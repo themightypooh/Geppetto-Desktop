@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><title>Vibe 4 — Retro CRT</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:#0a0e0a;color:#33ff66;font-family:"Courier New",monospace;overflow:hidden}
+canvas{display:block;width:100%;height:100%}
+.hint{position:fixed;bottom:12px;left:12px;font:11px/1.4 monospace;color:#1a7a33;pointer-events:none}
+.scan{position:fixed;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(0,0,0,.15) 0px,rgba(0,0,0,.15) 1px,transparent 1px,transparent 3px)}
+</style></head><body>
+<canvas id="c"></canvas><div class="scan"></div><div class="hint">Vibe 4 · Retro CRT · 1/2/3/4 stages · type to filter</div>
+<script>
+const c=document.getElementById('c'),ctx=c.getContext('2d');
+let W,H;function resize(){W=innerWidth;H=innerHeight;c.width=W*devicePixelRatio;c.height=H*devicePixelRatio;ctx.setTransform(devicePixelRatio,0,0,0,devicePixelRatio,0,0)}addEventListener('resize',resize);resize();
+const stages=['BUILD','SCULPT','RIG','MARIONETTE'];
+let si=0,yaw=-0.6,pitch=0.3,zoom=1,time=0;
+const bodies=['SPINOUS 4 ARCH','LUMBAR 5 BODY','RIB 7 L','HUMERUS R','FEMUR L','HOSE ELBOW L','ROTOR BOLT R1','ANKLE CHEEK R'];
+let sel=2,filter='',scroll=0;
+addEventListener('keydown',e=>{if(e.key>='1'&&e.key<='4')si=+e.key-1;if(e.key==='Escape')filter='';if(/^[a-z ]$/i.test(e.key)&&e.key.length===1)filter+=e.key.toUpperCase();if(e.key==='Backspace')filter=filter.slice(0,-1)});
+addEventListener('wheel', function(e){ e.preventDefault(); zoom = Math.max(0.4, Math.min(2.5, zoom * (e.deltaY < 0 ? 1.08 : 0.93))); }, { passive: false });
+let drag=false,lx,ly;addEventListener('mousedown',e=>{drag=true;lx=e.clientX;ly=e.clientY});addEventListener('mouseup',()=>drag=false);
+addEventListener('mousemove',e=>{if(drag){yaw+=(e.clientX-lx)*.006;pitch=Math.max(-1.1,Math.min(1.1,pitch+(e.clientY-ly)*.006));lx=e.clientX;ly=e.clientY}});
+function project(x,y,z){const cY=Math.cos(yaw),sY=Math.sin(yaw),cP=Math.cos(pitch),sP=Math.sin(pitch);const x1=x*cY-y*sY,y1=x*sY+y*cY,y2=y1*cP-z*sP,z2=y1*sP+z*cP;const dist=Math.max(60,520/zoom+y2*.4);const fov=520/dist;return{x:W*.5+x1*.0022*W*fov,y:H*.42-z2*.0022*W*fov}}
+function draw(){
+  time+=.016;ctx.fillStyle='#0a0e0a';ctx.fillRect(0,0,W,H);
+  // faint grid
+  ctx.strokeStyle='rgba(51,255,102,.08)';ctx.lineWidth=1;
+  for(let i=0;i<W;i+=40){ctx.beginPath();ctx.moveTo(i,0);ctx.lineTo(i,H);ctx.stroke()}
+  for(let i=0;i<H;i+=40){ctx.beginPath();ctx.moveTo(0,i);ctx.lineTo(W,i);ctx.stroke()}
+  const rings=[{x:-90,r:24},{x:-50,r:30},{x:0,r:28},{x:50,r:22},{x:90,r:16}];
+  rings.forEach(rg=>{
+    const pts=[];for(let s=0;s<12;s++){const a=s/12*Math.PI*2;pts.push(project(rg.x,Math.cos(a)*rg.r,Math.sin(a)*rg.r))}
+    ctx.beginPath();pts.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.closePath();
+    ctx.fillStyle='rgba(51,255,102,.12)';ctx.fill();ctx.strokeStyle='#33ff66';ctx.lineWidth=1;ctx.stroke();
+  });
+  // stage switcher (CRT menu bar)
+  const sw=400,sh=24,sx=W*.5-sw/2,sy=16;
+  ctx.fillStyle='#0a0e0a';ctx.strokeStyle='#33ff66';ctx.lineWidth=1;ctx.strokeRect(sx,sy,sw,sh);
+  stages.forEach((st,i)=>{
+    const bx=sx+i*(sw/4),bw=sw/4;
+    if(i===si){ctx.fillStyle='rgba(51,255,102,.2)';ctx.fillRect(bx,sy,bw,sh)}
+    ctx.fillStyle=i===si?'#33ff66':'#1a7a33';ctx.font='bold 11px monospace';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('['+st+']',bx+bw/2,sy+sh/2);
+  });
+  // body index (CRT terminal panel)
+  const ix=W-270,iy=60,iw=250,ih=H-120;
+  ctx.fillStyle='#0a0e0a';ctx.strokeStyle='#33ff66';ctx.lineWidth=1;ctx.strokeRect(ix,iy,iw,ih);
+  ctx.fillStyle='#33ff66';ctx.font='bold 12px monospace';ctx.textAlign='left';ctx.textBaseline='top';ctx.fillText('> BODIES',ix+10,iy+8);
+  ctx.fillStyle='#1a7a33';ctx.font='10px monospace';ctx.fillText(filter?'FILTER:'+filter:'COUNT:'+bodies.length,ix+10,iy+24);
+  ctx.strokeStyle='#1a7a33';ctx.beginPath();ctx.moveTo(ix+10,iy+40);ctx.lineTo(ix+iw-10,iy+40);ctx.stroke();
+  const filt=filter.toLowerCase();
+  let yy=iy+46-scroll;
+  ctx.font='10px monospace';
+  bodies.filter(b=>!filt||b.toLowerCase().includes(filt)).forEach(b=>{
+    if(yy>iy+46&&yy<iy+ih-6){
+      const active=b===bodies[sel];
+      if(active){ctx.fillStyle='rgba(51,255,102,.15)';ctx.fillRect(ix+4,yy-2,iw-8,14)}
+      ctx.fillStyle=active?'#33ff66':'#1a7a33';ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillText((active?'> ':'  ')+b,ix+10,yy+5);
+    }
+    yy+=15;
+  });
+  // history tape (bottom CRT bar)
+  const tx=20,ty=H-50,tw=W-40;
+  ctx.fillStyle='#0a0e0a';ctx.strokeStyle='#33ff66';ctx.lineWidth=1;ctx.strokeRect(tx,ty,tw,34);
+  const notches=['HULL','LOD','INTAKE','FAN','BRIDGE','MIRROR'];
+  notches.forEach((n,i)=>{
+    const nx=tx+14+i*(tw-28)/(notches.length-1);
+    ctx.beginPath();ctx.arc(nx,ty+12,3.5,0,Math.PI*2);ctx.fillStyle=i===2?'#33ff66':'#1a7a33';ctx.fill();
+    ctx.fillStyle='#1a7a33';ctx.font='8px monospace';ctx.textAlign='center';ctx.textBaseline='top';ctx.fillText(n,nx,ty+20);
+  });
+  ctx.strokeStyle='#33ff66';ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(tx+tw*.4,ty+3);ctx.lineTo(tx+tw*.4,ty+31);ctx.stroke();
+  requestAnimationFrame(draw);
+}
+draw();
+</script></body></html>

@@ -1,0 +1,1938 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Geppetto Desktop — Boxless Diegetic Stage UI</title>
+<style>
+  * {
+    box-sizing: border-box;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #08090c;
+    color: #e8e4d9;
+    font-family: "JetBrains Mono", "Fira Code", monospace;
+  }
+  canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+</style>
+</head>
+<body>
+<canvas id="geppetto"></canvas>
+
+<script>
+// ============================================================================
+// GEPPETTO DESKTOP — 100% BOXLESS DIEGETIC STAGE & INSTRUMENT UI
+// Every control is a physical arc, rotary turret, taut string, caliper jaw,
+// or spinning music-box cylinder painted directly on the stage. Zero boxes.
+// ============================================================================
+
+const canvas = document.getElementById('geppetto');
+const ctx = canvas.getContext('2d');
+
+let W = window.innerWidth;
+let H = window.innerHeight;
+function resize() {
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = W * window.devicePixelRatio;
+  canvas.height = H * window.devicePixelRatio;
+  ctx.setTransform(window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ----------------------------------------------------------------------------
+// STATE
+// ----------------------------------------------------------------------------
+const stages = [
+  { id: 'build',      num: '01', name: 'BUILD',      sub: 'SEXTANT ARC // CAD DRAFT ⇄ POLY LOOM' },
+  { id: 'sculpt',     num: '02', name: 'SCULPT',     sub: 'THUMB PALETTE & PLUMB-BOB CALIPER' },
+  { id: 'rig',        num: '03', name: 'RIG',        sub: 'SUSPENDED PUPPET CROSS & TENSION CORDS' },
+  { id: 'marionette', num: '04', name: 'MARIONETTE', sub: 'REVOLVING BRASS CYLINDER & CATENARY THREADS' }
+];
+
+// Sample bodies (camhead-style anatomical regions) for the diegetic Body Index
+const BODY_REGIONS = [
+  { region: 'SPINE', items: ['Spinous 4 arch','Spinous 5 arch','Lumbar 1 body','Lumbar 2 body','Lumbar 3 body','Lumbar 4 body','Lumbar 5 body','Sacrum block'] },
+  { region: 'RIBS',  items: ['Rib 7 L','Rib 7 R','Rib 8 L','Rib 8 R','Rib 9 L','Rib 9 R','Rib 10 L','Rib 10 R','Sternum plate'] },
+  { region: 'SKULL', items: ['Cranium dome','Occipital ridge','Zygomatic L','Zygomatic R','Mandible body','Mandible ramus L','Mandible ramus R'] },
+  { region: 'ARM L',  items: ['Clavicle L','Scapula L','Humerus head L','Humerus shaft L','Radius L','Ulna L','Hand palm L','Thumb L','Index L'] },
+  { region: 'ARM R',  items: ['Clavicle R','Scapula R','Humerus head R','Humerus shaft R','Radius R','Ulna R','Hand palm R','Thumb R','Index R'] },
+  { region: 'LEG L',  items: ['Ilium L','Femur head L','Femur shaft L','Patella L','Tibia L','Fibula L','Talus L','Calcaneus L','Ankle cheek L'] },
+  { region: 'LEG R',  items: ['Ilium R','Femur head R','Femur shaft R','Patella R','Tibia R','Fibula R','Talus R','Calcaneus R','Ankle cheek R'] },
+  { region: 'HOSE',   items: ['Hose elbow a hip top L','Hose elbow a hip top R','Hose knee b L','Hose knee b R','Heel hub L nut','Heel hub R nut'] },
+  { region: 'ROTOR',  items: ['Rotor bolt L 1','Rotor bolt L 2','Rotor bolt R 1','Rotor bolt R 2','Tilt motor','Ab piston rod R','Ab piston rod L'] }
+];
+
+// Sample bones for the Rig-stage Bone Index
+const BONE_REGIONS = [
+  { region: 'SPINE', items: ['pelvis','spine_0','spine_1','spine_2','neck_0','head'] },
+  { region: 'ARM L', items: ['clavicle_L','upperarm_L','lowerarm_L','hand_L','thumb_0_L','index_0_L'] },
+  { region: 'ARM R', items: ['clavicle_R','upperarm_R','lowerarm_R','hand_R','thumb_0_R','index_0_R'] },
+  { region: 'LEG L', items: ['thigh_L','shin_L','foot_L','toe_L'] },
+  { region: 'LEG R', items: ['thigh_R','shin_R','foot_R','toe_R'] },
+  { region: 'TAIL',  items: ['tail_0','tail_1','tail_2','tail_3'] }
+];
+
+const S = {
+  stageIdx: 0,
+  turretAngle: 0,
+  targetTurretAngle: 0,
+
+  // 3D Camera (Orbit + 6-DOF Fly Cam)
+  yaw: -0.58,
+  pitch: 0.34,
+  zoom: 1.0,
+  flyMode: false,
+  camX: 0,      // camera target / fly offset in 3D space
+  camY: 0,
+  camZ: 0,
+  flySpeed: 180,
+  keys: {},
+  time: 0,
+
+  // Body / Bone INDEX (the "tree", diegetic) — scrollable brass ledger
+  bodyIndexOpen: true,
+  bodyIndexScroll: 0,
+  bodyFilter: '',
+  bodyIndexHover: false,
+  boneIndexOpen: true,
+  boneIndexScroll: 0,
+  boneFilter: '',
+  boneIndexHover: false,
+  showCoverage: false,   // 'C' toggles the capability-coverage overlay
+
+  // Dragging state
+  dragKind: null, // 'orbit' | 'sextant' | 'caliper' | 'bead' | 'drum' | 'catenary'
+  dragIndex: -1,
+  lastX: 0,
+  lastY: 0,
+  mouseX: 0,
+  mouseY: 0,
+  hoverHint: 'F: Toggle Fly Cam (WASD move · Q/E altitude · Shift sprint · Scroll zoom/speed · R reset)',
+
+  // STAGE 01: BUILD (Sextant Arc + CAD ⇄ Poly Cage Compass Lever)
+  polyMode: false,      // false = CAD Solid Draft, true = Poly Cage Loom
+  polyRing: 1,          // 0 = Vert, 1 = Edge Loop, 2 = Quad Face
+  sextantT: 1.0,        // 0..1 rollback needle along the bottom brass sextant arc
+  selectedNotch: 2,
+  notches: [
+    { name: 'Hull (SDF)',     kind: 'cad',  val: 'Voxel 0.42', r: 0.42 },
+    { name: 'Hull_lod',       kind: 'cad',  val: '16k Tris',   r: 16.0 },
+    { name: 'Intake_Loop',    kind: 'poly', val: 'LoopCut #2', r: 0.85 },
+    { name: 'Fan_Blades',     kind: 'cad',  val: '23× Radial', r: 23.0 },
+    { name: 'Cowl_Bridge',    kind: 'poly', val: '8 Quads',    r: 8.0  },
+    { name: 'Mirror_XZ',      kind: 'cad',  val: '+164 Bodies',r: 2.0  }
+  ],
+
+  // STAGE 02: SCULPT (Painter's Thumb Palette + Plumb-Bob Caliper)
+  uvClothOpen: false,
+  activePigment: 0,
+  pigments: [
+    { name: 'engine_paint',  color: '#d45132' },
+    { name: 'engine_chrome', color: '#dce6f2' },
+    { name: 'engine_brass',  color: '#e2b258' },
+    { name: 'engine_soot',   color: '#2c3036' },
+    { name: 'engine_hot',    color: '#ff7733' },
+    { name: 'rein_cable',    color: '#4be3d6' }
+  ],
+  plumbDepth: 0.68,   // 0.1..1.0 brush pressure (vertical plumb bob)
+  caliperSpread: 44,  // 14..90 brush radius (caliper jaw spread)
+
+  // STAGE 03: RIG (Suspended Wooden/Brass Puppet Cross in 3D space with real strings to model)
+  selectedPeg: 2,
+  mirrorStrings: true,
+  // Each peg on the floating overhead cross drops a taut string to a 3D bone on the model:
+  pegs: [
+    { name: 'pelvis',      crossOffset: [  0,   0], bone3D: [-45,   0,   0], bead: 0.0, limitDeg: 25 },
+    { name: 'head_vane',   crossOffset: [  0, -58], bone3D: [-110,  0,  12], bead: 0.2, limitDeg: 40 },
+    { name: 'hand_R [IK]', crossOffset: [-74,  18], bone3D: [ 65, -58, -18], bead: 0.85,limitDeg: 65 },
+    { name: 'hand_L [IK]', crossOffset: [ 74,  18], bone3D: [ 65,  58, -18], bead: 0.85,limitDeg: 65 },
+    { name: 'tail_tendon', crossOffset: [  0,  62], bone3D: [115,   0,  -8], bead: 1.0, limitDeg: 80 }
+  ],
+  // bead: 0 = FK, 0.5 = TwoBone IK, 1.0 = Soft Spring Tendon
+
+  // STAGE 04: MARIONETTE (Revolving Brass Music-Box Cylinder & Catenary Threads)
+  playing: true,
+  drumPhase: 0.25, // 0..1 revolution
+  catenarySag: -36, // curve bend between brass pins
+  waveRipples: false
+};
+
+// Hit regions rebuilt each frame for clean cursor interaction without DOM boxes
+let hits = [];
+function addHit(shape, cursor, hint, onClick, onDrag) {
+  hits.push({ shape, cursor, hint, onClick, onDrag });
+}
+
+// ----------------------------------------------------------------------------
+// 3D PROJECTION HELPERS (Orbit + 6-DOF Fly Camera)
+// ----------------------------------------------------------------------------
+function project(x, y, z, cx, cy, scale) {
+  const rx = x - S.camX;
+  const ry = y - S.camY;
+  const rz = z - S.camZ;
+  const cosY = Math.cos(S.yaw), sinY = Math.sin(S.yaw);
+  const cosP = Math.cos(S.pitch), sinP = Math.sin(S.pitch);
+  const x1 = rx * cosY - ry * sinY;
+  const y1 = rx * sinY + ry * cosY;
+  const y2 = y1 * cosP - rz * sinP;
+  const z2 = y1 * sinP + rz * cosP;
+  const dist = Math.max(80, 560 / S.zoom + y2 * 0.55);
+  const fov = 560 / dist;
+  return { x: cx + x1 * scale * fov, y: cy - z2 * scale * fov, depth: y2, fov };
+}
+
+function draw3DLine(a, b, cx, cy, scale, stroke, width = 1.5, dash = []) {
+  const pa = project(a[0], a[1], a[2], cx, cy, scale);
+  const pb = project(b[0], b[1], b[2], cx, cy, scale);
+  ctx.save();
+  ctx.beginPath();
+  ctx.setLineDash(dash);
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = width;
+  ctx.moveTo(pa.x, pa.y);
+  ctx.lineTo(pb.x, pb.y);
+  ctx.stroke();
+  ctx.restore();
+  return { pa, pb };
+}
+
+//Draw text along an arc!
+function drawArcText(text, cx, cy, radius, startAngle, spacingAngle, color, font = '11px monospace') {
+  ctx.save();
+  ctx.font = font;
+  ctx.fillStyle = color;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (let i = 0; i < text.length; i++) {
+    const a = startAngle + i * spacingAngle;
+    ctx.save();
+    ctx.translate(cx + Math.cos(a) * radius, cy + Math.sin(a) * radius);
+    ctx.rotate(a + Math.PI / 2);
+    ctx.fillText(text[i], 0, 0);
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+// ----------------------------------------------------------------------------
+// 1. TOP-LEFT ROTARY TURRET LENS (STAGE SWITCHER — NO BOXES)
+// ----------------------------------------------------------------------------
+function drawTurretSwitcher() {
+  const tx = 48;
+  const ty = 48;
+  const R = 148;
+
+  // Smoothly animate turret rotation
+  S.targetTurretAngle = -S.stageIdx * (Math.PI / 5.5);
+  S.turretAngle += (S.targetTurretAngle - S.turretAngle) * 0.16;
+
+  // Outer brass knurled ring
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(tx, ty, R, 0, Math.PI * 2);
+  const grad = ctx.createRadialGradient(tx, ty, 30, tx, ty, R);
+  grad.addColorStop(0, '#161920');
+  grad.addColorStop(0.82, '#101318');
+  grad.addColorStop(0.95, '#523e1d');
+  grad.addColorStop(1, '#d8a956');
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Knurling ticks along rim
+  for (let i = 0; i < 48; i++) {
+    const a = S.turretAngle + (i / 48) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(tx + Math.cos(a) * (R - 5), ty + Math.sin(a) * (R - 5));
+    ctx.lineTo(tx + Math.cos(a) * R, ty + Math.sin(a) * R);
+    ctx.strokeStyle = i % 4 === 0 ? '#f5d386' : 'rgba(216,169,86,0.35)';
+    ctx.lineWidth = i % 4 === 0 ? 2 : 1;
+    ctx.stroke();
+  }
+
+  // 4 Lens Turret Sockets arranged along the active quadrant
+  const baseAngle = Math.PI * 0.22; // 40 deg diagonal into screen
+  stages.forEach((st, idx) => {
+    const a = baseAngle + S.turretAngle + idx * (Math.PI / 5.5);
+    const lx = tx + Math.cos(a) * (R * 0.68);
+    const ly = ty + Math.sin(a) * (R * 0.68);
+    const isSel = idx === S.stageIdx;
+    const lensR = isSel ? 26 : 19;
+
+    // Socket ring
+    ctx.beginPath();
+    ctx.arc(lx, ly, lensR, 0, Math.PI * 2);
+    ctx.fillStyle = isSel ? 'rgba(75, 227, 214, 0.18)' : '#0b0d11';
+    ctx.fill();
+    ctx.strokeStyle = isSel ? '#f5d386' : 'rgba(216,169,86,0.45)';
+    ctx.lineWidth = isSel ? 2.5 : 1.4;
+    ctx.stroke();
+
+    // Lens glass glint
+    ctx.beginPath();
+    ctx.arc(lx - lensR * 0.28, ly - lensR * 0.28, lensR * 0.22, 0, Math.PI * 2);
+    ctx.fillStyle = isSel ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.12)';
+    ctx.fill();
+
+    // Stage number inside lens
+    ctx.fillStyle = isSel ? '#f5d386' : '#8c8a82';
+    ctx.font = isSel ? 'bold 11px monospace' : '10px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(st.num, lx, ly - 4);
+    ctx.font = '8.5px monospace';
+    ctx.fillStyle = isSel ? '#ffffff' : '#8c8a82';
+    ctx.fillText(st.name.slice(0, 6), lx, ly + 7);
+
+    // Ray-line extending from active turret lens
+    if (isSel) {
+      const rx = tx + Math.cos(a) * (R + 16);
+      const ry = ty + Math.sin(a) * (R + 16);
+      ctx.beginPath();
+      ctx.moveTo(lx + Math.cos(a) * lensR, ly + Math.sin(a) * lensR);
+      ctx.lineTo(rx, ry);
+      ctx.lineTo(rx + 250, ry);
+      ctx.strokeStyle = 'rgba(216, 169, 86, 0.55)';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+
+      ctx.textAlign = 'left';
+      ctx.font = 'bold 12px monospace';
+      ctx.fillStyle = '#f5d386';
+      ctx.fillText(`${st.num} // ${st.name}`, rx + 8, ry - 8);
+      ctx.font = '10px monospace';
+      ctx.fillStyle = '#4be3d6';
+      ctx.fillText(st.sub, rx + 8, ry + 11);
+    }
+
+    addHit(
+      { type: 'circle', x: lx, y: ly, r: lensR + 4 },
+      'pointer',
+      `Rotate Turret to Stage ${st.num}: ${st.name}`,
+      () => { S.stageIdx = idx; }
+    );
+  });
+
+  // Center brass Gyro Hub — click (or press F) to engage/disengage 6-DOF Fly Cam!
+  ctx.beginPath();
+  ctx.arc(tx, ty, 33, 0, Math.PI * 2);
+  ctx.fillStyle = S.flyMode ? '#4be3d6' : '#d8a956';
+  ctx.fill();
+  ctx.strokeStyle = '#08090c';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+
+  // Gimbal horizon line inside the hub that tilts with camera pitch/yaw
+  ctx.save();
+  ctx.translate(tx, ty);
+  ctx.rotate(S.yaw * 0.25);
+  ctx.beginPath();
+  ctx.moveTo(-22, 0);
+  ctx.lineTo(22, 0);
+  ctx.strokeStyle = '#08090c';
+  ctx.lineWidth = 1.6;
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.font = 'bold 9.5px monospace';
+  ctx.fillStyle = '#08090c';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(S.flyMode ? 'FLY ON' : '[F] FLY', tx, ty);
+
+  addHit(
+    { type: 'circle', x: tx, y: ty, r: 35 },
+    'pointer',
+    'Gyro Hub [F]: Toggle 6-DOF Fly Camera (WASD move · Q/E altitude · Shift sprint · Scroll speed)',
+    () => { S.flyMode = !S.flyMode; }
+  );
+
+  ctx.restore();
+}
+
+// Diegetic Brass Optical Sight / Pitch-Ladder Reticle when Fly Cam is active (Zero boxes!)
+function drawFlyGimbalReticle(cx, cy) {
+  if (!S.flyMode) return;
+  ctx.save();
+  const r = 74;
+
+  // Faint split optical horizon ring
+  ctx.strokeStyle = 'rgba(75, 227, 214, 0.45)';
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, -0.45, 0.45);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, Math.PI - 0.45, Math.PI + 0.45);
+  ctx.stroke();
+
+  // Pitch ladder ticks along left/right arcs
+  for (let p = -2; p <= 2; p++) {
+    const py = cy + p * 16 - (S.pitch - 0.34) * 45;
+    const w = p === 0 ? 18 : 9;
+    ctx.beginPath();
+    ctx.moveTo(cx - r - w, py);
+    ctx.lineTo(cx - r + 2, py);
+    ctx.moveTo(cx + r - 2, py);
+    ctx.lineTo(cx + r + w, py);
+    ctx.strokeStyle = p === 0 ? '#f5d386' : 'rgba(75, 227, 214, 0.45)';
+    ctx.lineWidth = p === 0 ? 2 : 1.2;
+    ctx.stroke();
+  }
+
+  // Center pip
+  ctx.beginPath();
+  ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+  ctx.fillStyle = '#f5d386';
+  ctx.fill();
+
+  // Curved telemetry along top of sight ring
+  drawArcText(
+    `FLY CAM · SPD ${Math.round(S.flySpeed)} · WASD/QE/SHIFT`,
+    cx, cy, r + 14, -Math.PI * 0.76, 0.052, '#4be3d6', '9.5px monospace'
+  );
+  ctx.restore();
+}
+
+// ----------------------------------------------------------------------------
+// DIEGETIC INDEX LEDGER — the "tree", as a brass-bound parchment scroll
+// (replaces the plain body/bone list box; grouped by anatomical region)
+// ----------------------------------------------------------------------------
+function drawIndexLedger(regions, opts) {
+  // opts: { accent, title, openKey, scrollKey, filterKey, hoverKey, x, y, w, h }
+  const accent = opts.accent;
+  const open = S[opts.openKey];
+  const x = opts.x, y = opts.y, w = opts.w, h = opts.h;
+
+  // Collapsed tab (brass rivet) when closed
+  if (!open) {
+    const tabX = x + w - 18;
+    const tabY = y + 40;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(tabX, tabY, 14, 0, Math.PI * 2);
+    ctx.fillStyle = accent;
+    ctx.fill();
+    ctx.strokeStyle = '#08090c';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = '#08090c';
+    ctx.font = 'bold 9px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('IDX', tabX, tabY);
+    ctx.restore();
+    addHit({ type:'circle', x:tabX, y:tabY, r:16 }, 'pointer',
+      `Open ${opts.title} Index`, () => { S[opts.openKey] = true; });
+    // hover tracking reset
+    S[opts.hoverKey] = false;
+    return;
+  }
+
+  // Hover tracking
+  const mx = S.mouseX, my = S.mouseY;
+  const hovered = mx >= x && mx <= x + w && my >= y && my <= y + h;
+  S[opts.hoverKey] = hovered;
+
+  ctx.save();
+  // Parchment scroll body with brass binding on left edge
+  const grad = ctx.createLinearGradient(x, y, x + w, y);
+  grad.addColorStop(0, 'rgba(30,26,20,0.92)');
+  grad.addColorStop(0.06, 'rgba(216,169,86,0.35)');
+  grad.addColorStop(0.12, 'rgba(232,228,217,0.06)');
+  grad.addColorStop(1, 'rgba(12,14,18,0.88)');
+  ctx.fillStyle = grad;
+  // rounded rect (parchment)
+  const r = 10;
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 1.6;
+  ctx.stroke();
+
+  // Brass rivets top/bottom
+  for (const ry of [y + 14, y + h - 14]) {
+    ctx.beginPath();
+    ctx.arc(x + 10, ry, 4, 0, Math.PI * 2);
+    ctx.fillStyle = '#d8a956';
+    ctx.fill();
+  }
+
+  // Title
+  ctx.fillStyle = accent;
+  ctx.font = 'bold 11px monospace';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText(opts.title, x + 18, y + 10);
+
+  // Search lens (magnifying glass) — click to set filter via prompt
+  const lensX = x + w - 26, lensY = y + 16;
+  ctx.beginPath();
+  ctx.arc(lensX, lensY, 8, 0, Math.PI * 2);
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 1.6;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(lensX + 5, lensY + 5);
+  ctx.lineTo(lensX + 10, lensY + 10);
+  ctx.stroke();
+  addHit({ type:'circle', x:lensX, y:lensY, r:12 }, 'text',
+    `Search ${opts.title} (type to filter)`, () => {
+      const q = window.prompt('Filter ' + opts.title + ':', S[opts.filterKey]);
+      if (q !== null) S[opts.filterKey] = q.trim();
+    });
+
+  // Filter readout
+  ctx.fillStyle = '#8c8a82';
+  ctx.font = '9px monospace';
+  ctx.fillText(S[opts.filterKey] ? ('/' + S[opts.filterKey]) : '/ (all)', x + 18, y + 26);
+
+  // Close rivet
+  const closeX = x + w - 14, closeY = y + h - 14;
+  ctx.beginPath();
+  ctx.arc(closeX, closeY, 6, 0, Math.PI * 2);
+  ctx.fillStyle = '#22262e';
+  ctx.fill();
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 1.4;
+  ctx.stroke();
+  ctx.fillStyle = '#e8e4d9';
+  ctx.font = 'bold 9px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('×', closeX, closeY);
+  addHit({ type:'circle', x:closeX, y:closeY, r:10 }, 'pointer',
+    `Close ${opts.title} Index`, () => { S[opts.openKey] = false; });
+
+  // Scrollable list area
+  const listX = x + 6;
+  const listY = y + 42;
+  const listW = w - 12;
+  const listH = h - 60;
+  // clip
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(listX, listY, listW, listH);
+  ctx.clip();
+
+  const filter = S[opts.filterKey].toLowerCase();
+  let cursorY = listY - S[opts.scrollKey];
+  const lineH = 15;
+  const regionH = 18;
+
+  regions.forEach(reg => {
+    const items = filter
+      ? reg.items.filter(it => it.toLowerCase().includes(filter) || reg.region.toLowerCase().includes(filter))
+      : reg.items;
+    if (items.length === 0) return;
+
+    // region header
+    if (cursorY + regionH > listY && cursorY < listY + listH) {
+      ctx.fillStyle = accent;
+      ctx.font = 'bold 10px monospace';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('▸ ' + reg.region, listX + 6, cursorY + regionH / 2);
+      // count
+      ctx.fillStyle = '#8c8a82';
+      ctx.font = '8px monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText(items.length, listX + listW - 6, cursorY + regionH / 2);
+    }
+    cursorY += regionH;
+
+    items.forEach(it => {
+      if (cursorY + lineH > listY && cursorY < listY + listH) {
+        const iy = cursorY + lineH / 2;
+        // bead
+        ctx.beginPath();
+        ctx.arc(listX + 10, iy, 2.6, 0, Math.PI * 2);
+        ctx.fillStyle = accent;
+        ctx.fill();
+        ctx.fillStyle = '#e8e4d9';
+        ctx.font = '9.5px monospace';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(it, listX + 18, iy);
+      }
+      cursorY += lineH;
+      // hit for selecting (scroll-aware? skip for mockup)
+    });
+    cursorY += 4;
+  });
+
+  const totalH = cursorY + S[opts.scrollKey] - listY;
+  ctx.restore();
+
+  // scrollbar (brass thread)
+  const maxScroll = Math.max(0, totalH - listH);
+  if (maxScroll > 0) {
+    const trackX = x + w - 6;
+    const trackY = listY;
+    const trackH = listH;
+    ctx.beginPath();
+    ctx.moveTo(trackX, trackY);
+    ctx.lineTo(trackX, trackY + trackH);
+    ctx.strokeStyle = 'rgba(216,169,86,0.25)';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+
+    const thumbH = Math.max(20, trackH * (listH / totalH));
+    const thumbY = trackY + (S[opts.scrollKey] / maxScroll) * (trackH - thumbH);
+    ctx.beginPath();
+    ctx.moveTo(trackX - 3, thumbY);
+    ctx.lineTo(trackX + 3, thumbY);
+    ctx.lineTo(trackX + 3, thumbY + thumbH);
+    ctx.lineTo(trackX - 3, thumbY + thumbH);
+    ctx.closePath();
+    ctx.fillStyle = accent;
+    ctx.fill();
+
+    // wheel scroll hit over whole ledger
+    addHit({ type:'rect', x:x, y:y, w:w, h:h }, 'ns-resize',
+      `Scroll ${opts.title} Index`, null,
+      (mx, my) => {
+        // handled via wheel globally; here drag scrolls
+        S[opts.scrollKey] = Math.max(0, Math.min(maxScroll, S[opts.scrollKey] + (my - S.lastY)));
+      });
+  }
+
+  // footer count
+  const totalCount = regions.reduce((a, r) => a + r.items.length, 0);
+  ctx.fillStyle = '#8c8a82';
+  ctx.font = '8.5px monospace';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText(`${totalCount} entries · ${regions.length} groups`, x + 18, y + h - 6);
+
+  ctx.restore();
+}
+
+function drawBodyIndex() {
+  drawIndexLedger(BODY_REGIONS, {
+    accent: '#4be3d6',
+    title: 'BODY INDEX',
+    openKey: 'bodyIndexOpen',
+    scrollKey: 'bodyIndexScroll',
+    filterKey: 'bodyFilter',
+    hoverKey: 'bodyIndexHover',
+    x: W - 232,
+    y: 96,
+    w: 216,
+    h: Math.min(520, H - 160)
+  });
+}
+
+function drawBoneIndex() {
+  drawIndexLedger(BONE_REGIONS, {
+    accent: '#f5d386',
+    title: 'BONE INDEX',
+    openKey: 'boneIndexOpen',
+    scrollKey: 'boneIndexScroll',
+    filterKey: 'boneFilter',
+    hoverKey: 'boneIndexHover',
+    x: W - 232,
+    y: 96,
+    w: 216,
+    h: Math.min(420, H - 200)
+  });
+}
+
+// ----------------------------------------------------------------------------
+// 2. STAGE 01: BUILD — BRASS SEXTANT ARC + COMPASS/LOOM LEVER (NO BOXES!)
+// ----------------------------------------------------------------------------
+function drawBuildInstruments(cx, cy, scale) {
+  // Sweeping Sextant Arc at bottom of screen
+  const arcCx = W * 0.5;
+  const arcCy = H + 260;
+  const arcR = 390;
+  const aStart = -Math.PI * 0.72;
+  const aEnd   = -Math.PI * 0.28;
+
+  ctx.save();
+  // Main graduated brass sextant track (two concentric curved rails, zero boxes)
+  for (let dr of [-12, 12]) {
+    ctx.beginPath();
+    ctx.arc(arcCx, arcCy, arcR + dr, aStart, aEnd);
+    ctx.strokeStyle = S.polyMode ? 'rgba(255, 110, 58, 0.55)' : 'rgba(216, 169, 86, 0.55)';
+    ctx.lineWidth = dr === -12 ? 3 : 1.5;
+    ctx.stroke();
+  }
+
+  // Degree vernier ticks along the sextant arc
+  const ticks = 60;
+  for (let i = 0; i <= ticks; i++) {
+    const u = i / ticks;
+    const a = aStart + u * (aEnd - aStart);
+    const r0 = arcR - 12;
+    const r1 = arcR + (i % 5 === 0 ? 12 : 2);
+    ctx.beginPath();
+    ctx.moveTo(arcCx + Math.cos(a) * r0, arcCy + Math.sin(a) * r0);
+    ctx.lineTo(arcCx + Math.cos(a) * r1, arcCy + Math.sin(a) * r1);
+    ctx.strokeStyle = u <= S.sextantT
+      ? (S.polyMode ? 'rgba(255,110,58,0.45)' : 'rgba(75,227,214,0.45)')
+      : 'rgba(232,228,217,0.12)';
+    ctx.lineWidth = i % 5 === 0 ? 1.8 : 1;
+    ctx.stroke();
+  }
+
+  // Feature Pins / Jewels mounted directly along the Sextant Arc
+  S.notches.forEach((n, idx) => {
+    const u = (idx + 0.5) / S.notches.length;
+    const a = aStart + u * (aEnd - aStart);
+    const nx = arcCx + Math.cos(a) * arcR;
+    const ny = arcCy + Math.sin(a) * arcR;
+    const active = u <= S.sextantT + 0.02;
+    const isSel = idx === S.selectedNotch;
+    const isPoly = n.kind === 'poly';
+
+    // Radial stem speaking out from the arc
+    const stemLen = isSel ? 54 : 28;
+    const sx = arcCx + Math.cos(a) * (arcR - stemLen);
+    const sy = arcCy + Math.sin(a) * (arcR - stemLen);
+
+    ctx.beginPath();
+    ctx.moveTo(nx, ny);
+    ctx.lineTo(sx, sy);
+    ctx.strokeStyle = isSel ? '#f5d386' : (isPoly ? '#ff6e3a' : '#4be3d6');
+    ctx.lineWidth = isSel ? 2.2 : 1.2;
+    ctx.stroke();
+
+    // Jewel / Pin head on the arc
+    ctx.beginPath();
+    if (isPoly) {
+      // Diamond jewel for Poly Cage steps
+      ctx.moveTo(nx, ny - 8);
+      ctx.lineTo(nx + 8, ny);
+      ctx.lineTo(nx, ny + 8);
+      ctx.lineTo(nx - 8, ny);
+      ctx.closePath();
+    } else {
+      // Circular brass rivet for CAD Solid steps
+      ctx.arc(nx, ny, isSel ? 8 : 6, 0, Math.PI * 2);
+    }
+    ctx.fillStyle = !active ? '#22262e' : (isPoly ? '#ff6e3a' : '#4be3d6');
+    ctx.fill();
+    ctx.strokeStyle = isSel ? '#ffffff' : '#08090c';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Radial floating label (no box!)
+    ctx.save();
+    ctx.translate(sx, sy);
+    ctx.rotate(a + Math.PI / 2);
+    ctx.textAlign = 'center';
+    ctx.font = isSel ? 'bold 11px monospace' : '10px monospace';
+    ctx.fillStyle = !active ? '#555' : (isSel ? '#f5d386' : '#e8e4d9');
+    ctx.fillText(n.name, 0, -14);
+    if (isSel) {
+      ctx.font = '10px monospace';
+      ctx.fillStyle = isPoly ? '#ff9c78' : '#4be3d6';
+      ctx.fillText(`◄ ${n.val} ►`, 0, -28);
+    }
+    ctx.restore();
+
+    addHit(
+      { type: 'circle', x: nx, y: ny, r: 16 },
+      'pointer',
+      `Inspect [${n.name}] — Automatically switches CAD Draft ⇄ Poly Loom`,
+      () => {
+        S.selectedNotch = idx;
+        S.polyMode = (n.kind === 'poly');
+      }
+    );
+  });
+
+  // Draggable Brass Vernier Sight (Rollback Cursor on the Sextant Arc)
+  const sightA = aStart + S.sextantT * (aEnd - aStart);
+  const vx = arcCx + Math.cos(sightA) * arcR;
+  const vy = arcCy + Math.sin(sightA) * arcR;
+  ctx.beginPath();
+  ctx.arc(vx, vy, 14, 0, Math.PI * 2);
+  ctx.strokeStyle = '#f5d386';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  // Crosshair needle through vernier sight
+  ctx.beginPath();
+  ctx.moveTo(arcCx + Math.cos(sightA) * (arcR - 24), arcCy + Math.sin(sightA) * (arcR - 24));
+  ctx.lineTo(arcCx + Math.cos(sightA) * (arcR + 24), arcCy + Math.sin(sightA) * (arcR + 24));
+  ctx.strokeStyle = '#f5d386';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  addHit(
+    { type: 'circle', x: vx, y: vy, r: 24 },
+    'ew-resize',
+    'Drag Vernier Sight along Sextant Arc to roll back build history',
+    null,
+    (mx, my) => {
+      const ang = Math.atan2(my - arcCy, mx - arcCx);
+      S.sextantT = Math.max(0.1, Math.min(1.0, (ang - aStart) / (aEnd - aStart)));
+    }
+  );
+
+  // --------------------------------------------------------------------------
+  // THE MECHANICAL THROW LEVER: CAD COMPASS ⇄ POLY SPIDER LOOM
+  // Mounted at the left pivot of the Sextant Arc (No tabs, no boxes!)
+  // --------------------------------------------------------------------------
+  const pivX = arcCx + Math.cos(aStart - 0.14) * (arcR - 10);
+  const pivY = arcCy + Math.sin(aStart - 0.14) * (arcR - 10);
+
+  // Brass quadrant plate
+  ctx.beginPath();
+  ctx.arc(pivX, pivY, 46, -Math.PI * 0.9, -Math.PI * 0.1);
+  ctx.strokeStyle = 'rgba(216,169,86,0.5)';
+  ctx.lineWidth = 4;
+  ctx.stroke();
+
+  // Throw lever arm
+  const leverAng = S.polyMode ? -Math.PI * 0.22 : -Math.PI * 0.78;
+  const knobX = pivX + Math.cos(leverAng) * 52;
+  const knobY = pivY + Math.sin(leverAng) * 52;
+
+  ctx.beginPath();
+  ctx.moveTo(pivX, pivY);
+  ctx.lineTo(knobX, knobY);
+  ctx.strokeStyle = S.polyMode ? '#ff6e3a' : '#4be3d6';
+  ctx.lineWidth = 5;
+  ctx.stroke();
+
+  // Pivot bolt & Throw knob
+  ctx.beginPath();
+  ctx.arc(pivX, pivY, 9, 0, Math.PI * 2);
+  ctx.fillStyle = '#d8a956';
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.arc(knobX, knobY, 12, 0, Math.PI * 2);
+  ctx.fillStyle = S.polyMode ? '#ff6e3a' : '#4be3d6';
+  ctx.fill();
+  ctx.strokeStyle = '#08090c';
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+
+  ctx.font = 'bold 10.5px monospace';
+  ctx.fillStyle = !S.polyMode ? '#4be3d6' : '#8c8a82';
+  ctx.textAlign = 'right';
+  ctx.fillText('CAD COMPASS', pivX - 36, pivY - 38);
+
+  ctx.fillStyle = S.polyMode ? '#ff6e3a' : '#8c8a82';
+  ctx.textAlign = 'left';
+  ctx.fillText('POLY LOOM', pivX + 36, pivY - 38);
+
+  addHit(
+    { type: 'circle', x: pivX, y: pivY - 20, r: 58 },
+    'pointer',
+    'Throw Mechanical Lever: Switch between Parametric CAD Compass & Poly Spider Loom',
+    () => { S.polyMode = !S.polyMode; }
+  );
+
+  // --------------------------------------------------------------------------
+  // WHEN IN POLY LOOM MODE: Draw the Spider-Web Ring directly around the 3D Model!
+  // --------------------------------------------------------------------------
+  if (S.polyMode) {
+    const loomR = 175;
+    ctx.beginPath();
+    ctx.arc(cx, cy, loomR, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255, 110, 58, 0.28)';
+    ctx.setLineDash([4, 6]);
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // 3 Concentric Sub-Object Selector Rings on top of the Loom (Vert / Edge / Quad)
+    const elems = ['VERT', 'EDGE LOOP', 'QUAD FACE'];
+    elems.forEach((el, eIdx) => {
+      const ang = -Math.PI / 2 + (eIdx - 1) * 0.36;
+      const ex = cx + Math.cos(ang) * loomR;
+      const ey = cy + Math.sin(ang) * loomR;
+      const isEl = S.polyRing === eIdx;
+
+      ctx.beginPath();
+      ctx.arc(ex, ey, isEl ? 18 : 13, 0, Math.PI * 2);
+      ctx.fillStyle = isEl ? '#ff6e3a' : '#14171d';
+      ctx.fill();
+      ctx.strokeStyle = '#ff6e3a';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      ctx.font = 'bold 9.5px monospace';
+      ctx.fillStyle = isEl ? '#08090c' : '#ff9c78';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(eIdx + 1, ex, ey);
+
+      ctx.fillStyle = isEl ? '#ff9c78' : '#8c8a82';
+      ctx.fillText(el, ex, ey - 25);
+
+      addHit(
+        { type: 'circle', x: ex, y: ey, r: 20 },
+        'pointer',
+        `Select Poly Sub-Object Mode: ${el}`,
+        () => { S.polyRing = eIdx; }
+      );
+    });
+
+    // 4 Radial Silk Threads you pull to trigger LoopCut / Extrude / Inset / Bridge
+    const ops = [
+      { name: '✂ LOOP CUT', ang: Math.PI * 0.88, val: 'Cut Ring' },
+      { name: '⬆ EXTRUDE',  ang: Math.PI * 1.12, val: '+14n' },
+      { name: '⫘ BRIDGE',   ang: -0.12,          val: '8 Quads' },
+      { name: '⚡ CREASE',   ang:  0.12,          val: 'Sharp 1.0' }
+    ];
+    ops.forEach(op => {
+      const ox = cx + Math.cos(op.ang) * (loomR + 42);
+      const oy = cy + Math.sin(op.ang) * (loomR + 42);
+      const ix = cx + Math.cos(op.ang) * (loomR - 18);
+      const iy = cy + Math.sin(op.ang) * (loomR - 18);
+
+      ctx.beginPath();
+      ctx.moveTo(ix, iy);
+      ctx.lineTo(ox, oy);
+      ctx.strokeStyle = 'rgba(255, 110, 58, 0.6)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(ox, oy, 7, 0, Math.PI * 2);
+      ctx.fillStyle = '#f5d386';
+      ctx.fill();
+
+      ctx.font = '10.5px monospace';
+      ctx.fillStyle = '#f5d386';
+      ctx.textAlign = Math.cos(op.ang) < 0 ? 'right' : 'left';
+      ctx.fillText(op.name, ox + (Math.cos(op.ang) < 0 ? -12 : 12), oy + 4);
+
+      addHit(
+        { type: 'circle', x: ox, y: oy, r: 22 },
+        'pointer',
+        `Pluck Spoke to stamp [${op.name}] onto the Sextant Arc`,
+        () => {
+          S.notches.push({ name: op.name.slice(2), kind: 'poly', val: op.val, r: 1.0 });
+          S.selectedNotch = S.notches.length - 1;
+          S.sextantT = 1.0;
+        }
+      );
+    });
+  }
+  ctx.restore();
+}
+
+// ----------------------------------------------------------------------------
+// 3. STAGE 02: SCULPT — ORGANIC THUMB PALETTE & PLUMB-BOB CALIPER (NO BOXES!)
+// ----------------------------------------------------------------------------
+function drawSculptInstruments() {
+  const px = 190;
+  const py = H - 175;
+
+  ctx.save();
+  // Kidney-shaped Wooden/Brass Thumb Palette Silhouette (Bezier curve, not a circle/box!)
+  ctx.beginPath();
+  ctx.moveTo(px - 120, py + 20);
+  ctx.bezierCurveTo(px - 140, py - 95, px - 10, py - 140, px + 95, py - 95);
+  ctx.bezierCurveTo(px + 165, py - 55, px + 145, py + 75, px + 65, py + 110);
+  ctx.bezierCurveTo(px + 10, py + 130, px - 25, py + 75, px - 55, py + 82);
+  ctx.bezierCurveTo(px - 90, py + 90, px - 105, py + 75, px - 120, py + 20);
+  ctx.closePath();
+
+  const palGrad = ctx.createRadialGradient(px, py - 20, 10, px, py, 150);
+  palGrad.addColorStop(0, '#27201b');
+  palGrad.addColorStop(1, '#120f0d');
+  ctx.fillStyle = palGrad;
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(216, 169, 86, 0.55)';
+  ctx.lineWidth = 2.2;
+  ctx.stroke();
+
+  // Thumb-hole cutout in the palette!
+  const holeX = px - 52, holeY = py + 45;
+  ctx.beginPath();
+  ctx.ellipse(holeX, holeY, 24, 16, -0.35, 0, Math.PI * 2);
+  ctx.fillStyle = '#08090c';
+  ctx.fill();
+  ctx.strokeStyle = '#d8a956';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.fillStyle = '#f5d386';
+  ctx.font = '9.5px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('UV CLOTH', holeX, holeY + 3);
+
+  addHit(
+    { type: 'circle', x: holeX, y: holeY, r: 26 },
+    'pointer',
+    'Hook Thumb Hole: Drape or roll up the Linen UV Unwrap Cloth',
+    () => { S.uvClothOpen = !S.uvClothOpen; }
+  );
+
+  // 6 Organic Pigment Blobs along the top arc of the kidney palette
+  const blobSpots = [
+    [-85, -25], [-55, -72], [-5, -96], [50, -88], [96, -48], [104, 12]
+  ];
+  S.pigments.forEach((m, idx) => {
+    const bx = px + blobSpots[idx][0];
+    const by = py + blobSpots[idx][1];
+    const isSel = idx === S.activePigment;
+
+    ctx.beginPath();
+    ctx.arc(bx, by, isSel ? 19 : 15, 0, Math.PI * 2);
+    const g = ctx.createRadialGradient(bx - 5, by - 5, 2, bx, by, 18);
+    g.addColorStop(0, '#ffffff');
+    g.addColorStop(0.35, m.color);
+    g.addColorStop(1, '#08090c');
+    ctx.fillStyle = g;
+    ctx.fill();
+    if (isSel) {
+      ctx.strokeStyle = '#f5d386';
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+    }
+
+    addHit(
+      { type: 'circle', x: bx, y: by, r: 20 },
+      'pointer',
+      `Dip Brush in [${m.name}] pigment`,
+      () => { S.activePigment = idx; }
+    );
+  });
+
+  // --------------------------------------------------------------------------
+  // THE PLUMB-BOB & BRASS CALIPER (Replaces Brush Sliders!)
+  // --------------------------------------------------------------------------
+  const calX = px + 18;
+  const calY = py - 22;
+  const spread = S.caliperSpread;
+  const depthY = calY + S.plumbDepth * 68;
+
+  // Left & Right curved brass caliper legs measuring brush radius
+  ctx.beginPath();
+  ctx.moveTo(calX, calY - 18);
+  ctx.quadraticCurveTo(calX - spread * 0.8, calY + 15, calX - spread, calY + 52);
+  ctx.moveTo(calX, calY - 18);
+  ctx.quadraticCurveTo(calX + spread * 0.8, calY + 15, calX + spread, calY + 52);
+  ctx.strokeStyle = '#d8a956';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+
+  // Live bell-curve thread stretched between the caliper tips through the plumb-bob point
+  ctx.beginPath();
+  ctx.moveTo(calX - spread, calY + 52);
+  ctx.bezierCurveTo(calX - spread * 0.3, calY + 52, calX - 12, depthY, calX, depthY);
+  ctx.bezierCurveTo(calX + 12, depthY, calX + spread * 0.3, calY + 52, calX + spread, calY + 52);
+  ctx.strokeStyle = '#4be3d6';
+  ctx.lineWidth = 2.2;
+  ctx.stroke();
+
+  // Plumb-bob vertical cord & brass weight
+  ctx.beginPath();
+  ctx.moveTo(calX, calY - 18);
+  ctx.lineTo(calX, depthY);
+  ctx.strokeStyle = 'rgba(245, 211, 134, 0.5)';
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(calX, depthY + 8);
+  ctx.lineTo(calX - 7, depthY - 4);
+  ctx.lineTo(calX + 7, depthY - 4);
+  ctx.closePath();
+  ctx.fillStyle = '#f5d386';
+  ctx.fill();
+
+  ctx.fillStyle = '#e8e4d9';
+  ctx.font = '10px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(`RAD ${Math.round(spread)}u · STR ${Math.round(S.plumbDepth * 100)}%`, calX, calY + 78);
+
+  addHit(
+    { type: 'circle', x: calX, y: calY + 28, r: 54 },
+    'move',
+    'Drag Plumb-Bob vertically for Strength · Horizontally to spread Caliper Jaws (Radius)',
+    null,
+    (mx, my) => {
+      S.caliperSpread = Math.max(16, Math.min(72, Math.abs(mx - calX) + 12));
+      S.plumbDepth = Math.max(0.15, Math.min(1.0, (my - calY) / 68));
+    }
+  );
+
+  // If UV Cloth is open, hang a sagging linen cloth from 2 brass pins above the palette
+  if (S.uvClothOpen) {
+    const ux = px - 95, uy = py - 310, uw = 210, uh = 160;
+    ctx.beginPath();
+    ctx.moveTo(ux, uy);
+    ctx.quadraticCurveTo(ux + uw * 0.5, uy + 10, ux + uw, uy);
+    ctx.quadraticCurveTo(ux + uw - 6, uy + uh * 0.5, ux + uw, uy + uh);
+    ctx.quadraticCurveTo(ux + uw * 0.5, uy + uh + 8, ux, uy + uh);
+    ctx.quadraticCurveTo(ux + 6, uy + uh * 0.5, ux, uy);
+    ctx.fillStyle = 'rgba(22, 26, 34, 0.92)';
+    ctx.fill();
+    ctx.strokeStyle = '#d8a956';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Draw LSCM islands on the cloth
+    ctx.strokeStyle = '#4be3d6';
+    ctx.fillStyle = 'rgba(75, 227, 214, 0.16)';
+    ctx.beginPath();
+    ctx.ellipse(ux + 75, uy + 75, 48, 36, 0.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.ellipse(ux + 155, uy + 95, 32, 42, -0.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#f5d386';
+    ctx.font = '10px monospace';
+    ctx.fillText('LSCM CLOTH // 84.6% FILL', ux + uw * 0.5, uy + uh - 10);
+  }
+
+  ctx.restore();
+}
+
+// ----------------------------------------------------------------------------
+// 4. STAGE 03: RIG — FLOATING WOOD/BRASS PUPPET CONTROLLER CROSS + REAL STRINGS!
+// ----------------------------------------------------------------------------
+function drawRigPuppetCross(cx, cy, scale) {
+  // The Puppet Cross hangs in the upper-right of the stage
+  const crossX = W - 210;
+  const crossY = 185;
+
+  ctx.save();
+  // Draw the two crossed wooden/brass controller bars in perspective
+  // Main spine bar
+  ctx.beginPath();
+  ctx.moveTo(crossX, crossY - 78);
+  ctx.lineTo(crossX, crossY + 82);
+  // Transverse limb bar
+  ctx.moveTo(crossX - 96, crossY + 18);
+  ctx.lineTo(crossX + 96, crossY + 18);
+  ctx.strokeStyle = '#6e4e28';
+  ctx.lineWidth = 14;
+  ctx.lineCap = 'round';
+  ctx.stroke();
+
+  ctx.strokeStyle = '#d8a956';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Center symmetry swivel ring on the cross
+  ctx.beginPath();
+  ctx.arc(crossX, crossY + 18, 14, 0, Math.PI * 2);
+  ctx.fillStyle = S.mirrorStrings ? '#4be3d6' : '#181c24';
+  ctx.fill();
+  ctx.strokeStyle = '#f5d386';
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+
+  addHit(
+    { type: 'circle', x: crossX, y: crossY + 18, r: 16 },
+    'pointer',
+    'Click Center Swivel Ring on Puppet Cross to toggle L ⇄ R Symmetry Mirror',
+    () => { S.mirrorStrings = !S.mirrorStrings; }
+  );
+
+  // For each peg on the Puppet Cross: draw the TAUT STRING dropping straight down
+  // from the peg on the cross to the actual 3D bone joint on the model!
+  S.pegs.forEach((peg, idx) => {
+    const px = crossX + peg.crossOffset[0];
+    const py = crossY + peg.crossOffset[1];
+
+    // Project target 3D bone position on the model
+    const sway = peg.bead > 0.6 ? Math.sin(S.time * 4.5 + idx) * 16 * peg.bead : 0;
+    const bonePt = project(
+      peg.bone3D[0],
+      peg.bone3D[1],
+      peg.bone3D[2] + sway,
+      cx, cy, scale
+    );
+
+    const isSel = idx === S.selectedPeg;
+
+    // String from Puppet Cross peg to 3D Bone!
+    ctx.beginPath();
+    ctx.moveTo(px, py);
+    // Slight catenary curve based on springiness (bead)
+    const midX = (px + bonePt.x) * 0.5;
+    const midY = (py + bonePt.y) * 0.5 + peg.bead * 35;
+    ctx.quadraticCurveTo(midX, midY, bonePt.x, bonePt.y);
+    ctx.strokeStyle = isSel
+      ? '#f5d386'
+      : (peg.bead > 0.6 ? 'rgba(105, 216, 134, 0.55)' : 'rgba(75, 227, 214, 0.42)');
+    ctx.lineWidth = isSel ? 2.4 : 1.3;
+    if (peg.bead > 0.6) ctx.setLineDash([5, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Sliding Tension Bead along the string (0 = Rigid FK, 0.5 = IK, 1.0 = Soft Spring)
+    const u = 0.35;
+    const bx = (1 - u) * (1 - u) * px + 2 * (1 - u) * u * midX + u * u * bonePt.x;
+    const by = (1 - u) * (1 - u) * py + 2 * (1 - u) * u * midY + u * u * bonePt.y;
+
+    ctx.beginPath();
+    ctx.arc(bx, by, isSel ? 8 : 5.5, 0, Math.PI * 2);
+    ctx.fillStyle = peg.bead > 0.6 ? '#69d886' : (peg.bead > 0.2 ? '#f5d386' : '#4be3d6');
+    ctx.fill();
+    ctx.strokeStyle = '#08090c';
+    ctx.lineWidth = 1.8;
+    ctx.stroke();
+
+    addHit(
+      { type: 'circle', x: bx, y: by, r: 14 },
+      'pointer',
+      `Pluck String Bead for [${peg.name}]: Cycle Rigid FK ➔ TwoBone IK ➔ Soft Spring Tendon`,
+      () => {
+        S.selectedPeg = idx;
+        peg.bead = peg.bead < 0.3 ? 0.5 : (peg.bead < 0.8 ? 1.0 : 0.0);
+      }
+    );
+
+    // Brass Tuning Peg on the Cross itself + Protractor Cone Arc when selected
+    if (isSel) {
+      const coneRad = 32;
+      const halfAng = (peg.limitDeg * Math.PI) / 180;
+      ctx.beginPath();
+      ctx.moveTo(px, py);
+      ctx.arc(px, py, coneRad, Math.PI * 0.5 - halfAng, Math.PI * 0.5 + halfAng);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(216, 169, 86, 0.22)';
+      ctx.fill();
+      ctx.strokeStyle = '#f5d386';
+      ctx.lineWidth = 1.8;
+      ctx.stroke();
+
+      ctx.fillStyle = '#f5d386';
+      ctx.font = 'bold 11px monospace';
+      ctx.textAlign = 'center';
+      const modeName = peg.bead > 0.6 ? 'SPRING TENDON' : (peg.bead > 0.2 ? 'TWOBONE IK' : 'RIGID FK');
+      ctx.fillText(`${peg.name} · ${modeName} (±${Math.round(peg.limitDeg)}°)`, crossX, crossY - 104);
+    }
+
+    ctx.beginPath();
+    ctx.arc(px, py, isSel ? 10 : 7, 0, Math.PI * 2);
+    ctx.fillStyle = isSel ? '#f5d386' : '#d8a956';
+    ctx.fill();
+    ctx.strokeStyle = '#08090c';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    addHit(
+      { type: 'circle', x: px, y: py, r: 16 },
+      'ew-resize',
+      `Select [${peg.name}] Peg · Drag left/right to widen/narrow Joint Limit Cone (±${Math.round(peg.limitDeg)}°)`,
+      () => { S.selectedPeg = idx; },
+      (mx) => {
+        S.selectedPeg = idx;
+        peg.limitDeg = Math.max(10, Math.min(110, peg.limitDeg + (mx - S.lastX) * 0.5));
+      }
+    );
+
+    // Draw the 3D bone joint ring at the bottom end of the string
+    ctx.beginPath();
+    ctx.arc(bonePt.x, bonePt.y, isSel ? 8 : 5, 0, Math.PI * 2);
+    ctx.fillStyle = isSel ? '#f5d386' : '#4be3d6';
+    ctx.fill();
+  });
+
+  ctx.restore();
+}
+
+// ----------------------------------------------------------------------------
+// 5. STAGE 04: MARIONETTE — 3D SPINNING BRASS MUSIC-BOX CYLINDER (NO BOXES!)
+// ----------------------------------------------------------------------------
+function drawMarionetteCylinder() {
+  const cylX = W * 0.5;
+  const cylY = H - 78;
+  const cylW = Math.min(760, W * 0.66);
+  const cylR = 46; // vertical radius of the 3D cylinder
+
+  if (S.playing) {
+    S.drumPhase = (S.drumPhase + 0.0032) % 1.0;
+  }
+
+  ctx.save();
+  const leftX = cylX - cylW * 0.5;
+  const rightX = cylX + cylW * 0.5;
+
+  // Cylinder body shaded with metallic brass & dark phosphor grooves (curved 3D silhouette!)
+  const cylGrad = ctx.createLinearGradient(0, cylY - cylR, 0, cylY + cylR);
+  cylGrad.addColorStop(0, '#0d0c0a');
+  cylGrad.addColorStop(0.22, '#2b2419');
+  cylGrad.addColorStop(0.5, '#191612');
+  cylGrad.addColorStop(0.82, '#3a2e1e');
+  cylGrad.addColorStop(1, '#090807');
+
+  ctx.beginPath();
+  ctx.ellipse(leftX, cylY, 18, cylR, 0, Math.PI * 0.5, Math.PI * 1.5);
+  ctx.lineTo(rightX, cylY - cylR);
+  ctx.ellipse(rightX, cylY, 18, cylR, 0, -Math.PI * 0.5, Math.PI * 0.5);
+  ctx.closePath();
+  ctx.fillStyle = cylGrad;
+  ctx.fill();
+  ctx.strokeStyle = '#d8a956';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Left Heavy Brass Flywheel Cap (Spins with drumPhase!)
+  ctx.beginPath();
+  ctx.ellipse(leftX, cylY, 22, cylR + 8, 0, 0, Math.PI * 2);
+  ctx.fillStyle = '#b88632';
+  ctx.fill();
+  ctx.strokeStyle = '#fff0c2';
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+
+  // Spinning spokes on the flywheel
+  for (let s = 0; s < 6; s++) {
+    const a = S.drumPhase * Math.PI * 2 + (s / 6) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(leftX, cylY);
+    ctx.lineTo(leftX + Math.cos(a) * 18, cylY + Math.sin(a) * (cylR + 4));
+    ctx.strokeStyle = '#14110b';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+  }
+
+  addHit(
+    { type: 'circle', x: leftX, y: cylY, r: cylR + 10 },
+    'pointer',
+    S.playing ? 'Grab Brass Flywheel to Pause Drum' : 'Spin Brass Flywheel to Play Clip',
+    () => { S.playing = !S.playing; }
+  );
+
+  // Circumferential frame grooves etched around the cylinder
+  for (let g = 1; g < 12; g++) {
+    const gx = leftX + (g / 12) * cylW;
+    ctx.beginPath();
+    ctx.ellipse(gx, cylY, 10, cylR, 0, -Math.PI * 0.5, Math.PI * 0.5);
+    ctx.strokeStyle = 'rgba(216, 169, 86, 0.16)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  // Brass Comb / Playhead Needle reading the top crest of the cylinder
+  const playX = leftX + 40 + S.drumPhase * (cylW - 80);
+  ctx.beginPath();
+  ctx.moveTo(playX, cylY - cylR - 18);
+  ctx.lineTo(playX, cylY + cylR);
+  ctx.strokeStyle = '#f5d386';
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+
+  // 4 Keyframe Brass Pins protruding from the cylinder + Glowing Catenary Curve Thread
+  const pinFractions = [0.08, 0.34, 0.64, 0.90];
+  const pinPts = pinFractions.map(u => ({
+    x: leftX + u * cylW,
+    y: cylY - 4
+  }));
+
+  // Draw the bendable Catenary Easing Thread connecting the brass pins!
+  ctx.beginPath();
+  ctx.moveTo(pinPts[0].x, pinPts[0].y);
+  if (S.waveRipples) {
+    for (let x = pinPts[0].x; x <= pinPts[3].x; x += 6) {
+      const wy = cylY - 4 + Math.sin((x - pinPts[0].x) * 0.08 + S.time * 6) * 18;
+      ctx.lineTo(x, wy);
+    }
+  } else {
+    ctx.quadraticCurveTo(
+      (pinPts[0].x + pinPts[1].x) * 0.5,
+      cylY + S.catenarySag,
+      pinPts[1].x,
+      pinPts[1].y
+    );
+    ctx.quadraticCurveTo(
+      (pinPts[1].x + pinPts[2].x) * 0.5,
+      cylY - S.catenarySag * 0.7,
+      pinPts[2].x,
+      pinPts[2].y
+    );
+    ctx.quadraticCurveTo(
+      (pinPts[2].x + pinPts[3].x) * 0.5,
+      cylY + S.catenarySag * 0.5,
+      pinPts[3].x,
+      pinPts[3].y
+    );
+  }
+  ctx.strokeStyle = '#4be3d6';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+
+  // Red-Hot Ember Burn-Mark on the cylinder at Pin #1 (MotionLint 44 deg/f pop!)
+  const ember = pinPts[1];
+  const pulse = 12 + Math.sin(S.time * 8) * 3;
+  ctx.beginPath();
+  ctx.arc(ember.x, ember.y, pulse, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255, 110, 58, 0.28)';
+  ctx.fill();
+  ctx.strokeStyle = '#ff6e3a';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  ctx.fillStyle = '#ff9c78';
+  ctx.font = '10.5px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('🔥 f18 POP (44°/f)', ember.x, cylY - cylR - 10);
+
+  addHit(
+    { type: 'circle', x: ember.x, y: ember.y, r: 20 },
+    'pointer',
+    'Click Glowing Ember (MotionLint Pop @ f18) to snap cylinder & inspect joint',
+    () => {
+      S.playing = false;
+      S.drumPhase = 0.34;
+    }
+  );
+
+  // Draw the raised Brass Pins
+  pinPts.forEach((p, idx) => {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 7, 0, Math.PI * 2);
+    ctx.fillStyle = '#f5d386';
+    ctx.fill();
+    ctx.strokeStyle = '#08090c';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  });
+
+  // Right-end Tuning Fork (toggles Secondary Spring Wave ripples on the thread)
+  const forkX = rightX + 36;
+  const forkY = cylY;
+  ctx.beginPath();
+  ctx.arc(forkX, forkY, 16, 0, Math.PI * 2);
+  ctx.fillStyle = S.waveRipples ? '#69d886' : '#181a20';
+  ctx.fill();
+  ctx.strokeStyle = '#69d886';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.fillStyle = S.waveRipples ? '#08090c' : '#69d886';
+  ctx.font = 'bold 11px monospace';
+  ctx.fillText('∿', forkX, forkY + 4);
+
+  addHit(
+    { type: 'circle', x: forkX, y: forkY, r: 20 },
+    'pointer',
+    'Strike Tuning Fork: Brush live ChainWave / Secondary Spring onto the cylinder thread',
+    () => { S.waveRipples = !S.waveRipples; }
+  );
+
+  // Dragging anywhere on the cylinder body bends the catenary thread vertically or scrubs horizontally
+  addHit(
+    { type: 'rect', x: leftX + 25, y: cylY - cylR, w: cylW - 50, h: cylR * 2 },
+    'ns-resize',
+    'Drag up/down on Cylinder to bend the Catenary Easing Thread · Drag left/right to spin',
+    null,
+    (mx, my) => {
+      S.waveRipples = false;
+      S.catenarySag = Math.max(-42, Math.min(42, (my - cylY) * 1.4));
+      if (!S.playing) {
+        S.drumPhase = Math.max(0, Math.min(1, (mx - (leftX + 40)) / (cylW - 80)));
+      }
+    }
+  );
+
+  ctx.restore();
+}
+
+// ----------------------------------------------------------------------------
+// CAPABILITY COVERAGE OVERLAY ('C') — verifies no feature is silently dropped
+// ----------------------------------------------------------------------------
+function drawCoverage() {
+  ctx.save();
+  const x = 60, y = 60, w = W - 120, h = H - 120;
+  ctx.fillStyle = 'rgba(8,9,12,0.88)';
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = '#f5d386';
+  ctx.lineWidth = 1.6;
+  ctx.strokeRect(x, y, w, h);
+
+  ctx.fillStyle = '#f5d386';
+  ctx.font = 'bold 14px monospace';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText('CAPABILITY COVERAGE — every old panel mapped to a diegetic instrument', x + 16, y + 14);
+
+  const rows = [
+    ['RigControlWindow (host/menubar/toolbar)', 'Turret Switcher + Fly Hub + stage instruments'],
+    ['RigViewport (3D scene, bones, IK, overlays)', 'Central stage + puppet cross strings + motion trail'],
+    ['RigTimeline / RigTimelineLanes / Ruler', 'Music-box cylinder + catenary thread + pins'],
+    ['RigGraphEditor (curve editor)', 'Bendable thread between pins (Cubic/Monotone)'],
+    ['RigBonesPanel ("Scene" dock + tree)', 'Bone Index ledger (brass scroll, grouped)'],
+    ['RigObjectsPanel (props/parts)', 'Prop beads on puppet cross + object index'],
+    ['RigInspectorPanel (transforms)', 'In-place callout on selected bone/prop'],
+    ['RigConstraintsPanel (IK/limits)', 'Puppet cross: bead = FK/IK/Spring, protractor cone'],
+    ['RigCamerasPanel', 'Camera beads on cross + look-through toggle'],
+    ['RigLightsPanel', 'Rim-light halos on stage edge (grab to aim)'],
+    ['RigEventProperties (morphs/events)', 'Morph wells + morph pins on cylinder'],
+    ['RigTakeCheckPanel (motion lint)', 'Amber burn-marks on cylinder thread'],
+    ['RigUndoStack', 'Sextant rollback cursor (history tape)'],
+    ['EffigyFeatureDialog / PartStudio', 'Sextant arc stamps + CAD⇄Poly lever'],
+    ['EffigyMaterialsPanel / slots', 'Material pigment wells (dip-and-drop)'],
+    ['EffigyPaintBar / layers', 'Palette + brush nib (pressure/radius)'],
+    ['EffigySculptBar', 'Plumb-bob caliper (strength/radius)'],
+    ['EffigyUVPanel', 'UV cloth flip (Tab) on palette'],
+    ['EffigyMeshEditPanel / booleans', 'Poly Loom ring + silk-thread ops'],
+    ['EffigyShapeKeysPanel', 'Shape-key pins on cylinder thread'],
+    ['EffigyRigPanel / skeleton import', 'Bone Index + control cross'],
+    ['EffigySketchGridBar', 'Scribed brass vernier rulings on stage floor'],
+    ['EffigyRadialMenu / callouts', 'In-place blueprint callouts on stamps'],
+    ['EffigyPreview / StudioPreview', 'Central 3D viewport (GPU)'],
+    ['EffigyAnimExport / playermodel', 'Dispatch seal (bottom-right) — TBD'],
+    ['EffigySettings / console / tutorial', 'Turret hub + status whisper (top-right)'],
+  ];
+
+  let ry = y + 40;
+  const col1 = x + 16, col2 = x + w * 0.52;
+  ctx.font = '10px monospace';
+  rows.forEach((r, i) => {
+    if (ry > y + h - 24) return;
+    ctx.fillStyle = '#8c8a82';
+    ctx.textAlign = 'left';
+    ctx.fillText(r[0], col1, ry);
+    ctx.fillStyle = '#4be3d6';
+    ctx.fillText('→  ' + r[1], col2, ry);
+    ry += 15;
+  });
+
+  ctx.fillStyle = '#8c8a82';
+  ctx.font = '9px monospace';
+  ctx.fillText('Press C to close · Nothing dropped; everything remapped.', x + 16, y + h - 16);
+  ctx.restore();
+}
+
+// ----------------------------------------------------------------------------
+// MAIN RENDER LOOP
+// ----------------------------------------------------------------------------
+function updateFlyCamera(dt) {
+  const fwd = (S.keys['KeyW'] || S.keys['ArrowUp'] ? 1 : 0) - (S.keys['KeyS'] || S.keys['ArrowDown'] ? 1 : 0);
+  const right = (S.keys['KeyD'] || S.keys['ArrowRight'] ? 1 : 0) - (S.keys['KeyA'] || S.keys['ArrowLeft'] ? 1 : 0);
+  const up = (S.keys['KeyE'] || S.keys['Space'] ? 1 : 0) - (S.keys['KeyQ'] || S.keys['KeyC'] ? 1 : 0);
+
+  if (fwd !== 0 || right !== 0 || up !== 0) {
+    // Automatically engage Fly Mode as soon as you press WASD/QE
+    S.flyMode = true;
+    const sprint = (S.keys['ShiftLeft'] || S.keys['ShiftRight']) ? 2.4 : 1.0;
+    const spd = S.flySpeed * sprint * dt;
+
+    // Camera view basis matching project()
+    const sinY = Math.sin(S.yaw), cosY = Math.cos(S.yaw);
+    const sinP = Math.sin(S.pitch), cosP = Math.cos(S.pitch);
+
+    // Forward vector into depth (-y2 in camera space)
+    const fx = -sinY * cosP;
+    const fy = -cosY * cosP;
+    const fz =  sinP;
+
+    // Right vector (+x1 in camera space)
+    const rx =  cosY;
+    const ry = -sinY;
+
+    S.camX += (fx * fwd + rx * right) * spd;
+    S.camY += (fy * fwd + ry * right) * spd;
+    S.camZ += (fz * fwd + up) * spd;
+  }
+}
+
+function render() {
+  const dt = 0.016;
+  S.time += dt;
+  hits = [];
+  updateFlyCamera(dt);
+
+  const stageId = stages[S.stageIdx].id;
+  const cx = W * 0.5;
+  const cy = H * 0.44;
+  const scale = Math.min(W, H) * 0.0022;
+
+  // 1. Stage-Specific Atmospheric Lighting (No UI chrome)
+  const bg = ctx.createRadialGradient(cx, cy, 30, cx, cy, Math.max(W, H) * 0.75);
+  if (stageId === 'build') {
+    bg.addColorStop(0, S.polyMode ? '#241815' : '#16202e');
+    bg.addColorStop(1, '#07090d');
+  } else if (stageId === 'sculpt') {
+    bg.addColorStop(0, '#251e1a');
+    bg.addColorStop(1, '#090807');
+  } else if (stageId === 'rig') {
+    bg.addColorStop(0, '#0c2036');
+    bg.addColorStop(1, '#050a12');
+  } else {
+    bg.addColorStop(0, '#1e1b18');
+    bg.addColorStop(1, '#080706');
+  }
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  // 2. Stage-Specific Physical Floor / Armature in 3D Space
+  if (stageId === 'build') {
+    // Circular scribed datum compass on the floor instead of a box
+    for (let r of [165, 120]) {
+      ctx.beginPath();
+      for (let a = 0; a <= 72; a++) {
+        const th = (a / 72) * Math.PI * 2;
+        const pt = project(Math.cos(th) * r, Math.sin(th) * r, -44, cx, cy, scale);
+        a === 0 ? ctx.moveTo(pt.x, pt.y) : ctx.lineTo(pt.x, pt.y);
+      }
+      ctx.strokeStyle = S.polyMode ? 'rgba(255,110,58,0.28)' : 'rgba(75,227,214,0.22)';
+      ctx.lineWidth = r === 165 ? 1.8 : 1;
+      ctx.stroke();
+    }
+  } else if (stageId === 'sculpt') {
+    // Heavy cast-iron sculptor's turntable rings
+    for (let r of [140, 108, 34]) {
+      ctx.beginPath();
+      for (let a = 0; a <= 64; a++) {
+        const th = (a / 64) * Math.PI * 2;
+        const pt = project(Math.cos(th) * r, Math.sin(th) * r, -44, cx, cy, scale);
+        a === 0 ? ctx.moveTo(pt.x, pt.y) : ctx.lineTo(pt.x, pt.y);
+      }
+      ctx.strokeStyle = r === 140 ? 'rgba(216,169,86,0.5)' : 'rgba(232,228,217,0.14)';
+      ctx.lineWidth = r === 140 ? 2.4 : 1;
+      ctx.stroke();
+    }
+  } else if (stageId === 'rig') {
+    // Dual-axis Vitruvian gimbal rings enclosing the model
+    for (let ring = 0; ring < 2; ring++) {
+      ctx.beginPath();
+      for (let a = 0; a <= 72; a++) {
+        const th = (a / 72) * Math.PI * 2;
+        const pt = ring === 0
+          ? project(Math.cos(th) * 150, Math.sin(th) * 150, 0, cx, cy, scale)
+          : project(Math.cos(th) * 150, 0, Math.sin(th) * 120, cx, cy, scale);
+        a === 0 ? ctx.moveTo(pt.x, pt.y) : ctx.lineTo(pt.x, pt.y);
+      }
+      ctx.strokeStyle = ring === 0 ? 'rgba(75,227,214,0.3)' : 'rgba(216,169,86,0.28)';
+      ctx.lineWidth = 1.4;
+      ctx.stroke();
+    }
+  } else if (stageId === 'marionette') {
+    // Soundstage chalk blocking arcs on the floor
+    const marks = [
+      { pos: [-90, -25, -45], name: 'CHALK I' },
+      { pos: [  5,  30, -45], name: 'CHALK II' },
+      { pos: [ 95, -15, -45], name: 'CHALK III' }
+    ];
+    marks.forEach(m => {
+      const mp = project(m.pos[0], m.pos[1], m.pos[2], cx, cy, scale);
+      ctx.beginPath();
+      ctx.arc(mp.x, mp.y, 9, 0, Math.PI * 2);
+      ctx.strokeStyle = '#f5d386';
+      ctx.lineWidth = 1.8;
+      ctx.stroke();
+      ctx.fillStyle = '#f5d386';
+      ctx.font = '10px monospace';
+      ctx.fillText(m.name, mp.x + 14, mp.y + 4);
+    });
+  }
+
+  // 3. Draw 3D Podracer Engine Subject
+  const hullTint = stageId === 'sculpt'
+    ? S.pigments[S.activePigment].color
+    : (stageId === 'rig' ? '#4be3d6' : '#c85a3a');
+
+  let animLift = 0, animPitch = 0;
+  if (stageId === 'marionette') {
+    const u = S.drumPhase;
+    animLift = Math.sin(u * Math.PI * 2) * 18 - S.catenarySag * 0.35 * Math.sin(u * Math.PI);
+    animPitch = Math.cos(u * Math.PI * 2) * 0.16;
+  }
+
+  const rings = [
+    { x: -115, r: 28 },
+    { x: -80,  r: 36 },
+    { x: -30,  r: 34 },
+    { x:  25,  r: 28 },
+    { x:  75,  r: 22 },
+    { x: 115,  r: 15 }
+  ];
+
+  // Number of visible rings scales with Sextant rollback in Build mode
+  const maxRings = stageId === 'build' ? Math.max(2, Math.round(S.sextantT * rings.length)) : rings.length;
+  const activeRings = rings.slice(0, maxRings);
+
+  const ringPts = activeRings.map(rg => {
+    const pts = [];
+    const sides = 12;
+    for (let s = 0; s < sides; s++) {
+      const a = (s / sides) * Math.PI * 2;
+      const py = Math.cos(a) * rg.r;
+      const pz = Math.sin(a) * rg.r + animLift + rg.x * animPitch;
+      pts.push(project(rg.x, py, pz, cx, cy, scale));
+    }
+    return pts;
+  });
+
+  for (let i = 0; i < ringPts.length - 1; i++) {
+    const rA = ringPts[i];
+    const rB = ringPts[i + 1];
+    for (let s = 0; s < rA.length; s++) {
+      const ns = (s + 1) % rA.length;
+      ctx.beginPath();
+      ctx.moveTo(rA[s].x, rA[s].y);
+      ctx.lineTo(rB[s].x, rB[s].y);
+      ctx.lineTo(rB[ns].x, rB[ns].y);
+      ctx.lineTo(rA[ns].x, rA[ns].y);
+      ctx.closePath();
+
+      const highlightFace = stageId === 'build' && S.polyMode && S.polyRing === 2 && i === 1 && (s === 2 || s === 3);
+      ctx.fillStyle = highlightFace
+        ? 'rgba(255, 110, 58, 0.58)'
+        : (stageId === 'rig' ? 'rgba(18, 40, 64, 0.22)' : hullTint + (s % 2 === 0 ? '44' : '28'));
+      ctx.fill();
+      ctx.strokeStyle = (stageId === 'build' && S.polyMode)
+        ? 'rgba(255, 150, 105, 0.68)'
+        : (stageId === 'rig' ? 'rgba(75,227,214,0.22)' : 'rgba(232,228,217,0.3)');
+      ctx.lineWidth = 1.1;
+      ctx.stroke();
+    }
+  }
+
+  // Poly Cage Active Edge Loop / Vertices
+  if (stageId === 'build' && S.polyMode && ringPts.length > 1) {
+    const loop = ringPts[1];
+    ctx.beginPath();
+    loop.forEach((p, idx) => idx === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+    ctx.closePath();
+    ctx.strokeStyle = '#ff6e3a';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    ringPts.forEach((r, rIdx) => {
+      r.forEach(p => {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, rIdx === 1 ? 4.2 : 2.4, 0, Math.PI * 2);
+        ctx.fillStyle = rIdx === 1 ? '#ff6e3a' : '#f5d386';
+        ctx.fill();
+      });
+    });
+  }
+
+  // Turbine blades
+  if (stageId !== 'build' || S.sextantT > 0.55) {
+    const fc = project(-115, 0, animLift - 115 * animPitch, cx, cy, scale);
+    for (let b = 0; b < 18; b++) {
+      const a = (b / 18) * Math.PI * 2 + S.time * 0.9;
+      const tip = project(-115, Math.cos(a) * 26, Math.sin(a) * 26 + animLift - 115 * animPitch, cx, cy, scale);
+      ctx.beginPath();
+      ctx.moveTo(fc.x, fc.y);
+      ctx.lineTo(tip.x, tip.y);
+      ctx.strokeStyle = '#f5d386';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+  }
+
+  // Marionette 3D Stroboscopic Motion Trail in Space
+  if (stageId === 'marionette') {
+    ctx.beginPath();
+    for (let i = 0; i <= 48; i++) {
+      const u = i / 48;
+      const tx = -95 + u * 190;
+      const ty = Math.sin(u * Math.PI * 2) * 45;
+      const tz = Math.sin(u * Math.PI * 2) * 18 - S.catenarySag * 0.45 * Math.sin(u * Math.PI);
+      const pt = project(tx, ty, tz, cx, cy, scale);
+      i === 0 ? ctx.moveTo(pt.x, pt.y) : ctx.lineTo(pt.x, pt.y);
+    }
+    ctx.strokeStyle = '#4be3d6';
+    ctx.lineWidth = 2.2;
+    ctx.stroke();
+  }
+
+  // 4. Draw Stage-Specific Diegetic Instrument (1 per stage, ZERO boxes!)
+  if (stageId === 'build') {
+    drawBuildInstruments(cx, cy, scale);
+    drawBodyIndex();
+  } else if (stageId === 'sculpt') {
+    drawSculptInstruments();
+  } else if (stageId === 'rig') {
+    drawRigPuppetCross(cx, cy, scale);
+    drawBoneIndex();
+  } else if (stageId === 'marionette') {
+    drawMarionetteCylinder();
+  }
+
+  // 4b. Draw Diegetic Optical Sight Reticle when in Fly Cam mode
+  drawFlyGimbalReticle(cx, cy);
+
+  // 4c. Capability coverage overlay ('C')
+  if (S.showCoverage) drawCoverage();
+
+  // 5. Draw Top-Left Turret Switcher
+  drawTurretSwitcher();
+
+  // 6. Subtle frameless chalk whisper at top-right (just floating letters on the dark stage, no box)
+  ctx.save();
+  ctx.textAlign = 'right';
+  ctx.font = '11px monospace';
+  ctx.fillStyle = S.flyMode ? '#4be3d6' : '#69d886';
+  ctx.fillText(
+    `GL 4.6 · 144 FPS · 0 B/frame · [${S.flyMode ? 'FLY CAM (F: Orbit · R: Reset)' : 'ORBIT CAM (F / RMB / WASD: Fly)'}]`,
+    W - 26, 30
+  );
+  ctx.fillStyle = 'rgba(245, 211, 134, 0.78)';
+  ctx.fillText(S.hoverHint, W - 26, 48);
+  ctx.fillStyle = 'rgba(245, 211, 134, 0.55)';
+  ctx.fillText('C: coverage map · hover index to type-filter · wheel to scroll', W - 26, 64);
+  ctx.restore();
+
+  requestAnimationFrame(render);
+}
+
+// ----------------------------------------------------------------------------
+// UNIFIED POINTER & KEYBOARD INTERACTION (Orbit + 6-DOF Fly Cam)
+// ----------------------------------------------------------------------------
+function hitTest(mx, my) {
+  for (let i = hits.length - 1; i >= 0; i--) {
+    const h = hits[i];
+    const s = h.shape;
+    if (s.type === 'circle') {
+      const dx = mx - s.x, dy = my - s.y;
+      if (dx * dx + dy * dy <= s.r * s.r) return h;
+    } else if (s.type === 'rect') {
+      if (mx >= s.x && mx <= s.x + s.w && my >= s.y && my <= s.y + s.h) return h;
+    }
+  }
+  return null;
+}
+
+let activeDragHandler = null;
+
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+canvas.addEventListener('mousedown', (e) => {
+  const mx = e.clientX, my = e.clientY;
+  S.lastX = mx; S.lastY = my;
+
+  // Right mouse button engages Fly Look immediately
+  if (e.button === 2) {
+    S.flyMode = true;
+    S.dragKind = 'orbit';
+    return;
+  }
+
+  const hit = hitTest(mx, my);
+  if (hit) {
+    if (hit.onClick) hit.onClick();
+    if (hit.onDrag) {
+      activeDragHandler = hit.onDrag;
+      return;
+    }
+    return;
+  }
+  S.dragKind = 'orbit';
+});
+
+window.addEventListener('mouseup', () => {
+  S.dragKind = null;
+  activeDragHandler = null;
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  const mx = e.clientX, my = e.clientY;
+  S.mouseX = mx; S.mouseY = my;
+  if (activeDragHandler) {
+    activeDragHandler(mx, my);
+    S.lastX = mx; S.lastY = my;
+    return;
+  }
+  if (S.dragKind === 'orbit') {
+    const sens = S.flyMode ? 0.0055 : 0.007;
+    S.yaw += (mx - S.lastX) * sens;
+    S.pitch = Math.max(-1.2, Math.min(1.2, S.pitch + (my - S.lastY) * sens));
+    S.lastX = mx; S.lastY = my;
+    return;
+  }
+  const hit = hitTest(mx, my);
+  canvas.style.cursor = hit ? hit.cursor : (S.flyMode ? 'crosshair' : 'grab');
+  if (hit && hit.hint) {
+    S.hoverHint = hit.hint;
+  }
+});
+
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  // Scroll an index ledger when hovering it
+  if (S.bodyIndexHover) {
+    S.bodyIndexScroll = Math.max(0, S.bodyIndexScroll + e.deltaY * 0.6);
+    return;
+  }
+  if (S.boneIndexHover) {
+    S.boneIndexScroll = Math.max(0, S.boneIndexScroll + e.deltaY * 0.6);
+    return;
+  }
+  if (S.flyMode) {
+    // Scroll wheel adjusts Fly Cam speed in Fly Mode
+    S.flySpeed = Math.max(40, Math.min(600, S.flySpeed * (e.deltaY < 0 ? 1.12 : 0.89)));
+    S.hoverHint = `Fly Speed: ${Math.round(S.flySpeed)} u/s (WASD move · Q/E altitude · Shift sprint · R reset)`;
+  } else {
+    // Scroll wheel zooms in Orbit Mode
+    S.zoom = Math.max(0.35, Math.min(3.2, S.zoom * (e.deltaY < 0 ? 1.1 : 0.9)));
+  }
+}, { passive: false });
+
+window.addEventListener('keydown', (e) => {
+  S.keys[e.code] = true;
+  if (e.code === 'KeyF') {
+    S.flyMode = !S.flyMode;
+    S.hoverHint = S.flyMode
+      ? 'Fly Cam Engaged: WASD fly · Q/E altitude · Shift sprint · Scroll fly speed · R reset'
+      : 'Orbit Cam Engaged: Drag to orbit · Scroll to zoom · F or RMB for Fly Cam';
+  } else if (e.code === 'KeyR' || e.code === 'Home') {
+    S.camX = 0; S.camY = 0; S.camZ = 0;
+    S.yaw = -0.58; S.pitch = 0.34; S.zoom = 1.0;
+    S.flyMode = false;
+    S.hoverHint = 'Camera re-framed to origin';
+  } else if (e.code === 'KeyC') {
+    S.showCoverage = !S.showCoverage;
+  } else if (e.code === 'Escape') {
+    S.bodyFilter = ''; S.boneFilter = '';
+  } else {
+    // Type-to-filter when hovering an index ledger
+    if (S.bodyIndexHover) {
+      if (e.code === 'Backspace') S.bodyFilter = S.bodyFilter.slice(0, -1);
+      else if (/^Key[A-Z]$/.test(e.code) || e.code === 'Space') {
+        const ch = e.code === 'Space' ? ' ' : e.code.slice(3).toLowerCase();
+        S.bodyFilter += ch;
+      }
+    } else if (S.boneIndexHover) {
+      if (e.code === 'Backspace') S.boneFilter = S.boneFilter.slice(0, -1);
+      else if (/^Key[A-Z]$/.test(e.code) || e.code === 'Space') {
+        const ch = e.code === 'Space' ? ' ' : e.code.slice(3).toLowerCase();
+        S.boneFilter += ch;
+      }
+    }
+  }
+});
+
+window.addEventListener('keyup', (e) => {
+  S.keys[e.code] = false;
+});
+
+requestAnimationFrame(render);
+</script>
+</body>
+</html>

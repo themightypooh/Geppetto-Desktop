@@ -1,0 +1,73 @@
+=====================================================
+GPT (Codex) - LANE D - verification and numbers
+=====================================================
+
+PROJECT
+  "Geppetto" - a parametric 3D modeller (Effigy) plus an animation editor
+  (Marionette) - is being turned into a native Linux desktop app. No game
+  engine. OpenGL 4.6 through Silk.NET. C# / .NET 8 on Linux.
+
+READ THESE FIRST:
+  /home/poo/games/projects/geppetto-desktop/HANDOFF.md
+  /home/poo/games/projects/geppetto-desktop/TASKS.md
+
+YOU OWN ONE FOLDER, and you create it if it is not there already:
+  /home/poo/games/projects/geppetto-verify/
+Nothing else. You may READ anything under /home/poo/games/projects, but
+your only writes go in that folder.
+  - Do NOT edit /home/poo/games/projects/geppetto/ or geppetto-desktop/ .
+  - Do NOT commit, branch, stash or clean any repo. Joshua has uncommitted
+    work sitting in geppetto.
+  - Do NOT send any message on his behalf.
+
+WHY THIS LANE EXISTS
+  Three other agents are changing kernel code, adding a mesh cache, and
+  building a GL renderer. Somebody has to be able to say "that made it
+  slower" or "that changed the picture". That is you. You produce numbers,
+  not opinions, and every number has the command next to it.
+
+TASK 1 - kernel regression harness. Start here, it has no dependencies.
+  Write a script in geppetto-verify/ that:
+    - builds and runs the existing kernel tests:
+        cd /home/poo/games/projects/geppetto
+        dotnet build Effigy.Tests/Effigy.Tests.csproj -c Release
+        dotnet Effigy.Tests/bin/Release/net8.0/Effigy.Tests.dll <verb> ...
+    - times the cold document build over real files, at minimum:
+        podracer/tools/effigy/engine.effigy
+            known: 12.73 s, 325 features, 419 bodies, 87,252 tris
+        cookin/Assets/models/players/camhead.effigy
+      Use the CLI verb `describe <file>` - that is a pure document build
+      with no rendering in it.
+    - appends a timestamped line per run to geppetto-verify/history.txt
+    - prints PASS/FAIL against the previous run, so a regression is loud
+  Timing note: this box has no /usr/bin/time and no bc. Use `date +%s%N`
+  and awk.
+  Context worth knowing: `render <file> <out.png> iso 1024` costs 13.35 s
+  on the pod engine, of which only about 0.6 s is shading. The build is
+  the whole cost.
+
+TASK 2 - headless app harness. You can start this now.
+  geppetto-desktop builds a window app that takes --frames N and exits,
+  which makes it scriptable with no human judging the display. Write a
+  script that:
+    - runs it with --frames 120 and records wall time, exit code, and the
+      last GL/context line it prints
+    - captures a screenshot with `spectacle` or `import` (both installed)
+    - saves each run into geppetto-verify/shots/ with a timestamp
+  Once the app draws the pod engine, add: diff the screenshot against
+  /tmp/opencode/pod.png (the CPU reference render) and report how far off
+  it is. Copy that reference somewhere durable first - /tmp will not last.
+
+TASK 3 - the frame-time meter.
+  "Butter smooth" is the acceptance bar for the whole app, so it has to be
+  measurable rather than argued about. Append a request to the REQUESTS
+  section in TASKS.md asking lane B for a --stats flag that prints
+  per-frame times to stdout. Do not add the flag yourself - that is lane
+  B's file. When it exists, write the checker that turns the output into:
+  mean, p50, p99, worst frame, and spike count.
+
+RULES
+  - Show the command next to every number.
+  - Never edit another lane's files to make a test pass. Report it instead.
+  - The whole harness must be re-runnable by Joshua in one command.
+  - Report results as plain numbers. No praise, no summary prose.

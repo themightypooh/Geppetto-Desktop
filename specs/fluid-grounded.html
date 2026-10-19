@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><title>Geppetto Desktop — Fluid Grounded</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:#05080c;color:#fff;font-family:monospace;overflow:hidden;cursor:crosshair}
+canvas{display:block;width:100%;height:100%}
+.whisper{position:fixed;bottom:12px;left:50%;transform:translateX(-50%);font:10px/1.4 monospace;letter-spacing:1.5px;color:rgba(255,255,255,.35);pointer-events:none;text-transform:uppercase;text-align:center}
+</style></head><body>
+<canvas id="c"></canvas><div class="whisper">grounded fluid · panels are gooey · hover to wobble · click to select · 1-4 modes</div>
+<script>
+const c=document.getElementById('c'),ctx=c.getContext('2d');
+let W,H;function resize(){W=innerWidth;H=innerHeight;c.width=W*devicePixelRatio;c.height=H*devicePixelRatio;ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0)}addEventListener('resize',resize);resize();
+
+const MINT='#9fe1cb';
+const modes=[
+ {id:'build',name:'BUILD',accent:'#6fa8ff'},
+ {id:'sculpt',name:'SCULPT',accent:'#ff9a6a'},
+ {id:'rig',name:'RIG',accent:'#6affd6'},
+ {id:'marionette',name:'MARIONETTE',accent:'#d6a8ff'}
+];
+let mi=0,time=0,playing=true,playhead=.35;
+const keys={};
+
+// Fluid background particles
+const particles=[];
+for(let i=0;i<60;i++)particles.push({x:Math.random()*W,y:Math.random()*H,vx:(Math.random()-.5)*.3,vy:(Math.random()-.5)*.3,r:Math.random()*1.5+0.5});
+
+// Panels as organic blobs (2D layout, grounded)
+// Each panel has a base rect and wobble state
+const panelState={};
+function getPanel(id){if(!panelState[id])panelState[id]={wobble:0,hover:false,click:0};return panelState[id]}
+
+// body list items
+const bodies=['Spinous 4 arch','Lumbar 5 body','Rib 7 L','Humerus R','Femur L','Hose elbow L','Rotor bolt R1','Ankle cheek R'];
+let filter='',filtering=false;
+
+let hits=[];function addHit(s,c,h,o){hits.push({shape:s,cursor:c,hint:h,onClick:o})}
+
+addEventListener('keydown',e=>{
+ keys[e.code]=true;
+ if(e.key>='1'&&e.key<='4')mi=+e.key-1;
+ if(e.code==='Space')playing=!playing;
+ if(e.code==='KeyR'){}
+ if(filtering){if(e.code==='Escape'){filter='';filtering=false}else if(e.code==='Backspace')filter=filter.slice(0,-1);else if(/^Key[A-Z]$/.test(e.code)||e.code==='Space'){const ch=e.code==='Space'?' ':e.code.slice(3).toLowerCase();filter+=ch}}
+});
+addEventListener('keyup',e=>{keys[e.code]=false});
+function onWheel(e){e.preventDefault()}
+addEventListener('wheel',onWheel,{passive:false});
+let drag=false,lx=0,ly=0,mouseX=0,mouseY=0;
+addEventListener('mousedown',e=>{
+ const mx=e.clientX,my=e.clientY;mouseX=mx;mouseY=my;lx=mx;ly=my;
+ for(let i=hits.length-1;i>=0;i--){
+  const h=hits[i],s=h.shape;let hit=false;
+  if(s.type==='circle'){const dx=mx-s.x,dy=my-s.y;hit=dx*dx+dy*dy<=s.r*s.r}
+  else if(s.type==='rect'){hit=mx>=s.x&&mx<=s.x+s.w&&my>=s.y&&my<=s.y+s.h}
+  if(hit){if(h.onClick)h.onClick();return}
+ }
+ drag=true;
+});
+addEventListener('mouseup',()=>drag=false);
+addEventListener('mousemove',e=>{
+ const mx=e.clientX,my=e.clientY;mouseX=mx;mouseY=my;
+ if(drag){} 
+ // update hover states
+ Object.keys(panelState).forEach(k=>{panelState[k].hover=false});
+});
+addEventListener('contextmenu',e=>e.preventDefault());
+
+// draw a gooey panel: organic rounded rect with wobble
+function gooeyPanel(x,y,w,h,accent,hover,click){
+ const ps=getPanel(x+','+y);
+ const t=time;
+ const wob=ps.wobble;
+ // wobble decays
+ ps.wobble*=.9;
+ // base shape with sinusoidal edge wobble
+ ctx.save();
+ ctx.fillStyle='rgba(0,0,0,.78)';
+ ctx.strokeStyle='rgba(255,255,255,.12)';
+ ctx.lineWidth=1;
+ // draw as rounded rect with wavy edges
+ const segs=40;
+ ctx.beginPath();
+ for(let i=0;i<=segs;i++){
+  const u=i/segs;
+  // parametrize perimeter
+  let px,py;
+  if(u<.25){const v=u/.25;px=x+v*w;py=y+Math.sin(t*2+v*6)*wob*.6}
+  else if(u<.5){const v=(u-.25)/.25;px=x+w+Math.sin(t*2+v*6)*wob*.6;py=y+v*h}
+  else if(u<.75){const v=(u-.5)/.25;px=x+(1-v)*w;py=y+h+Math.sin(t*2+v*6)*wob*.6}
+  else{const v=(u-.75)/.25;px=x+Math.sin(t*2+v*6)*wob*.6;py=y+(1-v)*h}
+  i===0?ctx.moveTo(px,py):ctx.lineTo(px,py);
+ }
+ ctx.closePath();
+ ctx.fill();ctx.stroke();
+ // top highlight
+ const g=ctx.createLinearGradient(x,y,x,y+h*.35);g.addColorStop(0,'rgba(255,255,255,.07)');g.addColorStop(1,'rgba(255,255,255,0)');
+ ctx.fillStyle=g;ctx.fill();
+ ctx.restore();
+}
+
+// Simpler: just use rounded rects with a wobble scale
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath()}
+function panel(x,y,w,h,accent,hover){
+ const ps=getPanel(x+','+y);
+ ps.wobble+=(hover?1:0-ps.wobble)*.15;
+ const s=1+ps.wobble*.015;
+ ctx.save();ctx.translate(x+w/2,y+h/2);ctx.scale(s,s);ctx.translate(-(x+w/2),-(y+h/2));
+ // glass
+ const g=ctx.createLinearGradient(x,y,x,y+h);g.addColorStop(0,'rgba(255,255,255,.06)');g.addColorStop(1,'rgba(255,255,255,.01)');
+ ctx.fillStyle='rgba(0,0,0,.78)';rr(x,y,w,h,16);ctx.fill();
+ ctx.strokeStyle='rgba(255,255,255,.12)';ctx.lineWidth=1;rr(x,y,w,h,16);ctx.stroke();
+ ctx.fillStyle=g;rr(x,y,w,h,16);ctx.fill();
+ ctx.restore();
+}
+
+function draw(){
+ time+=.016;hits=[];
+ const st=modes[mi];
+ // fluid background
+ ctx.fillStyle='#05080c';ctx.fillRect(0,0,W,H);
+ // particles
+ particles.forEach(p=>{
+  p.x+=p.vx;p.y+=p.vy;
+  if(p.x<0||p.x>W)p.vx*=-1;if(p.y<0||p.y>H)p.vy*=-1;
+  ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.04)';ctx.fill();
+ });
+ // connecting lines between nearby particles (fluid web)
+ ctx.strokeStyle='rgba(255,255,255,.03)';ctx.lineWidth=1;
+ for(let i=0;i<particles.length;i++)for(let j=i+1;j<particles.length;j++){
+  const d=Math.hypot(particles[i].x-particles[j].x,particles[i].y-particles[j].y);
+  if(d<120){ctx.globalAlpha=1-d/120;ctx.beginPath();ctx.moveTo(particles[i].x,particles[i].y);ctx.lineTo(particles[j].x,particles[j].y);ctx.stroke();ctx.globalAlpha=1}
+ }
+
+ // LAYOUT: top bar (mode), left body index, bottom instrument, center model area
+ // top mode bar
+ const tbx=40,tby=14,tbw=W-80,tbh=36;
+ const tbHover=mouseX>=tbx&&mouseX<=tbx+tbw&&mouseY>=tby&&mouseY<=tby+tbh;
+ panel(tbx,tby,tbw,tbh,st.accent,tbHover);
+ // mode pills
+ const modes4=modes;
+ modes4.forEach((m,i)=>{
+  const pw=tbw/4,px=tbx+i*pw;
+  const hover=mouseX>=px&&mouseX<=px+pw&&mouseY>=tby&&mouseY<=tby+tbh;
+  if(hover)getPanel(tbx+','+tby).wobble=Math.min(1,getPanel(tbx+','+tby).wobble+.3);
+  if(i===mi){ctx.fillStyle=st.accent;ctx.font='bold 12px monospace';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(m.name,px+pw/2,tby+tbh/2)}
+  else{ctx.fillStyle='rgba(255,255,255,.4)';ctx.font='11px monospace';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(m.name,px+pw/2,tby+tbh/2)}
+  addHit({type:'rect',x:px,y:tby,w:pw,h:tbh},'pointer',m.name,()=>{mi=i});
+ });
+ // left body index
+ const ix=14,iy=60,iw=200,ih=H-140;
+ const iHover=mouseX>=ix&&mouseX<=ix+iw&&mouseY>=iy&&mouseY<=iy+ih;
+ panel(ix,iy,iw,ih,st.accent,iHover);
+ ctx.fillStyle='rgba(255,255,255,.4)';ctx.font='10px monospace';ctx.textAlign='left';ctx.textBaseline='top';ctx.fillText('BODIES',ix+14,iy+12);
+ const filt=filter.toLowerCase();
+ let yy=iy+40;
+ ctx.font='11px monospace';
+ bodies.filter(b=>!filt||b.toLowerCase().includes(filt)).forEach(b=>{
+  if(yy>iy+40&&yy<iy+ih-10){const active=b===bodies[2];ctx.fillStyle=active?st.accent:'rgba(255,255,255,.6)';ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillText(b,ix+14,yy);if(active){ctx.fillStyle=st.accent+'33';rr(ix+8,yy-8,iw-16,16,4);ctx.fill()}}
+  yy+=20;
+ });
+ // filter
+ ctx.fillStyle='rgba(255,255,255,.3)';ctx.font='9px monospace';ctx.textAlign='left';ctx.textBaseline='bottom';ctx.fillText(filter?'/'+filter:'type to filter',ix+14,iy+ih-8);
+ addHit({type:'rect',x:ix,y:iy,w:iw,h:ih},'ns-resize','Body index',null,(mx,my)=>{});
+ // bottom instrument
+ const bx=40,by=H-80,bw=W-80,bh=60;
+ const bHover=mouseX>=bx&&mouseX<=bx+bw&&mouseY>=by&&mouseY<=by+bh;
+ panel(bx,by,bw,bh,st.accent,bHover);
+ ctx.fillStyle='rgba(255,255,255,.4)';ctx.font='10px monospace';ctx.textAlign='left';ctx.textBaseline='top';ctx.fillText('INSTRUMENT  ·  '+st.id,bx+14,by+10);
+ // draw a few tool blobs in the bottom panel
+ if(st.id==='build'){
+  const notches=['Hull','Lod','Intake','Fan','Bridge','Mirror'];
+  notches.forEach((n,i)=>{const nx=bx+30+i*(bw-60)/(notches.length-1),ny=by+38;ctx.beginPath();ctx.arc(nx,ny,7,0,Math.PI*2);ctx.fillStyle=i===2?st.accent:'rgba(255,255,255,.2)';ctx.fill();ctx.strokeStyle='rgba(255,255,255,.3)';ctx.lineWidth=1;ctx.stroke();ctx.fillStyle=i===2?st.accent:'rgba(255,255,255,.5)';ctx.font='8px monospace';ctx.textAlign='center';ctx.textBaseline='top';ctx.fillText(n,nx,ny+10);addHit({type:'circle',x:nx,y:ny,r:10},'pointer',n,()=>{})});
+ } else if(st.id==='sculpt'){
+  S.pigments.forEach((m,i)=>{const px=bx+30+i*40,py=by+38;ctx.beginPath();ctx.arc(px,py,9,0,Math.PI*2);const g=ctx.createRadialGradient(px-2,py-2,1,px,py,9);g.addColorStop(0,'#fff');g.addColorStop(.5,m.color);g.addColorStop(1,'#0a0a0f');ctx.fillStyle=g;ctx.fill();addHit({type:'circle',x:px,y:py,r:11},'pointer',m.name,()=>{S.activePigment=i})});
+ } else if(st.id==='rig'){
+  const pegs2=[{n:'pelvis',x:bx+60},{n:'head',x:bx+120},{n:'handR',x:bx+180},{n:'handL',x:bx+240},{n:'tail',x:bx+300}];
+  pegs2.forEach(p=>{ctx.beginPath();ctx.arc(p.x,by+38,6,0,Math.PI*2);ctx.fillStyle=st.accent;ctx.fill();ctx.fillStyle='rgba(255,255,255,.5)';ctx.font='8px monospace';ctx.textAlign='center';ctx.textBaseline='top';ctx.fillText(p.n,p.x,by+46)});
+ } else {
+  // timeline
+  const t0=bx+20,t1=bx+bw-20,ty=by+36;
+  ctx.strokeStyle='rgba(255,255,255,.2)';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(t0,ty);ctx.lineTo(t1,ty);ctx.stroke();
+  if(playing)playhead=(playhead+.002)%1;
+  const phx=t0+playhead*(t1-t0);
+  ctx.strokeStyle=st.accent;ctx.lineWidth=2.5;ctx.beginPath();ctx.moveTo(phx,ty-10);ctx.lineTo(phx,ty+10);ctx.stroke();
+  ctx.beginPath();ctx.arc(phx,ty-14,4,0,Math.PI*2);ctx.fillStyle=st.accent;ctx.fill();
+  addHit({type:'circle',x:phx,y:ty,r:10},'ew-resize','Scrub',null,(mx)=>{playhead=Math.max(0,Math.min(1,playhead+(mx-mouseX)*.002))});
+ }
+ // model area (center) - just a subtle indicator
+ const mx=W/2,my=H/2;
+ // floating model (smaller, centered in remaining space)
+ const rings=[{x:-60,r:18},{x:-30,r:24},{x:0,r:22},{x:30,r:16},{x:60,r:12}];
+ // we need project but no 3D cam here? keep 2D simple
+ // draw as 2D rings
+ rings.forEach((rg,ri)=>{
+  ctx.beginPath();ctx.arc(mx+rg.x,my,rg.r,0,Math.PI*2);
+  ctx.fillStyle=ri%2?'#2a2f3a':'#1f2430';ctx.fill();
+  ctx.strokeStyle='rgba(255,255,255,.1)';ctx.lineWidth=1;ctx.stroke();
+ });
+
+ // whisper
+ ctx.fillStyle='rgba(255,255,255,.25)';ctx.font='9px monospace';ctx.textAlign='center';ctx.textBaseline='bottom';
+ ctx.fillText('fluid panels · 2D grounded · hover wobbles · click selects · 1-4 modes',W/2,H-8);
+
+ requestAnimationFrame(draw);
+}
+draw();
+</script></body></html>

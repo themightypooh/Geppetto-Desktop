@@ -1,0 +1,290 @@
+=====================================================
+GEMINI - LANE C - UI CONCEPT. Read a lot, write one doc.
+=====================================================
+
+WHAT THIS IS
+  A design brief, not an implementation job. Joshua has decided the UI
+  should be reconceived rather than ported, and he wants an independent
+  head to concept it before anyone writes a widget. You are that head.
+  Your deliverable is ONE document. No source edits, no code.
+
+  He said, in these words: "i think i want it different, gimme a handoff
+  doc for gemini to help me concept out a new better UI". So the
+  existing UI is the thing being replaced on purpose. Treat it as
+  evidence of what the app must be able to do. Do not treat it as a
+  layout to reproduce.
+
+FIRST, THE PROJECT
+  "Geppetto" is two tools in one repo:
+
+    Effigy     - a parametric modeller. Its document is a plain text
+                 .effigy file, one line per feature, git-diffable.
+                 Features are a tree: blob/surface-nets hulls, remesh
+                 and decimate, UV projection and organic unwrap, lofts
+                 and profiles, sweeps, fillets, mirrors, patterns,
+                 kitbash parts, shape keys, paint/vertex colour.
+
+    Marionette - an animation editor. Skeletons, skin weights, easing
+                 curves, auto-key, two-bone and chain IK, joint limits,
+                 springy secondary motion, clip baking, .riganim clips.
+
+  Both are being turned into ONE native Linux desktop app with no game
+  engine and no editor dependency. That app is what you are designing
+  the UI for.
+
+WHERE IT IS RIGHT NOW - so you do not have to guess
+  /home/poo/games/projects/geppetto-desktop
+    Program.cs        one window, an orbit camera, one document. That is
+                      the entire UI today.
+    DocumentLoader.cs loads a document off the UI thread.
+    ViewportMesh.cs   bakes the studio into one VBO, batched by material.
+    GlShader.cs       one shader, flat PBR values.
+    OrbitCamera.cs    orbit/pan/zoom. No picking, no gizmos.
+    MaterialPalette.cs material name -> colour.
+    specs/            lane C's existing specs (yours; see below).
+
+  Measured on this machine, current build:
+    419 bodies / 87,252 triangles / 12 material batches in the pod-engine
+    document, 60 fps vsync, p50 16.6 ms, p99 19.1 ms, 0 frames over
+    33.3 ms, and 0.13 s to load a document once its geometry cache is
+    warm (12.8 s cold). Silk.NET + SDL + OpenGL 4.6 core, own GLSL 4.60
+    shaders, RTX 5060 Ti, Wayland.
+
+  What the app CANNOT do yet, and you should assume will exist by the
+  time your UI is built:
+    - skin a mesh and play a .riganim clip  (the kernel supports it
+      today; Effigy/Rig/ is engine-free, and specs/viewport-frame.md
+      already specifies the per-frame path)
+    - picking, selection, transform gizmos
+    - keying, a curve editor, undo
+    - all modelling: every feature dialog, sculpt, paint, UV, mesh edit
+
+  So you are designing the whole tool around a renderer that works and
+  almost nothing on top of it. Blank slate, solid floor.
+
+READ THESE FIRST, IN THIS ORDER
+  1. /home/poo/games/projects/geppetto-desktop/HANDOFF.md   (12 sections, the brief)
+  2. /home/poo/games/projects/geppetto-desktop/TASKS.md    (lanes, facts, build order)
+  3. /home/poo/games/projects/geppetto-desktop/specs/imgui-port.md
+     Your own earlier spec. Its section 1 is a full inventory of every
+     panel, widget and piece of owned state in the Marionette UI, with
+     file:line. DO NOT REDO THAT WORK. Build on it, and go past it: it
+     answers "what is there and how would it port", and you are now
+     answering "what should it be instead".
+  4. /home/poo/games/projects/geppetto-desktop/specs/viewport-frame.md
+     The per-frame animation path, if you need to know what the viewport
+     can afford to ask for every frame.
+
+THE CAPABILITY INVENTORY - the thing that already exists
+  This is a menu, not a blueprint. Go read the ones that matter to you.
+  Both directories are s&box editor code: read-only, do not edit, do not
+  port blindly. Roughly 60k lines in the modeller and 18k in the
+  animator, which is most of why they need rethinking rather than
+  moving.
+
+  /home/poo/games/projects/geppetto/Editor/EffigyEditor/   (modelling)
+    Feature authoring ....... EffigyFeatureDialog, EffigyNumericField
+    Feature/panel hosting ... EffigyModelChrome, EffigyWorkspaceBar,
+                              EffigyStageBar, EffigyResultStrip
+    Materials ............... EffigyMaterialsPanel, EffigyMaterialSlot,
+                              EffigyMaterialBrushBar, EffigyMaterialSize
+    Paint ................... EffigyPaintBar, EffigyPaintLayersPanel
+    Sculpt .................. EffigySculptBar
+    UV ...................... EffigyUVPanel
+    Mesh editing ............ EffigyMeshEditPanel, EffigyMeshBoolean
+    Shape keys .............. EffigyShapeKeysPanel
+    Rigging in the modeller . EffigyRigPanel, EffigySkeletonImport,
+                              EffigySkeletonProbe
+    Sketches ................ EffigySketchGridBar
+    Selection/context ....... EffigyRadialMenu, EffigyOverlayCanvas,
+                              EffigyCallout
+    Preview ................. EffigyPreview, EffigyStudioPreview
+    Export .................. EffigyAnimExport, EffigyPlayermodelExport
+    Chrome .................. EffigySettingsWindow, EffigyConsolePanel,
+                              EffigyTutorial, EffigyTutorialPanel,
+                              EffigyIcons, EffigySizeReferenceButton
+
+  /home/poo/games/projects/geppetto/Editor/RigControlEditor/  (animation)
+    Host + docking .......... RigControlWindow, RigStatusBar, RigHelpBox
+    Viewport ................ RigViewport, RigViewport.Overlays,
+                              RigViewport.Drivers
+    Timeline ................ RigTimeline, RigTimelineLanes,
+                              RigTimelineRuler, RigBoneColumn
+    Curve editing ........... RigGraphEditor
+    Panels .................. RigBonesPanel, RigObjectsPanel,
+                              RigCamerasPanel, RigLightsPanel,
+                              RigConstraintsPanel, RigInspectorPanel,
+                              RigEventProperties, RigTakeCheckPanel
+    Tools ................... RigPoseCapture, RigRootMotionTool,
+                              RigSampleBuilder, RigSecondaryBake,
+                              RigKeyFromTargets, RigUndoStack
+    Chrome .................. RigIconButton, RigTutorialPanel,
+                              RigAnimExport, RigAnimExportDialog
+
+  Note the two things this inventory tells you. There are about forty
+  panels, which is the problem. And the panels are the *capability*;
+  their arrangement is the accident of having grown inside an engine
+  editor with a dock system, a radial menu and no viewport-first idea.
+
+WHAT JOSHUA ACTUALLY WANTS OUT OF IT
+  He is a solo animator and modeller. He wants one tool he reaches for,
+  not a suite. He is putting together an animation reel and wants to be
+  paid for rigging and animation work. He works on one desktop, 16:9,
+  Linux/Wayland, mouse and keyboard, and he is not a keyboard-shortcut
+  maximalist.
+
+HARD CONSTRAINTS - a concept that breaks these is not a concept
+  - ONE native window, GPU-first, no engine. No website, no Electron.
+  - BUTTER SMOOTH, and that is a measured requirement, not a vibe: the
+    whole viewport currently holds 60 fps with p99 under 19 ms and zero
+    frames over 33 ms. The UI must fit in that budget. Say what your
+    proposal costs per frame and where the cost lands. Never propose a
+    design that only works if the viewport drops to 30 fps.
+  - No s&box assets or chrome. Nothing named "citizen".
+  - Immediate-mode provisioning is available but not mandatory. ImGui.NET
+    is the assumed toolkit because your own imgui-port.md already mapped
+    onto it. If you think a different approach is the right call, say so
+    and argue it - with the reason, and with what it costs.
+
+WHAT TO WRITE - ONE FILE
+  /home/poo/games/projects/geppetto-desktop/specs/ui-concept.md
+
+  Ask yourself the question the current UI never asked: what is the SPINE
+  of this tool? Roughly, which five or six interactions carry most of
+  the work? Design those first and let them dictate everything else,
+  instead of starting from a list of panels.
+
+  Include, in this order:
+
+  1. WHAT IT IS FOR, in one page. Who uses it, for what, and what it is
+     deliberately not for. If you think the two tools should be one
+     document or two, say which and why - that is a UI decision as much
+     as a data one. There is evidence for it in the document above: a
+     character's .effigy file is already organised like a body, 617
+     pieces of one, named by region. So the modeller and the rigger are
+     sharing one document whether or not the UI admits it.
+
+  2. THE SPINE. The handful of interactions that matter most, described
+     as things a person does, in order, from opening a file to finishing
+     a shot. Concrete: "right-drag orbits, scrolling zooms, clicking a
+     bone selects it, R keys rotation at the current frame". This
+     section is the point of the document.
+
+  3. THE LAYOUT, as ASCII wireframes in a fenced block. One diagram per
+     mode or screen, 16:9, with the panels labelled, and a note on what
+     is fixed and what can be hidden. Plain text diagrams, please - this
+     doc has to be readable in a terminal.
+
+  4. PANEL INVENTORY AND PRIORITY. Every capability from the list above,
+     mapped to where it lives in your design, marked P0 / P1 / P2. The
+     test: nothing may be silently dropped. If you want to cut something,
+     cut it explicitly, in its own section, with the reason.
+
+  5. WHAT YOU WOULD DROP AND WHY. The s&box chrome, the panels that exist
+     because a dock system made them easy, the dialogs that could be
+     inline, the modal flows that should be direct manipulation. Be
+     specific and be willing to be wrong out loud.
+
+  6. MODES OR NO MODES, and how you keep a user from getting lost between
+     modelling, rigging, animating and painting. Argue the trade-off.
+
+  7. THE PERFORMANCE BUDGET. What the UI may spend per frame, what is
+     cached, what rebuilds when a document changes, what happens while a
+     12.8 s cold rebuild is running, and what a 419-body / 87k-triangle
+     document does to your panel that lists bodies. A list of 419 rows is
+     a real UI problem, not an afterthought.
+
+  8. A BUILD ORDER. What an implementer does first, second, third, in
+     dependency order, with the smallest first step that puts something
+     usable on screen. Steps 5 through 8 of TASKS.md are the existing
+     order; extend or argue with it.
+
+  9. OPEN QUESTIONS FOR JOSHUA. Only the things you cannot decide from
+     the code - how he actually works. Does he key with the mouse or the
+     keyboard, does he start from a dope sheet or a curve graph, does he
+     animate to reference video, does he want one window or two monitors,
+     does he want to sculpt at all. Ask them as short questions he can
+     answer in a line each.
+
+RULES
+  - Specs only, in specs/. No source edits anywhere, and no commits.
+  - When you cite existing code, cite real types and methods with
+    file:line, as you did in imgui-port.md.
+  - When you assert a number, either cite the measured one from HANDOFF.md
+    or mark it as an estimate and say it is one.
+  - Flag anything you could not determine instead of filling the gap with
+    something plausible. That is the failure mode this lane exists to
+    avoid.
+  - Do not write anything in Joshua's voice, and do not send any message
+    for him.
+  - Length: as long as it needs. One well-argued page on the spine is
+    worth more than ten on widgets.
+
+IF YOU CANNOT READ LOCAL FILES OR RUN COMMANDS
+  Say so immediately and ask Joshua to attach the folders above. Do not
+  guess from file names. If you can run commands, the app is runnable
+  and it is worth actually looking at before you design on top of it:
+
+    cd /home/poo/games/projects/geppetto-desktop
+    dotnet build Marionette.Desktop.csproj -c Release
+    dotnet bin/Release/net8.0/marionette-desktop.dll \
+      --model /home/poo/games/projects/cookin/Assets/models/players/camhead.effigy \
+      --frames 300 --screenshot /tmp/geppetto-ui-look.png
+
+  That opens a real window on his desktop for as long as it runs, so tell
+  him before you launch it. Note the --model above: without it the app
+  defaults to engine.effigy, which is the 12.8 s one.
+
+  It takes --model <file.effigy>, --size WxH, --frames N, --screenshot
+  <png>, and --stats.
+
+  USE THE RIGHT DOCUMENT FOR THE RIGHT QUESTION. These are measured, and
+  they are the documents that decide the panel and list problems you are
+  designing for:
+
+    cookin/Assets/models/players/camhead.effigy
+        617 bodies, 63,236 triangles, 15 material batches.
+        9.9 s to load cold, 0.17 s warm.
+        THIS IS THE DOCUMENT JOSHUA ACTUALLY CARES ABOUT, and the one to
+        design against. It is his own character, and it is the row-count
+        problem at its worst. Read the body names and notice what they
+        are: "Spinous 4 arch", "Lumbar 5 facet R", "Ankle cheek R",
+        "Heel hub L nut", "Hose elbow a hip top L", "Rotor bolt L 1",
+        "Tilt motor", "Ab piston rod R". Anatomical regions, not loose
+        parts - 617 rows that are all pieces of one body. Whatever your
+        UI does with a list of bodies has to hold up against that.
+        One more detail worth knowing: those 617 bodies collapse to only
+        15 materials, so a list of materials is cheap and a list of BODIES
+        is the expensive surface. And the colour you see is produced by a
+        ten-line name matcher, MaterialPalette.cs, that was written for
+        pod-engine names - chrome, brass, paint, soot. Eleven of
+        camhead's fifteen materials match none of its rules and fall
+        through to the same grey, lens_black included. That is why a
+        screenshot of him is monochrome. It is also the gap a materials
+        panel is supposed to close, and the palette is not worth porting.
+
+    podracer/tools/effigy/engine.effigy
+        419 bodies, 87,252 triangles, 12.8 s cold. The other stress case:
+        a rocket engine with no rig, mostly kitbash detail. The opposite
+        shape of document. Useful for "does this survive four hundred
+        rows", useless for anything about a character.
+
+  TWO THINGS TO KNOW BEFORE YOU ITERATE, both of them annoyances you
+  will otherwise blame on your own changes:
+
+    The geometry cache is keyed on the app's own kernel assembly, so
+    REBUILDING THE APP INVALIDATES IT. You pay one 9.9 s first load after
+    every build, then 0.17 s per load until you build again. The 9.9 s is
+    not the UI being slow; it is a deliberate design trade recorded in
+    HANDOFF.md section 10, and it is worth knowing before you conclude
+    that something you wrote costs ten seconds.
+
+    There are no .riganim clips for camhead, so testing clip playback
+    means borrowing one. There are 135 clips on this machine: 74 under
+    arcade/, 51 under arcade_scratch/, 9 under deep_sentance/. Some live
+    in folders called "graveyard", so 111 of the 135 are the ones someone
+    still meant to keep.
+
+  Find the rest with:
+    find /home/poo/games/projects -name '*.effigy' -not -path '*/out/*'
+    find /home/poo/games/projects -name '*.riganim'

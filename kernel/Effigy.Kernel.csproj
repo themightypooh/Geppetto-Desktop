@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <RootNamespace>Effigy</RootNamespace>
+    <AssemblyName>Effigy.Kernel</AssemblyName>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <Deterministic>true</Deterministic>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <!--
+    Standalone engine-free Effigy kernel assembly.
+    Keeping the kernel in its own deterministic assembly ensures:
+      1. Effigy cannot accidentally depend on Silk.NET or desktop UI types.
+      2. Editing Marionette.Desktop files does not change typeof(PartStudio).Assembly's
+         ModuleVersionId, so ~/.cache/effigy/*.cache stays warm across app builds.
+  -->
+  <ItemGroup>
+    <Compile Include="../../geppetto/Effigy/**/*.cs" />
+  </ItemGroup>
+
+</Project>
