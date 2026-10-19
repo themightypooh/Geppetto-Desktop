@@ -1,0 +1,722 @@
+using System;
+using System.Collections.Generic;
+
+namespace Effigy;
+
+/// <summary>
+/// One bone: a name, a parent, and where it sits in the bind pose.
+///
+/// Local is relative to the parent, which is what every skeletal format stores and what makes a
+/// chain behave when a parent moves. World bind transforms are derived by walking up the parents
+/// rather than stored, so there is exactly one source of truth and no chance of the two drifting
+/// apart after an edit.
+///
+/// Length exists because a bone needs a tail as well as a head. The head is the transform's
+/// origin; the tail is Length along the bone's own +Y. That is Blender's convention, and it is
+/// what auto-weighting needs — a bone is a SEGMENT to measure distance to, not a point. It is also
+/// what <see cref="SoftSolver"/> simulates: the tail is the particle, the head follows the parent.
+/// </summary>
+public sealed class Bone
+{
+	public string Name;
+
+	/// <summary>Index into Skeleton.Bones, or -1 for a root. Always less than this bone's own
+	/// index — see Skeleton.AddBone.</summary>
+	public int Parent;
+
+	/// <summary>Bind pose relative to the parent.</summary>
+	public Xform Local;
+
+	public float Length;
+
+	/// <summary>
+	/// Physical softness, or null for a rigid bone - which is nearly all of them, and why this
+	/// hangs off the bone rather than adding four fields to every one. See <see cref="SoftBone"/>.
+	/// </summary>
+	public SoftBone Soft;
+
+	public Bone( string name, int parent, Xform local, float length )
+	{
+		Name = name;
+		Parent = parent;
+		Local = local;
+		Length = length;
+	}
+
+	public Bone Clone() => new( Name, Parent, Local, Length ) { Soft = Soft?.Clone() };
+}
+
+/// <summary>
+/// A bone hierarchy with a bind pose. Engine-free, like everything else in here — the s&amp;box and
+/// Godot sides convert at the boundary.
+///
+/// BONES ARE STORED IN TOPOLOGICAL ORDER: a bone's parent always has a lower index. AddBone
+/// enforces it by refusing a parent that does not exist yet, which makes cycles unrepresentable
+/// rather than merely invalid, and means WorldBind can never loop forever. It also happens to be
+/// what SMD's node block wants, but that is a consequence, not the reason.
+/// </summary>
+public sealed class Skeleton
+{
+	public List<Bone> Bones = new();
+
+	public int Count => Bones.Count;
+
+	/// <summary>
+	/// Add a bone under an existing parent (-1 for a root). Returns its index.
+	///
+	/// Throws if the parent does not already exist. That is the constraint that keeps the list
+	/// topologically ordered and the hierarchy acyclic.
+	/// </summary>
+	public int AddBone( string name, int parent, Xform local, float length = 1f )
+	{
+		if ( string.IsNullOrWhiteSpace( name ) )
+			throw new ArgumentException( "A bone needs a name — every consuming format keys on it" );
+
+		if ( parent < -1 || parent >= Bones.Count )
+			throw new ArgumentOutOfRangeException( nameof( parent ),
+				$"Parent {parent} does not exist yet. Add parents before children." );
+
+		if ( IndexOf( name ) >= 0 )
+			throw new ArgumentException( $"A bone called '{name}' already exists" );
+
+		Bones.Add( new Bone( name, parent, local, length ) );
+		return Bones.Count - 1;
+	}
+
+	/// <summary>
+	/// Add a bone from a head and tail point in WORLD bind space, which is what drawing a bone
+	/// chain in a viewport produces.
+	///
+	/// The bone's +Y is aimed head→tail. <paramref name="up"/> settles the roll about that aim by
+	/// naming which way the bone's +Z should lean; leave it null and the roll is an arbitrary but
+	/// stable perpendicular, which is all this took before roll could be asked for.
+	/// </summary>
+	public int AddBoneFromPoints( string name, int parent, Vec3 head, Vec3 tail, Vec3? up = null )
+	{
+		var (local, length) = LocalFromWorldPoints( parent, head, tail, name, up );
+		return AddBone( name, parent, local, length );
+	}
+
+	/// <summary>
+	/// Move an existing bone's head and tail in WORLD bind space — a numeric edit standing in for
+	/// the click that placed it, or a correction after the fact. Recomputes Local the same way a
+	/// fresh placement would, against the bone's CURRENT parent.
+	///
+	/// Children are not touched here, and do not need to be: their own Local is relative to THIS
+	/// bone, and WorldBind always walks the parent chain fresh rather than caching a result, so
+	/// they follow automatically the moment this bone's Local changes underneath them.
+	/// </summary>
+	public void SetHeadTail( int index, Vec3 head, Vec3 tail, Vec3? up = null )
+	{
+		if ( index < 0 || index >= Bones.Count )
+			throw new ArgumentOutOfRangeException( nameof( index ) );
+
+		var (local, length) = LocalFromWorldPoints( Bones[index].Parent, head, tail, Bones[index].Name, up );
+
+		Bones[index].Local = local;
+		Bones[index].Length = length;
+	}
+
+	/// <summary>Shared math behind AddBoneFromPoints and SetHeadTail — a bone's Local and Length
+	/// from a head/tail pair in world space and the parent it will sit under. One copy so a change
+	/// to how the axes are built cannot land in one caller and not the other.</summary>
+	(Xform local, float length) LocalFromWorldPoints( int parent, Vec3 head, Vec3 tail, string boneNameForError,
+		Vec3? up = null )
+	{
+		var along = tail - head;
+		var length = along.Length;
+
+		if ( length < 1e-6f )
+			throw new ArgumentException(
+				$"Bone '{boneNameForError}' has zero length — head and tail are the same point" );
+
+		var y = along / length;
+
+		var (x, z) = PerpendicularAxes( y, up );
+
+		var world = new Xform( x, y, z, head );
+		var local = parent < 0 ? world : WorldBind( parent ).Inverse * world;
+
+		return (local, length);
+	}
+
+	/// <summary>
+	/// The two axes across a bone, given the one along it.
+	///
+	/// WHY ROLL IS WORTH A PARAMETER. Aiming a bone head→tail pins two of its three axes and
+	/// leaves it free to spin about its own length, and something has to choose. Choosing
+	/// arbitrarily is fine for a bone that only ever bends — but not for one an animator snaps a
+	/// hand or a prop onto, where "which way is up" is the whole point of the bone existing. A
+	/// grip bone whose roll came out of whichever world axis it happened to lean on least hands
+	/// the animator a rotation to undo by eye on every single weapon.
+	///
+	/// So <paramref name="up"/> names the direction the bone's +Z should lean, and the component
+	/// of it along the bone is projected out — the caller says roughly which way is up and does
+	/// not have to supply something exactly perpendicular.
+	///
+	/// A hint parallel to the bone selects nothing (its perpendicular component is zero), and so
+	/// does no hint at all, so both fall back to the arbitrary-but-stable seed this used before
+	/// roll could be asked for. Falling back rather than throwing is deliberate: a hint is a
+	/// preference, and a bone aimed straight up with an up-hint of +Z is a caller being consistent
+	/// rather than one making a mistake.
+	/// </summary>
+	static (Vec3 X, Vec3 Z) PerpendicularAxes( Vec3 y, Vec3? up )
+	{
+		if ( up is Vec3 hint )
+		{
+			var z = hint - y * Vec3.Dot( hint, y );
+
+			if ( z.Length > 1e-4f )
+			{
+				z = z.Normal;
+				return (Vec3.Cross( y, z ), z);
+			}
+		}
+
+		// Any axis not parallel to y works as a seed; picking the one y leans on least keeps the
+		// cross product well-conditioned.
+		var seed = MathF.Abs( y.x ) < 0.9f ? new Vec3( 1, 0, 0 ) : new Vec3( 0, 0, 1 );
+		var sx = Vec3.Cross( seed, y ).Normal;
+
+		return (sx, Vec3.Cross( sx, y ));
+	}
+
+	public int IndexOf( string name )
+	{
+		for ( var i = 0; i < Bones.Count; i++ )
+		{
+			if ( Bones[i].Name == name )
+				return i;
+		}
+
+		return -1;
+	}
+
+	/// <summary>Bind transform in world space, from walking up the parents. Cheap enough to call
+	/// per bone; the chains here are tens of bones, not thousands.</summary>
+	public Xform WorldBind( int index )
+	{
+		var x = Bones[index].Local;
+		var p = Bones[index].Parent;
+
+		while ( p >= 0 )
+		{
+			x = Bones[p].Local * x;
+			p = Bones[p].Parent;
+		}
+
+		return x;
+	}
+
+	public Vec3 HeadWorld( int index ) => WorldBind( index ).Origin;
+
+	/// <summary>Tail is Length along the bone's own +Y — see Bone.</summary>
+	public Vec3 TailWorld( int index )
+	{
+		var w = WorldBind( index );
+		return w.TransformPoint( new Vec3( 0, Bones[index].Length, 0 ) );
+	}
+
+	public IEnumerable<int> Children( int index )
+	{
+		for ( var i = index + 1; i < Bones.Count; i++ )
+		{
+			if ( Bones[i].Parent == index )
+				yield return i;
+		}
+	}
+
+	/// <summary>
+	/// The direction a bone points, head to the child that continues its chain — the world vector
+	/// from this bone's head to the head of its furthest child, normalised.
+	///
+	/// FRAME-AGNOSTIC, which is the point. <see cref="Bone"/>'s +Y is the tail direction only for a
+	/// skeleton built by Effigy's own placement; an imported rig — citizen's is +X-down-the-bone —
+	/// carries a local basis whose +Y is a cross-axis, and reading it as the bone direction then
+	/// measures every twist and swing along the wrong axis. The geometric head-to-child vector is
+	/// the direction regardless of which local axis happens to run along the bone.
+	///
+	/// Furthest child rather than first: a limb bone's first child is often a twist or helper bone
+	/// that sits partway down the bone, and the child at the far end is the one that actually
+	/// continues the chain. A leaf (or a bone whose children all sit at its own head) falls back to
+	/// its +Y, which is what a chain with no continuation has left to offer.
+	/// </summary>
+	public Vec3 BoneDirection( int index )
+	{
+		var origin = WorldBind( index ).Origin;
+		var best = default( Vec3 );
+		var bestLen = 0f;
+
+		foreach ( var c in Children( index ) )
+		{
+			var v = WorldBind( c ).Origin - origin;
+			var len = v.Length;
+
+			if ( len > bestLen )
+			{
+				bestLen = len;
+				best = v;
+			}
+		}
+
+		if ( bestLen > 1e-4f )
+			return best / bestLen;
+
+		return WorldBind( index ).Y.Normal;
+	}
+
+	/// <summary>
+	/// Twist stations, helpers, IK targets and face widgets. They sit on a limb or float off it;
+	/// they are not the limb. A skin built on them, and a garment measured along them, follows
+	/// the widget instead of the body.
+	/// </summary>
+	public static bool IsAuxiliaryBone( string name )
+	{
+		if ( string.IsNullOrEmpty( name ) )
+			return false;
+
+		var n = name.ToLowerInvariant();
+
+		return n.Contains( "twist" ) || n.Contains( "helper" ) || n.Contains( "ik" )
+			|| n.Contains( "aim" ) || n.Contains( "hold" ) || n.Contains( "clothing" )
+			|| n.Contains( "eye" ) || n.Contains( "ear" ) || n.Contains( "lid" )
+			|| n.Contains( "face" ) || n.Contains( "jaw" );
+	}
+
+	/// <summary>
+	/// The segment this bone occupies, head to tail, for measuring a limb and for building a skin.
+	///
+	/// An Effigy-placed bone has its child sitting on the +Y tail, and that segment comes back
+	/// unchanged. An imported bone — citizen is +X-down-the-bone, and its skeleton table leaves
+	/// Length at the default inch — has that tail on a cross axis an inch away, while the
+	/// next joint is a foot or more down +X. The segment is then head to the child that continues
+	/// the chain, which is the same end <see cref="BoneDirection"/> points at.
+	///
+	/// A joint whose children leave in different directions (a pelvis, a hand) keeps its own tail.
+	/// Extending it to the furthest child would send the pelvis down one leg. False for an
+	/// auxiliary bone, which has no segment of its own.
+	/// </summary>
+	public bool TryBodySpan( int index, out Vec3 head, out Vec3 tail )
+	{
+		head = tail = default;
+
+		if ( index < 0 || index >= Bones.Count || IsAuxiliaryBone( Bones[index].Name ) )
+			return false;
+
+		head = HeadWorld( index );
+		tail = TailWorld( index );
+
+		var bestLen = 0f;
+		var best = default( Vec3 );
+		var continued = 0;
+
+		foreach ( var c in Children( index ) )
+		{
+			if ( IsAuxiliaryBone( Bones[c].Name ) )
+				continue;
+
+			var v = HeadWorld( c ) - head;
+			var len = v.Length;
+
+			if ( len < 1e-3f )
+				continue;
+
+			continued++;
+
+			if ( len > bestLen )
+			{
+				bestLen = len;
+				best = v;
+			}
+		}
+
+		if ( continued == 0 || bestLen < 1e-3f )
+		{
+			// A head has no limb continuing it — the eyes and ears were excluded — so the
+			// authored tail is an inch on a cross axis and a beanie lands on that inch.
+			// Run the segment on up from the neck, through the skull.
+			if ( Bones[index].Name.Contains( "head", StringComparison.OrdinalIgnoreCase ) )
+			{
+				var parent = Bones[index].Parent;
+				var up = parent >= 0 ? head - HeadWorld( parent ) : WorldBind( index ).Z;
+				var skull = 0f;
+
+				foreach ( var c in Children( index ) )
+				{
+					var child = Bones[c].Name.ToLowerInvariant();
+
+					if ( !child.Contains( "eye" ) && !child.Contains( "ear" ) && !child.Contains( "lid" )
+						&& !child.Contains( "face" ) && !child.Contains( "jaw" ) )
+						continue;
+
+					skull = MathF.Max( skull, (HeadWorld( c ) - head).Length );
+				}
+
+				if ( up.LengthSquared > 1e-4f && skull > 1f )
+					tail = head + up.Normal * (skull * 0.55f);
+			}
+
+			return (tail - head).LengthSquared > 1e-8f;
+		}
+
+		var dir = best / bestLen;
+		var fan = false;
+
+		foreach ( var c in Children( index ) )
+		{
+			if ( IsAuxiliaryBone( Bones[c].Name ) )
+				continue;
+
+			var v = HeadWorld( c ) - head;
+			var len = v.Length;
+
+			if ( len < 1e-3f )
+				continue;
+
+			if ( Vec3.Dot( v / len, dir ) < 0.7f )
+				fan = true;
+		}
+
+		// One direction: the far child is the tail, which is where an Effigy chain already
+		// put it. A fan keeps the authored tail so the joint stays put.
+		if ( !fan )
+			tail = head + best;
+
+		return (tail - head).LengthSquared > 1e-8f;
+	}
+
+	public Skeleton Clone()
+	{
+		var s = new Skeleton();
+
+		foreach ( var b in Bones )
+			s.Bones.Add( b.Clone() );
+
+		return s;
+	}
+
+	/// <summary>
+	/// Remove a bone, reparenting its direct children to ITS parent so deleting one from the
+	/// middle of a chain does not orphan everything past it — a mis-click while placing bones is
+	/// the common case this exists for.
+	///
+	/// Every surviving bone keeps its WORLD bind transform; only the stored Local of the removed
+	/// bone's children changes, recomputed against their new parent. Topological order (parent
+	/// index &lt; child index) is preserved because indices only ever shift down to fill the gap.
+	/// </summary>
+	public void RemoveBone( int index )
+	{
+		if ( index < 0 || index >= Bones.Count )
+			throw new ArgumentOutOfRangeException( nameof( index ) );
+
+		var removedParent = Bones[index].Parent;
+
+		// Captured before anything is rebuilt, so reparenting reads world transforms rather than
+		// composing through a partially-rebuilt list.
+		var worlds = new Xform[Bones.Count];
+		for ( var i = 0; i < Bones.Count; i++ )
+			worlds[i] = WorldBind( i );
+
+		var newBones = new List<Bone>( Bones.Count - 1 );
+		var oldToNew = new int[Bones.Count];
+
+		for ( var i = 0; i < Bones.Count; i++ )
+		{
+			if ( i == index )
+				continue;
+
+			var bone = Bones[i];
+			var oldParent = bone.Parent;
+
+			// A direct child of the removed bone re-parents to what the removed bone's parent
+			// was; everything else keeps its parent unchanged.
+			var newParent = oldParent == index ? removedParent : oldParent;
+
+			// newParent, when not -1, is always an index already visited — it is either less
+			// than `index`, or it is `removedParent` which is itself less than `index` — so its
+			// mapping exists by now.
+			var mappedParent = newParent < 0 ? -1 : oldToNew[newParent];
+
+			var local = mappedParent < 0 ? worlds[i] : worlds[mappedParent].Inverse * worlds[i];
+
+			newBones.Add( new Bone( bone.Name, mappedParent, local, bone.Length ) );
+			oldToNew[i] = newBones.Count - 1;
+		}
+
+		Bones = newBones;
+	}
+
+	/// <summary>
+	/// Hang <paramref name="index"/> under <paramref name="newParent"/> (-1 to make it a root).
+	/// The bone keeps its WORLD bind pose; only Local is rewritten against the new parent, so a
+	/// trigger and a mag parented onto a root stay where they were drawn and then follow the root
+	/// when it moves — which is the whole point of a hierarchy.
+	///
+	/// May reorder the list. Parent index &lt; child index is an invariant, and parenting an
+	/// earlier bone onto a later one would break it without a rebuild. Returns the bone's index
+	/// after the rebuild, which is what a UI holding a selection has to switch to.
+	///
+	/// A cycle is refused: a bone cannot parent to itself or to anything that already hangs off it.
+	/// </summary>
+	public int SetParent( int index, int newParent )
+	{
+		if ( index < 0 || index >= Bones.Count )
+			throw new ArgumentOutOfRangeException( nameof( index ) );
+
+		if ( newParent < -1 || newParent >= Bones.Count )
+			throw new ArgumentOutOfRangeException( nameof( newParent ) );
+
+		if ( newParent == index )
+			throw new ArgumentException( $"Bone '{Bones[index].Name}' cannot parent to itself." );
+
+		if ( Bones[index].Parent == newParent )
+			return index;
+
+		for ( var p = newParent; p >= 0; p = Bones[p].Parent )
+		{
+			if ( p == index )
+				throw new ArgumentException(
+					$"Bone '{Bones[index].Name}' cannot parent to '{Bones[newParent].Name}' — that bone already hangs off it." );
+		}
+
+		var count = Bones.Count;
+		var names = new string[count];
+		var heads = new Vec3[count];
+		var tails = new Vec3[count];
+		var ups = new Vec3[count];
+		var softs = new SoftBone[count];
+		var parents = new int[count];
+		var movedName = Bones[index].Name;
+
+		for ( var i = 0; i < count; i++ )
+		{
+			var world = WorldBind( i );
+			names[i] = Bones[i].Name;
+			heads[i] = world.Origin;
+			tails[i] = TailWorld( i );
+			ups[i] = world.Z;
+			softs[i] = Bones[i].Soft?.Clone();
+			parents[i] = Bones[i].Parent;
+		}
+
+		parents[index] = newParent;
+
+		var order = new List<int>( count );
+		var state = new byte[count];
+
+		void Visit( int i )
+		{
+			if ( state[i] == 2 )
+				return;
+
+			if ( state[i] == 1 )
+				throw new InvalidOperationException( "Cycle in the parent list." );
+
+			state[i] = 1;
+
+			if ( parents[i] >= 0 )
+				Visit( parents[i] );
+
+			state[i] = 2;
+			order.Add( i );
+		}
+
+		for ( var i = 0; i < count; i++ )
+			Visit( i );
+
+		Bones = new List<Bone>( count );
+
+		foreach ( var i in order )
+		{
+			var mappedParent = parents[i] < 0 ? -1 : IndexOf( names[parents[i]] );
+			AddBoneFromPoints( names[i], mappedParent, heads[i], tails[i], ups[i] );
+			Bones[Bones.Count - 1].Soft = softs[i];
+		}
+
+		return IndexOf( movedName );
+	}
+
+	/// <summary>
+	/// Mirror a bone and everything beneath it across the plane through the origin with the given
+	/// normal, appended as new bones under `newParent` (-1 for a new root, or an existing bone —
+	/// mirroring an arm should graft onto the spine bone the original arm hangs from, not become
+	/// its own root).
+	///
+	/// Reflects the WORLD head and tail of each bone and rebuilds it from those two points, the
+	/// same way AddBoneFromPoints always builds a bone. That sidesteps the usual mirrored-bone
+	/// handedness problem entirely: there is no roll stored anywhere in this format to come out
+	/// backwards, so reflecting the two points a bone is defined by is exactly right rather than a
+	/// shortcut that happens to work.
+	///
+	/// Naming swaps a trailing _L/_R, _l/_r, .L/.R (Blender's own convention); anything else gets
+	/// "_mirrored" appended. A collision with an existing name — mirroring twice, or a name that
+	/// already looks mirrored — gets a numeric suffix rather than throwing, since this is meant to
+	/// be safe to lean on while roughing out a rig.
+	///
+	/// Returns the index of the new mirrored root.
+	/// </summary>
+	public int MirrorSubtree( int root, Vec3 planeNormal, int newParent = -1 )
+	{
+		if ( root < 0 || root >= Bones.Count )
+			throw new ArgumentOutOfRangeException( nameof( root ) );
+
+		if ( newParent < -1 || newParent >= Bones.Count )
+			throw new ArgumentOutOfRangeException( nameof( newParent ) );
+
+		var n = planeNormal.Normal;
+
+		if ( n.LengthSquared < 0.5f )
+			throw new ArgumentException( "A mirror plane needs a normal", nameof( planeNormal ) );
+
+		Vec3 Reflect( Vec3 p ) => p - n * (2f * Vec3.Dot( p, n ));
+
+		var newRootIndex = -1;
+
+		void Walk( int sourceIndex, int mirroredParent )
+		{
+			var bone = Bones[sourceIndex];
+			var head = Reflect( HeadWorld( sourceIndex ) );
+			var tail = Reflect( TailWorld( sourceIndex ) );
+
+			var newIndex = AddBoneFromPoints( UniqueName( MirroredName( bone.Name ) ), mirroredParent, head, tail );
+
+			if ( sourceIndex == root )
+				newRootIndex = newIndex;
+
+			// Snapshotted before recursing: Children scans live off Bones, which is growing with
+			// every mirrored bone Walk adds, and the source subtree's children are exactly the set
+			// this reads once, up front.
+			var kids = new List<int>();
+			foreach ( var child in Children( sourceIndex ) )
+				kids.Add( child );
+
+			foreach ( var child in kids )
+				Walk( child, newIndex );
+		}
+
+		Walk( root, newParent );
+		return newRootIndex;
+	}
+
+	/// <summary>
+	/// Each bone's mirror partner, by name: <c>arm_upper_L</c> is <c>arm_upper_R</c>'s and back, and
+	/// the same with digits after the side letter (<c>finger_L1</c>). A bone whose partner is not in
+	/// the rig maps to itself, which is the right answer for a spine and a visible-enough wrong one
+	/// for a limb that was named by hand. <paramref name="pairs"/> is how many left/right pairs
+	/// were found.
+	/// </summary>
+	public int[] MirrorPartners( out int pairs )
+	{
+		var byName = new Dictionary<string, int>( StringComparer.OrdinalIgnoreCase );
+
+		for ( var i = 0; i < Bones.Count; i++ )
+			if ( !string.IsNullOrEmpty( Bones[i].Name ) )
+				byName[Bones[i].Name] = i;
+
+		var map = new int[Bones.Count];
+		var found = 0;
+
+		for ( var i = 0; i < Bones.Count; i++ )
+		{
+			map[i] = i;
+
+			var name = Bones[i].Name;
+
+			if ( string.IsNullOrEmpty( name ) )
+				continue;
+
+			if ( FlipSideSuffix( name ) is { } flipped && byName.TryGetValue( flipped, out var other ) )
+			{
+				map[i] = other;
+				found++;
+			}
+		}
+
+		pairs = found / 2;
+		return map;
+	}
+
+	/// <summary>`..._L` becomes `..._R` and back, including when digits follow the side letter.
+	/// Null when the name does not name a side.</summary>
+	public static string FlipSideSuffix( string name )
+	{
+		for ( var i = name.Length - 1; i >= 1; i-- )
+		{
+			if ( char.IsDigit( name[i] ) )
+				continue;
+
+			var c = name[i];
+
+			if ( (c != 'L' && c != 'R' && c != 'l' && c != 'r') || name[i - 1] != '_' )
+				return null;
+
+			var swapped = c switch { 'L' => 'R', 'R' => 'L', 'l' => 'r', _ => 'l' };
+			return name[..i] + swapped + name[(i + 1)..];
+		}
+
+		return null;
+	}
+
+	static string MirroredName( string name )
+	{
+		if ( name.EndsWith( "_L" ) ) return name[..^2] + "_R";
+		if ( name.EndsWith( "_R" ) ) return name[..^2] + "_L";
+		if ( name.EndsWith( "_l" ) ) return name[..^2] + "_r";
+		if ( name.EndsWith( "_r" ) ) return name[..^2] + "_l";
+		if ( name.EndsWith( ".L" ) ) return name[..^2] + ".R";
+		if ( name.EndsWith( ".R" ) ) return name[..^2] + ".L";
+		return name + "_mirrored";
+	}
+
+	/// <summary>
+	/// <paramref name="baseName"/> if no bone has it, otherwise the same with the lowest free
+	/// numeric suffix.
+	///
+	/// Public because a caller naming a bone after something else — a body, a feature — has the
+	/// same collision to solve and no way to solve it as cheaply from outside. AddBone throws on a
+	/// duplicate, which is right for a name somebody typed and wrong for one derived from a model
+	/// where two parts are perfectly entitled to share a name.
+	/// </summary>
+	public string UniqueName( string baseName )
+	{
+		if ( IndexOf( baseName ) < 0 )
+			return baseName;
+
+		var n = 1;
+		while ( IndexOf( $"{baseName}_{n}" ) >= 0 )
+			n++;
+
+		return $"{baseName}_{n}";
+	}
+
+	/// <summary>Rename a bone in place, with the same validation AddBone applies to a new one.</summary>
+	public void RenameBone( int index, string name )
+	{
+		if ( index < 0 || index >= Bones.Count )
+			throw new ArgumentOutOfRangeException( nameof( index ) );
+
+		if ( string.IsNullOrWhiteSpace( name ) )
+			throw new ArgumentException( "A bone needs a name — every consuming format keys on it" );
+
+		var existing = IndexOf( name );
+
+		if ( existing >= 0 && existing != index )
+			throw new ArgumentException( $"A bone called '{name}' already exists" );
+
+		Bones[index].Name = name;
+	}
+
+	/// <summary>
+	/// A single root bone at the origin. Every static model exported as a skinned format needs
+	/// one — a mesh with no bones at all is not something SMD can express, so "static" is really
+	/// "everything weighted to one root".
+	/// </summary>
+	public static Skeleton SingleRoot( string name = "root" )
+	{
+		var s = new Skeleton();
+		s.AddBone( name, -1, Xform.Identity );
+		return s;
+	}
+
+	public override string ToString() => $"Skeleton, {Bones.Count} bones";
+}

@@ -1,0 +1,1051 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
+using System.Linq;
+using System.Reflection;
+
+namespace Effigy;
+
+/// <summary>One solid in the studio. Onshape calls these parts; a Part Studio holds several.</summary>
+/// <summary>
+/// A picture stood in the viewport to model against. <see cref="View"/> is which way it faces:
+/// "front" stands in the XZ plane facing the Front view, "side" in the YZ plane facing Right,
+/// "top" lies flat facing Top. <see cref="Height"/> is its size in units (width follows the
+/// picture); <see cref="Offset"/> slides it in its own plane; <see cref="Depth"/> pushes it back
+/// away from the viewer, so it sits behind the model rather than through it.
+/// </summary>
+public sealed class ReferenceImage
+{
+	public string Path = "";
+	public string View = "front";
+	public float Height = 72f;
+	public Vec2 Offset;
+	public float Depth = 0f;
+	public float Opacity = 0.5f;
+	public bool Visible = true;
+
+	public ReferenceImage Clone() => new()
+	{
+		Path = Path, View = View, Height = Height, Offset = Offset, Depth = Depth, Opacity = Opacity, Visible = Visible,
+	};
+}
+
+public sealed class Body
+{
+	public string Id;
+	public string Name;
+	public PolyMesh Mesh;
+
+	/// <summary>Whether this body is drawn. Set from the feature that produced it — see
+	/// Feature.Visible for why this is not the same thing as suppression.</summary>
+	public bool Visible = true;
+
+	/// <summary>Id of the Feature that produced this body, recorded by the rebuild alongside
+	/// Visible. Bodies are re-made from scratch every rebuild and have no identity a UI can hold
+	/// onto, so a Parts list needs this to get from a row back to the thing that owns it.</summary>
+	public string FeatureId;
+
+	/// <summary>Made by a GarmentFeature. Later garments collide with it but are never cut from it,
+	/// and Fur with nothing picked grows on garments.</summary>
+	public bool IsGarment;
+	/// <summary>Sewn-on parts, not another cloth surface to decorate by default.</summary>
+	public bool IsGarmentDetail;
+
+	/// <summary>For a garment: which layer it is worn in, 0 Base (next to the skin) to 3 Outer.
+	/// -1 is a garment-like body that does not say (a trim): it is collided with, as before, but
+	/// adds nothing to the room a garment over it leaves. See GarmentFeature.Layer.</summary>
+	public int Layer = -1;
+
+	/// <summary>For a garment: how much room it takes up under a garment worn over it, in inches -
+	/// its own thickness and the clearance it sits off what is under it. See GarmentFit.Options.Inner.</summary>
+	public float LayerAllowance;
+
+	/// <summary>Here to be measured against, not to be shipped — the body a WearerFeature brought
+	/// in so a garment has something to be cut from and collide with. Everything reads it the way
+	/// it reads any other body; only export leaves it out. See WearerFeature.</summary>
+	public bool IsReference;
+
+	public Body( string id, string name, PolyMesh mesh )
+	{
+		Id = id;
+		Name = name;
+		Mesh = mesh;
+	}
+
+	public Body Clone() => new( Id, Name, Mesh.Clone() )
+		{ Visible = Visible, FeatureId = FeatureId, IsGarment = IsGarment, IsGarmentDetail = IsGarmentDetail, IsReference = IsReference, Layer = Layer, LayerAllowance = LayerAllowance };
+}
+
+// --- parameters -------------------------------------------------------------------------------
+
+/// <summary>
+/// Feature parameters describe themselves, so one generic panel can render any feature's dialog
+/// rather than each feature needing hand-written UI.
+///
+/// This is copied from Onshape deliberately. Every feature dialog there has the same shape, and
+/// that uniformity is most of why the tool feels coherent with a hundred features in it. Getting
+/// it for free is worth the small indirection here.
+///
+/// The parameter object IS the storage — the feature reads `_length.Value` — so there is no
+/// separate copy to keep in sync.
+/// </summary>
+public interface IParam
+{
+	string Label { get; }
+}
+
+public sealed class FloatParam : IParam
+{
+	public string Label { get; }
+	public float Value;
+	public float Min, Max;
+	public string Unit;
+
+	public FloatParam( string label, float value, float min = float.MinValue, float max = float.MaxValue, string unit = null )
+	{
+		Label = label;
+		Value = value;
+		Min = min;
+		Max = max;
+		Unit = unit;
+	}
+
+	/// <summary>
+	/// The expression this parameter was typed as, or null when the number is a literal.
+	///
+	/// A LITERAL STAYS A LITERAL. Typing <c>4</c> must not become a formula that re-evaluates;
+	/// typing <c>#thickness / 2</c> must, or changing the variable does not move the feature.
+	/// Rebuild evaluates this through the studio's variable table and writes the result into
+	/// <see cref="Value"/>. An empty or unparsable expression holds the last good value.
+	/// </summary>
+	public string Expr;
+
+	public float Clamped => Math.Clamp( Value, Min, Max );
+}
+
+public sealed class IntParam : IParam
+{
+	public string Label { get; }
+	public int Value;
+	public int Min, Max;
+
+	/// <summary>
+	/// Whether dragging this number through its range means anything.
+	///
+	/// A slider is for a MAGNITUDE — segment counts, subdivision levels, numbers where the values
+	/// either side of the one you have are the neighbouring answers. A material slot is an
+	/// IDENTIFIER that happens to be stored as a number: slot 7 is not "more" than slot 6, sweeping
+	/// through 40 of them on the way says nothing, and the drag bar was the widest control in the
+	/// Extrude dialog doing the least. Those get a field and no slider.
+	///
+	/// The bounds test in the dialog cannot tell the two apart — 0..63 looks exactly as draggable
+	/// as 0..6 — so the parameter says which it is.
+	/// </summary>
+	public bool Slider = true;
+
+	public IntParam( string label, int value, int min = int.MinValue, int max = int.MaxValue )
+	{
+		Label = label;
+		Value = value;
+		Min = min;
+		Max = max;
+	}
+
+	public int Clamped => Math.Clamp( Value, Min, Max );
+}
+
+public sealed class BoolParam : IParam
+{
+	public string Label { get; }
+	public bool Value;
+
+	public BoolParam( string label, bool value )
+	{
+		Label = label;
+		Value = value;
+	}
+}
+
+public sealed class Vec3Param : IParam
+{
+	public string Label { get; }
+	public Vec3 Value;
+
+	public Vec3Param( string label, Vec3 value )
+	{
+		Label = label;
+		Value = value;
+	}
+}
+
+public sealed class ChoiceParam : IParam
+{
+	public string Label { get; }
+	public string[] Options;
+	public int Index;
+
+	public ChoiceParam( string label, string[] options, int index = 0 )
+	{
+		Label = label;
+		Options = options;
+		Index = index;
+	}
+
+	public string Value => Options[Math.Clamp( Index, 0, Options.Length - 1 )];
+}
+
+/// <summary>
+/// A free-text parameter. Paths, names, anything a number or a dropdown cannot hold.
+///
+/// Written as the rest of the line, so a path with spaces survives. The dialog renders it as a
+/// field; Import is the feature that asked for it.
+/// </summary>
+public sealed class StringParam : IParam
+{
+	public string Label { get; }
+	public string Value;
+
+	public StringParam( string label, string value = "" )
+	{
+		Label = label;
+		Value = value ?? "";
+	}
+}
+
+/// <summary>Which bodies a feature acts on. Empty means every body, which is what Onshape's
+/// "all" behaves like and is the sane default for a studio holding one part.</summary>
+public sealed class BodySelectionParam : IParam
+{
+	public string Label { get; }
+	public List<string> BodyIds = new();
+
+	public BodySelectionParam( string label )
+	{
+		Label = label;
+	}
+
+	public bool Matches( Body b ) => BodyIds.Count == 0 || BodyIds.Contains( b.Id );
+}
+
+/// <summary>
+/// What geometry a tool will take from the selection you already made.
+///
+/// ONE DECLARATION BECAUSE THERE WERE THREE. "Which tools consume a face" was written down in three
+/// places that could not see each other - the type switch in <see cref="Feature.ApplyGeometrySelection"/>,
+/// the prose the editor paints under the viewport, and the per-dialog pick-mode flags - so the strip
+/// could be right while the hint was a lie, and a tool could be missing from a list it belonged on
+/// with nothing to catch it. Nothing DECLARED it, so nothing could ASK.
+///
+/// A FLAGS ENUM ON A VIRTUAL PROPERTY, deliberately, and for the same reason EffigyWindow.ToolKind
+/// is an enum rather than a Func: an int survives a hotload, a lambda or a System.Type held in
+/// static editor state comes back pointing into the dead assembly.
+///
+/// This says what a tool will USE, not what it needs to run. Fillet accepts a body because selecting
+/// a part and pressing Fillet fillets that part; it does not follow that a fillet with no selection
+/// is invalid.
+/// </summary>
+[Flags]
+public enum GeometryKind
+{
+	None = 0,
+	Face = 1,
+	Edge = 2,
+	Body = 4,
+	SketchRegion = 8,
+}
+
+// --- features ---------------------------------------------------------------------------------
+
+/// <summary>The state a feature reads and writes as it runs.</summary>
+public sealed class FeatureContext
+{
+	public List<Body> Bodies = new();
+
+	/// <summary>Sketches published by SketchFeature, keyed by that feature's id. Extrude and
+	/// Revolve look themselves up here rather than holding a reference, so editing the sketch
+	/// upstream and rebuilding feeds the new geometry through without any wiring to keep in sync.</summary>
+	public Dictionary<string, Sketch> Sketches = new();
+
+	/// <summary>Splines published by SplineFeature, keyed by that feature's id, and the id of the
+	/// one published last — what a curve deform or a sweep means by "the spline" when it names
+	/// none. Same arrangement as Sketches, for the same reason.</summary>
+	public Dictionary<string, Spline3> Splines = new();
+	public string LastSplineId;
+
+	/// <summary>
+	/// For a sketch drawn on a face, the id of the body that face belongs to. Keyed by sketch
+	/// feature id, same as Sketches.
+	///
+	/// This is what lets an extrude know it is growing OUT OF something rather than into thin air.
+	/// A Sketch is pure geometry and has no business knowing about bodies, and the consuming
+	/// feature never sees the SketchFeature itself — only what it published here — so the
+	/// attachment travels the same way the sketch does.
+	/// </summary>
+	public Dictionary<string, string> SketchHostBodies = new();
+
+	/// <summary>
+	/// Planes published by PlaneFeature, keyed by that feature's id. A sketch — or another plane —
+	/// looks itself up here rather than holding the SketchPlane object.
+	///
+	/// Beside Sketches and for exactly the same reason: move the plane, rebuild, and everything
+	/// drawn on it follows, with no second reference anywhere that could be left pointing at the old
+	/// one. It is also what makes a reference to a plane that is suppressed or below the rollback
+	/// bar fail honestly rather than quietly using last rebuild's answer — a feature that has not
+	/// run is not in here.
+	/// </summary>
+	public Dictionary<string, SketchPlane> Planes = new();
+
+	/// <summary>
+	/// For a plane built from a face, the id of the body that face belongs to — inherited along a
+	/// chain of planes. Keyed by plane feature id, same as Planes.
+	///
+	/// The plane half of SketchHostBodies above, and it feeds straight into it: a sketch on a plane
+	/// that came off a part is a sketch on that part as far as Extrude's Auto result is concerned,
+	/// which is what keeps "three bosses off one block" one part rather than four.
+	/// </summary>
+	public Dictionary<string, string> PlaneHostBodies = new();
+
+	/// <summary>
+	/// Resolve a variable name (without the <c>#</c>) during this rebuild. Null when the studio
+	/// has no table. Set once before the first feature runs, so a feature's value does not depend
+	/// on when it happened to be asked.
+	/// </summary>
+	public Func<string, float?> Resolve;
+
+	/// <summary>The studio's rig, read-only, for features that place things by bone - a garment
+	/// finds the torso and the arms from it. Null when the studio has none.</summary>
+	public Skeleton Rig;
+
+	/// <summary>Material slots a shell feature (fur) claimed earlier in this rebuild. A later
+	/// fabric must not bind the cloth weave onto them.</summary>
+	public readonly HashSet<int> ShellSlots = new();
+
+	/// <summary>
+	/// This rebuild is a PREVIEW: somebody is dragging a slider and wants to see the shape move, not
+	/// to see the finished article.
+	///
+	/// A feature that has an expensive final step and a cheap approximation of it should take the
+	/// cheap one here. A garment's drape is forty simulation steps and its solidify doubles the
+	/// mesh; neither changes the silhouette you are actually looking at while you drag Length, and
+	/// together they are the difference between a slider that moves and one that stutters.
+	///
+	/// NOT A QUALITY SETTING. Nothing is saved from a preview rebuild and nothing exports from one -
+	/// the full rebuild always follows, within a fraction of a second of the drag stopping. A
+	/// feature must therefore never let a preview change anything but geometry: no material slots
+	/// moving, no bodies appearing or disappearing, or the tree and the parts list would flicker
+	/// through states that never existed.
+	/// </summary>
+	public bool Preview;
+
+	int _nextId = 1;
+	string _featureId;
+	int _featureBodies;
+
+	/// <summary>
+	/// A body id belonging to the feature currently running: its feature id, plus a counter of the
+	/// bodies that feature has made this run.
+	///
+	/// IDS USED TO BE A SINGLE RUNNING COUNTER - body1, body2, body3 in creation order across the
+	/// whole rebuild - and that is the topological naming problem all over again, one level up from
+	/// the faces FaceRef was written to protect. Add a feature ANYWHERE upstream that produces a
+	/// body and every id after it shifts by one, so a sketch attached to "body1" silently lands on
+	/// whatever happens to be body1 now. Not an error, not a warning: a boss quietly reattaches
+	/// itself to an unrelated block.
+	///
+	/// Feature ids are assigned once at creation and never reused, so a body named after the
+	/// feature that made it cannot be renumbered by anything happening elsewhere in the tree.
+	/// </summary>
+	public string NewBodyId() =>
+		_featureId is null ? $"body{_nextId++}" : $"{_featureId}b{_featureBodies++}";
+
+	/// <summary>Called by Feature.Run before Execute, so bodies are named after their maker. The
+	/// per-feature counter restarts, which is what makes a feature that produces three bodies -
+	/// a pattern, say - name them the same three ids on every rebuild.</summary>
+	public void BeginFeature( string featureId )
+	{
+		_featureId = featureId;
+		_featureBodies = 0;
+	}
+
+	/// <summary>Vestigial: only the fallback numbering uses it, for a context nothing has called
+	/// BeginFeature on.</summary>
+	public void SeedIdCounter( int next ) => _nextId = Math.Max( _nextId, next );
+}
+
+/// <summary>
+/// One step in the history. Features run in order, each seeing what the ones before it produced.
+///
+/// THE ORDERED TREE IS THE WHOLE POINT. It is what separates a parametric modeller from a stack of
+/// bakes: roll back to before feature 3, change a number, roll forward and everything downstream
+/// rebuilds against the new value. Every design decision here bends toward keeping that true —
+/// features hold parameters rather than results, and nothing caches geometry inside a feature.
+/// </summary>
+public abstract class Feature
+{
+	public string Id = Guid.NewGuid().ToString( "N" )[..8];
+	public string Name;
+
+	/// <summary>
+	/// Suppressed features do not run at all — their effect is removed from the model.
+	/// </summary>
+	public bool Suppressed;
+
+	/// <summary>
+	/// Whether the geometry this feature produced is DRAWN. Deliberately not the same thing as
+	/// Suppressed, and conflating the two would be wrong: suppression takes a feature's effect out
+	/// of the model, hiding only stops you looking at it. A hidden body is still there, still
+	/// exported, and everything downstream still builds on it.
+	///
+	/// Solvespace keeps the same two flags separately on a group for the same reason.
+	/// </summary>
+	public bool Visible = true;
+
+	/// <summary>Set by Run when Execute threw. A failed feature does not stop the rebuild — the
+	/// tree carries on with the bodies as they were, which is what lets you fix an upstream
+	/// mistake without every later feature also reporting failure.</summary>
+	public string Error { get; internal set; }
+
+	/// <summary>
+	/// Something the feature worked around rather than failed on — it built, but not from
+	/// everything it was given.
+	///
+	/// Distinct from Error because the two need opposite handling. An error means there is no
+	/// geometry and the tree below is standing on nothing; a warning means there IS geometry and
+	/// you should look at it. Collapsing the second into the first is why one stray branch
+	/// anywhere in a sketch used to fail every extrude that read it.
+	/// </summary>
+	public string Warning { get; internal set; }
+
+	/// <summary>
+	/// Structured form of Error or Warning. Null when the feature ran clean.
+	///
+	/// Error and Warning stay as strings because PartStudio, RebuildReport, the feature tree and
+	/// several tests already read them. They are set alongside this: Error = Diagnostic.Problem
+	/// on a failure, Warning = Diagnostic.Problem on a warning.
+	/// </summary>
+	public FeatureDiagnostic Diagnostic { get; internal set; }
+
+	public abstract string TypeName { get; }
+	public abstract IReadOnlyList<IParam> Parameters { get; }
+
+	/// <summary>
+	/// The subset of <see cref="Parameters"/> that belongs behind the dialog's Advanced disclosure
+	/// — folded away by default, and still every bit as much a parameter as the ones above it.
+	///
+	/// It is a SUBSET RATHER THAN A SECOND LIST. Everything generic — the snapshot Cancel restores
+	/// from, the document writer, the diagnostics that point at a parameter by label — walks
+	/// Parameters, and a parameter that only appeared here would be invisible to all of it. So this
+	/// says nothing about what a feature HAS; it only says which of them are answered once and then
+	/// left alone. Extrude is the case that asked for it: taper, a second distance and a material
+	/// slot are three rows of nothing-to-do-here sitting under the distance that is the whole point
+	/// of the feature.
+	///
+	/// Held by REFERENCE, matched by reference. Naming the parameters by label would tie which rows
+	/// fold up to the words on screen.
+	/// </summary>
+	public virtual IReadOnlyList<IParam> AdvancedParameters => Array.Empty<IParam>();
+
+	/// <summary>
+	/// Whether this feature's cached result is out of date even though nobody called MarkDirty.
+	///
+	/// The convention everywhere else is that whoever edits a feature marks it dirty, and for a
+	/// dialog full of numbers that is one call in one place. It does not hold for a feature whose
+	/// state is a live object somebody else is mutating — SculptFeature's levels are changed by a
+	/// brush, hundreds of times a stroke, nowhere near the code that owns the studio. Relying on
+	/// that caller to remember is how "every parameter edit is a silent no-op" happened once
+	/// already, and it looked like three unrelated UI faults for a day.
+	///
+	/// So a feature that owns mutable state outside its parameters answers this instead, and the
+	/// rebuild asks. Must be cheap: it is called for every reusable feature on every rebuild.
+	/// </summary>
+	public virtual bool IsStale => false;
+
+	/// <summary>
+	/// Which kinds of picked geometry this feature will actually use.
+	///
+	/// The one place that knows. <see cref="ApplyGeometrySelection"/> is what DOES the consuming, and
+	/// the two are kept honest against each other by AcceptsTests rather than by hope: a feature that
+	/// stores FaceRefs and forgets to say Face here fails a test, not a user.
+	///
+	/// Must be cheap and must not touch the studio - the editor asks this while painting the toolbar.
+	/// </summary>
+	public virtual GeometryKind Accepts => GeometryKind.None;
+
+	/// <summary>
+	/// Seed this feature from geometry that was already picked, the way Onshape's tools consume
+	/// the current selection instead of making you pick again after the button.
+	///
+	/// Faces go to anything that stores FaceRefs — a sketch's plane, a datum plane, draft, hole,
+	/// face material, subdivide, move face, delete face, and EXTRUDE, which pulls the face itself. Body ids go onto every
+	/// BodySelectionParam. A face selection with no explicit
+	/// body list still names those faces' bodies, so clicking a face and then Fillet fillets that
+	/// part rather than every part.
+	///
+	/// <paramref name="bodies"/> is only needed for Shell, whose openings are still stored as
+	/// indices rather than FaceRefs and have to be resolved against the live mesh.
+	/// </summary>
+	public void ApplyGeometrySelection( IReadOnlyList<FaceRef> faces, IReadOnlyList<string> bodyIds,
+		IEnumerable<Body> bodies = null, IReadOnlyList<EdgeRef> edges = null,
+		string sketchFeatureId = null, IReadOnlyList<Vec2> regionSeeds = null )
+	{
+		faces ??= Array.Empty<FaceRef>();
+		bodyIds ??= Array.Empty<string>();
+		edges ??= Array.Empty<EdgeRef>();
+
+		if ( this is SketchFeature sketch && faces.Count > 0 )
+		{
+			sketch.Face = faces[0];
+			sketch.PlaneFeatureId = "";
+		}
+
+		// A datum plane takes a face the same way a sketch does, and the two other things it could
+		// have been built from are cleared: they are three answers to one question, and a stale one
+		// left set would win on the next rebuild (see PlaneFeature.ResolveBasePlane's order).
+		if ( this is PlaneFeature datum && faces.Count > 0 )
+		{
+			datum.Face = faces[0];
+			datum.BasePlaneId = "";
+		}
+
+		if ( this is SketchConsumingFeature consumer
+			&& !string.IsNullOrEmpty( sketchFeatureId )
+			&& sketchFeatureId != SketchConsumingFeature.AwaitingPick )
+		{
+			consumer.SketchFeatureId = sketchFeatureId;
+			consumer.RegionSeeds.Clear();
+
+			if ( regionSeeds is { Count: > 0 } )
+				consumer.RegionSeeds.AddRange( regionSeeds );
+		}
+
+		var pickedFaces = this switch
+		{
+			FaceMaterialFeature material => material.Faces,
+			DraftFeature draft => draft.Faces,
+			HoleFeature hole => hole.Faces,
+			SubdivideFeature subdivide => subdivide.Faces,
+			MoveFaceFeature move => move.Faces,
+			DeleteFaceFeature deleted => deleted.Faces,
+			ExtrudeFeature extrude => extrude.Faces,
+			FurFeature fur => fur.Faces,
+			_ => null,
+		};
+
+		if ( pickedFaces is not null && faces.Count > 0 )
+		{
+			pickedFaces.Clear();
+			pickedFaces.AddRange( faces );
+		}
+
+		// A FACE ANSWERS THE QUESTION AwaitingPick WAS ASKING. An Extrude created from the toolbar
+		// starts out refusing to help itself to the nearest sketch (see SketchConsumingFeature
+		// .AwaitingPick), and pointing it at a face is an answer just as much as pointing it at a
+		// sketch is. Leaving the flag set would have the feature build correctly from the face while
+		// every panel that reads it still said "pick a profile".
+		if ( this is SketchConsumingFeature awaiting && faces.Count > 0
+			&& pickedFaces is not null && awaiting.IsAwaitingPick )
+			awaiting.SketchFeatureId = "";
+
+		ApplyBlendEdges( faces, edges, bodies );
+
+		var ids = bodyIds.Count > 0
+			? bodyIds
+			: (IReadOnlyList<string>)faces.Select( f => f.BodyId )
+				.Concat( edges.Select( e => e.BodyId ) )
+				.Distinct()
+				.ToList();
+
+		if ( ids.Count > 0 )
+		{
+			foreach ( var param in Parameters )
+			{
+				if ( param is not BodySelectionParam selection )
+					continue;
+
+				selection.BodyIds.Clear();
+				selection.BodyIds.AddRange( ids );
+			}
+		}
+
+		if ( this is not ShellFeature shell || faces.Count == 0 || bodies is null )
+			return;
+
+		// OpenFaces is applied to every selected body, so it only means something when the
+		// openings all live on one part. Two parts and a mixed index list would punch the
+		// wrong faces — or fail — on the second body.
+		if ( ids.Count != 1 )
+			return;
+
+		shell.OpenFaces.Clear();
+
+		foreach ( var face in faces )
+		{
+			if ( !FacePlane.TryResolveFace( bodies, face, out _, out var index ) )
+				continue;
+
+			if ( !shell.OpenFaces.Contains( index ) )
+				shell.OpenFaces.Add( index );
+		}
+	}
+
+	/// <summary>
+	/// Fillet and Chamfer store edges, not faces. A picked edge list is copied across; a picked
+	/// FACE becomes that face's boundary, which is what "select the top, then Fillet" means in
+	/// Onshape.
+	/// </summary>
+	void ApplyBlendEdges( IReadOnlyList<FaceRef> faces, IReadOnlyList<EdgeRef> edges, IEnumerable<Body> bodies )
+	{
+		var dest = this switch
+		{
+			FilletFeature fillet => fillet.Edges,
+			ChamferFeature chamfer => chamfer.Edges,
+			_ => null,
+		};
+
+		if ( dest is null )
+			return;
+
+		dest.Clear();
+
+		if ( edges.Count > 0 )
+		{
+			dest.AddRange( edges );
+			return;
+		}
+
+		if ( faces.Count == 0 || bodies is null )
+			return;
+
+		var seen = new HashSet<(string BodyId, EdgeKey Key)>();
+
+		foreach ( var face in faces )
+		{
+			if ( !FacePlane.TryResolveFace( bodies, face, out var body, out var index ) )
+				continue;
+
+			foreach ( var edge in FacePlane.CaptureBoundary( body, index ) )
+			{
+				if ( !FacePlane.TryResolveEdge( bodies, edge, out _, out var key ) )
+					continue;
+
+				if ( !seen.Add( (body.Id, key) ) )
+					continue;
+
+				dest.Add( edge );
+			}
+		}
+	}
+
+	/// <summary>
+	/// Re-evaluate every <see cref="FloatParam"/> that still carries its typed expression, so a
+	/// variable change moves the feature without anyone reopening the dialog.
+	///
+	/// ALL PUBLIC FLOAT FIELDS, not only <see cref="Parameters"/>. PrimitiveFeature hides SizeX
+	/// when the shape is a cylinder, and Execute still reads it; skipping hidden ones would leave
+	/// a stale number the moment the dropdown flipped back.
+	///
+	/// NOTHING HERE IS SILENT. A variable that drives a parameter outside its range is clamped, and
+	/// an expression that no longer evaluates holds its last good number - both are the right thing
+	/// to build with, and both mean the part is not what the formula says. The first such parameter
+	/// comes back as a warning for <see cref="Run"/> to apply once Execute has had its say.
+	/// </summary>
+	internal FeatureDiagnostic EvaluateExpressions( Func<string, float?> resolve )
+	{
+		FeatureDiagnostic warning = null;
+
+		foreach ( var field in GetType().GetFields() )
+		{
+			if ( field.GetValue( this ) is not FloatParam param )
+				continue;
+
+			if ( string.IsNullOrWhiteSpace( param.Expr ) )
+				continue;
+
+			if ( !Expression.TryEvaluate( param.Expr, param.Unit, resolve, out var value ) )
+			{
+				warning ??= new FeatureDiagnostic( DiagnosticSeverity.Warning,
+					$"'{param.Label}' is using its last good value, {Expression.Format( param.Value )}",
+					$"'{param.Expr}' doesn't evaluate: {WhyNot( param.Expr, resolve )}.",
+					param.Label, null,
+					"Fix the expression in the dimension, or the variable it names" );
+				continue;
+			}
+
+			var clamped = Math.Clamp( value, param.Min, param.Max );
+
+			if ( clamped != value )
+			{
+				warning ??= new FeatureDiagnostic( DiagnosticSeverity.Warning,
+					$"'{param.Label}' was limited to {Expression.Format( clamped )}",
+					$"'{param.Expr}' comes to {Expression.Format( value )}, but '{param.Label}' {Bounds( param )}.",
+					param.Label, null,
+					"Change the variable so the result is in range" );
+			}
+
+			param.Value = clamped;
+		}
+
+		return warning;
+	}
+
+	private static string Bounds( FloatParam param )
+	{
+		if ( param.Min == float.MinValue )
+			return $"can be at most {Expression.Format( param.Max )}";
+
+		if ( param.Max == float.MaxValue )
+			return $"has to be at least {Expression.Format( param.Min )}";
+
+		return $"has to be between {Expression.Format( param.Min )} and {Expression.Format( param.Max )}";
+	}
+
+	/// <summary>The first #name in <paramref name="expr"/> that does not resolve, or "it isn't a
+	/// number or an expression" when every name does and the syntax is what is wrong.</summary>
+	private static string WhyNot( string expr, Func<string, float?> resolve )
+	{
+		foreach ( var name in VariableResolver.ReferencedNames( expr ) )
+		{
+			if ( resolve?.Invoke( name ) is null )
+				return $"'#{name}' isn't a variable that has a value (missing, renamed, or broken itself)";
+		}
+
+		return "it isn't a number or an expression that can be read";
+	}
+
+	/// <summary>The labels of every parameter whose expression names <c>#name</c>.</summary>
+	public List<string> ParametersReferencing( string name )
+	{
+		var labels = new List<string>();
+
+		foreach ( var field in GetType().GetFields() )
+		{
+			if ( field.GetValue( this ) is not FloatParam param || string.IsNullOrWhiteSpace( param.Expr ) )
+				continue;
+
+			if ( VariableResolver.ReferencedNames( param.Expr ).Exists( n => string.Equals( n, name, StringComparison.OrdinalIgnoreCase ) ) )
+				labels.Add( param.Label );
+		}
+
+		return labels;
+	}
+
+	/// <summary>
+	/// A variable was renamed: follow it. Rewrites <c>#oldName</c> to <c>#newName</c> in every
+	/// parameter expression and returns how many changed, so renaming a variable never quietly
+	/// freezes the dimensions that used it.
+	/// </summary>
+	public int RenameVariableReferences( string oldName, string newName )
+	{
+		var changed = 0;
+
+		foreach ( var field in GetType().GetFields() )
+		{
+			if ( field.GetValue( this ) is not FloatParam param || string.IsNullOrWhiteSpace( param.Expr ) )
+				continue;
+
+			var rewritten = VariableResolver.RenameReferences( param.Expr, oldName, newName );
+
+			if ( rewritten == param.Expr )
+				continue;
+
+			param.Expr = rewritten;
+			changed++;
+		}
+
+		return changed;
+	}
+
+	protected abstract void Execute( FeatureContext ctx );
+
+	internal void Run( FeatureContext ctx )
+	{
+		Error = null;
+		Warning = null;
+		Diagnostic = null;
+
+		// Bodies made from here on belong to this feature and are named after it. Set before the
+		// Suppressed check is pointless; set here so every path into Execute is covered.
+		ctx.BeginFeature( Id );
+
+		if ( Suppressed )
+			return;
+
+		try
+		{
+			var expressionWarning = EvaluateExpressions( ctx.Resolve );
+			Execute( ctx );
+
+			// After Execute, so an Error it raised (which throws past this) always wins. Over a
+			// warning of Execute's own the expression one wins: a dimension that is not what its
+			// formula says is the root cause of whatever else looks off.
+			if ( expressionWarning is not null && Error is null )
+				ApplyDiagnostic( expressionWarning );
+		}
+		catch ( FeatureException e )
+		{
+			ApplyDiagnostic( e.Diagnostic );
+		}
+		catch ( Exception e )
+		{
+			ApplyDiagnostic( new FeatureDiagnostic( DiagnosticSeverity.Error, e.Message ) );
+		}
+	}
+
+	/// <summary>Refuse to proceed. The three arguments are the three things the dialog shows.</summary>
+	[DoesNotReturn]
+	protected static void Fail( string problem, string cause, params string[] remedies ) =>
+		throw new FeatureException( new FeatureDiagnostic( DiagnosticSeverity.Error, problem, cause, remedies: remedies ) );
+
+	/// <summary>Refuse, and name the control the dialog should highlight.</summary>
+	[DoesNotReturn]
+	protected static void FailOn( string parameterLabel, string problem, string cause, params string[] remedies ) =>
+		throw new FeatureException( new FeatureDiagnostic( DiagnosticSeverity.Error, problem, cause, parameterLabel, remedies: remedies ) );
+
+	/// <summary>Refuse, highlight the control, and offer a button that writes <paramref name="suggested"/>
+	/// into it.</summary>
+	[DoesNotReturn]
+	protected static void FailOn( string parameterLabel, float suggested, string problem, string cause, params string[] remedies ) =>
+		throw new FeatureException( new FeatureDiagnostic( DiagnosticSeverity.Error, problem, cause, parameterLabel, suggested, remedies ) );
+
+	/// <summary>The feature built, but not from what was asked. Geometry stays; the dialog goes yellow.</summary>
+	protected void Warn( string problem, string cause, params string[] remedies ) =>
+		ApplyDiagnostic( new FeatureDiagnostic( DiagnosticSeverity.Warning, problem, cause, remedies: remedies ) );
+
+	/// <summary>Refuse, and offer <paramref name="fix"/> as a button: the missing prerequisite, done
+	/// for you. The first remedy should say the same thing in words.</summary>
+	[DoesNotReturn]
+	protected static void Fail( RemedyAction fix, string problem, string cause, params string[] remedies ) =>
+		throw new FeatureException( new FeatureDiagnostic( DiagnosticSeverity.Error, problem, cause, remedies: remedies ).With( fix ) );
+
+	/// <summary>Warn, and offer <paramref name="fix"/> as a button.</summary>
+	protected void Warn( RemedyAction fix, string problem, string cause, params string[] remedies ) =>
+		ApplyDiagnostic( new FeatureDiagnostic( DiagnosticSeverity.Warning, problem, cause, remedies: remedies ).With( fix ) );
+
+	/// <summary>
+	/// After a cut, put every piece the cut severed into the part list. Returns how many bodies
+	/// were added, so the caller can say so.
+	///
+	/// A boolean is allowed to sever a part and has no obligation to mention it — "one mesh" is a
+	/// fine answer to "subtract this". Whether that mesh is one SOLID is the part list's question,
+	/// and this is where it gets asked. See MeshSplit for why connectivity is by shared vertex and
+	/// why the order the pieces come back in is a promise rather than an implementation detail.
+	///
+	/// THE ORIGINAL BODY KEEPS ITS ID, and keeps the largest piece. Everything built on this part is
+	/// holding that id — a sketch drawn on one of its faces, a later feature's body selection — and
+	/// a cut must not invalidate them. The offcuts are new bodies named after the feature that made
+	/// them, which is the same rule every other body in the studio follows.
+	/// </summary>
+	protected int SeparatePieces( FeatureContext ctx, Body body )
+	{
+		if ( body?.Mesh is null || MeshSplit.PieceCount( body.Mesh ) < 2 )
+			return 0;
+
+		var pieces = MeshSplit.ConnectedPieces( body.Mesh );
+
+		body.Mesh = pieces[0];
+
+		// Straight after the body they came off, so the parts list reads in the order someone would
+		// expect rather than collecting offcuts at the bottom. IndexOf can legitimately miss - a
+		// feature is allowed to hand us a body it has not published - and appending is right then.
+		var at = ctx.Bodies.IndexOf( body );
+
+		for ( var i = 1; i < pieces.Count; i++ )
+		{
+			var piece = new Body( ctx.NewBodyId(), $"{body.Name} ({i + 1})", pieces[i] )
+			{
+				Visible = body.Visible,
+				FeatureId = Id,
+			};
+
+			if ( at < 0 )
+				ctx.Bodies.Add( piece );
+			else
+				ctx.Bodies.Insert( at + i, piece );
+		}
+
+		return pieces.Count - 1;
+	}
+
+	/// <summary>
+	/// The warning a severing cut earns. Never an error: the geometry is right, and the part list
+	/// having grown is something to look at rather than something to fix.
+	/// </summary>
+	protected void WarnSeparated( int added, string bodyName )
+	{
+		if ( added <= 0 )
+			return;
+
+		Warn(
+			added == 1
+				? $"This cut separated '{bodyName}' into two parts"
+				: $"This cut separated '{bodyName}' into {added + 1} parts",
+			$"The tool went all the way through, so what was one solid is now {added + 1} that touch nowhere. "
+				+ "The largest keeps the original part's name and id; the rest are new parts below it.",
+			"Reduce the depth if the cut was meant to be a pocket",
+			"Nothing to fix if separating the part was the intent" );
+	}
+
+	/// <summary>Names in a sentence: "'A'", "'A' and 'B'", "'A', 'B' and 'C'".</summary>
+	protected static string Listed( IReadOnlyList<string> names )
+	{
+		if ( names is null || names.Count == 0 )
+			return "nothing";
+
+		var quoted = new List<string>( names.Count );
+
+		foreach ( var name in names )
+			quoted.Add( $"'{name}'" );
+
+		if ( quoted.Count == 1 )
+			return quoted[0];
+
+		return string.Join( ", ", quoted.GetRange( 0, quoted.Count - 1 ) ) + " and " + quoted[^1];
+	}
+
+	protected void ApplyDiagnostic( FeatureDiagnostic diagnostic )
+	{
+		if ( diagnostic is null )
+			return;
+
+		Diagnostic = diagnostic;
+
+		if ( diagnostic.Severity == DiagnosticSeverity.Error )
+			Error = diagnostic.Problem;
+		else
+			Warning = diagnostic.Problem;
+	}
+
+	/// <summary>The bodies this feature acts on, or a refusal if there are none. A feature that
+	/// did nothing is never a success.</summary>
+	protected List<Body> RequireBodies( FeatureContext ctx, BodySelectionParam selection )
+	{
+		var bodies = new List<Body>();
+
+		foreach ( var b in ctx.Bodies )
+		{
+			if ( selection.Matches( b ) )
+				bodies.Add( b );
+		}
+
+		if ( bodies.Count > 0 )
+			return bodies;
+
+		if ( ctx.Bodies.Count == 0 )
+		{
+			Fail(
+				"This studio has no bodies yet",
+				"There is nothing to act on — the feature list has not produced a solid.",
+				"Add a Primitive, or extrude a sketch first" );
+		}
+
+		Fail(
+			"No matching body is selected",
+			$"The studio has {ctx.Bodies.Count} body/bodies but none match this feature's selection.",
+			"Clear the body selection to act on every body",
+			"Pick a body that is still in the studio" );
+
+		return bodies;
+	}
+
+	/// <summary>
+	/// Run a blend on each selected body, using picked edges when any were given.
+	///
+	/// <paramref name="edges"/> empty means the blend's own angle threshold, which is how Fillet
+	/// and Chamfer behaved before edges could be picked. Non-empty means only those edges, and a
+	/// body that none of them land on is left alone rather than blended by the threshold — mixing
+	/// the two would fillet a part you never pointed at.
+	/// </summary>
+	protected List<(Body Body, BlendReport Report)> BlendBodies( FeatureContext ctx, List<EdgeRef> edges,
+		Func<PolyMesh, HashSet<EdgeKey>, BlendReport> blend )
+	{
+		var reports = new List<(Body Body, BlendReport Report)>();
+		var picked = edges is { Count: > 0 };
+
+		foreach ( var body in RequireBodies( ctx, BodiesOf() ) )
+		{
+			if ( !picked )
+			{
+				reports.Add( (body, blend( body.Mesh, null )) );
+				continue;
+			}
+
+			var keys = FacePlane.ResolveEdges( body, edges );
+
+			if ( keys.Count == 0 )
+				continue;
+
+			reports.Add( (body, blend( body.Mesh, keys )) );
+		}
+
+		if ( picked && reports.Count == 0 )
+		{
+			Fail(
+				"None of the picked edges are on the selected bodies",
+				"The edges were stored as geometry so they could survive a rebuild, and none of them could be re-found.",
+				"Pick the edges again",
+				"Clear the edge selection to blend every sharp edge" );
+		}
+
+		return reports;
+	}
+
+	/// <summary>The BodySelectionParam on this feature, or a fresh empty one (meaning every body)
+	/// if the feature does not have one. Fillet and Chamfer both do.</summary>
+	BodySelectionParam BodiesOf()
+	{
+		foreach ( var param in Parameters )
+		{
+			if ( param is BodySelectionParam selection )
+				return selection;
+		}
+
+		return new BodySelectionParam( "Bodies" );
+	}
+
+	/// <summary>Assign blended meshes, or refuse, only after every body has been tried — so a
+	/// failure leaves the studio as it was, which is Feature.Run's contract.</summary>
+	protected void CommitBlend( List<(Body Body, BlendReport Report)> reports, string sizeLabel )
+	{
+		foreach ( var ( _, report ) in reports )
+		{
+			if ( report.Failure is null )
+				continue;
+
+			report.Failure.ParameterLabel ??= sizeLabel;
+
+			if ( report.SuggestedSize > 0f )
+				report.Failure.SuggestedValue ??= FloorThousandths( report.SuggestedSize );
+
+			throw new FeatureException( report.Failure );
+		}
+
+		foreach ( var ( body, report ) in reports )
+			body.Mesh = report.Mesh;
+
+		var warnings = new List<FeatureDiagnostic>();
+
+		foreach ( var ( _, report ) in reports )
+			warnings.AddRange( report.Warnings );
+
+		if ( warnings.Count == 0 )
+			return;
+
+		if ( warnings.Count == 1 )
+		{
+			ApplyDiagnostic( warnings[0] );
+			return;
+		}
+
+		Warn(
+			warnings[0].Problem,
+			string.Join( " ", warnings.Select( w => w.Cause ).Where( c => !string.IsNullOrEmpty( c ) ) ),
+			warnings.SelectMany( w => w.Remedies ).Distinct().ToArray() );
+		Diagnostic?.Actions.AddRange( warnings.SelectMany( w => w.Actions ) );
+	}
+
+	/// <summary>A number the user can type that is never larger than the true fit, so suggesting
+	/// it cannot immediately fail again to rounding.</summary>
+	protected static float FloorThousandths( float value ) => MathF.Floor( value * 1000f ) / 1000f;
+
+	public override string ToString() => $"{TypeName} '{Name ?? Id}'{(Suppressed ? " (suppressed)" : "")}";
+}

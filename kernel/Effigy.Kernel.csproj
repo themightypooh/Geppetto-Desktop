@@ -21,7 +21,7 @@
          ModuleVersionId, so ~/.cache/effigy/*.cache stays warm across app builds.
   -->
   <ItemGroup>
-    <Compile Include="../../geppetto/Effigy/**/*.cs" />
+    <Compile Include="Effigy/**/*.cs" />
   </ItemGroup>
 
 </Project>
