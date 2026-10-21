@@ -1,0 +1,25 @@
+# Build outputs
+bin/
+obj/
+artifacts/
+
+# Python
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+
+# Separate upstream clone with personal chat data; launched by tools/chat
+/SillyTavern/
+
+# AI run scratch
+.ai-jobs/
+.live/
+
+# Editor / OS
+.vs/
+.vscode/
+.idea/
+*.swp
+.DS_Store

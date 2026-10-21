@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="600" viewBox="0 0 400 600">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0%" stop-color="#0b1a1c"/>
+      <stop offset="45%" stop-color="#123030"/>
+      <stop offset="100%" stop-color="#060f10"/>
+    </linearGradient>
+    <radialGradient id="lampglow" cx="26%" cy="30%" r="62%">
+      <stop offset="0%" stop-color="#ffc887" stop-opacity="0.70"/>
+      <stop offset="40%" stop-color="#b06a2c" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="steam" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#e8f4f2" stop-opacity="0.16"/>
+      <stop offset="70%" stop-color="#d8ebe8" stop-opacity="0.05"/>
+      <stop offset="100%" stop-color="#d8ebe8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="vignette" cx="50%" cy="45%" r="70%">
+      <stop offset="50%" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.80"/>
+    </radialGradient>
+    <linearGradient id="fade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#060f10" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#04090a" stop-opacity="0.92"/>
+    </linearGradient>
+  </defs>
+  <rect width="400" height="600" fill="url(#bg)"/>
+  <g stroke="#1d3d3c" stroke-width="1.2" opacity="0.5">
+    <line x1="0" y1="0" x2="0" y2="600"/>
+    <line x1="50" y1="0" x2="50" y2="600"/>
+    <line x1="100" y1="0" x2="100" y2="600"/>
+    <line x1="150" y1="0" x2="150" y2="600"/>
+    <line x1="200" y1="0" x2="200" y2="600"/>
+    <line x1="250" y1="0" x2="250" y2="600"/>
+    <line x1="300" y1="0" x2="300" y2="600"/>
+    <line x1="350" y1="0" x2="350" y2="600"/>
+    <line x1="400" y1="0" x2="400" y2="600"/>
+    <line x1="0" y1="0" x2="400" y2="0"/>
+    <line x1="0" y1="50" x2="400" y2="50"/>
+    <line x1="0" y1="100" x2="400" y2="100"/>
+    <line x1="0" y1="150" x2="400" y2="150"/>
+    <line x1="0" y1="200" x2="400" y2="200"/>
+    <line x1="0" y1="250" x2="400" y2="250"/>
+    <line x1="0" y1="300" x2="400" y2="300"/>
+    <line x1="0" y1="350" x2="400" y2="350"/>
+    <line x1="0" y1="400" x2="400" y2="400"/>
+    <line x1="0" y1="450" x2="400" y2="450"/>
+    <line x1="0" y1="500" x2="400" y2="500"/>
+    <line x1="0" y1="550" x2="400" y2="550"/>
+    <line x1="0" y1="600" x2="400" y2="600"/>
+  </g>
+  <rect width="400" height="600" fill="url(#lampglow)"/>
+  <line x1="104" y1="0" x2="104" y2="150" stroke="#241a10" stroke-width="2.5"/>
+  <path d="M78 150 L130 150 L120 182 L88 182 Z" fill="#2e2013"/>
+  <path d="M84 154 L124 154 L117 178 L91 178 Z" fill="#ffcf8b"/>
+  <circle cx="104" cy="165" r="8" fill="#fff6e0"/>
+  <circle cx="104" cy="165" r="34" fill="#ffc078" opacity="0.28"/>
+  <path d="M84 182 L124 182 L114 196 L94 196 Z" fill="#241a10"/>
+  <g>
+    <ellipse cx="320" cy="366" rx="71" ry="57" fill="url(#steam)"/>
+    <ellipse cx="118" cy="404" rx="81" ry="61" fill="url(#steam)"/>
+    <ellipse cx="158" cy="270" rx="164" ry="66" fill="url(#steam)"/>
+    <ellipse cx="194" cy="449" rx="157" ry="51" fill="url(#steam)"/>
+    <ellipse cx="309" cy="284" rx="147" ry="41" fill="url(#steam)"/>
+    <ellipse cx="148" cy="439" rx="138" ry="49" fill="url(#steam)"/>
+    <ellipse cx="172" cy="557" rx="121" ry="55" fill="url(#steam)"/>
+    <ellipse cx="357" cy="245" rx="114" ry="42" fill="url(#steam)"/>
+    <ellipse cx="351" cy="560" rx="103" ry="83" fill="url(#steam)"/>
+    <ellipse cx="157" cy="577" rx="150" ry="73" fill="url(#steam)"/>
+    <ellipse cx="299" cy="280" rx="94" ry="51" fill="url(#steam)"/>
+    <ellipse cx="372" cy="244" rx="163" ry="49" fill="url(#steam)"/>
+    <ellipse cx="252" cy="283" rx="138" ry="77" fill="url(#steam)"/>
+    <ellipse cx="60" cy="313" rx="76" ry="75" fill="url(#steam)"/>
+    <ellipse cx="71" cy="516" rx="166" ry="85" fill="url(#steam)"/>
+    <ellipse cx="166" cy="510" rx="108" ry="31" fill="url(#steam)"/>
+    <ellipse cx="253" cy="447" rx="163" ry="62" fill="url(#steam)"/>
+    <ellipse cx="244" cy="320" rx="129" ry="44" fill="url(#steam)"/>
+  </g>
+  <rect x="0" y="330" width="400" height="270" fill="url(#fade)"/>
+  <text x="200" y="452" font-family="DejaVu Serif, Georgia, serif" font-size="46" letter-spacing="3" fill="#f3e3cc" text-anchor="middle">SABLE</text>
+  <text x="200" y="500" font-family="DejaVu Serif, Georgia, serif" font-size="46" letter-spacing="3" fill="#f3e3cc" text-anchor="middle">HARROW</text>
+  <line x1="150" y1="524" x2="250" y2="524" stroke="#c98a45" stroke-width="1.6" opacity="0.8"/>
+  <text x="200" y="554" font-family="DejaVu Serif, Georgia, serif" font-size="17" letter-spacing="4" fill="#d7b48c" text-anchor="middle" opacity="0.9">THE STEAMHOUSE</text>
+  <text x="200" y="580" font-family="DejaVu Serif, Georgia, serif" font-size="13" letter-spacing="2" fill="#8fa9a6" text-anchor="middle" opacity="0.75">BELLWETHER REACH - FAR BANK</text>
+  <rect width="400" height="600" fill="url(#vignette)"/>
+</svg>

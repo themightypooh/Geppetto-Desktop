@@ -1,0 +1,64 @@
+=====================================================
+GEMINI - LANE C - read, then write specs. No source edits.
+=====================================================
+
+PROJECT
+  "Geppetto" - Effigy (a parametric modeller) and Marionette (an
+  animation editor) - is being turned into a native Linux desktop app with
+  no game engine and no editor dependency. You are the analysis lane. Your
+  job is to read a lot of code and produce specs another agent can
+  implement from without re-reading the source.
+
+READ THESE FIRST:
+  /home/poo/games/projects/geppetto-desktop/HANDOFF.md
+  /home/poo/games/projects/geppetto-desktop/TASKS.md
+
+WHAT YOU MAY WRITE
+  New files under /home/poo/games/projects/geppetto-desktop/specs/
+  That is all. Do not edit source. Do not commit. Do not write anywhere
+  under /home/poo/games/projects/geppetto - read it as much as you like.
+
+IF YOU CANNOT READ LOCAL FILES: say so and ask Joshua to attach the
+folders listed below. Do not guess from file names.
+
+TASK 1 - the ImGui port spec. This is the biggest win.
+  Read /home/poo/games/projects/geppetto/Editor/RigControlEditor/
+  34 files, 18,387 lines. It is the Marionette UI, currently built on
+  s&box's Widget / Editor.Label / DockWindow, and it all has to be
+  replaced because the desktop app has no s&box.
+  Write /home/poo/games/projects/geppetto-desktop/specs/imgui-port.md :
+    - every panel that exists today, what it does, and what state it owns
+    - what the timeline and the curve editor actually need from the kernel
+    - what is s&box chrome that should be dropped rather than ported
+    - a recommended ImGui panel layout, and a build order for it
+  Be concrete. Name types and methods with file:line. This spec is
+  supposed to save whoever implements it from reading 18k lines.
+
+TASK 2 - what a GPU viewport needs per frame.
+  Read /home/poo/games/projects/geppetto/Effigy/Rig/ - the engine-free rig
+  kernel: SimRig, ChainIk, ChainSpring, SoftBone, RigLimit, RigSoftCollision,
+  TwoBoneIk, ClipBake, SkinWeights, Skeleton, RigAnimFile.
+  Write specs/viewport-frame.md :
+    - to draw one animated frame, which kernel calls happen, in order,
+      what each returns, and which are cheap vs expensive
+    - how bone matrices get from a clip to a skinned vertex
+    - where a per-frame allocation would sneak in
+  This is the animation version of the render loop, and it has to stay
+  allocation-free.
+
+TASK 3 - where the rebuild spends its time. Independent cross-check.
+  The cold build of /home/poo/games/projects/podracer/tools/effigy/engine.effigy
+  takes 12.73 seconds for 325 features. Read
+  /home/poo/games/projects/geppetto/Effigy/Features/ and the Feature*.cs
+  files at the top of Effigy/.
+  Write specs/rebuild-profile.md with your static read of the expensive
+  operations - subdivision levels, booleans, cutters, LOD, tessellation -
+  and where you would expect the time to go, in what proportion.
+  Another agent is measuring this empirically. You are the second opinion,
+  so say what you expect and rank it.
+
+RULES
+  - Specs only, in specs/. No source edits anywhere.
+  - Name real types and methods. Cite file:line. No hand-waving.
+  - Flag anything you could not determine instead of filling the gap.
+  - Do not write anything in Joshua's voice or send any message for him.

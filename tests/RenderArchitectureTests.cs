@@ -1,0 +1,118 @@
+using System.Numerics;
+using Effigy;
+using Marionette.Desktop;
+using Silk.NET.OpenGL;
+
+/// <summary>R0: one pass order, render-target lifecycle.</summary>
+internal static class RenderArchitectureTests
+{
+	public static void Register( TestRegistry registry, TestSettings settings )
+	{
+		static void Check( bool ok, string reason ) { if ( !ok ) throw new Exception( reason ); }
+
+		registry.Add( "render-architecture", "pass order is declared once and validated", () =>
+		{
+			Check( RenderPassOrder.Validate( null! ) is not null, "null order accepted" );
+			Check( RenderPassOrder.Validate( [RenderPassKind.Shadow, RenderPassKind.DepthPrePass, (RenderPassKind)99, RenderPassKind.Lit, RenderPassKind.PostChain] ) is not null, "unknown extra pass accepted" );
+			Check( RenderPassOrder.Validate( [RenderPassKind.Shadow, RenderPassKind.Shadow, RenderPassKind.Lit, RenderPassKind.PostChain] ) is not null, "duplicate pass accepted" );
+			Check( RenderPassOrder.Validate( RenderPassOrder.Default ) is null, "default order invalid" );
+			Check( RenderPassOrder.Default.SequenceEqual( [RenderPassKind.Shadow, RenderPassKind.DepthPrePass, RenderPassKind.Lit, RenderPassKind.PostChain] ), "unexpected default order" );
+			Check( RenderPassOrder.Validate( [RenderPassKind.Lit, RenderPassKind.Shadow, RenderPassKind.DepthPrePass, RenderPassKind.PostChain] ) is not null, "lit-before-shadow accepted" );
+			Check( RenderPassOrder.Validate( [RenderPassKind.Shadow, RenderPassKind.DepthPrePass, RenderPassKind.PostChain, RenderPassKind.Lit] ) is not null, "post-before-lit accepted" );
+			Check( RenderPassOrder.Validate( [RenderPassKind.Shadow, RenderPassKind.Lit, RenderPassKind.PostChain] ) is not null, "missing pass accepted" );
+		} );
+
+		registry.Add( "render-architecture", "hardware EGL: render targets resize and dispose cleanly; Draw runs the declared order", () =>
+		{
+			using var context = new HeadlessGlContext();
+			var gl = context.Gl;
+			int before = RenderTarget.LiveObjects;
+			using ( var target = new RenderTarget( gl, InternalFormat.Rgba16f, depth: true ) )
+			{
+				Check( target.Ensure( 64, 32 ) && !target.Ensure( 64, 32 ), "Ensure did not cache the size" );
+				Check( target.Ensure( 128, 64 ) && target.Width == 128, "resize did not recreate" );
+				Check( RenderTarget.LiveObjects == before + 3, $"live objects {RenderTarget.LiveObjects - before}, expected 3" );
+			}
+			Check( RenderTarget.LiveObjects == before, "dispose leaked render-target objects" );
+
+			using ( var depth = new RenderTarget( gl, null, depth: true ) )
+			{
+				depth.Ensure( 0, -1 );
+				Check( depth.Width == 1 && depth.Height == 1 && depth.ColorTexture == 0 && depth.DepthTexture != 0, "depth-only target invalid" );
+				depth.Dispose(); depth.Dispose();
+				Check( depth.Framebuffer == 0 && depth.Width == 0 && RenderTarget.LiveObjects == before, "repeated dispose leaked objects" );
+			}
+			using ( var invalid = new RenderTarget( gl, (InternalFormat)0, depth: false ) )
+			{
+				bool rejected = false;
+				try { invalid.Ensure( 4, 4 ); } catch ( InvalidOperationException ) { rejected = true; }
+				Check( rejected && invalid.Framebuffer == 0 && invalid.ColorTexture == 0 && RenderTarget.LiveObjects == before, "failed allocation leaked objects" );
+				// Drivers report an invalid internal format as an invalid enum or value.
+				var error = gl.GetError();
+				Check( error is GLEnum.InvalidEnum or GLEnum.InvalidValue, $"invalid-format control returned {error}" );
+				Check( gl.GetError() == GLEnum.NoError, "unexpected additional GL error" );
+			}
+
+			using ( var renderer = new SceneRenderer( gl ) )
+			{
+				var mesh = new PolyMesh();
+				int a = mesh.AddVertex( new Vec3( -1, -1, 0 ) ), b = mesh.AddVertex( new Vec3( 1, -1, 0 ) ), c = mesh.AddVertex( new Vec3( 0, 1, 0 ) );
+				mesh.AddFace( [a, b, c] );
+				using var viewport = ViewportMesh.FromPolyMesh( mesh, _ => "m" );
+				viewport.Upload( gl );
+				var camera = new OrbitCamera { Target = Vector3.Zero, Distance = 4, Near = .1f, Far = 40 };
+				using var capture = new CaptureTarget( gl, 64, 64 );
+				renderer.Draw( viewport, null, camera, 64, 64, 1, capture.Handle );
+				int afterFirst = RenderTarget.LiveObjects;
+				using var capture2 = new CaptureTarget( gl, 96, 48 );
+				renderer.Draw( viewport, null, camera, 96, 48, 1, capture2.Handle );
+				renderer.Draw( viewport, null, camera, 64, 64, 1, capture.Handle );
+				Check( RenderTarget.LiveObjects == afterFirst, $"resizing leaked {RenderTarget.LiveObjects - afterFirst} objects" );
+				Check( renderer.LastFramePasses.SequenceEqual( RenderPassOrder.Default ), "Draw did not run the declared order" );
+				Check( gl.GetError() == GLEnum.NoError, "GL error" );
+				// R10: steady-state frames allocate nothing; reload cycles leak no GL objects.
+				for ( int i = 0; i < 3; i++ ) renderer.Draw( viewport, null, camera, 64, 64, 1, capture.Handle );
+				Check( renderer.Stats.FrameAllocatedBytes == 0, $"steady frame allocated {renderer.Stats.FrameAllocatedBytes} B" );
+				long textures = MeshResourceBudget.LiveGpuTextures;
+				for ( int i = 0; i < 3; i++ )
+				{
+					using var reloaded = ViewportMesh.FromPolyMesh( mesh, _ => "m" );
+					reloaded.Upload( gl );
+					renderer.Draw( reloaded, null, camera, 64, 64, 1, capture.Handle );
+					reloaded.ReleaseGpu( gl );
+				}
+				Check( MeshResourceBudget.LiveGpuTextures == textures && RenderTarget.LiveObjects == afterFirst, "reload leaked GL objects" );
+
+				// R9: live geometry goes through the shared lit shader: an emissive red cube at the
+				// target covers the centre pixel, hiding the layer restores it; particles all draw.
+				var cube = new PolyMesh();
+				for ( int i = 0; i < 8; i++ ) cube.AddVertex( new Vec3( ( i & 1 ) == 0 ? -.5f : .5f, ( i & 2 ) == 0 ? -.5f : .5f, ( i & 4 ) == 0 ? -.5f : .5f ) );
+				foreach ( var f in new[] { new[] { 0, 2, 3, 1 }, new[] { 4, 5, 7, 6 }, new[] { 0, 1, 5, 4 }, new[] { 2, 6, 7, 3 }, new[] { 0, 4, 6, 2 }, new[] { 1, 3, 7, 5 } } ) cube.AddFace( f );
+				var cubeLayer = new GeometrySetLayer( GeometrySet.FromMesh( cube ) ) { Material = new LiveMaterial( new Vector3( .9f, .02f, .02f ), Emission: new Vector3( 2f, 0, 0 ) ) };
+				var particles = new ParticleSystem( new ParticleSystemSettings { Gravity = Vector3.Zero, Capacity = 64 } );
+				particles.AddEmitter( new ParticleEmitter { Position = new Vector3( 0, 0, 1.2f ), LifetimeMin = 10, LifetimeMax = 10, SizeMin = .05f, SizeMax = .05f, Bursts = { new ParticleBurst( 0, 50 ) } } );
+				particles.Step();
+				var particleLayer = new ParticleLayer( particles ) { Material = new LiveMaterial( Vector3.One, Alpha: .5f, Blend: true ) { Sprite = true } };
+				renderer.Live.Layers.Add( cubeLayer ); renderer.Live.Layers.Add( particleLayer );
+				byte[] Centre()
+				{
+					renderer.Draw( viewport, null, camera, 64, 64, 1, capture.Handle );
+					var px = new byte[3]; gl.Finish();
+					gl.ReadPixels<byte>( 32, 32, 1, 1, PixelFormat.Rgb, PixelType.UnsignedByte, px.AsSpan() );
+					return px;
+				}
+				var lit = Centre();
+				Check( lit[0] > 120 && lit[0] > lit[1] + 60 && lit[0] > lit[2] + 60, $"live cube not drawn at centre: {lit[0]},{lit[1]},{lit[2]}" );
+				Check( particleLayer.LastDrawn == 50, $"drew {particleLayer.LastDrawn} of 50 particles" );
+				for ( int i = 0; i < 3; i++ ) Centre();
+				Check( renderer.Stats.FrameAllocatedBytes == 0, $"live frame allocated {renderer.Stats.FrameAllocatedBytes} B" );
+				cubeLayer.Visible = false;
+				var hidden = Centre();
+				Check( hidden[0] < hidden[1] + 30, $"hidden live cube still at centre: {hidden[0]},{hidden[1]},{hidden[2]}" );
+				Check( gl.GetError() == GLEnum.NoError, "GL error with live geometry" );
+				viewport.ReleaseGpu( gl );
+			}
+			Check( RenderTarget.LiveObjects == before, "SceneRenderer dispose leaked render targets" );
+		} );
+	}
+}

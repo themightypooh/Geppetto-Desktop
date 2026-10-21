@@ -1,0 +1,83 @@
+=====================================================
+CURSOR - LANE B - the app
+=====================================================
+
+You are joining a project that is already in motion. Read the brief
+before you write any code.
+
+PROJECT
+  "Geppetto" is being turned into a native Linux desktop app: a
+  parametric 3D modeller (Effigy) and an animation editor (Marionette).
+  No game engine. No editor framework. GPU-first, OpenGL 4.6 through
+  Silk.NET. C# / .NET 8.
+
+READ THESE FIRST, in this order:
+  1. /home/poo/games/projects/geppetto-desktop/HANDOFF.md
+  2. /home/poo/games/projects/geppetto-desktop/TASKS.md
+
+OPEN THIS FOLDER AS YOUR WORKSPACE:
+  /home/poo/games/projects
+(the PARENT folder, not geppetto-desktop) because the app compiles the
+kernel from ../geppetto/Effigy/**/*.cs and you will want to read it.
+
+YOU OWN LANE B: /home/poo/games/projects/geppetto-desktop/ . Nothing else.
+  - Do NOT edit /home/poo/games/projects/geppetto/Effigy/ . Lane A owns it
+    and is adding a mesh cache there right now.
+  - Do NOT edit Code/ or Editor/. Never touch Editor/Effigy/ - that is a
+    generated mirror and hand edits get overwritten.
+  - Do NOT commit, stash, branch or clean the geppetto repo. Joshua has
+    uncommitted work in there. `git status` to look, nothing more.
+  - If you need a change in the kernel, append it to the REQUESTS section
+    at the bottom of TASKS.md. Do not make the edit yourself.
+
+WHAT ALREADY EXISTS
+  geppetto-desktop builds and opens a real GL 4.6 core context on an
+  RTX 5060 Ti and draws 120 frames, exit 0. Marionette.Desktop.csproj
+  compiles the kernel from source via Compile Include.
+
+KNOWN GOTCHA, already paid for:
+  Silk.NET's SDL backend silently hands back a 3.3 compatibility context
+  unless you ask for 4.6 core explicitly:
+      API = new GraphicsAPI( ContextAPI.OpenGL, ContextProfile.Core,
+                             ContextFlags.ForwardCompatible,
+                             new APIVersion( 4, 6 ) )
+  Without it you get GLSL 3.30 and no modern shader features.
+
+YOUR TASK, STEP 1: get real geometry on screen, orbiting.
+  Model: /home/poo/games/projects/podracer/tools/effigy/engine.effigy
+         419 bodies, 87,252 triangles, 9 named materials:
+         UV_engine_paint, UV_engine_metal, UV_engine_chrome,
+         UV_engine_soot, UV_engine_rubber, UV_engine_brass,
+         UV_engine_ceramic, UV_engine_hot, UV_rein_cable
+
+  - Load it through the kernel: StudioDocument.ReadFile(path) then
+    studio.Rebuild(). See Effigy.Tests/EffigyCli.cs and its Load() helper
+    for the exact pattern.
+  - Group the geometry by material and upload ONE buffer, drawn as about
+    9 draw calls, not 419.
+  - Orbit camera on the mouse. Flat or simple lambert shading is fine for
+    now.
+  - Do not block the window on the load.
+
+WATCH OUT: the cold document rebuild currently costs 12.73 seconds. Lane A
+is building a cache for it. Until that lands, load once at startup behind a
+progress indicator and keep a way to time it. Do NOT try to optimise Rebuild
+yourself - that is lane A's job and simultaneous edits to the kernel will
+break both of you.
+
+ACCEPTANCE FOR STEP 1: the pod engine is on screen and you can orbit it.
+Only then move to step 2 - materials, lighting, tonemap - and compare
+against the CPU reference render at /tmp/opencode/pod.png.
+
+WORKING RULES
+  - Measure, do not estimate. If you claim something is faster or smoother,
+    show the command and the number.
+  - "Butter smooth" is the acceptance bar for the whole app: no per-frame
+    allocations, no GPU readback, no GC churn in the render loop.
+  - Build and run it yourself. Do not hand Joshua untested code.
+      cd /home/poo/games/projects/geppetto-desktop
+      dotnet build -c Release
+      dotnet bin/Release/net8.0/marionette-desktop.dll --frames 120
+
+REPORT BACK: what you changed, the exact command to see it, and the number
+that proves it works.

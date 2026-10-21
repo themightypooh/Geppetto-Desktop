@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <RootNamespace>Marionette.Desktop</RootNamespace>
+    <AssemblyName>marionette-desktop</AssemblyName>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <!--
+    The kernel is compiled from source in kernel/Effigy.Kernel.csproj (zero NuGet / engine dependencies)
+    so that editing Marionette.Desktop does not change typeof(PartStudio).Assembly's MVID and
+    invalidate ~/.cache/effigy/*.cache on every build.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="kernel/Effigy.Kernel.csproj" />
+    <!--
+      tools/** holds standalone tools with their own project files (for example the
+      local chat client). They must not be compiled into the desktop executable.
+    -->
+    <Compile Remove="kernel/**;tests/**;tools/**;obj/**;bin/**" />
+    <EmbeddedResource Remove="kernel/**;tools/**" />
+    <None Remove="kernel/**;tools/**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Silk.NET.Input.Sdl" Version="2.23.0" />
+    <PackageReference Include="Silk.NET.Windowing" Version="2.23.0" />
+    <PackageReference Include="Silk.NET.Windowing.Sdl" Version="2.23.0" />
+    <PackageReference Include="Silk.NET.OpenGL" Version="2.23.0" />
+    <PackageReference Include="Silk.NET.Input" Version="2.23.0" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,164 @@
+using System;
+using System.Globalization;
+
+namespace Marionette.Desktop;
+
+public sealed class DesktopOptions
+{
+	public string Model = "/home/poo/games/projects/deep_sentance/Assets/models/player/player_suit.fbx";
+	public string Clip, Screenshot;
+	public int Frames, Width = 1600, Height = 900;
+	public bool Stats, Animate, ListBones, Iso, NoVsync, Help, Headless, Turntable, Wireframe, Serve;
+	public float Exposure = 1f;
+	public ViewSettings View = new();
+	public AntiAliasingMode AntiAliasing;
+	public string Hdri;
+	public string WatchRun;
+	public float ShadowRadius = 2f;
+	public bool GroundShadow = true;
+	/// <summary>R8: global fog optical depth across the model radius; 0 = off.</summary>
+	public float Fog;
+	/// <summary>R9: comma list of live demo sources (particles, hair, cloth, instances).</summary>
+	public string Live;
+	/// <summary>R9: comma list of live modifiers evaluated before upload (see <see cref="ModifierStack.Kinds"/>).</summary>
+	public string Modifiers;
+	/// <summary>R7: motion-blur shutter fraction (0 = off); ShotFrame: which headless frame to screenshot.</summary>
+	public float MotionBlur;
+	public int ShotFrame;
+	public bool FogFallback;
+	public float? Time, Yaw, Pitch;
+	public const string Usage = "Geppetto: [--model file.effigy|file.fbx] [--clip file.riganim] [--animate] [--time seconds] [--frames N] [--size WxH] [--screenshot file.png] [--stats] [--no-vsync] [--list-bones] [--iso] [--headless] [--serve] [--exposure factor] [--yaw deg] [--pitch deg] [--turntable] [--wireframe] [--fog opticalDepth] [--fog-fallback] [--live particles,hair,cloth,instances] [--modifiers subsurf,decimate,retopo,smooth,displace,shrinkwrap,morph] [--motion-blur shutter] [--shot-frame N] [--aa none|taa|msaa4] [--hdri world.hdr] [--shadow-radius texels] [--no-ground-shadow] [--view-transform agx|standard] [--look none|punchy] [--view-exposure stops] [--gamma factor] [--white-balance kelvin] [--tint value] [--serve --watch-run NEW_OR_EXISTING_RUN_DIRECTORY]";
+
+	public static DesktopOptions Parse( string[] args )
+	{
+		var result = new DesktopOptions();
+		for ( int i = 0; i < args.Length; i++ )
+		{
+			string flag = args[i];
+			string Value()
+			{
+				if ( i + 1 >= args.Length || args[i + 1].StartsWith( "--", StringComparison.Ordinal ) )
+					throw new ArgumentException( $"{flag} needs a value." );
+				return args[++i];
+			}
+			float FiniteRange( float min, float max )
+			{
+				if ( !float.TryParse( Value(), NumberStyles.Float, CultureInfo.InvariantCulture, out float value )
+					|| !float.IsFinite( value ) || value < min || value > max )
+					throw new ArgumentException( $"{flag} must be finite and in [{min},{max}]." );
+				return value;
+			}
+			int Positive( string value ) => int.TryParse( value, out int n ) && n > 0 ? n
+				: throw new ArgumentException( $"{flag} requires positive integers." );
+			switch ( flag )
+			{
+				case "--view-transform":
+					result.View = result.View with { Transform = Value().ToLowerInvariant() switch
+					{
+						"agx" => ViewTransform.AgX,
+						"standard" => ViewTransform.Standard,
+						_ => throw new ArgumentException( "--view-transform must be agx or standard." )
+					} };
+					break;
+				case "--look":
+					result.View = result.View with { Look = Value().ToLowerInvariant() switch
+					{
+						"none" => ViewLook.None,
+						"punchy" => ViewLook.Punchy,
+						_ => throw new ArgumentException( "--look must be none or punchy." )
+					} };
+					break;
+				case "--view-exposure": result.View = result.View with { Exposure = FiniteRange( -16f, 16f ) }; break;
+				case "--gamma": result.View = result.View with { Gamma = FiniteRange( .1f, 5f ) }; break;
+				case "--white-balance": result.View = result.View with { WhiteBalanceTemperature = FiniteRange( WhiteBalance.MinKelvin, WhiteBalance.MaxKelvin ) }; break;
+				case "--tint": result.View = result.View with { WhiteBalanceTint = FiniteRange( -1f, 1f ) }; break;
+				case "--watch-run": result.WatchRun = System.IO.Path.GetFullPath( Value() ); break;
+				case "--model": result.Model = Value(); break;
+				case "--aa":
+					result.AntiAliasing = Value().ToLowerInvariant() switch
+					{
+						"none" => AntiAliasingMode.None,
+						"taa" => AntiAliasingMode.Temporal,
+						"msaa4" => AntiAliasingMode.Msaa4,
+						_ => throw new ArgumentException("--aa must be none, taa, or msaa4.")
+					};
+					break;
+				case "--hdri": result.Hdri = System.IO.Path.GetFullPath(Value()); break;
+				case "--shadow-radius":
+					if (!float.TryParse(Value(), NumberStyles.Float, CultureInfo.InvariantCulture, out float shadowRadius)
+						|| !float.IsFinite(shadowRadius) || shadowRadius < 0 || shadowRadius > 64)
+						throw new ArgumentException("--shadow-radius must be finite shadow texels in [0,64].");
+					result.ShadowRadius = shadowRadius;
+					break;
+				case "--clip": result.Clip = Value(); break;
+				case "--screenshot": result.Screenshot = Value(); break;
+				case "--frames": result.Frames = Positive( Value() ); break;
+				case "--size":
+					var size = Value().Split( 'x' );
+					if ( size.Length != 2 ) throw new ArgumentException( "--size must be WxH." );
+					result.Width = Positive( size[0] ); result.Height = Positive( size[1] );
+					if ( result.Width > 8192 || result.Height > 8192 ) throw new ArgumentException( "--size is limited to 8192 per side." );
+					break;
+				case "--time":
+					if ( !float.TryParse( Value(), NumberStyles.Float, CultureInfo.InvariantCulture, out float time ) || !float.IsFinite( time ) || time < 0 )
+						throw new ArgumentException( "--time requires finite, nonnegative seconds." );
+					result.Time = time;
+					break;
+				case "--stats": result.Stats = true; break;
+				case "--headless": result.Headless = true; break;
+				case "--serve": result.Serve = true; break;
+				case "--fog":
+					if ( !float.TryParse( Value(), NumberStyles.Float, CultureInfo.InvariantCulture, out float fog ) || !float.IsFinite( fog ) || fog < 0 || fog > 64 )
+						throw new ArgumentException( "--fog must be an optical depth in [0,64]." );
+					result.Fog = fog;
+					break;
+				case "--fog-fallback": result.FogFallback = true; break;
+				case "--live":
+					result.Live = Value();
+					foreach ( var kind in result.Live.Split( ',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries ) )
+						if ( Array.IndexOf( LiveFixtures.Kinds, kind.ToLowerInvariant() ) < 0 ) throw new ArgumentException( $"--live: unknown kind '{kind}'." );
+					break;
+				case "--modifiers":
+					result.Modifiers = Value();
+					foreach ( var kind in result.Modifiers.Split( ',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries ) )
+						if ( Array.IndexOf( ModifierStack.Kinds, kind.ToLowerInvariant() ) < 0 ) throw new ArgumentException( $"--modifiers: unknown kind '{kind}'." );
+					break;
+				case "--motion-blur":
+					if ( !float.TryParse( Value(), NumberStyles.Float, CultureInfo.InvariantCulture, out float shutter ) || !float.IsFinite( shutter ) || shutter < 0 || shutter > 1 )
+						throw new ArgumentException( "--motion-blur must be a shutter fraction in [0,1]." );
+					result.MotionBlur = shutter;
+					break;
+				case "--shot-frame":
+					if ( !int.TryParse( Value(), out int shot ) || shot < 0 ) throw new ArgumentException( "--shot-frame must be a frame index >= 0." );
+					result.ShotFrame = shot;
+					break;
+				case "--exposure":
+					if ( !float.TryParse( Value(), NumberStyles.Float, CultureInfo.InvariantCulture, out float exposure ) || !float.IsFinite( exposure ) || exposure <= 0 || exposure > 16 )
+						throw new ArgumentException( "--exposure must be a finite factor in (0,16]." );
+					result.Exposure = exposure;
+					break;
+				case "--yaw":
+					if ( !float.TryParse( Value(), NumberStyles.Float, CultureInfo.InvariantCulture, out float yaw ) || !float.IsFinite( yaw ) )
+						throw new ArgumentException( "--yaw requires a finite float." );
+					result.Yaw = yaw;
+					break;
+				case "--pitch":
+					if ( !float.TryParse( Value(), NumberStyles.Float, CultureInfo.InvariantCulture, out float pitch ) || !float.IsFinite( pitch ) )
+						throw new ArgumentException( "--pitch requires a finite float." );
+					result.Pitch = pitch;
+					break;
+				case "--animate": result.Animate = true; break;
+				case "--turntable": result.Turntable = true; break;
+				case "--no-ground-shadow": result.GroundShadow = false; break;
+				case "--wireframe": result.Wireframe = true; break;
+				case "--list-bones": result.ListBones = true; break;
+				case "--iso": result.Iso = true; break;
+				case "--no-vsync": result.NoVsync = true; break;
+				case "--help": result.Help = true; break;
+				default: throw new ArgumentException( $"Unknown option '{flag}'. {Usage}" );
+			}
+		}
+		if ( result.WatchRun is not null && !result.Serve ) throw new ArgumentException( "--watch-run requires --serve." );
+		return result;
+	}
+}

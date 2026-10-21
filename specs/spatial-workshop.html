@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><title>Geppetto Desktop — Spatial Workshop (zero chrome)</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:#0c0d12;color:#d6d8e0;font-family:"Inter","Helvetica Neue",sans-serif;overflow:hidden;cursor:crosshair}
+canvas{display:block;width:100%;height:100%}
+.whisper{position:fixed;top:16px;left:50%;transform:translateX(-50%);font:11px/1.4 monospace;color:rgba(255,255,255,.35);pointer-events:none;text-align:center}
+</style></head><body>
+<canvas id="c"></canvas><div class="whisper">ZERO CHROME · orbit drag · wheel zoom · click the objects floating in the room · 1-4 modes</div>
+<script>
+const c=document.getElementById('c'),ctx=c.getContext('2d');
+let W,H;function resize(){W=innerWidth;H=innerHeight;c.width=W*devicePixelRatio;c.height=H*devicePixelRatio;ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0)}addEventListener('resize',resize);resize();
+
+const modes=[
+ {id:'build',name:'BUILD',accent:'#6fa8ff'},
+ {id:'sculpt',name:'SCULPT',accent:'#ff9a6a'},
+ {id:'rig',name:'RIG',accent:'#6affd6'},
+ {id:'marionette',name:'MARIONETTE',accent:'#d6a8ff'}
+];
+let mi=0,yaw=-0.55,pitch=0.3,zoom=1,time=0;
+let camX=0,camY=0,camZ=0;
+const keys={};
+
+// spatial tool objects floating around the model (in 3D)
+// each has position, size, label, mode it belongs to, and an action
+const tools=[
+ {name:'HULL',mode:'build',pos:[-170,60,40],col:'#6fa8ff',kind:'orb'},
+ {name:'LOD',mode:'build',pos:[-130,90,20],col:'#6fa8ff',kind:'orb'},
+ {name:'POLY',mode:'build',pos:[-90,110,0],col:'#ff9a6a',kind:'orb'},
+ {name:'PAINT',mode:'sculpt',pos:[170,60,40],col:'#ff9a6a',kind:'orb'},
+ {name:'BRUSH',mode:'sculpt',pos:[130,90,20],col:'#ff9a6a',kind:'orb'},
+ {name:'RIG',mode:'rig',pos:[0,150,60],col:'#6affd6',kind:'orb'},
+ {name:'IK',mode:'rig',pos:[-40,170,40],col:'#6affd6',kind:'orb'},
+ {name:'PLAY',mode:'marionette',pos:[0,-150,60],col:'#d6a8ff',kind:'orb'},
+ {name:'KEY',mode:'marionette',pos:[40,-170,40],col:'#d6a8ff',kind:'orb'},
+];
+
+// body index as a "wall" of cards on the left (spatial, not a panel)
+let bodyIdx=0;
+const bodies=['Spinous 4 arch','Lumbar 5 body','Rib 7 L','Humerus R','Femur L','Hose elbow L','Rotor bolt R1','Ankle cheek R','Tilt motor','Ab piston rod R'];
+let filter='',filtering=false;
+
+// timeline as a track on the floor
+let playhead=0.35,playing=true;
+
+let hits=[];function addHit(s,c,h,o,d){hits.push({shape:s,cursor:c,hint:h,onClick:o,onDrag:d})}
+
+addEventListener('keydown',e=>{
+ keys[e.code]=true;
+ if(e.key>='1'&&e.key<='4')mi=+e.key-1;
+ if(e.code==='Space')playing=!playing;
+ if(e.code==='KeyF'){} // no fly in this prototype
+ if(e.code==='KeyR'){yaw=-.55;pitch=.3;zoom=1}
+ if(filtering){
+   if(e.code==='Escape'){filter='';filtering=false}
+   else if(e.code==='Backspace')filter=filter.slice(0,-1);
+   else if(/^Key[A-Z]$/.test(e.code)||e.code==='Space'){const ch=e.code==='Space'?' ':e.code.slice(3).toLowerCase();filter+=ch}
+ }
+});
+addEventListener('keyup',e=>{keys[e.code]=false});
+function onWheel(e){e.preventDefault();zoom=Math.max(.4,Math.min(3,zoom*(e.deltaY<0?1.1:.9)))}
+addEventListener('wheel',onWheel,{passive:false});
+
+let drag=false,lx=0,ly=0,activeDrag=null;
+addEventListener('mousedown',e=>{
+ const mx=e.clientX,my=e.clientY;lx=mx;ly=my;
+ for(let i=hits.length-1;i>=0;i--){
+  const h=hits[i],s=h.shape;let hit=false;
+  if(s.type==='circle'){const dx=mx-s.x,dy=my-s.y;hit=dx*dx+dy*dy<=s.r*s.r}
+  else if(s.type==='rect'){hit=mx>=s.x&&mx<=s.x+s.w&&my>=s.y&&my<=s.y+s.h}
+  if(hit){if(h.onClick)h.onClick();if(h.onDrag){activeDrag=h.onDrag;return}return}
+ }
+ drag=true;
+});
+addEventListener('mouseup',()=>{drag=false;activeDrag=null});
+addEventListener('mousemove',e=>{
+ const mx=e.clientX,my=e.clientY;
+ if(activeDrag){activeDrag(mx,my);lx=mx;ly=my;return}
+ if(drag){yaw+=(mx-lx)*.006;pitch=Math.max(-1.2,Math.min(1.2,pitch+(my-ly)*.006));lx=mx;ly=my;return}
+});
+addEventListener('contextmenu',e=>e.preventDefault());
+
+function project(x,y,z){
+ const rx=x,ry=y,rz=z;
+ const cY=Math.cos(yaw),sY=Math.sin(yaw),cP=Math.cos(pitch),sP=Math.sin(pitch);
+ const x1=rx*cY-ry*sY,y1=rx*sY+ry*cY,y2=y1*cP-rz*sP,z2=y1*sP+rz*cP;
+ const dist=Math.max(60,560/zoom+y2*.4);const fov=560/dist;
+ return{x:W*.5+x1*.0022*W*fov,y:H*.48-z2*.0022*W*fov,depth:y2,fov}
+}
+
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath()}
+
+function draw(){
+ time+=.016;hits=[];
+ const st=modes[mi];
+ // background: deep clean room
+ const bg=ctx.createRadialGradient(W*.5,H*.5,80,W*.5,H*.5,Math.max(W,H)*.7);
+ bg.addColorStop(0,'#161820');bg.addColorStop(1,'#08090d');ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
+
+ // floor grid (subtle)
+ ctx.strokeStyle='rgba(255,255,255,.03)';ctx.lineWidth=1;
+ for(let i=-10;i<=10;i++){
+  const a=project(i*60,0,-300),b=project(i*60,0,300);ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
+  const c2=project(-300,0,i*60),d=project(300,0,i*60);ctx.beginPath();ctx.moveTo(c2.x,c2.y);ctx.lineTo(d.x,d.y);ctx.stroke();
+ }
+
+ // model (floating in center)
+ const rings=[{x:-80,r:22},{x:-45,r:28},{x:0,r:26},{x:45,r:20},{x:80,r:14}];
+ rings.forEach((rg,ri)=>{
+  const pts=[];for(let s=0;s<14;s++){const a=s/14*Math.PI*2;pts.push(project(rg.x,Math.cos(a)*rg.r,Math.sin(a)*rg.r))}
+  ctx.beginPath();pts.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.closePath();
+  ctx.fillStyle=ri%2?'#2a2f3a':'#1f2430';ctx.fill();
+  ctx.strokeStyle='rgba(255,255,255,.1)';ctx.lineWidth=1;ctx.stroke();
+ });
+
+ // tool orbs floating in 3D (only show current mode + universal)
+ tools.forEach(t=>{
+  if(t.mode!==st.id) return;
+  const p=project(t.pos[0],t.pos[1],t.pos[2]);
+  const scale=Math.max(.6,1.2-p.depth/400);
+  const r=18*scale;
+  ctx.beginPath();ctx.arc(p.x,p.y,r,0,Math.PI*2);
+  const g=ctx.createRadialGradient(p.x-r*.3,p.y-r*.3,1,p.x,p.y,r);
+  g.addColorStop(0,'#fff');g.addColorStop(.3,t.col);g.addColorStop(1,'#0a0a0f');
+  ctx.fillStyle=g;ctx.fill();
+  ctx.strokeStyle='rgba(255,255,255,.25)';ctx.lineWidth=1;ctx.stroke();
+  ctx.fillStyle=t.col;ctx.font='bold 9px sans-serif';ctx.textAlign='center';ctx.textBaseline='top';ctx.fillText(t.name,p.x,p.y+r+4);
+  addHit({type:'circle',x:p.x,y:p.y,r:r+6},'pointer',t.name,()=>{});
+ });
+
+ // mode indicator: small text in 3D-ish (top center, but minimal)
+ ctx.fillStyle=st.accent;ctx.font='bold 13px sans-serif';ctx.textAlign='center';ctx.textBaseline='top';
+ ctx.fillText(st.id.toUpperCase(),W/2,20);
+ ctx.fillStyle='rgba(255,255,255,.3)';ctx.font='10px sans-serif';
+ ctx.fillText('1 BUILD · 2 SCULPT · 3 RIG · 4 MARIONETTE',W/2,40);
+
+ // body index as a "wall" of cards on the left side in 3D
+ const wallX=-260, wallZ=0;
+ const filt=filter.toLowerCase();
+ const visible=bodies.filter(b=>!filt||b.toLowerCase().includes(filt));
+ const cardW=120,cardH=28,cardGap=6;
+ visible.forEach((b,i)=>{
+  if(i>9) return;
+  const p=project(wallX, 120 - i*(cardH+cardGap), wallZ);
+  const scale=Math.max(.7,1.1-p.depth/500);
+  const w=cardW*scale,h=cardH*scale;
+  ctx.fillStyle='rgba(255,255,255,.06)';rr(p.x-w/2,p.y-h/2,w,h,4);ctx.fill();
+  ctx.strokeStyle='rgba(255,255,255,.12)';ctx.lineWidth=1;rr(p.x-w/2,p.y-h/2,w,h,4);ctx.stroke();
+  ctx.fillStyle=i===bodyIdx?st.accent:'#a0a3b0';ctx.font='bold '+(9*scale)+'px sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillText(b,p.x-w/2+6,p.y);
+  addHit({type:'rect',x:p.x-w/2,y:p.y-h/2,w,h},'pointer',b,()=>{bodyIdx=i});
+ });
+
+ // filter input (only when filtering)
+ if(filtering || filter){
+  const fx=W*.5-120,fy=H-60;
+  ctx.fillStyle='rgba(255,255,255,.06)';rr(fx,fy,240,32,6);ctx.fill();
+  ctx.strokeStyle=st.accent;ctx.lineWidth=1;rr(fx,fy,240,32,6);ctx.stroke();
+  ctx.fillStyle=st.accent;ctx.font='11px sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillText('/'+filter+'_',fx+10,fy+16);
+ }
+ // click area to start filtering
+ addHit({type:'rect',x:W*.5-120,y:H-60,w:240,h:32},'text','Click to filter bodies',()=>{filtering=true});
+
+ // timeline track on the floor
+ const trackY=200, trackLen=320;
+ const trackStart=project(-trackLen/2,0,trackY), trackEnd=project(trackLen/2,0,trackY);
+ ctx.strokeStyle='rgba(255,255,255,.15)';ctx.lineWidth=3;ctx.beginPath();
+ ctx.moveTo(trackStart.x,trackStart.y);ctx.lineTo(trackEnd.x,trackEnd.y);ctx.stroke();
+ // ticks
+ for(let i=0;i<=8;i++){
+  const u=i/8;const p=project(-trackLen/2+u*trackLen,0,trackY);
+  ctx.strokeStyle='rgba(255,255,255,.2)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(p.x,p.y-6);ctx.lineTo(p.x,p.y+6);ctx.stroke();
+ }
+ // playhead
+ const phX=-trackLen/2+playhead*trackLen;
+ const ph=project(phX,0,trackY);
+ ctx.strokeStyle=st.accent;ctx.lineWidth=2.5;ctx.beginPath();ctx.moveTo(ph.x,ph.y-14);ctx.lineTo(ph.x,ph.y+14);ctx.stroke();
+ ctx.beginPath();ctx.arc(ph.x,ph.y-18,5,0,Math.PI*2);ctx.fillStyle=st.accent;ctx.fill();
+ addHit({type:'circle',x:ph.x,y:ph.y,r:12},'ew-resize','Scrub timeline',null,(mx,my)=>{playhead=Math.max(0,Math.min(1,(mx-(W*.5-trackLen/2*.0022*W*1))/(trackLen*.0022*W*1)))});
+ // play/pause button (floating near track)
+ const pp=project(0,0,trackY+60);
+ ctx.beginPath();ctx.arc(pp.x,pp.y,14,0,Math.PI*2);ctx.fillStyle=playing?st.accent:'#3a3f4d';ctx.fill();
+ ctx.strokeStyle='rgba(255,255,255,.2)';ctx.lineWidth=1;ctx.stroke();
+ ctx.fillStyle=playing?'#0a0a0f':st.accent;ctx.font='bold 11px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(playing?'⏸':'▶',pp.x,pp.y);
+ addHit({type:'circle',x:pp.x,y:pp.y,r:16},'pointer',playing?'Pause':'Play',()=>{playing=!playing});
+
+ // whisper hint bottom
+ ctx.fillStyle='rgba(255,255,255,.25)';ctx.font='9px monospace';ctx.textAlign='center';ctx.textBaseline='bottom';
+ ctx.fillText('no panels · no toolbars · no lists · everything is in the room',W/2,H-12);
+
+ requestAnimationFrame(draw);
+}
+draw();
+</script></body></html>

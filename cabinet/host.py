@@ -1,0 +1,962 @@
+#!/usr/bin/env python3
+"""Geppetto tool-chest host: one frameless, transparent, normal window on the real desktop.
+
+The 3D viewport is rendered headless by `marionette-desktop --serve` (ServeMode.cs) and streamed
+here through a shared-memory file; mouse input goes back to it as commands on its stdin. Around it
+sits a baked steel tool chest (cabinet.qml) with three drawers that slide out onto the desktop:
+Research (left), Outliner (right) and Timeline (bottom). Only the chest, the lid and the drawers
+take the mouse: the rest of the window is masked out, so it is see-through *and* click-through.
+
+  python3 host.py [MODEL]    start (or, if already running, bring it to the front / open MODEL)
+  python3 host.py snap PATH  ask the running chest to save a picture of itself to PATH
+  python3 host.py open|shut NAME   slide a drawer (research, tools, timeline)
+  python3 host.py clip PATH  play a .riganim (on the model it was made for)
+  python3 host.py draw [PATH|ID]  bring the drawing tool up, or open one of its drawings
+  python3 host.py cmd LINE   send a command to the viewport (see ServeMode.cs)
+  python3 host.py quit       close the running chest
+"""
+import json
+import mmap
+import os
+import re
+import sys
+import time
+import threading
+
+from live_runs import read_state, preview_path, activity, request_cancel, send_command, next_pace, control_state
+from drawing_tools import (drawings as drawing_gallery, program as drawing_program,
+                           resolve as drawing_resolve, socket_key as drawing_socket_key,
+                           DRAWINGS as DRAWING_DIR)
+import chat as chatlib
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+PROJECT = os.path.dirname(HERE)
+BIN = os.path.join(PROJECT, "bin", "Release", "net8.0")
+EXE = os.path.join(BIN, "marionette-desktop")
+SOCK = "geppetto-cabinet"
+DRAWER_ALIASES = {"outliner": "tools"}      # the right drawer is the tools drawer now
+PROJECTS = os.path.expanduser("~/games/projects")
+RUNS = os.path.expanduser("~/.local/share/geppetto/research")
+DEFAULT_MODEL = os.path.join(PROJECTS, "deep_sentance/Assets/models/player/player_suit.fbx")
+OLLAMA = "http://localhost:11434/v1/"
+VIEW_W, VIEW_H = 1024, 576
+# the dope sheet before the viewer has said what keys the clip has
+NO_KEYS = {"tracks": [], "undo": 0, "redo": 0, "dirty": False, "saveable": False, "frames": 0}
+
+from PySide6.QtCore import (Q_ARG, QMetaObject, QObject, QProcess, QProcessEnvironment, QRect,  # noqa: E402
+                            QTimer, QUrl, Qt, QCoreApplication, Property, Signal, Slot)
+from PySide6.QtGui import QDesktopServices, QGuiApplication, QIcon, QImage, QRegion  # noqa: E402
+from PySide6.QtNetwork import QLocalServer, QLocalSocket  # noqa: E402
+from PySide6.QtQuick import QQuickPaintedItem  # noqa: E402
+from PySide6.QtQml import qmlRegisterType  # noqa: E402
+
+HOST = None
+
+
+def send(msg):
+    """send a command to a running chest; True if one answered"""
+    s = QLocalSocket()
+    s.connectToServer(SOCK)
+    if not s.waitForConnected(500):
+        return False
+    s.write(msg.encode())
+    s.flush()
+    s.waitForBytesWritten(500)
+    s.waitForReadyRead(3000)
+    print(bytes(s.readAll()).decode() or "ok")
+    s.disconnectFromServer()
+    return True
+
+
+def project_root(path):
+    """the s&box project a file belongs to: the nearest folder up with a .sbproj in it"""
+    d = os.path.dirname(os.path.abspath(path))
+    while d.startswith(PROJECTS) and d != PROJECTS:
+        try:
+            if any(n.endswith(".sbproj") for n in os.listdir(d)):
+                return d
+        except OSError:
+            pass
+        d = os.path.dirname(d)
+    return None
+
+
+def walk(root, exts, limit, skip=("backups", ".sbox", "obj", "bin", "node_modules", ".git")):
+    out = []
+    for d, dirs, files in os.walk(root):
+        dirs[:] = sorted(x for x in dirs if x not in skip and not x.startswith("."))
+        for f in sorted(files):
+            if f.lower().endswith(exts):
+                out.append(os.path.join(d, f))
+                if len(out) >= limit:
+                    return out
+    return out
+
+
+def clip_source(clip, root):
+    """the model a .riganim was authored on (its SourceModel), as a file the viewer can load:
+    the .fbx/.effigy next to the .vmdl, else the .vmdl path itself. None if it doesn't say."""
+    try:
+        with open(clip, encoding="utf-8", errors="replace") as f:
+            m = re.search(r'"SourceModel"\s*:\s*"([^"]*)"', f.read(4096))
+    except OSError:
+        return None
+    if not m or not m.group(1):
+        return None
+    rel = m.group(1)
+    stem = os.path.splitext(os.path.join(root, "Assets", rel))[0]
+    for ext in (".fbx", ".effigy", ".FBX"):
+        if os.path.isfile(stem + ext):
+            return stem + ext
+    return stem + os.path.splitext(rel)[1]
+
+
+def same_model(a, b):
+    return bool(b) and os.path.splitext(os.path.abspath(a))[0] == os.path.splitext(os.path.abspath(b))[0]
+
+
+class Viewport(QQuickPaintedItem):
+    """shows the latest frame from the serve process, 1:1"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setOpaquePainting(True)
+        HOST.frameReady.connect(self.update)
+
+    def paint(self, p):
+        img = HOST.image
+        if img is None:
+            p.fillRect(0, 0, int(self.width()), int(self.height()), Qt.black)
+            return
+        p.drawImage(QRect(0, 0, int(self.width()), int(self.height())), img)
+
+
+class Host(QObject):
+    """what cabinet.qml can ask of Python"""
+    frameReady = Signal()
+    infoChanged = Signal()
+    playheadChanged = Signal()
+    keysChanged = Signal()
+    listsChanged = Signal()
+    runsChanged = Signal()
+    statusChanged = Signal()
+    toolsChanged = Signal()
+    chatChanged = Signal()
+    chatAnswer = Signal(int, str, str)
+    chatChunk = Signal(int, str)
+    modelsAnswer = Signal(object)
+
+    def __init__(self):
+        super().__init__()
+        self.window = None
+        self.image = None
+        self.proc = None
+        self.buf = b""
+        self.shm = None
+        self.shm_path = ""
+        self._info = {}
+        self._clip = {}
+        self._sel = {"bone": -1, "body": -1}
+        self._playhead = {"time": 0, "frame": 0, "playing": False, "loop": True}
+        self._keys = NO_KEYS
+        self._status = "starting"
+        self._models = []
+        self._clips = []
+        self._runs = []
+        self._drawings = []
+        self._drawing_open = False
+        self._chat = []                   # [{"role": "you"|"model", "text": ...}, ...]
+        self._chat_models = []
+        self._chat_model = self._chat_models[0]["id"] if self._chat_models else ""
+        self._chat_busy = False
+        self._chat_request = 0
+        self._chat_cancel = threading.Event()
+        self._catalogue_busy = False
+        self._model_preferences = {}
+        self._preferences_path = os.path.expanduser("~/.config/geppetto/model-selection.json")
+        try:
+            with open(self._preferences_path) as f:
+                self._model_preferences = json.load(f)
+        except (OSError, ValueError):
+            pass
+        if not isinstance(self._model_preferences, dict):
+            self._model_preferences = {}
+        self.drawing_key = drawing_socket_key()    # the socket the drawing tool listens on
+        self.drawing_program = drawing_program      # what to run to start it
+        self.model = ""
+        self.ai_model = self._model_preferences.get("research", "")
+        self.jobs = {}                  # run dir -> QProcess
+        self.watching = ""
+        self.live_states = {}
+        self.displayed_revision = 0
+        self.stop_requests = {}
+        self.env = QProcessEnvironment.systemEnvironment()
+        dotnet = self.env.value("DOTNET_ROOT", os.path.expanduser("~/.dotnet"))
+        self.env.insert("DOTNET_ROOT", dotnet)
+        self.env.insert("PATH", dotnet + ":" + self.env.value("PATH", ""))
+        self.env.insert("LD_LIBRARY_PATH", ":".join(
+            [BIN, os.path.join(BIN, "runtimes/linux-x64/native"), self.env.value("LD_LIBRARY_PATH", "")]))
+        self.runTimer = QTimer(self)
+        self.runTimer.setInterval(500)
+        self.runTimer.timeout.connect(self.scanRuns)
+        self.runTimer.start()
+        self.chatAnswer.connect(self._chat_done)
+        self.chatChunk.connect(self._chat_chunk)
+        self.modelsAnswer.connect(self._models_done)
+
+    # ---- properties ------------------------------------------------------------------------
+    def _get_info(self): return self._info
+    def _get_clip(self): return self._clip
+    def _get_sel(self): return self._sel
+    def _get_playhead(self): return self._playhead
+    def _get_status(self): return self._status
+    def _get_models(self): return self._models
+    def _get_clips(self): return self._clips
+    def _get_runs(self): return self._runs
+    def _get_ai_model(self): return self.ai_model
+    info = Property("QVariantMap", _get_info, notify=infoChanged)
+    clip = Property("QVariantMap", _get_clip, notify=infoChanged)
+    sel = Property("QVariantMap", _get_sel, notify=infoChanged)
+    playhead = Property("QVariantMap", _get_playhead, notify=playheadChanged)
+    keys = Property("QVariantMap", lambda self: self._keys, notify=keysChanged)
+    status = Property(str, _get_status, notify=statusChanged)
+    models = Property("QVariantList", _get_models, notify=listsChanged)
+    clips = Property("QVariantList", _get_clips, notify=listsChanged)
+    runs = Property("QVariantList", _get_runs, notify=runsChanged)
+    aiModel = Property(str, _get_ai_model, notify=runsChanged)
+    watchedRun = Property(str, lambda self: self.watching, notify=runsChanged)
+    drawings = Property("QVariantList", lambda self: self._drawings, notify=toolsChanged)
+    drawingOpen = Property(bool, lambda self: self._drawing_open, notify=toolsChanged)
+    chatMessages = Property("QVariantList", lambda self: self._chat, notify=chatChanged)
+    chatModels = Property("QVariantList", lambda self: self._chat_models, notify=chatChanged)
+    chatModel = Property(str, lambda self: self._chat_model, notify=chatChanged)
+    chatBusy = Property(bool, lambda self: self._chat_busy, notify=chatChanged)
+    catalogueBusy = Property(bool, lambda self: self._catalogue_busy, notify=chatChanged)
+    researchModels = Property("QVariantList", lambda self: [m for m in self._chat_models if m.get("research", True)], notify=chatChanged)
+
+    def set_status(self, s):
+        self._status = s
+        self.statusChanged.emit()
+
+    # ---- the window ------------------------------------------------------------------------
+    @Slot("QVariantList")
+    def setMask(self, rects):
+        """rects: flat list x, y, w, h, x, y, w, h, ... in window coordinates"""
+        if self.window is None:
+            return
+        reg = QRegion()
+        for i in range(0, len(rects) - 3, 4):
+            x, y, w, h = (int(round(v)) for v in rects[i:i + 4])
+            if w > 0 and h > 0:
+                reg = reg.united(QRegion(QRect(x, y, w, h)))
+        self.window.setMask(reg)
+
+    def snap(self, path):
+        return self.window.grabWindow().save(path)
+
+    # ---- the viewport process --------------------------------------------------------------
+    @Slot(str)
+    def openModel(self, path, clip=""):
+        path = os.path.abspath(os.path.expanduser(path))
+        if not os.path.isfile(path):
+            self.set_status("no such model: " + path)
+            return
+        self.watching = ""
+        self.displayed_revision = 0
+        self.runsChanged.emit()
+        self.stop()
+        self.model = path
+        self._info, self._clip, self._sel = {"model": path}, {}, {"bone": -1, "body": -1}
+        self._keys = NO_KEYS
+        self.infoChanged.emit()
+        self.keysChanged.emit()
+        self.set_status("loading " + os.path.basename(path))
+        self.listFiles()
+        p = QProcess(self)
+        p.setProcessEnvironment(self.env)
+        p.setProgram(EXE)
+        p.setArguments(["--serve", "--size", "%dx%d" % (VIEW_W, VIEW_H), "--model", path] + (["--clip", clip] if clip else []))
+        p.setProcessChannelMode(QProcess.SeparateChannels)
+        p.readyReadStandardOutput.connect(lambda p=p: self.onOutput(p))
+        p.readyReadStandardError.connect(lambda p=p: p.readAllStandardError())
+        p.finished.connect(lambda code, _st, p=p: self.onFinished(p, code))
+        self.buf = b""
+        self.proc = p
+        p.start()
+
+    def stop(self):
+        p, self.proc = self.proc, None
+        if p is not None and p.state() != QProcess.NotRunning:
+            p.write(b"quit\n")
+            if not p.waitForFinished(1500):
+                p.kill()
+                p.waitForFinished(500)
+        self.unmap()
+
+    def unmap(self):
+        if self.shm is not None:
+            self.shm.close()
+        self.shm, self.shm_path = None, ""
+
+    @Slot(str)
+    def cmd(self, line):
+        if self.proc is not None and self.proc.state() == QProcess.Running:
+            self.proc.write((line + "\n").encode())
+
+    def onFinished(self, p, code):
+        if p is self.proc:
+            self.proc = None
+            self.unmap()
+            if not self._status.startswith("error"):
+                self.set_status("viewer exited (%d)" % code)
+
+    def onOutput(self, p):
+        if p is not self.proc:
+            p.readAllStandardOutput()
+            return
+        self.buf += bytes(p.readAllStandardOutput())
+        *lines, self.buf = self.buf.split(b"\n")
+        frame = None
+        for raw in lines:
+            if not raw.startswith(b"@"):
+                continue
+            try:
+                ev = json.loads(raw[1:])
+            except ValueError:
+                continue
+            kind = ev.get("ev")
+            if kind == "frame":
+                frame = ev                      # only the latest of a burst is worth showing
+            elif kind == "ready":
+                self._info = ev
+                self._clip = ev.get("clip") or {}
+                self.infoChanged.emit()
+                self.set_status("%s  %d tris  %.1fs" % (os.path.basename(ev["model"]), ev.get("tris", 0), ev.get("load_s", 0)))
+            elif kind == "ai-activity":
+                if self.watching:
+                    self.live_states[self.watching] = ev
+                    self.set_status(activity(ev))
+                    self.scanRuns()
+            elif kind == "ai-preview":
+                self.displayed_revision = ev.get("revision", 0)
+                self._info.update({"model": ev.get("path", ""), "tris": ev.get("tris", 0),
+                                   "bodies": [], "bones": [], "materials": []})
+                self._clip, self._sel = {}, {"bone": -1, "body": -1}
+                self.infoChanged.emit()
+                self.scanRuns()
+            elif kind == "ai-preview-error":
+                self.set_status("preview: " + ev.get("msg", "?"))
+            elif kind == "clip":
+                self._clip = ev
+                self.infoChanged.emit()
+            elif kind == "keys":
+                self._keys = ev
+                self.keysChanged.emit()
+                if self._clip and ev.get("frames", 0) != self._clip.get("frames", 0):
+                    self._clip = dict(self._clip, frames=ev.get("frames", 0))   # a key dragged past the end
+                    self.infoChanged.emit()
+            elif kind == "saved":
+                self.set_status("saved %s (backup in %s)" % (os.path.basename(ev.get("path", "")), os.path.dirname(ev.get("backup", ""))))
+            elif kind == "selected":
+                self._sel = {"bone": ev.get("bone", -1), "body": ev.get("body", -1)}
+                self.infoChanged.emit()
+            elif kind == "error":
+                self.set_status("error: " + ev.get("msg", "?"))
+            elif kind == "loading":
+                pass
+        if frame is not None:
+            self.onFrame(frame)
+
+    def onFrame(self, ev):
+        w, h = ev["w"], ev["h"]
+        path = self._info.get("shm", "")
+        try:
+            if self.shm is None or self.shm_path != path or len(self.shm) != w * h * 4:
+                self.unmap()
+                with open(path, "rb") as f:
+                    self.shm = mmap.mmap(f.fileno(), w * h * 4, access=mmap.ACCESS_READ)
+                self.shm_path = path
+            data = self.shm[:w * h * 4]
+            self.image = QImage(data, w, h, w * 4, QImage.Format_RGBX8888).copy()
+        except (OSError, ValueError) as e:
+            self.set_status("frame: %s" % e)
+        self.cmd("ack")
+        self._playhead = {"time": ev.get("time", 0), "frame": ev.get("frame", 0), "playing": ev.get("playing", False),
+                          "loop": ev.get("loop", True)}
+        self.playheadChanged.emit()
+        self.frameReady.emit()
+
+    # ---- files -----------------------------------------------------------------------------
+    def listFiles(self):
+        models = walk(PROJECTS, (".effigy",), 200)
+        root = project_root(self.model) if self.model else None
+        if root:
+            models += walk(os.path.join(root, "Assets", "models"), (".fbx",), 200)
+        if self.model and self.model not in models:
+            models.insert(0, self.model)
+        self._models = [{"path": m, "name": os.path.basename(m),
+                         "where": os.path.relpath(os.path.dirname(m), PROJECTS) if m.startswith(PROJECTS) else os.path.dirname(m)}
+                        for m in models]
+        clips = walk(root, (".riganim",), 300) if root else []
+        self._clips = []
+        for c in clips:
+            src = clip_source(c, root)
+            self._clips.append({"path": c, "name": os.path.splitext(os.path.basename(c))[0],
+                                "where": os.path.relpath(os.path.dirname(c), root),
+                                "source": src or "",
+                                "fits": src is None or same_model(src, self.model)})
+        # clips made on this model first
+        self._clips.sort(key=lambda c: (not c["fits"], c["name"]))
+        self.listsChanged.emit()
+
+    @Slot(str)
+    def playClip(self, path):
+        """play a clip on the model it was made for: a clip on the wrong rig only mangles it"""
+        if self._keys.get("dirty") and getattr(self, "_drop_edits", None) != path:
+            self._drop_edits = path           # a second click on the same clip means it
+            self.set_status("unsaved key edits: SAVE them, or click the clip again to drop them")
+            return
+        self._drop_edits = None
+        c = next((c for c in self._clips if c["path"] == path), None)
+        if c is None or c["fits"]:
+            self.cmd("clip " + path)
+        elif c["source"] and os.path.isfile(c["source"]):
+            self.openModel(c["source"], path)
+        else:
+            self.set_status("%s was made for %s, which isn't here" % (c["name"], os.path.basename(c["source"]) or "another model"))
+
+    @Slot(str)
+    def watchRun(self, directory):
+        directory = os.path.abspath(directory)
+        state = read_state(directory)
+        if not state.get("runId"):
+            self.set_status("run is starting; try Watch again shortly")
+            return
+        self.watching = directory
+        self.displayed_revision = 0
+        self.live_states[directory] = state
+        if self.proc is None or self.proc.state() == QProcess.NotRunning:
+            # Boot the existing headless server directly into its blank/follow mode.
+            self.stop()
+            p = QProcess(self)
+            p.setProcessEnvironment(self.env)
+            p.setProgram(EXE)
+            p.setArguments(["--serve", "--watch-run", directory, "--size", "%dx%d" % (VIEW_W, VIEW_H)])
+            p.setProcessChannelMode(QProcess.SeparateChannels)
+            p.readyReadStandardOutput.connect(lambda p=p: self.onOutput(p))
+            p.readyReadStandardError.connect(lambda p=p: p.readAllStandardError())
+            p.finished.connect(lambda code, _st, p=p: self.onFinished(p, code))
+            self.buf = b""
+            self.proc = p
+            p.start()
+        else:
+            self.cmd("follow " + directory)
+        self.set_status("watching " + os.path.basename(directory))
+        self.scanRuns()
+
+    @Slot()
+    def stopWatching(self):
+        self.cmd("follow")
+        self.watching = ""
+        self.displayed_revision = 0
+        self.scanRuns()
+
+    # ---- research runs ---------------------------------------------------------------------
+    @Slot()
+    def scanRuns(self):
+        for directory in list(self.stop_requests):
+            self.tryCancel(directory)
+        out = []
+        if os.path.isdir(RUNS):
+            for name in sorted(os.listdir(RUNS), reverse=True):
+                d = os.path.join(RUNS, name)
+                if not os.path.isdir(d):
+                    continue
+                files = set(os.listdir(d))
+                r = {"dir": d, "name": name, "status": "running" if d in self.jobs else "unknown",
+                     "score": -1, "best": "", "sources": 0, "rounds": 0, "prompt": ""}
+                meta = os.path.join(RUNS, name + ".json")
+                try:
+                    r["prompt"] = json.load(open(meta)).get("prompt", "")
+                except (OSError, ValueError):
+                    pass
+                if not r["prompt"]:
+                    for f in sorted(files):
+                        if f.endswith("-brief.txt"):
+                            r["prompt"] = open(os.path.join(d, f)).read().split("\n")[1][:200]
+                            break
+                for f in sorted(files):
+                    p = os.path.join(d, f)
+                    try:
+                        if f.endswith("-result.json"):
+                            j = json.load(open(p))
+                            r["status"] = j.get("status", r["status"])
+                            r["best"] = os.path.join(d, j.get("best", "")) if j.get("best") else ""
+                            r["rounds"] = len(j.get("rounds", []))
+                            sc = [x.get("score", 0) for x in j.get("rounds", [])]
+                            if sc:
+                                r["score"] = max(sc)
+                        elif f == "stopped.json" and d not in self.jobs:
+                            j = json.load(open(p))
+                            r["status"] = "stopped: " + str(j.get("reason", ""))[:60]
+                            if j.get("bestCheckpoint"):
+                                r["best"] = os.path.join(d, j["bestCheckpoint"])
+                        elif f.endswith("-sources.json"):
+                            r["sources"] += len(json.load(open(p)))
+                        elif f.endswith("-selection.json") and r["score"] < 0:
+                            r["score"] = json.load(open(p)).get("score", -1)
+                    except (OSError, ValueError, AttributeError):
+                        pass
+                if r["status"] == "unknown" and d not in self.jobs:
+                    r["status"] = "ended"
+                if not r["best"]:
+                    eff = sorted(f for f in files if f.endswith(".effigy"))
+                    if eff:
+                        r["best"] = os.path.join(d, eff[-1])
+                live = read_state(d)
+                if live:
+                    self.live_states[d] = live
+                    r["activity"] = activity(live)
+                    r["latestRevision"] = (live.get("snapshot") or {}).get("revision", 0)
+                    r["displayedRevision"] = self.displayed_revision if self.watching == d else 0
+                    r["preview"] = preview_path(d, live)
+                    control = control_state(live)
+                    r["paused"] = bool(control.get("paused") or control.get("pauseRequested"))
+                    r["pace"] = control.get("paceSeconds", 0) or 0
+                    r["pendingDirections"] = control.get("pendingDirections", 0) or 0
+                    if live.get("state") in ("completed", "below-target", "cancelled", "failed"):
+                        r["status"] = r["activity"]
+                else:
+                    r.update(activity="starting" if d in self.jobs else "", latestRevision=0, displayedRevision=0, preview="",
+                             paused=False, pace=0, pendingDirections=0)
+                log = os.path.join(RUNS, name + ".log")
+                r["log"] = ""
+                try:
+                    with open(log, "rb") as f:
+                        f.seek(max(0, os.path.getsize(log) - 400))
+                        tail = [x for x in f.read().decode(errors="replace").splitlines() if x.strip() and not x.startswith("@")]
+                        r["log"] = tail[-1][:120] if tail else ""
+                except OSError:
+                    pass
+                out.append(r)
+        if out != self._runs:
+            self._runs = out
+            self.runsChanged.emit()
+
+    def _save_model_preferences(self):
+        self._model_preferences = {"chat": self._chat_model, "research": self.ai_model}
+        try:
+            os.makedirs(os.path.dirname(self._preferences_path), exist_ok=True)
+            temporary = self._preferences_path + ".tmp"
+            with open(temporary, "w") as f:
+                json.dump(self._model_preferences, f)
+            os.replace(temporary, self._preferences_path)
+        except OSError:
+            self.set_status("could not save model selection")
+
+    @Slot(str)
+    def setAiModel(self, model_id):
+        model = chatlib.find(model_id, self._chat_models)
+        if model and model.get("research", True) and model.get("available", True):
+            self.ai_model = model_id
+            self._save_model_preferences()
+            self.runsChanged.emit()
+
+    @Slot()
+    def cycleAiModel(self):
+        names = [m["id"] for m in self.researchModels if m.get("available", True)]
+        if names:
+            self.setAiModel(names[(names.index(self.ai_model) + 1) % len(names)] if self.ai_model in names else names[0])
+
+    @Slot(str, result=bool)
+    def startResearch(self, prompt):
+        prompt = prompt.strip()
+        if not prompt:
+            return False
+        model = chatlib.find(self.ai_model, self._chat_models)
+        if not model:
+            self.set_status("select a research model first")
+            return False
+        try:
+            connection = chatlib.research_arguments(model)
+        except RuntimeError as e:
+            self.set_status(str(e))
+            return False
+        os.makedirs(RUNS, exist_ok=True)
+        slug = re.sub(r"[^a-z0-9]+", "-", prompt.lower()).strip("-")[:32] or "run"
+        name = time.strftime("%Y%m%d-%H%M%S-") + str(time.time_ns() % 1000000) + "-" + slug
+        d = os.path.join(RUNS, name)
+        with open(os.path.join(RUNS, name + ".json"), "w") as f:
+            json.dump({"prompt": prompt, "model": model["label"], "started": time.time()}, f)
+        p = QProcess(self)
+        env = QProcessEnvironment(self.env)
+        if model.get("key_env"):
+            env.insert(model["key_env"], chatlib.key(model))
+        p.setProcessEnvironment(env)
+        p.setProgram(EXE)
+        p.setArguments(["--ai", "create", "--research"] + connection +
+                       ["--out", d, "--prompt", prompt])
+        p.setProcessChannelMode(QProcess.MergedChannels)
+        p.setStandardOutputFile(os.path.join(RUNS, name + ".log"))
+        p.finished.connect(lambda *_a, d=d: (self.jobs.pop(d, None), self.stop_requests.pop(d, None), self.scanRuns()))
+        def failed(_error, d=d):
+            self.jobs.pop(d, None)
+            self.set_status("research process failed to start; check the desktop executable")
+            self.scanRuns()
+        p.errorOccurred.connect(failed)
+        self.jobs[d] = p
+        p.start()
+        self.set_status("research started: " + model["label"])
+        self.scanRuns()
+        return True
+
+    @Slot(str)
+    def stopResearch(self, d):
+        p = self.jobs.get(d)
+        if p is not None:
+            self.stop_requests[d] = time.monotonic()
+            self.tryCancel(d)
+
+    def live_command(self, d, command, done, **fields):
+        if d not in self.jobs:
+            self.set_status("run is not active")
+            return False
+        try:
+            send_command(d, command, **fields)
+        except (OSError, ValueError) as e:
+            self.set_status(str(e))
+            return False
+        self.set_status(done)
+        return True
+
+    @Slot(str)
+    def togglePause(self, d):
+        control = control_state(read_state(d))
+        if control.get("paused") or control.get("pauseRequested"):
+            self.live_command(d, "resume", "resume requested")
+        else:
+            self.live_command(d, "pause", "pausing after the current operation")
+
+    @Slot(str)
+    def cyclePace(self, d):
+        seconds = next_pace(control_state(read_state(d)).get("paceSeconds", 0))
+        self.live_command(d, "pace", "build pace: " + ("normal" if seconds == 0 else "%gs between operations" % seconds), seconds=seconds)
+
+    @Slot(str, str)
+    def sendDirection(self, d, text):
+        self.live_command(d, "instruct", "direction sent", text=text)
+
+    def tryCancel(self, directory):
+        try:
+            request_cancel(directory)
+            self.set_status("stop requested; waiting for cancellation acknowledgement")
+            self.stop_requests.pop(directory, None)
+        except (OSError, ValueError):
+            # Startup may not have created the run identity yet. Retry without killing
+            # the parent and leaving its native rebuild process orphaned.
+            if time.monotonic() - self.stop_requests.get(directory, time.monotonic()) > 10:
+                self.set_status("stop pending: run has not published its control identity")
+
+
+    # ---- the chat window (research drawer) -------------------------------------------------
+    @Slot()
+    def refreshChat(self):
+        if self._catalogue_busy:
+            return
+        self._catalogue_busy = True
+        self.chatChanged.emit()
+        def discover():
+            try:
+                catalogue = chatlib.models()
+            except Exception:
+                catalogue = []
+            self.modelsAnswer.emit(catalogue)
+        threading.Thread(target=discover, daemon=True).start()
+
+    @Slot(object)
+    def _models_done(self, catalogue):
+        self._chat_models = catalogue
+        self._catalogue_busy = False
+        available = [m for m in catalogue if m.get("available", True)]
+        wanted = self._chat_model or self._model_preferences.get("chat", "")
+        self._chat_model = wanted if any(m["id"] == wanted for m in available) else (available[0]["id"] if available else "")
+        research = [m for m in available if m.get("research", True)]
+        if not any(m["id"] == self.ai_model for m in research):
+            self.ai_model = research[0]["id"] if research else ""
+        self.chatChanged.emit()
+        self.runsChanged.emit()
+        if not catalogue:
+            self.set_status("no models found; start Ollama or configure a provider")
+
+    @Slot(str)
+    def setChatModel(self, model_id):
+        model = chatlib.find(model_id, self._chat_models)
+        if model and model.get("available", True) and not self._chat_busy:
+            self._chat_model = model_id
+            self._save_model_preferences()
+            self.chatChanged.emit()
+
+    @Slot()
+    def stopChat(self):
+        self._chat_cancel.set()
+        self._chat_request += 1  # ignore late chunks/completion from the cancelled request
+        self._chat_busy = False
+        self.chatChanged.emit()
+
+    @Slot()
+    def clearChat(self):
+        self.stopChat()
+        self._chat = []
+        self.chatChanged.emit()
+
+    @Slot(str)
+    def sendChat(self, text):
+        text = (text or "").strip()[:8000]
+        if not text or self._chat_busy:
+            return
+        model = chatlib.find(self._chat_model, self._chat_models)
+        if model is None:
+            self.set_status("no chat model is selected")
+            return
+        self._chat.append({"role": "you", "text": text})
+        history = [dict(m) for m in self._chat if m["role"] in ("you", "model") and m["text"]]
+        self._chat.append({"role": "model", "text": "", "label": model["label"]})
+        self._chat = self._chat[-40:]
+        self._chat_busy = True
+        self._chat_request += 1
+        self._chat_cancel = threading.Event()
+        self.chatChanged.emit()
+        self._chat_reply(model, history)
+
+    def _chat_notes(self):
+        """Notes from the watched research run, else the newest run that has any."""
+        runs = [self.watching] if self.watching else []
+        try:
+            runs += [os.path.join(RUNS, n) for n in sorted(os.listdir(RUNS), reverse=True)]
+        except OSError:
+            pass
+        for d in runs:
+            if d and os.path.isdir(d):
+                notes = chatlib.research_notes(d)
+                if notes:
+                    return notes
+        return ""
+
+    def _chat_reply(self, model, history):
+        request_id, cancel = self._chat_request, self._chat_cancel
+        notes = self._chat_notes()
+        api = chatlib.effigy_reference(history[-1]["text"] if history else "")
+        def work():
+            text = ""
+            last_update = 0.0
+            try:
+                for chunk in chatlib.stream(model, history, cancel, notes=notes, api=api):
+                    if cancel.is_set():
+                        return
+                    text += chunk
+                    if chunk and time.monotonic() - last_update >= 0.05:
+                        self.chatChunk.emit(request_id, text)
+                        last_update = time.monotonic()
+                error = "" if text.strip() else "the model sent back no text"
+            except Exception as e:
+                error = str(e)
+            self.chatAnswer.emit(request_id, text, error)
+        threading.Thread(target=work, daemon=True).start()
+
+    @Slot(int, str)
+    def _chat_chunk(self, request_id, text):
+        if request_id == self._chat_request and self._chat_busy and self._chat:
+            self._chat[-1] = dict(self._chat[-1], text=text)
+            self.chatChanged.emit()
+
+    @Slot(int, str, str)
+    def _chat_done(self, request_id, text, error):
+        if request_id != self._chat_request:
+            return
+        self._chat_busy = False
+        if self._chat and self._chat[-1]["role"] == "model":
+            if text:
+                self._chat[-1] = dict(self._chat[-1], text=text)
+            else:
+                self._chat.pop()
+        if error:
+            self._chat.append({"role": "error", "text": error})
+        self._chat = self._chat[-40:]
+        self.chatChanged.emit()
+
+    # ---- the drawing tool (Linework) -------------------------------------------------------
+    def drawing_running(self):
+        """is the drawing tool up? ask the socket it listens on"""
+        sock = QLocalSocket()
+        sock.connectToServer(self.drawing_key)
+        return sock.waitForConnected(400)
+
+    def drawing_send(self, path=""):
+        """hand a file to the drawing tool: it opens it and comes up. False if it isn't up."""
+        sock = QLocalSocket()
+        sock.connectToServer(self.drawing_key)
+        if not sock.waitForConnected(400):
+            return False
+        sock.write(((path + "\n") if path else "\n").encode())
+        sock.flush()
+        sock.waitForBytesWritten(400)
+        sock.disconnectFromServer()
+        return True
+
+    def drawing_start(self, path=""):
+        """start the drawing tool; if it is already up it raises its own window"""
+        program = self.drawing_program()
+        if not os.path.isfile(program):
+            self.set_status("no drawing tool: " + program)
+            return False
+        args = [path] if path else []
+        try:
+            ok, _pid = QProcess.startDetached(program, args, os.path.expanduser("~"))
+        except (OSError, ValueError) as e:
+            self.set_status("drawing tool: " + str(e))
+            return False
+        if not ok:
+            self.set_status("the drawing tool would not start")
+            return False
+        self.set_status("drawing up" + ("" if not path else ": " + os.path.basename(path)))
+        return True
+
+    @Slot()
+    def refreshTools(self):
+        """what the tool drawer shows: the drawings, and whether the tool is up"""
+        self._drawings = drawing_gallery()
+        self._drawing_open = self.drawing_running()
+        self.toolsChanged.emit()
+
+    @Slot()
+    def openDrawingTool(self):
+        """the pencil: bring the drawing tool up (it raises its window if it is already up)"""
+        if not os.path.isfile(self.drawing_program()):
+            self.set_status("no drawing tool on this machine")
+            return
+        if self.drawing_send():
+            self.set_status("drawing is up")
+            self._drawing_open = True
+        elif self.drawing_start():
+            self._drawing_open = True
+        self.toolsChanged.emit()
+
+    @Slot(str)
+    def openDrawingFile(self, path):
+        """open one of the drawings in the drawing tool"""
+        path = os.path.abspath(os.path.expanduser(path))
+        if not os.path.isfile(path):
+            self.set_status("no such drawing: " + os.path.basename(path))
+            return
+        if self.drawing_send(path):
+            self.set_status("opened " + os.path.basename(path))
+            self._drawing_open = True
+        elif self.drawing_start(path):
+            self._drawing_open = True
+        self.toolsChanged.emit()
+
+    @Slot()
+    def openDrawingsFolder(self):
+        """the DRAWINGS folder in the tool drawer: show where the drawings live, in the file manager"""
+        try:
+            os.makedirs(DRAWING_DIR, exist_ok=True)
+        except OSError as e:
+            self.set_status("drawings folder: " + str(e))
+            return
+        if QDesktopServices.openUrl(QUrl.fromLocalFile(DRAWING_DIR)):
+            self.set_status("drawings: " + DRAWING_DIR)
+        else:
+            self.set_status("could not open " + DRAWING_DIR)
+
+
+def main():
+    if len(sys.argv) > 1 and sys.argv[1] in ("snap", "quit", "open", "shut", "cmd", "mask", "clip", "draw", "tools"):
+        app = QCoreApplication(sys.argv)
+        cmd = sys.argv[1] + (" " + os.path.abspath(sys.argv[2]) if sys.argv[1] in ("snap", "clip") else
+                             " " + " ".join(sys.argv[2:]) if len(sys.argv) > 2 else "")
+        sys.exit(0 if send(cmd) else 1)
+
+    from PySide6.QtQml import QQmlApplicationEngine
+    from PySide6 import QtQuick  # noqa: F401  (so the root window comes back as a QQuickWindow)
+    app = QGuiApplication(sys.argv)
+    model = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else None
+    if send("model " + model if model else "raise"):
+        return
+    app.setApplicationName("Geppetto")
+    app.setDesktopFileName("geppetto")
+    icon = os.path.join(PROJECT, "geppetto.svg")
+    if os.path.exists(icon):
+        app.setWindowIcon(QIcon(icon))
+
+    global HOST
+    HOST = host = Host()
+    qmlRegisterType(Viewport, "Geppetto", 1, 0, "Viewport")
+    eng = QQmlApplicationEngine()
+    eng.rootContext().setContextProperty("host", host)
+    eng.load(QUrl.fromLocalFile(os.path.join(HERE, "cabinet.qml")))
+    if not eng.rootObjects():
+        sys.exit(1)
+    host.window = eng.rootObjects()[0]
+    host.scanRuns()
+    host.refreshTools()
+    host.refreshChat()
+    host.openModel(model or DEFAULT_MODEL)
+    app.aboutToQuit.connect(host.stop)
+
+    # single instance + a tiny command channel (raise / model PATH / snap PATH / open|shut NAME / quit)
+    QLocalServer.removeServer(SOCK)
+    server = QLocalServer()
+    server.listen(SOCK)
+
+    def on_conn():
+        c = server.nextPendingConnection()
+
+        def on_read():
+            msg = bytes(c.readAll()).decode().strip()
+            reply = "ok"
+            if msg == "raise" or msg.startswith("model "):
+                host.window.show()
+                host.window.raise_()
+                host.window.requestActivate()
+                if msg.startswith("model "):
+                    host.openModel(msg[6:])
+            elif msg == "mask":
+                m = host.window.mask()
+                reply = "%d rects, bounds %s, window %dx%d" % (m.rectCount(), m.boundingRect().getRect(), host.window.width(), host.window.height())
+            elif msg.startswith("clip "):
+                host.playClip(msg[5:])
+            elif msg.startswith("cmd "):
+                host.cmd(msg[4:])
+            elif msg.startswith("snap "):
+                reply = "saved" if host.snap(msg[5:]) else "snap failed"
+            elif msg.startswith(("open ", "shut ")):
+                name = msg[5:].strip()
+                name = DRAWER_ALIASES.get(name, name)      # the outliner drawer is the tools drawer now
+                d = host.window.findChild(QObject, name)
+                if d is None:
+                    reply = "no such drawer"
+                else:
+                    QMetaObject.invokeMethod(d, "setOpen", Q_ARG("QVariant", msg[:4] == "open"))
+            elif msg == "draw":
+                host.openDrawingTool()
+            elif msg.startswith("draw "):
+                what = msg[5:].strip()
+                host.openDrawingFile(drawing_resolve(DRAWING_DIR, what) or what)
+            elif msg == "tools":
+                host.refreshTools()
+                reply = "%d drawing(s)" % len(host._drawings)
+            elif msg == "quit":
+                c.write(b"bye")
+                c.flush()
+                app.quit()
+                return
+            c.write(reply.encode())
+            c.flush()
+        c.readyRead.connect(on_read)
+    server.newConnection.connect(on_conn)
+
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()
