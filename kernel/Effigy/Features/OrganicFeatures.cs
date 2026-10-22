@@ -37,7 +37,10 @@ public sealed class BlobFeature : Feature
 
 	public readonly StringParam Shapes = new( "Shapes", "sphere 0,0,10 6" );
 	public readonly FloatParam Blend = new( "Blend", 2f, 0f, unit: "u" );
-	public readonly FloatParam CutBlend = new( "Cut blend", 0.5f, 0f, unit: "u" );
+	// Small on purpose. A smooth subtract eats up to a quarter of its blend from the wall it cuts,
+	// so the old 0.5 u erased any shell thinner than about 0.25 u (6 mm): a hollow handle, a
+	// button well, a battery bay. Hard-surface parts want crisp cuts; raise it for soft creature work.
+	public readonly FloatParam CutBlend = new( "Cut blend", 0.05f, 0f, unit: "u" );
 	public readonly FloatParam Voxel = new( "Voxel", 0.5f, 0.01f, unit: "u" );
 	public readonly IntParam Smooth = new( "Smooth passes", 2, 0, 20 );
 	public readonly FloatParam Noise = new( "Noise", 0f, 0f, unit: "u" );
@@ -102,13 +105,30 @@ public sealed class BlobFeature : Feature
 		var result = SurfaceNets.Mesh( field, voxel );
 		var mesh = result.Mesh;
 
+		if ( mesh.FaceCount == 0 && cuts.Count > 0 && CutBlend.Clamped > 0f )
+		{
+			// Before blaming the shapes, see whether the blend did it: the same cutters with a
+			// sharp cut. Only paid when the build has already failed.
+			var sharp = new SdfSubtract( adds.Count == 1 ? adds[0] : new SdfBlend( Blend.Clamped, adds.ToArray() ), 0f, cuts.ToArray() );
+			if ( SurfaceNets.Mesh( sharp, voxel ).Mesh.FaceCount > 0 )
+			{
+				var suggested = MathF.Min( CutBlend.Clamped * 0.1f, 0.01f );
+				FailOn( "Cut blend", suggested,
+					"The cut blend erased the walls",
+					$"Cut blend {CutBlend.Clamped:0.###} u rounds every cut, and that eats walls thinner than about {CutBlend.Clamped * 0.5f:0.###} u. With a sharp cut the blob has a surface.",
+					$"Lower Cut blend (cutblend={suggested:0.###}), or 0 for a sharp cut",
+					"Or make the walls between the shapes and the cutters thicker" );
+			}
+		}
+
 		if ( mesh.FaceCount == 0 )
 		{
 			Fail(
 				"The shapes made no surface",
-				"The cutters removed everything, or every shape is smaller than one voxel.",
+				$"The cutters removed everything, or every shape is smaller than one voxel ({voxel:0.###} u).",
 				"Make the shapes bigger than the voxel, or the voxel smaller",
-				"Check the cutters do not cover the whole blob" );
+				"Check the cutters do not cover the whole blob",
+				"If the walls are thin, lower Cut blend" );
 		}
 
 		if ( Smooth.Clamped > 0 )
