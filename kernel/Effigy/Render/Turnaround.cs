@@ -94,6 +94,9 @@ public static class Turnaround
 			return scene;
 
 		var flesh = studio.Features.OfType<FleshMaterialFeature>().Where( x => !x.Suppressed ).ToList();
+		var clayBodies = new List<string>();
+		var lookBodies = new Dictionary<string, List<string>>();
+		var anyGuessed = false;
 
 		foreach ( var body in studio.Bodies )
 		{
@@ -123,6 +126,15 @@ public static class Turnaround
 				scene.Add( body.Mesh, PaintTextureSet.Shade( paint ) );
 				log?.Add( $"{name}: its paint ({paint.Width}² maps)" );
 			}
+			else if ( SlotLooks( studio, body.Mesh, guess: fallback is null, out var guessed ) is { Count: > 0 } looks )
+			{
+				// Hard-surface parts: each face shaded by its slot's look, on the whole mesh's normals.
+				scene.Add( body.Mesh, looks.ToDictionary( kv => kv.Key, kv => kv.Value.Shade() ), ShadeMaterial.Clay() );
+				var said = string.Join( ", ", looks.OrderBy( kv => kv.Key ).Select( kv => $"{kv.Key}={kv.Value.Preset ?? "custom"}" ) );
+				if ( !lookBodies.TryGetValue( said, out var names ) ) lookBodies[said] = names = new List<string>();
+				names.Add( name );
+				anyGuessed |= guessed;
+			}
 			else if ( fallback is not null )
 			{
 				var v = FleshMaterial.BakeVertices( body.Mesh, fallback );
@@ -139,11 +151,48 @@ public static class Turnaround
 			else
 			{
 				scene.Add( body.Mesh, ShadeMaterial.Clay() );
-				log?.Add( $"{name}: clay (no Flesh Material on it; add one, or pass preset=)" );
+				clayBodies.Add( name );
 			}
 		}
 
+		// One line for every clay body, not one each: a hard-surface model is mostly bodies with
+		// neither flesh nor a look, and forty identical lines buried the ones that mattered.
+		// Same for slot looks: one line per set of looks, naming the bodies that wear it.
+		foreach ( var (said, names) in lookBodies )
+			log?.Add( $"slot looks ({said}): {Names( names )}" );
+
+		if ( anyGuessed )
+			log?.Add( "some slot looks were guessed from the slot's name; set them with `material SLOT preset=…`" );
+
+		if ( clayBodies.Count > 0 )
+			log?.Add( $"clay: {Names( clayBodies )} " +
+				$"(no slot look, Flesh Material or preset=; give one with `material SLOT preset=…` — {SlotLook.PresetList})" );
+
 		return scene;
+	}
+
+	static string Names( List<string> names ) =>
+		names.Count <= 6 ? string.Join( ", ", names ) : $"{string.Join( ", ", names.Take( 5 ) )} and {names.Count - 5} more";
+
+	/// <summary>The looks of the slots a mesh's faces use: set ones from the studio, else guessed from
+	/// the slot's name when <paramref name="guess"/> (not when a preset= was asked for). Slots with neither are left out and render clay.</summary>
+	public static Dictionary<int, SlotLook> SlotLooks( PartStudio studio, PolyMesh mesh, bool guess, out bool guessed )
+	{
+		guessed = false;
+		var o = new Dictionary<int, SlotLook>();
+
+		foreach ( var slot in mesh.Faces.Select( f => f.Material ).Distinct() )
+		{
+			if ( studio.MaterialLooks.TryGetValue( slot, out var look ) && look is not null )
+				o[slot] = look;
+			else if ( guess && SlotLook.Guess( studio.NameForSlot( slot ) ) is { } g )
+			{
+				o[slot] = g;
+				guessed = true;
+			}
+		}
+
+		return o;
 	}
 
 	/// <summary>Render the views and lay them out as one labelled sheet. Writes nothing.</summary>

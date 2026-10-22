@@ -467,12 +467,35 @@ public static partial class BuildScript
 			case "material":
 			{
 				// material 1 materials/alley/brass.vmat — what slot 1 is exported as.
-				if ( args.Count < 2 || !int.TryParse( args[0], out var slot ) )
-					return Fail( r, "material needs a slot number and a .vmat path: material 1 materials/alley/brass.vmat" );
+				// material 2 [materials/pad/grip.vmat] preset=soft_rubber color=#202024 rough=0.8 metal=0 emit=#ff2010
+				// — and what it looks like: the renderers and the viewer shade with it, export writes it as the .vmat.
+				const string usage = "material SLOT [path.vmat] [preset=name] [color=#rrggbb] [rough=0..1] [metal=0..1] [emit=#rrggbb|none]";
 
-				studio.MaterialNames[slot] = args[1];
+				if ( args.Count < 2 || !int.TryParse( args[0], out var slot ) )
+					return Fail( r, $"material needs a slot number and a .vmat path or a look: {usage}" );
+
+				var path = args.Skip( 1 ).FirstOrDefault( a => !a.Contains( '=' ) );
+				var pairs = Pairs( args.Skip( 1 ).Where( a => a.Contains( '=' ) ) );
+
+				foreach ( var key in pairs.Keys )
+					if ( !SlotLook.IsKey( key ) )
+						return Fail( r, $"material has no option '{key}'. {usage}. Presets: {SlotLook.PresetList}" );
+
+				if ( path is not null )
+				{
+					studio.MaterialNames[slot] = path;
+					r.Log.Add( $"slot {slot} is {path}" );
+				}
+
+				if ( pairs.Count > 0 )
+				{
+					var look = SlotLook.Parse( pairs, studio.MaterialLooks.GetValueOrDefault( slot ), out var error );
+					if ( look is null ) return Fail( r, $"material {slot}: {error}" );
+					studio.MaterialLooks[slot] = look;
+					r.Log.Add( $"slot {slot} looks {look.Describe()}" );
+				}
+
 				studio.MarkDirty( 0 );
-				r.Log.Add( $"slot {slot} is {args[1]}" );
 				return true;
 			}
 
@@ -631,6 +654,7 @@ public static partial class BuildScript
 
 		var dir = Path.Combine( root, folder );
 		Directory.CreateDirectory( dir );
+		SlotLook.WriteVmats( studio, root, r.Log, r.Written );
 
 		var layout = new StringBuilder();
 		layout.AppendLine( "# part\tmodel\tpivot x\ty\tz\tsize x\ty\tz" );

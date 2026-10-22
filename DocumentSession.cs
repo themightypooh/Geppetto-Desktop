@@ -299,6 +299,11 @@ public sealed class DocumentSession
 		// materials at all, because every slot falls back to a neutral grey.
 		var vmdlMap = surveyMap is null ? ResolveVmdlMaterials( materialRoot, materialPaths ) : null;
 		var materialResolver = surveyMap?.Resolver ?? vmdlMap?.Resolver ?? new MaterialResolver( materialPaths, DocumentId );
+		// Slots the document gave a look win over any name-based colour.
+		if ( Studio is not null )
+			foreach ( var (slot, look) in Studio.MaterialLooks )
+				if ( look is not null )
+					materialResolver.SetOverride( slot, MaterialPalette.ForLook( Studio.NameForSlot( slot ), look ) );
 		mesh.ApplyMaterials( materialResolver );
 
 		MarionettePlayer? player = null;

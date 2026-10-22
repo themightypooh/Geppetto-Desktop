@@ -100,6 +100,11 @@ public static class StudioDocument
 			sb.Append( "materialscale " ).Append( slot ).Append( ' ' )
 				.Append( Num( scale.x ) ).Append( ' ' ).Append( Num( scale.y ) ).Append( '\n' );
 
+		// Only the slots that have a look, so documents without one keep their bytes.
+		foreach ( var (slot, look) in studio.MaterialLooks.OrderBy( kv => kv.Key ) )
+			if ( look is not null )
+				sb.Append( "materiallook " ).Append( slot ).Append( ' ' ).Append( look.Describe() ).Append( '\n' );
+
 		foreach ( var (id, name) in studio.BodyNames.OrderBy( kv => kv.Key, StringComparer.Ordinal ) )
 		{
 			if ( !string.IsNullOrWhiteSpace( id ) && !string.IsNullOrWhiteSpace( name ) )
@@ -596,6 +601,13 @@ public static class StudioDocument
 						new Vec2( ParseFloat( parts[1] ), ParseFloat( parts[2] ) ) );
 				}
 
+				continue;
+			}
+
+			if ( line.StartsWith( "materiallook " ) )
+			{
+				var (slot, rest) = Split( line[13..] );
+				studio.MaterialLooks[ParseInt( slot, 0 )] = SlotLook.FromLine( rest );
 				continue;
 			}
 

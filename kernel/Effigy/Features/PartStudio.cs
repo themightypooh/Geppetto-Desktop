@@ -74,6 +74,13 @@ public sealed class PartStudio
 	/// </summary>
 	public Dictionary<int, Vec2> MaterialScales = new();
 
+	/// <summary>
+	/// What each slot looks like, for the slots somebody gave a look (`material 2 preset=pcb_green`):
+	/// colour, roughness, metalness, glow. The renderers and the viewer shade the slot with it and
+	/// export writes it as the slot's .vmat. Absent means the slot has no look of its own.
+	/// </summary>
+	public Dictionary<int, SlotLook> MaterialLooks = new();
+
 	/// <summary>The name for a slot, falling back to the .vmat a Flesh Material wrote for it, then
 	/// the numbered default. Pass this straight to any of the exporters.
 	///

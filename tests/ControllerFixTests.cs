@@ -28,5 +28,41 @@ internal static class ControllerFixTests
 			var bad = Effigy.BuildScript.Run( new Effigy.PartStudio(), $"add Blob voxel=0.05 cutblend=0.5 shapes=\"{shell}\"" );
 			Check( !bad.Ok && bad.Error.Contains( "Cut blend" ) && bad.Error.Contains( "cutblend=" ), "diagnostic does not name cut blend: " + bad.Error );
 		} );
+		registry.Add( "controller-fixes", "slot looks: script, document, turnaround shading, vmat export", () =>
+		{
+			var dir = Path.Combine( Path.GetTempPath(), "effigy-slotlook-" + Guid.NewGuid().ToString( "N" ) );
+			var studio = new Effigy.PartStudio();
+			var run = Effigy.BuildScript.Run( studio,
+				"add Blob voxel=0.1 shapes=\"sphere 0,0,0 1 mat=1; sphere 2.5,0,0 0.6 mat=2\"\n" +
+				"material 1 preset=pcb_green\n" +
+				"material 2 materials/pad/led.vmat preset=led_emissive color=#00ff40 emit=#00ff40\n" +
+				$"export models/pad assets={dir}", dir );
+			Check( run.Ok, "script failed: " + run );
+			Check( studio.MaterialLooks[1].Preset == "pcb_green" && studio.MaterialLooks[2].Glows, "looks not stored" );
+			var bad = Effigy.BuildScript.Run( new Effigy.PartStudio(), "material 1 preset=chrome_moon" );
+			Check( !bad.Ok && bad.Error.Contains( "pcb_green" ), "bad preset does not list presets: " + bad.Error );
+
+			var text = Effigy.StudioDocument.Write( studio );
+			Check( text.Contains( "materiallook 1 color=#1f5c32" ), "look not saved:\n" + text );
+			var back = Effigy.StudioDocument.Read( text );
+			Check( Effigy.StudioDocument.Write( back ) == text, "look does not round-trip" );
+			Check( !Effigy.StudioDocument.Write( new Effigy.PartStudio() ).Contains( "materiallook" ), "empty document gained a line" );
+
+			var log = new List<string>();
+			var scene = Effigy.Render.Turnaround.Scene( studio, false, null, null, log );
+			Check( scene.FaceMaterials.Count == 1 && scene.FaceMaterials.Values.First().Count == 2, "faces not shaded per slot" );
+			Check( log.Any( l => l.Contains( "slot looks" ) ) && !log.Any( l => l.Contains( "clay" ) ), "log: " + string.Join( " | ", log ) );
+
+			var vmat = File.ReadAllText( Path.Combine( dir, "materials/pad/led.vmat" ) );
+			Check( vmat.Contains( "F_SELF_ILLUM 1" ) && vmat.Contains( "g_flMetalness" ), "vmat: " + vmat );
+			Check( run.Log.Any( l => l.Contains( "slot 1 has a look but no .vmat path" ) ), "pathless look not reported" );
+			Directory.Delete( dir, true );
+
+			var clay = new Effigy.PartStudio();
+			Check( Effigy.BuildScript.Run( clay, "add Blob voxel=0.1 shapes=\"sphere 0,0,0 1\"\nadd Blob voxel=0.1 shapes=\"sphere 3,0,0 1\"" ).Ok, "clay build" );
+			var clayLog = new List<string>();
+			Effigy.Render.Turnaround.Scene( clay, false, null, null, clayLog );
+			Check( clayLog.Count( l => l.Contains( "clay" ) ) == 1, "clay log not one line: " + string.Join( " | ", clayLog ) );
+		} );
 	}
 }

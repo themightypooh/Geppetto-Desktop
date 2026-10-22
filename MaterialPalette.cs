@@ -27,6 +27,20 @@ public static class MaterialPalette
 		}
 	}
 
+	/// <summary>A slot's own look (the `material SLOT preset=… color=…` a document saved), as a viewport
+	/// material. Wins over every name-based guess below; colours go linear as the shader expects.</summary>
+	public static MaterialDescriptor ForLook( string name, Effigy.SlotLook look )
+	{
+		static float L( float c ) => Effigy.Render.ShadedRender.SrgbToLinear( c );
+		return new MaterialDescriptor( name )
+		{
+			BaseColorFactor = new Effigy.Vec4( L( look.Color.x ), L( look.Color.y ), L( look.Color.z ), 1f ),
+			RoughnessFactor = look.Rough,
+			MetallicFactor = look.Metal,
+			EmissionFactor = new Effigy.Vec3( L( look.Emit.x ), L( look.Emit.y ), L( look.Emit.z ) ) * 1.5f,
+		};
+	}
+
 	public static Entry ForName( string name )
 	{
 		var key = (name ?? "").ToLowerInvariant();

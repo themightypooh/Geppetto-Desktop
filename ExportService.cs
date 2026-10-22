@@ -553,6 +553,12 @@ public sealed class ExportService
 			{
 				string matName = materialResolver( slot );
 				var entry = MaterialPalette.ForName( matName );
+				if ( session.Studio?.MaterialLooks.GetValueOrDefault( slot ) is { } look )
+				{
+					// The slot's own look, linear like the palette's entries.
+					var d = MaterialPalette.ForLook( matName, look );
+					entry = new MaterialPalette.Entry( matName, d.BaseColorFactor.x, d.BaseColorFactor.y, d.BaseColorFactor.z, d.RoughnessFactor, d.MetallicFactor );
+				}
 
 				mtlSb.Append( $"newmtl {matName}\n" );
 				mtlSb.Append( "Ka 1.000000 1.000000 1.000000\n" );
