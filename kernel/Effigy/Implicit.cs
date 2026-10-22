@@ -233,6 +233,111 @@ public sealed class SdfEllipsoid : SdfLeaf
 	public override Vec3 Max => Center + Vec3.One * _maxR;
 }
 
+/// <summary>
+/// A box, its edges rounded by <see cref="Round"/>, turned by <see cref="Rotation"/> about its centre.
+/// Exact distance (Quilez). The rounding is cut from inside the size, so a 4 u box stays 4 u wide.
+/// </summary>
+public sealed class SdfBox : SdfLeaf
+{
+	public Vec3 Center;
+	/// <summary>Half the size on each local axis.</summary>
+	public Vec3 Half;
+	public float Round;
+	public Xform Rotation;
+	readonly Xform _inverse;
+	readonly float _reach;
+
+	public SdfBox( Vec3 center, Vec3 size, float round = 0f, Xform? rotation = null )
+	{
+		Center = center;
+		Half = size * 0.5f;
+		Round = Math.Clamp( round, 0f, MathF.Min( Half.x, MathF.Min( Half.y, Half.z ) ) );
+		Rotation = rotation ?? Xform.Identity;
+		_inverse = Rotation.Inverse;
+		_reach = Half.Length;
+	}
+
+	public override float Eval( Vec3 p )
+	{
+		var q = _inverse.TransformDirection( p - Center );
+		var dx = MathF.Abs( q.x ) - Half.x + Round;
+		var dy = MathF.Abs( q.y ) - Half.y + Round;
+		var dz = MathF.Abs( q.z ) - Half.z + Round;
+		var outside = new Vec3( MathF.Max( dx, 0f ), MathF.Max( dy, 0f ), MathF.Max( dz, 0f ) ).Length;
+		return outside + MathF.Min( MathF.Max( dx, MathF.Max( dy, dz ) ), 0f ) - Round;
+	}
+
+	public override Vec3 Min => Center - Vec3.One * _reach;
+	public override Vec3 Max => Center + Vec3.One * _reach;
+}
+
+/// <summary>A cylinder between two ends with flat caps, the cap rim rounded by <see cref="Round"/>.
+/// Exact distance (Quilez). Unlike a capsule its ends stop at A and B.</summary>
+public sealed class SdfCylinder : SdfLeaf
+{
+	public Vec3 A, B;
+	public float Radius, Round;
+
+	public SdfCylinder( Vec3 a, Vec3 b, float radius, float round = 0f )
+	{
+		A = a;
+		B = b;
+		Radius = radius;
+		Round = Math.Clamp( round, 0f, MathF.Min( radius, (b - a).Length * 0.5f ) );
+	}
+
+	public override float Eval( Vec3 p )
+	{
+		var axis = B - A;
+		var length = MathF.Max( axis.Length, 1e-9f );
+		var dir = axis / length;
+		var pa = p - A;
+		var along = Vec3.Dot( pa, dir );
+		var across = (pa - dir * along).Length;
+
+		// 2D box distance in (radial, axial), with the rim rounded.
+		var dr = across - Radius + Round;
+		var dh = MathF.Abs( along - length * 0.5f ) - length * 0.5f + Round;
+		var outside = MathF.Sqrt( MathF.Max( dr, 0f ) * MathF.Max( dr, 0f ) + MathF.Max( dh, 0f ) * MathF.Max( dh, 0f ) );
+		return outside + MathF.Min( MathF.Max( dr, dh ), 0f ) - Round;
+	}
+
+	public override Vec3 Min => new(
+		MathF.Min( A.x, B.x ) - Radius, MathF.Min( A.y, B.y ) - Radius, MathF.Min( A.z, B.z ) - Radius );
+
+	public override Vec3 Max => new(
+		MathF.Max( A.x, B.x ) + Radius, MathF.Max( A.y, B.y ) + Radius, MathF.Max( A.z, B.z ) + Radius );
+}
+
+/// <summary>A ring: <see cref="Major"/> from the centre to the middle of the tube, <see cref="Minor"/>
+/// the tube's radius. It lies in the local XY plane (around Z) before <see cref="Rotation"/>.</summary>
+public sealed class SdfTorus : SdfLeaf
+{
+	public Vec3 Center;
+	public float Major, Minor;
+	public Xform Rotation;
+	readonly Xform _inverse;
+
+	public SdfTorus( Vec3 center, float major, float minor, Xform? rotation = null )
+	{
+		Center = center;
+		Major = major;
+		Minor = minor;
+		Rotation = rotation ?? Xform.Identity;
+		_inverse = Rotation.Inverse;
+	}
+
+	public override float Eval( Vec3 p )
+	{
+		var q = _inverse.TransformDirection( p - Center );
+		var ring = MathF.Sqrt( q.x * q.x + q.y * q.y ) - Major;
+		return MathF.Sqrt( ring * ring + q.z * q.z ) - Minor;
+	}
+
+	public override Vec3 Min => Center - Vec3.One * (Major + Minor);
+	public override Vec3 Max => Center + Vec3.One * (Major + Minor);
+}
+
 /// <summary>A polyline swept with a radius at every point: a tendril, a gut, a vein.</summary>
 public sealed class SdfTube : SdfLeaf
 {
@@ -1509,7 +1614,21 @@ public static class SurfaceNets
 		var mesh = new PolyMesh( positions, faces );
 
 		var nearest = new Sdf[positions.Count];
-		Parallel.For( 0, positions.Count, i => { nearest[i] = sdf.Nearest( positions[i], band ); } );
+		// A big blend pushes the skin further than the band from every leaf that made it. Such a vertex
+		// used to come back unlabelled and the caller's default slot showed through as a ragged
+		// fringe where the blend was deepest; widen the search until something owns it.
+		var reach = (sdf.Max - sdf.Min).Length + band;
+		Parallel.For( 0, positions.Count, i =>
+		{
+			var wide = band;
+			var leaf = sdf.Nearest( positions[i], wide );
+			while ( leaf is null && wide < reach )
+			{
+				wide *= 2f;
+				leaf = sdf.Nearest( positions[i], wide );
+			}
+			nearest[i] = leaf;
+		} );
 
 		return new Result
 		{

@@ -7,7 +7,7 @@ using System.Linq;
 namespace Effigy;
 
 /// <summary>
-/// Shapes fused into one skin: spheres, capsules, cones, ellipsoids and tubes smooth-unioned, with
+/// Shapes fused into one skin: spheres, ellipsoids, capsules, cones, tubes, boxes, cylinders and tori smooth-unioned, with
 /// cutters smooth-subtracted, meshed by <see cref="SurfaceNets"/> at a voxel size.
 ///
 /// WHY THIS IS A FEATURE. The implicit kernel (<see cref="Sdf"/>, <see cref="SdfBlend"/>,
@@ -24,9 +24,20 @@ namespace Effigy;
 ///   capsule 0,0,0 0,0,12 3
 ///   cone 0,0,0 4 0,0,10 1.5          (round cone: end A, its radius, end B, its radius)
 ///   tube 0,0,0|4,0,6|0,0,12 2|1.5|1  (polyline through |-separated points; one radius or one per point)
+///   box 0,0,5 8,4,2 r=0.3            (centre and full size; r= rounds the edges inside that size)
+///   cylinder 0,0,0 0,0,3 2 r=0.2     (two ends and a radius; flat caps, r= rounds the rim)
+///   torus 0,0,5 4 0.5                (centre, ring radius, tube radius; lies around Z)
 ///   -sphere 0,-5,10 2.5              (cut a hole)
+///   paint box 0,0,6 2,2,1 mat=3      (no surface of its own: skin inside it takes slot 3)
 ///
-/// Any shape may end with mat=N for the material slot of the skin it makes.
+/// Any shape may end with mat=N for the material slot of the skin it makes. Ellipsoid, box,
+/// cylinder and torus take rot=x,y,z (degrees, XYZ order) about their centre.
+///
+/// PAINT EXISTS FOR WHAT HAS NO SHAPE. A face takes the slot of the shape nearest its corner, so a
+/// window, label or inlay flush with the shell (nothing proud of it) can never get a slot of its own
+/// without changing the skin. A paint shape is not part of the field: after meshing, every face
+/// whose centre lies inside it (within half a voxel) takes its slot, and a later paint wins over an
+/// earlier one.
 ///
 /// THE RESULT HAS NO UVS. A voxel skin has no parameterisation to inherit; unwrap it (UV project,
 /// Unwrap) before baking. Said in the warning rather than left for the bake to refuse.
@@ -61,11 +72,20 @@ public sealed class BlobFeature : Feature
 	{
 		var adds = new List<Sdf>();
 		var cuts = new List<Sdf>();
+		var paints = new List<Sdf>();
 
 		foreach ( var (text, index) in (Shapes.Value ?? "").Split( ';' ).Select( ( s, i ) => (s.Trim(), i) ) )
 		{
 			if ( text.Length == 0 )
 				continue;
+
+			if ( text.StartsWith( "paint ", StringComparison.OrdinalIgnoreCase ) )
+			{
+				if ( !text.Contains( "mat=", StringComparison.OrdinalIgnoreCase ) )
+					BadShape( index + 1, text, "a paint shape needs mat=N, the slot it paints" );
+				paints.Add( ParseShape( text[6..].Trim(), index + 1 ) );
+				continue;
+			}
 
 			var cutter = text.StartsWith( '-' );
 			var leaf = ParseShape( cutter ? text[1..].Trim() : text.TrimStart( '+' ).Trim(), index + 1 );
@@ -139,23 +159,69 @@ public sealed class BlobFeature : Feature
 		foreach ( var face in mesh.Faces )
 			face.Material = result.Nearest[face.Indices[0]]?.Material ?? Material.Clamped;
 
+		var painted = Paint( mesh, paints, voxel * 0.5f );
+
 		ctx.Bodies.Add( new Body( ctx.NewBodyId(), Name, mesh ) );
 
 		Warning = $"{mesh.FaceCount:N0} quads from {adds.Count} shape(s)" + (cuts.Count > 0 ? $" and {cuts.Count} cutter(s)" : "")
+			+ (paints.Count > 0 ? $", {painted:N0} painted by {paints.Count} paint shape(s)" : "")
 			+ ". It has no UVs yet: add a UV project (Unwrap) before baking.";
+	}
+
+	/// <summary>Give every face whose centre is inside a paint shape that shape's slot; later paints
+	/// win. Returns how many faces were painted.</summary>
+	public static int Paint( PolyMesh mesh, IReadOnlyList<Sdf> paints, float reach )
+	{
+		if ( paints.Count == 0 )
+			return 0;
+
+		var count = 0;
+
+		foreach ( var face in mesh.Faces )
+		{
+			var c = Vec3.Zero;
+			foreach ( var v in face.Indices )
+				c += mesh.Positions[v];
+			c /= face.Indices.Length;
+
+			for ( var i = paints.Count - 1; i >= 0; i-- )
+			{
+				if ( !paints[i].InBounds( c, reach ) || paints[i].Eval( c ) > reach )
+					continue;
+
+				face.Material = paints[i].Material;
+				count++;
+				break;
+			}
+		}
+
+		return count;
 	}
 
 	Sdf ParseShape( string text, int number )
 	{
 		var words = text.Split( (char[])null, StringSplitOptions.RemoveEmptyEntries ).ToList();
 		var material = Material.Clamped;
+		var round = 0f;
+		Xform? rotation = null;
+		var rotated = false;
 
 		for ( var i = words.Count - 1; i >= 0; i-- )
 		{
-			if ( !words[i].StartsWith( "mat=", StringComparison.OrdinalIgnoreCase ) )
+			var w = words[i];
+			if ( w.StartsWith( "mat=", StringComparison.OrdinalIgnoreCase ) )
+				material = (int)Num( w[4..], number, text );
+			else if ( w.StartsWith( "r=", StringComparison.OrdinalIgnoreCase ) )
+				round = Num( w[2..], number, text );
+			else if ( w.StartsWith( "rot=", StringComparison.OrdinalIgnoreCase ) )
+			{
+				var deg = Pt( w[4..], number, text );
+				rotation = Xform.FromEulerXyz( deg * (MathF.PI / 180f) );
+				rotated = true;
+			}
+			else
 				continue;
 
-			material = (int)Num( words[i][4..], number, text );
 			words.RemoveAt( i );
 		}
 
@@ -165,20 +231,41 @@ public sealed class BlobFeature : Feature
 		var kind = words[0].ToLowerInvariant();
 		var a = words.Skip( 1 ).ToList();
 
+		if ( rotated && kind is not ("ellipsoid" or "box" or "cylinder" or "torus") )
+			BadShape( number, text, $"rot= turns an ellipsoid, box, cylinder or torus; a {kind} has nothing to turn" );
+		if ( round != 0f && kind is not ("box" or "cylinder") )
+			BadShape( number, text, $"r= rounds a box or a cylinder; a {kind} is already round" );
+
 		SdfLeaf leaf = kind switch
 		{
 			"sphere" when a.Count == 2 => new SdfSphere( Pt( a[0], number, text ), Num( a[1], number, text ) ),
-			"ellipsoid" when a.Count == 2 => new SdfEllipsoid( Pt( a[0], number, text ), Pt( a[1], number, text ) ),
+			"ellipsoid" when a.Count == 2 => new SdfEllipsoid( Pt( a[0], number, text ), Pt( a[1], number, text ), rotation ),
 			"capsule" when a.Count == 3 => new SdfCapsule( Pt( a[0], number, text ), Pt( a[1], number, text ), Num( a[2], number, text ) ),
 			"cone" when a.Count == 4 => new SdfRoundCone( Pt( a[0], number, text ), Num( a[1], number, text ), Pt( a[2], number, text ), Num( a[3], number, text ) ),
 			"tube" when a.Count == 2 => Tube( a[0], a[1], number, text ),
-			"sphere" or "ellipsoid" or "capsule" or "cone" or "tube" => BadShape( number, text, $"{kind} takes {Usage( kind )}" ),
-			_ => BadShape( number, text, $"'{kind}' is not a shape; use sphere, ellipsoid, capsule, cone or tube" ),
+			"box" when a.Count == 2 => new SdfBox( Pt( a[0], number, text ), Pt( a[1], number, text ), round, rotation ),
+			"cylinder" when a.Count == 3 => Cylinder( Pt( a[0], number, text ), Pt( a[1], number, text ), Num( a[2], number, text ), round, rotation ),
+			"torus" when a.Count == 3 => new SdfTorus( Pt( a[0], number, text ), Num( a[1], number, text ), Num( a[2], number, text ), rotation ),
+			"sphere" or "ellipsoid" or "capsule" or "cone" or "tube" or "box" or "cylinder" or "torus" => BadShape( number, text, $"{kind} takes {Usage( kind )}" ),
+			_ => BadShape( number, text, $"'{kind}' is not a shape; use sphere, ellipsoid, capsule, cone, tube, box, cylinder or torus" ),
 		};
 
 		leaf.Material = material;
 		leaf.Tag = $"shape{number}";
 		return leaf;
+	}
+
+	/// <summary>A cylinder's rot= turns its two ends about their midpoint.</summary>
+	static SdfLeaf Cylinder( Vec3 a, Vec3 b, float radius, float round, Xform? rotation )
+	{
+		if ( rotation is { } r )
+		{
+			var mid = (a + b) * 0.5f;
+			a = mid + r.TransformDirection( a - mid );
+			b = mid + r.TransformDirection( b - mid );
+		}
+
+		return new SdfCylinder( a, b, radius, round );
 	}
 
 	SdfLeaf Tube( string pointsText, string radiiText, int number, string text )
@@ -204,6 +291,9 @@ public sealed class BlobFeature : Feature
 		"ellipsoid" => "a centre and three radii: ellipsoid 0,0,10 6,4,8",
 		"capsule" => "two ends and a radius: capsule 0,0,0 0,0,12 3",
 		"cone" => "an end, its radius, the other end, its radius: cone 0,0,0 4 0,0,10 1.5",
+		"box" => "a centre and a full size: box 0,0,5 8,4,2 [r=0.3] [rot=0,0,45]",
+		"cylinder" => "two ends and a radius: cylinder 0,0,0 0,0,3 2 [r=0.2] [rot=90,0,0]",
+		"torus" => "a centre, a ring radius and a tube radius: torus 0,0,5 4 0.5 [rot=90,0,0]",
 		_ => "points and radii: tube 0,0,0|4,0,6|0,0,12 2|1.5|1",
 	};
 

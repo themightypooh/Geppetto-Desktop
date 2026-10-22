@@ -73,5 +73,70 @@ internal static class ControllerFixTests
 			var check = Effigy.MeshValidator.Validate( studio.Bodies[0].Mesh );
 			Check( check.NonManifoldEdges == 0 && check.BoundaryEdges == 0, $"shell: {check.NonManifoldEdges} non-manifold, {check.BoundaryEdges} open edges" );
 		} );
+		registry.Add( "controller-fixes", "blob box, cylinder and torus are exact and turn with rot=", () =>
+		{
+			static bool Near( float a, float b ) => MathF.Abs( a - b ) < 1e-3f;
+			var turn = Effigy.Xform.FromEulerXyz( new Effigy.Vec3( 0, 0, MathF.PI / 2f ) );
+			var box = new Effigy.SdfBox( Effigy.Vec3.Zero, new Effigy.Vec3( 4, 2, 2 ), 0f, turn );
+			Check( Near( box.Eval( new( 0, 2, 0 ) ), 0f ) && Near( box.Eval( new( 3, 0, 0 ) ), 2f ), "box rotation" );
+			var rounded = new Effigy.SdfBox( Effigy.Vec3.Zero, new Effigy.Vec3( 4, 4, 4 ), 0.5f );
+			Check( Near( rounded.Eval( new( 2, 0, 0 ) ), 0f ) && rounded.Eval( new( 2, 2, 2 ) ) > 0.3f, "rounded box keeps its size, rounds corners" );
+			var cyl = new Effigy.SdfCylinder( Effigy.Vec3.Zero, new Effigy.Vec3( 0, 0, 3 ), 2f );
+			Check( Near( cyl.Eval( new( 0, 0, 4 ) ), 1f ) && Near( cyl.Eval( new( 3, 0, 1.5f ) ), 1f ) && Near( cyl.Eval( new( 0, 0, 1.5f ) ), -1.5f ), "cylinder caps are flat" );
+			var ring = new Effigy.SdfTorus( Effigy.Vec3.Zero, 4f, 0.5f, Effigy.Xform.FromEulerXyz( new Effigy.Vec3( MathF.PI / 2f, 0, 0 ) ) );
+			Check( Near( ring.Eval( new( 0, 0, 4 ) ), -0.5f ) && Near( ring.Eval( Effigy.Vec3.Zero ), 3.5f ), "torus rotation" );
+
+			var studio = new Effigy.PartStudio();
+			var run = Effigy.BuildScript.Run( studio, "add Blob voxel=0.1 blend=0.2 shapes=\"box 0,0,0 4,2,1 r=0.2 rot=0,0,30; cylinder 0,0,0 0,0,2 0.5; torus 0,0,2 1 0.2 rot=90,0,0\"" );
+			Check( run.Ok, "new shapes failed: " + run );
+			var mesh = studio.Bodies[0].Mesh;
+			var v = Effigy.MeshValidator.Validate( mesh );
+			Check( v.NonManifoldEdges == 0 && v.BoundaryEdges == 0, $"new shapes not closed: {v.NonManifoldEdges}/{v.BoundaryEdges}" );
+			var top = mesh.Positions.Max( p => p.z );
+			Check( MathF.Abs( top - 3.2f ) < 0.15f, $"torus stood up on its edge should reach z=3.2, reached {top}" );
+
+			var sphereRot = Effigy.BuildScript.Run( new Effigy.PartStudio(), "add Blob shapes=\"sphere 0,0,0 1 rot=0,0,10\"" );
+			Check( !sphereRot.Ok && sphereRot.Error.Contains( "rot=" ), "rot= on a sphere not refused: " + sphereRot.Error );
+		} );
+		registry.Add( "controller-fixes", "blob paint shapes give thin overlays their own slot", () =>
+		{
+			// A thin lens on a shell under a deep blend keeps its own slot (it used to fall back to slot 0).
+			var lensed = new Effigy.PartStudio();
+			Check( Effigy.BuildScript.Run( lensed, "add Blob voxel=0.05 blend=0.6 shapes=\"sphere 0,0,0 2 mat=1; cylinder 0,0,1.95 0,0,2.03 0.6 mat=2\"" ).Ok, "lens build" );
+			bool OnTop( Effigy.PolyMesh m, Effigy.Face f, float radius )
+			{
+				var c = Effigy.Vec3.Zero;
+				foreach ( var i in f.Indices ) c += m.Positions[i];
+				c /= f.Indices.Length;
+				return c.z > 1.9f && MathF.Sqrt( c.x * c.x + c.y * c.y ) < radius;
+			}
+
+			var lm = lensed.Bodies[0].Mesh;
+			var lensTop = lm.Faces.Where( f => OnTop( lm, f, 0.4f ) ).ToList();
+			Check( lensTop.Count > 20 && lensTop.All( f => f.Material == 2 ), $"lens lost its slot: {string.Join( " ", lensTop.GroupBy( f => f.Material ).Select( g => $"{g.Key}x{g.Count()}" ) )}" );
+
+			// A window flush with the shell has no shape of its own: only paint can give it a slot.
+			var plain = new Effigy.PartStudio();
+			Check( Effigy.BuildScript.Run( plain, "add Blob voxel=0.05 shapes=\"sphere 0,0,0 2 mat=1\"" ).Ok, "plain build" );
+			var painted = new Effigy.PartStudio();
+			var run = Effigy.BuildScript.Run( painted, "add Blob voxel=0.05 shapes=\"sphere 0,0,0 2 mat=1; paint cylinder 0,0,1.5 0,0,2.5 0.4 mat=2; paint sphere 0,0,2 0.15 mat=4\"" );
+			Check( run.Ok, "paint build failed: " + run );
+			var pm = plain.Bodies[0].Mesh;
+			var m = painted.Bodies[0].Mesh;
+			var window = m.Faces.Where( f => OnTop( m, f, 0.35f ) ).ToList();
+			Check( window.Count > 20 && window.All( f => f.Material is 2 or 4 ), $"paint left {window.Count( f => f.Material is not (2 or 4) )} window faces unpainted" );
+			Check( window.Any( f => f.Material == 4 ), "later paint did not win" );
+			Check( m.Faces.Count( f => f.Material == 1 ) > m.FaceCount * 9 / 10, "paint spread past its shape" );
+			Check( pm.FaceCount == m.FaceCount && Effigy.MeshValidator.Validate( m ).BoundaryEdges == 0, "paint changed the skin" );
+
+			// A deep blend used to leave its fillet unlabelled, so slot 0 showed through as a fringe.
+			var deep = new Effigy.PartStudio();
+			Check( Effigy.BuildScript.Run( deep, "add Blob voxel=0.04 blend=0.6 shapes=\"box 0,0,0 6,4,1 r=0.3 mat=1; torus 1.4,0,0.6 0.7 0.15 mat=3\"" ).Ok, "deep blend build" );
+			var stray = deep.Bodies[0].Mesh.Faces.Count( f => f.Material == 0 );
+			Check( stray == 0, $"{stray} faces of a deep blend fell back to slot 0" );
+
+			var noMat = Effigy.BuildScript.Run( new Effigy.PartStudio(), "add Blob shapes=\"sphere 0,0,0 1; paint sphere 0,0,1 0.3\"" );
+			Check( !noMat.Ok && noMat.Error.Contains( "mat=" ), "paint without mat= not refused: " + noMat.Error );
+		} );
 	}
 }
