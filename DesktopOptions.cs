@@ -13,6 +13,8 @@ public sealed class DesktopOptions
 	public ViewSettings View = new();
 	public AntiAliasingMode AntiAliasing;
 	public string Hdri;
+	/// <summary>--section y&gt;0: headless renders keep one side of an axis plane, to look inside (--clip is the animation).</summary>
+	public Effigy.ClipPlane? Section;
 	public string WatchRun;
 	public float ShadowRadius = 2f;
 	public bool GroundShadow = true;
@@ -27,7 +29,7 @@ public sealed class DesktopOptions
 	public int ShotFrame;
 	public bool FogFallback;
 	public float? Time, Yaw, Pitch;
-	public const string Usage = "Geppetto: [--model file.effigy|file.fbx] [--clip file.riganim] [--animate] [--time seconds] [--frames N] [--size WxH] [--screenshot file.png] [--stats] [--no-vsync] [--list-bones] [--iso] [--headless] [--serve] [--exposure factor] [--yaw deg] [--pitch deg] [--turntable] [--wireframe] [--fog opticalDepth] [--fog-fallback] [--live particles,hair,cloth,instances] [--modifiers subsurf,decimate,retopo,smooth,displace,shrinkwrap,morph] [--motion-blur shutter] [--shot-frame N] [--aa none|taa|msaa4] [--hdri world.hdr] [--shadow-radius texels] [--no-ground-shadow] [--view-transform agx|standard] [--look none|punchy] [--view-exposure stops] [--gamma factor] [--white-balance kelvin] [--tint value] [--serve --watch-run NEW_OR_EXISTING_RUN_DIRECTORY]";
+	public const string Usage = "Geppetto: [--model file.effigy|file.fbx] [--clip file.riganim] [--animate] [--time seconds] [--frames N] [--size WxH] [--screenshot file.png] [--stats] [--no-vsync] [--list-bones] [--iso] [--headless] [--serve] [--exposure factor] [--yaw deg] [--pitch deg] [--turntable] [--wireframe] [--section y>0] [--fog opticalDepth] [--fog-fallback] [--live particles,hair,cloth,instances] [--modifiers subsurf,decimate,retopo,smooth,displace,shrinkwrap,morph] [--motion-blur shutter] [--shot-frame N] [--aa none|taa|msaa4] [--hdri world.hdr] [--shadow-radius texels] [--no-ground-shadow] [--view-transform agx|standard] [--look none|punchy] [--view-exposure stops] [--gamma factor] [--white-balance kelvin] [--tint value] [--serve --watch-run NEW_OR_EXISTING_RUN_DIRECTORY]";
 
 	public static DesktopOptions Parse( string[] args )
 	{
@@ -149,6 +151,13 @@ public sealed class DesktopOptions
 						throw new ArgumentException( "--pitch requires a finite float." );
 					result.Pitch = pitch;
 					break;
+				case "--section":
+				{
+					if ( !Effigy.ClipPlane.TryParse( Value(), out var plane, out var why ) )
+						throw new ArgumentException( $"--section: {why}" );
+					result.Section = plane;
+					break;
+				}
 				case "--animate": result.Animate = true; break;
 				case "--turntable": result.Turntable = true; break;
 				case "--no-ground-shadow": result.GroundShadow = false; break;

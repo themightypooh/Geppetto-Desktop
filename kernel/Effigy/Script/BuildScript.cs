@@ -23,7 +23,7 @@ namespace Effigy;
 ///   fix Torso all
 ///   remedy Stroke1                       (press a failing feature's fix button: Subdivide above, …)
 ///   add Stroke bodies=Sac … inkey=sac_swell   (sculpt into a finished shape key)
-///   render out/torso.png view=sheet
+///   render out/torso.png view=sheet [clip=y>0]   (clip= keeps one side of a plane, to see inside)
 ///   describe
 ///   clearance Button Shell min=0.02      (gap, or overlap volume and depth; no names = every pair)
 ///   match front reference.png out/match.png
@@ -300,9 +300,18 @@ public static partial class BuildScript
 					FocusBodyId = opts.TryGetValue( "focus", out var focus ) ? ModelMeasure.FindBody( studio, focus )?.Id : null,
 				};
 
+				var bodies = studio.Bodies;
+				if ( opts.TryGetValue( "clip", out var clipSpec ) )
+				{
+					if ( !ClipPlane.TryParse( clipSpec, out var plane, out var clipWhy ) )
+						return Fail( r, clipWhy );
+					bodies = bodies.Select( b => b.Mesh is null ? b : new Body( b.Id, b.Name, MeshClip.Section( b.Mesh, plane ) )
+						{ Visible = b.Visible, FeatureId = b.FeatureId, IsGarment = b.IsGarment, IsGarmentDetail = b.IsGarmentDetail, IsReference = b.IsReference, Layer = b.Layer, LayerAllowance = b.LayerAllowance } ).ToList();
+				}
+
 				Directory.CreateDirectory( Path.GetDirectoryName( Path.GetFullPath( path ) ) ?? "." );
 
-				ModelRender.Named( studio.Bodies, viewName, size, options, studio.Rig ).SavePng( path );
+				ModelRender.Named( bodies, viewName, size, options, studio.Rig ).SavePng( path );
 
 				r.Written.Add( path );
 				r.Log.Add( $"rendered {viewName} to {path}" );
@@ -311,7 +320,7 @@ public static partial class BuildScript
 
 			case "turnaround":
 			{
-				// turnaround out/turn [shade=clay|material] [size=512] [views=front,quarter,side,back] [name=x] [focus=Body]
+				// turnaround out/turn [shade=clay|material] [size=512] [views=front,quarter,side,back] [name=x] [focus=Body] [clip=y>0]
 				// File ▸ Render Turnaround, from a script: the sheet and one picture per view.
 				if ( args.Count < 1 )
 					return Fail( r, "turnaround needs a folder: turnaround out/turn [shade=clay|material] [size=512] [views=front,quarter,side,back] [name=model] [focus=Body]" );
@@ -320,8 +329,8 @@ public static partial class BuildScript
 				var opts = Pairs( args.Skip( 1 ) );
 
 				foreach ( var key in opts.Keys )
-					if ( key is not ("shade" or "size" or "views" or "name" or "focus" or "elevation" or "ss" or "aa" or "preset") )
-						return Fail( r, $"turnaround has no option '{key}'. Options: shade, size, views, name, focus, elevation, ss, preset." );
+					if ( key is not ("shade" or "size" or "views" or "name" or "focus" or "elevation" or "ss" or "aa" or "preset" or "clip") )
+						return Fail( r, $"turnaround has no option '{key}'. Options: shade, size, views, name, focus, elevation, ss, aa, preset, clip." );
 
 				var look = opts.GetValueOrDefault( "shade", "clay" ).ToLowerInvariant();
 				if ( look is not ("clay" or "material") )
@@ -345,6 +354,13 @@ public static partial class BuildScript
 					if ( focusBody is null )
 						return Fail( r, $"focus={focusName}: no body called that." );
 					options.FocusBodyId = focusBody.Id;
+				}
+
+				if ( opts.TryGetValue( "clip", out var turnClip ) )
+				{
+					if ( !ClipPlane.TryParse( turnClip, out var plane, out var clipWhy ) )
+						return Fail( r, clipWhy );
+					options.Clip = plane;
 				}
 
 				if ( opts.TryGetValue( "preset", out var preset ) && (options.Fallback = FleshMaterial.Preset( preset )) is null )
@@ -1550,7 +1566,7 @@ public static partial class BuildScript
 	}
 
 	/// <summary>
-	/// `render out.png shade=material|clay [views=4] [size=512] [elevation=12] [preset=Wet gore] [focus=Body] [label=OURS]`:
+	/// `render out.png shade=material|clay [views=4] [size=512] [elevation=12] [preset=Wet gore] [focus=Body] [label=OURS] [clip=y>0]`:
 	/// a lit turnaround through ShadedRender, for judging how a thing LOOKS (wet, glossy, translucent)
 	/// rather than measuring it. shade=material shows each body as its Flesh Material feature baked it
 	/// (maps or per-vertex); a body with none shows its paint layers if it has any, else takes
@@ -1572,6 +1588,13 @@ public static partial class BuildScript
 
 		// The scene Render Turnaround draws, so the script's sheet and the editor's match.
 		var scene = Turnaround.Scene( studio, mode == "clay", focus?.Id, fallback, r.Log );
+
+		if ( opts.TryGetValue( "clip", out var clipSpec ) )
+		{
+			if ( !ClipPlane.TryParse( clipSpec, out var plane, out var clipWhy ) )
+				return Fail( r, clipWhy );
+			scene.Clip = plane;
+		}
 
 		if ( scene.Items.Count == 0 )
 			return Fail( r, focus is null ? "Nothing to render: no visible body has faces." : $"{focus.Name ?? focus.Id} has no faces to render." );

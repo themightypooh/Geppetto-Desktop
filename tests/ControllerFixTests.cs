@@ -164,6 +164,49 @@ internal static class ControllerFixTests
 			Check( run.Log.Count == 1 + 6, $"every pair of 4 bodies is 6 lines, got {run.Log.Count - 1}" );
 			Check( !Effigy.BuildScript.Run( studio, "clearance A" ).Ok && !Effigy.BuildScript.Run( studio, "clearance A A" ).Ok, "one name / same body accepted" );
 		} );
+		registry.Add( "controller-fixes", "clip plane cuts renders open: welded section, shaded half, script render and turnaround", () =>
+		{
+			Check( Effigy.ClipPlane.TryParse( "y>0", out var keepLeft, out _ ) && keepLeft.Keeps( new( 0, 1, 0 ) ) && !keepLeft.Keeps( new( 0, -1, 0 ) ), "y>0" );
+			Check( Effigy.ClipPlane.TryParse( "x <= 1.5", out var below, out _ ) && below.Keeps( new( 1, 0, 0 ) ) && !below.Keeps( new( 2, 0, 0 ) ) && below.Keeps( new( 1.5f, 0, 0 ) ), "x<=1.5" );
+			Check( !Effigy.ClipPlane.TryParse( "q>0", out _, out var badAxis ) && badAxis.Contains( "y>0" ), "bad axis: " + badAxis );
+			Check( !Effigy.ClipPlane.TryParse( "z>abc", out _, out var badNum ) && badNum.Contains( "not a number" ), "bad number: " + badNum );
+
+			var studio = new Effigy.PartStudio();
+			Check( Effigy.BuildScript.Run( studio, "add Blob name=Ball voxel=0.1 shapes=\"sphere 0,0,1 1\"" ).Ok, "ball" );
+			var ball = Effigy.ModelMeasure.FindBody( studio, "Ball" ).Mesh;
+			var half = Effigy.MeshClip.Section( ball, keepLeft );
+			Check( half.Positions.All( p => p.y >= -1e-4f ), "a kept vertex is on the cut side" );
+			Check( half.Positions.Count < ball.Positions.Count * 0.7f && half.Faces.Count > ball.Faces.Count * 0.4f, $"not welded: {half.Positions.Count} verts for {half.Faces.Count} faces" );
+			var open = Effigy.MeshValidator.Validate( half );
+			Check( open.NonManifoldEdges == 0 && open.BoundaryEdges > 0, $"section should be one open rim: {open}" );
+
+			// Shaded: from the front (+x) the +y half is on the right of the frame, so y>0 leaves the left empty.
+			int Covered( Effigy.ClipPlane? clip, bool left )
+			{
+				var scene = new Effigy.Render.ShadeScene { Floor = false, Clip = clip, Coverage = 1 };
+				scene.Add( ball, Effigy.Render.ShadeMaterial.Clay() );
+				scene.StudioLights( new Effigy.Vec3( -1, 0, 0 ) );
+				var empty = new Effigy.Render.ShadeScene { Floor = false, Coverage = 1 };
+				var camera = new Effigy.Render.ShadeCamera( new Effigy.Vec3( 6, 0, 1 ), new Effigy.Vec3( 0, 0, 1 ), 30f );
+				var img = Effigy.Render.ShadedRender.Render( scene, camera, 64, 64 );
+				var bg = Effigy.Render.ShadedRender.Render( empty, camera, 64, 64 );
+				var n = 0;
+				for ( var y = 0; y < 64; y++ )
+					for ( var x = left ? 0 : 34; x < (left ? 30 : 64); x++ )
+						if ( img.Pixels[y * 64 + x] != bg.Pixels[y * 64 + x] ) n++;
+				return n;
+			}
+			Check( Covered( null, true ) > 200 && Covered( keepLeft, true ) == 0, $"left half not cut away: {Covered( keepLeft, true )} px" );
+			Check( Covered( keepLeft, false ) > 200, "kept half not drawn" );
+
+			var dir = Path.Combine( Path.GetTempPath(), "effigy-clip-test" );
+			var run = Effigy.BuildScript.Run( studio, $"render {dir}/shaded.png shade=clay views=1 size=64 clip=y>0\nrender {dir}/wire.png view=front size=64 clip=y>0\nturnaround {dir}/turn size=64 views=front clip=z<1" );
+			Check( run.Ok, "script clip: " + run.Error );
+			Check( !Effigy.BuildScript.Run( studio, $"render {dir}/bad.png shade=clay clip=q>0" ).Ok, "bad clip accepted" );
+			Check( Effigy.ModelMeasure.FindBody( studio, "Ball" ).Mesh == ball, "render clip changed the body" );
+			var opts = DesktopOptions.Parse( new[] { "--headless", "--section", "x<0.5" } );
+			Check( opts.Section is { } sec && sec.Keeps( new( 0, 0, 0 ) ) && !sec.Keeps( new( 1, 0, 0 ) ), "--section" );
+		} );
 		registry.Add( "controller-fixes", "surface landmark finds the skin and its normal from any side", () =>
 		{
 			var studio = new Effigy.PartStudio();

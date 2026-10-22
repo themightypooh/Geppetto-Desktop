@@ -33,6 +33,9 @@ public sealed class TurnaroundOptions
 	/// <summary>Printed on each tile before the view's name. Null prints the view alone.</summary>
 	public string Label;
 
+	/// <summary>Draw only what is on the kept side of this plane, to see inside. Null draws everything.</summary>
+	public ClipPlane? Clip;
+
 	/// <summary>The views, by name: front, quarter, side, back (the default four), left, top.</summary>
 	public IReadOnlyList<string> Views = Turnaround.DefaultViews;
 }
@@ -221,6 +224,7 @@ public static class Turnaround
 			return Fail( result, $"There is no body '{options.FocusBodyId}' to render. Pick a body that is in the model, or render the whole model." );
 
 		var scene = Scene( studio, options.Clay, options.FocusBodyId, options.Fallback, result.Log );
+		scene.Clip = options.Clip;
 		scene.Coverage = options.Coverage;
 
 		if ( scene.Items.Count == 0 )

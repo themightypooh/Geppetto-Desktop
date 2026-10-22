@@ -21,6 +21,12 @@ public static class HeadlessRender
 			mesh = stack.Apply( mesh );
 			Console.WriteLine( $"modifiers: {stack.LastSummary} in {stack.LastSeconds * 1000:F1} ms" );
 		}
+		if ( options.Section is { } section )
+		{
+			// A section view: the kept half, cut open at the plane, welded so it shades as the whole did.
+			mesh = mesh.Remesh( MeshClip.Section( mesh.SourceMesh, section ) );
+			Console.WriteLine( $"section  : kept {section}, {mesh.TriangleCount} tris" );
+		}
 		var player = loader.Player;
 		using var context = new HeadlessGlContext();
 		var gl = context.Gl;

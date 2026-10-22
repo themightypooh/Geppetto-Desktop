@@ -126,6 +126,10 @@ public sealed class ShadeScene
 
 	public bool Floor = true;
 	public float FloorHeight;
+
+	/// <summary>A cut to look inside: only what is on the kept side is drawn, faces across the plane clipped at it
+	/// (open, no cap, the inside faces lit from the cut). Null draws everything. See <see cref="ClipPlane"/>.</summary>
+	public ClipPlane? Clip;
 	public Vec3 FloorColour = new( 0.42f, 0.4f, 0.44f );
 	public float FloorRoughness = 0.45f;
 
@@ -285,6 +289,71 @@ public static class ShadedRender
 		return sheet;
 	}
 
+	/// <summary>Cut the flat triangle list at <paramref name="clip"/>: triangles wholly on the far side go, ones across
+	/// it become one or two clipped at it. A vertex made on a crossing edge is shared by both triangles on that edge
+	/// and blends every attribute of its ends, so the cut line is as smooth as the rest.</summary>
+	static void ClipTriangles( ClipPlane clip, List<Vec3> pos, List<Vec3> nrm, List<Vec3> col, List<int> mat, List<float> vrough, List<Vec3> vemit,
+		List<(int A, int B, int C)> tris, List<int> triItem, List<(Vec2 A, Vec2 B, Vec2 C)> triUv, List<(Vec3 T, Vec3 B)> triTan )
+	{
+		var dist = new float[pos.Count];
+		for ( var i = 0; i < dist.Length; i++ ) dist[i] = clip.Distance( pos[i] );
+		var made = new Dictionary<(int, int), int>();
+		int Cut( int a, int b )
+		{
+			var key = a < b ? (a, b) : (b, a);
+			if ( made.TryGetValue( key, out var at ) ) return at;
+			var (i, j) = key;
+			var t = Math.Clamp( dist[i] / (dist[i] - dist[j]), 0f, 1f );
+			at = pos.Count;
+			pos.Add( pos[i] + (pos[j] - pos[i]) * t );
+			nrm.Add( (nrm[i] + (nrm[j] - nrm[i]) * t).Normal );
+			col.Add( col[i] + (col[j] - col[i]) * t );
+			mat.Add( mat[i] );
+			vrough.Add( vrough[i] + (vrough[j] - vrough[i]) * t );
+			vemit.Add( vemit[i] + (vemit[j] - vemit[i]) * t );
+			return made[key] = at;
+		}
+
+		var outTris = new List<(int A, int B, int C)>( tris.Count );
+		var outItem = new List<int>( tris.Count );
+		var outUv = new List<(Vec2 A, Vec2 B, Vec2 C)>( tris.Count );
+		var outTan = new List<(Vec3 T, Vec3 B)>( tris.Count );
+		var poly = new List<(int V, Vec2 Uv)>( 4 );
+		for ( var t = 0; t < tris.Count; t++ )
+		{
+			var (a, b, c) = tris[t];
+			var (ua, ub, uc) = triUv[t];
+			var ins = (dist[a] >= 0f ? 1 : 0) + (dist[b] >= 0f ? 1 : 0) + (dist[c] >= 0f ? 1 : 0);
+			if ( ins == 0 ) continue;
+			if ( ins == 3 ) { outTris.Add( tris[t] ); outItem.Add( triItem[t] ); outUv.Add( triUv[t] ); outTan.Add( triTan[t] ); continue; }
+			poly.Clear();
+			var vs = new[] { (a, ua), (b, ub), (c, uc) };
+			for ( var k = 0; k < 3; k++ )
+			{
+				var (va, uva) = vs[(k + 2) % 3];
+				var (vb, uvb) = vs[k];
+				bool inA = dist[va] >= 0f, inB = dist[vb] >= 0f;
+				if ( inA != inB )
+				{
+					var s = Math.Clamp( dist[va] / (dist[va] - dist[vb]), 0f, 1f );
+					poly.Add( (Cut( va, vb ), uva + (uvb - uva) * s) );
+				}
+				if ( inB ) poly.Add( (vb, uvb) );
+			}
+			for ( var k = 1; k + 1 < poly.Count; k++ )
+			{
+				outTris.Add( (poly[0].V, poly[k].V, poly[k + 1].V) );
+				outItem.Add( triItem[t] );
+				outUv.Add( (poly[0].Uv, poly[k].Uv, poly[k + 1].Uv) );
+				outTan.Add( triTan[t] );
+			}
+		}
+		tris.Clear(); tris.AddRange( outTris );
+		triItem.Clear(); triItem.AddRange( outItem );
+		triUv.Clear(); triUv.AddRange( outUv );
+		triTan.Clear(); triTan.AddRange( outTan );
+	}
+
 	public static Raster Render( ShadeScene scene, ShadeCamera camera, int width, int height, int supersample = 1 )
 	{
 		var ss = Math.Clamp( supersample, 1, 4 );
@@ -345,6 +414,7 @@ public static class ShadedRender
 				}
 			}
 		}
+		if ( scene.Clip is { } clip ) ClipTriangles( clip, pos, nrm, col, mat, vrough, vemit, tris, triItem, triUv, triTan );
 		var materials = materialList.ToArray();
 
 		// --- camera ---------------------------------------------------------------------------
