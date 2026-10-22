@@ -1341,7 +1341,8 @@ public static partial class BuildScript
 
 	// --- points and landmarks ---------------------------------------------------------------------
 
-	/// <summary>`x,y,z`, `@landmark`, or `@landmark+dx,dy,dz` / `@landmark-dx,dy,dz`.</summary>
+	/// <summary>`x,y,z`, `@landmark`, or `@landmark+dx,dy,dz` / `@landmark-dx,dy,dz`. A landmark
+	/// can be `@Body.surface(x,y,+z)`, the skin seen from +z at x,y, and `.normal` after it.</summary>
 	public static bool Point( PartStudio studio, string text, out Vec3 point, out string why )
 	{
 		why = null;
@@ -1359,7 +1360,9 @@ public static partial class BuildScript
 
 		var body = text[1..];
 		var offset = Vec3.Zero;
-		var plus = body.IndexOfAny( new[] { '+', '-' }, 1 );
+		// `@Shell.surface(0,0,+z)+0,0,1`: the signs inside the brackets are the landmark's own.
+		var close = body.LastIndexOf( ')' );
+		var plus = body.IndexOfAny( new[] { '+', '-' }, Math.Max( 1, close + 1 ) );
 
 		if ( plus > 0 )
 		{

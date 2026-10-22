@@ -133,6 +133,26 @@ internal static class ControllerFixTests
 			var bad = Effigy.BuildScript.Run( new Effigy.PartStudio(), $"add Spline name=P tube=0 points={pts}\nadd Part part=Cog along=P" );
 			Check( !bad.Ok && bad.Error.Contains( "Strap" ), "cog along a path not refused: " + bad.Error );
 		} );
+		registry.Add( "controller-fixes", "surface landmark finds the skin and its normal from any side", () =>
+		{
+			var studio = new Effigy.PartStudio();
+			Check( Effigy.BuildScript.Run( studio, "add Blob name=Shell voxel=0.04 shapes=\"sphere 0,0,0 2\"" ).Ok, "shell build" );
+			bool Land( string text, out Effigy.Vec3 p ) => Effigy.BuildScript.Point( studio, text, out p, out _ );
+
+			Check( Land( "@Shell.surface(1,0,+z)", out var top ) && MathF.Abs( top.x - 1f ) < 1e-3f && MathF.Abs( top.z - MathF.Sqrt( 3f ) ) < 0.03f, $"top hit {top}" );
+			Check( Land( "@Shell.surface(1,0,+z).normal", out var n ) && (n - new Effigy.Vec3( 0.5f, 0f, 0.866f )).Length < 0.06f, $"top normal {n}" );
+			Check( Land( "@Shell.surface(0,-y,0.5)", out var side ) && MathF.Abs( side.y + MathF.Sqrt( 3.75f ) ) < 0.03f, $"-y hit {side}" );
+			Check( Land( "@Shell.surface(0,-y,0).normal", out var sn ) && sn.y < -0.98f, $"-y normal faces outward: {sn}" );
+			Check( Land( "@Shell.surface(+x,0,0)+0,0,1", out var off ) && MathF.Abs( off.x - 2f ) < 0.03f && MathF.Abs( off.z - 1f ) < 1e-3f, $"offset after brackets {off}" );
+
+			Check( !Effigy.BuildScript.Point( studio, "@Shell.surface(5,0,+z)", out _, out var miss ) && miss.Contains( "misses" ) && miss.Contains( "bounds" ), "miss: " + miss );
+			Check( !Effigy.BuildScript.Point( studio, "@Shell.surface(0,0,0)", out _, out var noSide ) && noSide.Contains( "side" ), "no side: " + noSide );
+			Check( !Effigy.BuildScript.Point( studio, "@Shell.surface(+y,0,0)", out _, out _ ), "+y in the x place accepted" );
+
+			// Script commands take it like any landmark.
+			var run = Effigy.BuildScript.Run( studio, "measure @Shell.surface(0,0,+z)" );
+			Check( run.Ok, "measure surface: " + run.Error );
+		} );
 		registry.Add( "controller-fixes", "blob paint shapes give thin overlays their own slot", () =>
 		{
 			// A thin lens on a shell under a deep blend keeps its own slot (it used to fall back to slot 0).

@@ -172,8 +172,10 @@ public static class ModelMeasure
 	/// A named place on the model, or null with a reason.
 	///
 	/// `origin`, `ground`, a bone name (its head), `bone.tail`, `bone.mid`, a body name (its
-	/// centre), `body.top|bottom|front|back|left|right|min|max`, or a literal `x,y,z`. Names
-	/// match case-insensitively, and a space in a name can be written as an underscore.
+	/// centre), `body.top|bottom|front|back|left|right|min|max`, `body.surface(x,y,+z)` (see
+	/// <see cref="TrySurface"/>; `.normal` after it gives the surface's direction instead), or a
+	/// literal `x,y,z`. Names match case-insensitively, and a space in a name can be written as an
+	/// underscore.
 	/// </summary>
 	public static bool TryLandmark( PartStudio studio, string name, out Vec3 point, out string reason )
 	{
@@ -187,6 +189,25 @@ public static class ModelMeasure
 		}
 
 		name = name.Trim();
+
+		var surface = name.IndexOf( ".surface(", StringComparison.OrdinalIgnoreCase );
+		if ( surface > 0 )
+		{
+			var close = name.IndexOf( ')', surface );
+			var tail = close > 0 ? name[(close + 1)..].Trim().ToLowerInvariant() : null;
+
+			if ( close < 0 || tail is not ("" or ".normal") )
+			{
+				reason = $"'{name}': write body.surface(x,y,+z), optionally followed by .normal.";
+				return false;
+			}
+
+			if ( !TrySurface( studio, name[..surface], name[(surface + 9)..close], out var hit, out var normal, out reason ) )
+				return false;
+
+			point = tail == ".normal" ? normal : hit;
+			return true;
+		}
 
 		if ( TryParseVec3( name, out point ) )
 			return true;
@@ -257,6 +278,75 @@ public static class ModelMeasure
 		reason = $"No body or bone called '{head}'. Bodies: {string.Join( ", ", studio.Bodies.Select( b => b.Name ?? b.Id ) )}"
 			+ (rig is { Count: > 0 } ? $". Bones: {string.Join( ", ", rig.Bones.Select( b => b.Name ) )}" : "") + ".";
 		return false;
+	}
+
+	/// <summary>
+	/// Where a body's skin is, seen from one side: `surface(x,y,+z)` drops a line at x,y from above
+	/// the body down -z and gives the first point it meets, with the outward normal there. The
+	/// signed axis stands in its own place: `surface(0,+y,3)` looks along -y at x=0,
+	/// z=3. A thing placed on a curved shell needs this; `top` is the middle of the bounding box.
+	/// </summary>
+	public static bool TrySurface( PartStudio studio, string bodyName, string args, out Vec3 point, out Vec3 normal, out string reason )
+	{
+		point = normal = Vec3.Zero;
+		reason = null;
+
+		var body = FindBody( studio, bodyName );
+		if ( body?.Mesh is null )
+		{
+			reason = $"No body called '{bodyName}'. Bodies: {string.Join( ", ", studio.Bodies.Select( b => b.Name ?? b.Id ) )}.";
+			return false;
+		}
+
+		var parts = args.Split( ',' ).Select( a => a.Trim() ).ToArray();
+		var axis = -1;
+		var sign = 1f;
+		var coords = new float[3];
+
+		for ( var i = 0; i < parts.Length && parts.Length == 3; i++ )
+		{
+			var a = parts[i].ToLowerInvariant();
+			var letter = a.TrimStart( '+', '-' );
+
+			if ( letter is "x" or "y" or "z" && "xyz".IndexOf( letter[0] ) == i && axis < 0 )
+			{
+				axis = i;
+				sign = a.StartsWith( '-' ) ? -1f : 1f;
+			}
+			else if ( !float.TryParse( a, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out coords[i] ) )
+			{
+				axis = -2;
+				break;
+			}
+		}
+
+		if ( parts.Length != 3 || axis < 0 )
+		{
+			reason = $"surface({args}): give two numbers and the side to look from in its own place, e.g. surface(x,y,+z), surface(+x,y,z) or surface(x,-y,z).";
+			return false;
+		}
+
+		var (min, max) = Bounds( body.Mesh );
+		var dir = Vec3.Zero;
+		var origin = new Vec3( coords[0], coords[1], coords[2] );
+
+		switch ( axis )
+		{
+			case 0: dir = new Vec3( -sign, 0, 0 ); origin = new Vec3( sign > 0 ? max.x + 1f : min.x - 1f, origin.y, origin.z ); break;
+			case 1: dir = new Vec3( 0, -sign, 0 ); origin = new Vec3( origin.x, sign > 0 ? max.y + 1f : min.y - 1f, origin.z ); break;
+			default: dir = new Vec3( 0, 0, -sign ); origin = new Vec3( origin.x, origin.y, sign > 0 ? max.z + 1f : min.z - 1f ); break;
+		}
+
+		if ( MeshRaycast.Raycast( body.Mesh, origin, dir ) is not { } hit )
+		{
+			reason = $"{body.Name ?? body.Id}.surface({args}) misses the body: nothing is there seen from {(sign > 0 ? "+" : "-")}{"xyz"[axis]}. Its bounds are {min.x:0.###},{min.y:0.###},{min.z:0.###} to {max.x:0.###},{max.y:0.###},{max.z:0.###}.";
+			return false;
+		}
+
+		point = hit.Point;
+		// Facing back up the line it was found along, whichever way the faces wind.
+		normal = Vec3.Dot( hit.Normal, dir ) > 0f ? -hit.Normal : hit.Normal;
+		return true;
 	}
 
 	public static Body FindBody( PartStudio studio, string name )
