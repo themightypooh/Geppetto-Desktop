@@ -977,7 +977,7 @@ Window {
                     Text {
                         x: 2; width: parent.width - 4; elide: Text.ElideRight
                         anchors.verticalCenter: parent.verticalCenter
-                        text: ("R" + modelData.rev + "   ").slice(0, 5) + (modelData.part ? modelData.part + ": " : "") + modelData.code
+                        text: ("R" + modelData.rev + "   ").slice(0, 5) + (modelData.part && modelData.code.indexOf(modelData.part) !== 0 ? modelData.part + ": " : "") + modelData.code
                         color: index === 0 ? root.amber : root.keyText
                         font.family: root.mono; font.pixelSize: 11
                     }

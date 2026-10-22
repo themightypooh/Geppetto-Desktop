@@ -308,6 +308,12 @@ def watch(root, state, recent=6):
     error = ""
     if state.get("state") in ("held", "failed"):
         error = str(state.get("outcome") or "")[:300]
+        try:                                    # a held run sits on its bad line: show that one, not the last good step
+            bad = int(error[5:].split(":", 1)[0]) if error.startswith("line ") else 0
+        except ValueError:
+            bad = 0
+        if 0 < bad <= len(lines):
+            at, code = bad, lines[bad - 1]
     tail = []
     for st in shown[-recent:]:
         line = script_line(root, st["op"])

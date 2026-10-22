@@ -177,9 +177,11 @@ class WatchTests(unittest.TestCase):
             with open(os.path.join(root, ".live", "events.jsonl"), "w") as f:
                 f.write("".join(json.dumps(e) + "\n" for e in events))
             w = live.watch(root, {"state": "held", "sequence": 9, "outcome": "line 3: no feature 'Nope'", "operation": None})
-            self.assertEqual((w["line"], w["total"], w["part"]), (2, 3, "A"))
-            self.assertEqual(w["code"], "set A size=2,1,1")
+            self.assertEqual((w["line"], w["total"], w["part"]), (3, 3, "Nope"))    # held: the bad line, not the last good one
+            self.assertEqual(w["code"], "set Nope x=1")
             self.assertIn("no feature 'Nope'", w["error"])
+            w = live.watch(root, {"state": "open", "sequence": 10, "operation": None})
+            self.assertEqual((w["line"], w["code"], w["part"]), (2, "set A size=2,1,1", "A"))
             self.assertEqual([s["part"] for s in w["steps"]], ["", "A", "A"])
 
 
