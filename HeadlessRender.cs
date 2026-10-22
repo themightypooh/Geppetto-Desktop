@@ -50,8 +50,9 @@ public static class HeadlessRender
 				camera.Distance = Math.Max( camera.Distance, radius * 1.15f / MathF.Sin( Math.Min( vertical, horizontal ) ) );
 			}
 		}
-		if ( options.Model.EndsWith( ".fbx", StringComparison.OrdinalIgnoreCase ) ) camera.YawDegrees = -55;
-		if ( options.Iso ) { camera.YawDegrees = -38.66f; camera.PitchDegrees = 23.2f; }
+		camera.ApplyStartView( options.Model, options.Iso, options.Yaw, options.Pitch );
+		renderer.WireframeMode = options.Wireframe ? 1 : 0;
+		float startYaw = camera.YawDegrees;
 		int vertexCount = mesh.Vertices.Length / ViewportMesh.FloatsPerVertex;
 		mesh.Upload( gl );
 		// The clip's reference props: the same lit path, their own ModelDoc and materials.
@@ -71,10 +72,18 @@ public static class HeadlessRender
 			{
 				player?.Step( frame == 0 ? 0 : 1f / 60 );
 				if ( frame > 0 ) renderer.Live.Advance( 1f / 60 );
+				// --turntable: one full turn spread over the drawn frames, so --frames 8 gives eight
+				// evenly spaced views (the window spins by wall-clock time instead).
+				if ( options.Turntable ) camera.YawDegrees = startYaw + 360f * frame / frames;
 				renderer.Draw( mesh, player, camera, options.Width, options.Height, options.Exposure, target.Handle );
 				overlay.Draw( camera.ViewMatrix() * camera.ProjectionMatrix( options.Width / (float)options.Height ), mesh.Rig,
 					player is null ? ReadOnlySpan<Xform>.Empty : player.WorldPose, mesh.BodyPicks );
-				if ( frame == options.ShotFrame && options.Screenshot is not null ) Program.SaveScreenshot( gl, options.Width, options.Height, options.Screenshot );
+				if ( options.Screenshot is not null )
+				{
+					// A turntable with several frames writes every view as name_000.png, name_001.png, ...
+					if ( options.Turntable && frames > 1 ) Program.SaveScreenshot( gl, options.Width, options.Height, TurntablePath( options.Screenshot, frame ) );
+					else if ( frame == options.ShotFrame ) Program.SaveScreenshot( gl, options.Width, options.Height, options.Screenshot );
+				}
 			}
 			gl.Finish(); // only this verification path blocks on the GPU; not the interactive viewport
 			if ( gl.GetError() is var error && error != GLEnum.NoError ) throw new InvalidOperationException( $"Headless GL error: {error}" );
@@ -110,6 +119,18 @@ public static class HeadlessRender
 			Console.WriteLine( $"headless : drew {frames} frame(s) in {clock.Elapsed.TotalSeconds:F3}s (GPU completion included; not present/vsync FPS)" );
 		}
 		finally { mesh.ReleaseGpu( gl ); }
+		// Never exit 0 without the picture that was asked for.
+		if ( options.Screenshot is not null )
+		{
+			string expected = options.Turntable && frames > 1 ? TurntablePath( options.Screenshot, 0 ) : options.Screenshot;
+			if ( !System.IO.File.Exists( expected ) ) throw new InvalidOperationException( $"Headless render finished but wrote no screenshot at {expected}." );
+		}
 		return 0;
+	}
+
+	public static string TurntablePath( string screenshot, int frame )
+	{
+		string dir = System.IO.Path.GetDirectoryName( screenshot ) ?? "";
+		return System.IO.Path.Combine( dir, $"{System.IO.Path.GetFileNameWithoutExtension( screenshot )}_{frame:000}{System.IO.Path.GetExtension( screenshot )}" );
 	}
 }

@@ -73,7 +73,9 @@ public sealed class DesktopOptions
 				case "--white-balance": result.View = result.View with { WhiteBalanceTemperature = FiniteRange( WhiteBalance.MinKelvin, WhiteBalance.MaxKelvin ) }; break;
 				case "--tint": result.View = result.View with { WhiteBalanceTint = FiniteRange( -1f, 1f ) }; break;
 				case "--watch-run": result.WatchRun = System.IO.Path.GetFullPath( Value() ); break;
-				case "--model": result.Model = Value(); break;
+				// Absolute from the caller's directory up front, so nothing downstream (the loader's
+				// worker thread, cache keys, the screenshot writer) can resolve them against another cwd.
+				case "--model": result.Model = System.IO.Path.GetFullPath( Value() ); break;
 				case "--aa":
 					result.AntiAliasing = Value().ToLowerInvariant() switch
 					{
@@ -90,8 +92,8 @@ public sealed class DesktopOptions
 						throw new ArgumentException("--shadow-radius must be finite shadow texels in [0,64].");
 					result.ShadowRadius = shadowRadius;
 					break;
-				case "--clip": result.Clip = Value(); break;
-				case "--screenshot": result.Screenshot = Value(); break;
+				case "--clip": result.Clip = System.IO.Path.GetFullPath( Value() ); break;
+				case "--screenshot": result.Screenshot = System.IO.Path.GetFullPath( Value() ); break;
 				case "--frames": result.Frames = Positive( Value() ); break;
 				case "--size":
 					var size = Value().Split( 'x' );

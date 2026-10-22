@@ -25,6 +25,18 @@ public sealed class OrbitCamera
 	public Vector3 FlyPosition { get; private set; }
 	public float FlySpeed { get; private set; } = 28f;
 
+	/// <summary>
+	/// The start view a model opens with: FBX three-quarter, --iso, then explicit --yaw/--pitch.
+	/// Shared by the window and --headless so both paths frame the same shot.
+	/// </summary>
+	public void ApplyStartView( string modelPath, bool iso, float? yaw, float? pitch )
+	{
+		if ( modelPath is not null && modelPath.EndsWith( ".fbx", StringComparison.OrdinalIgnoreCase ) ) YawDegrees = -55;
+		if ( iso ) { YawDegrees = -38.66f; PitchDegrees = 23.2f; }
+		if ( yaw.HasValue ) YawDegrees = yaw.Value;
+		if ( pitch.HasValue ) PitchDegrees = Math.Clamp( pitch.Value, MinPitch, MaxPitch );
+	}
+
 	public void AdjustFlySpeed( float wheelSteps )
 	{
 		FlySpeed = Math.Clamp( FlySpeed * MathF.Pow( 1.25f, wheelSteps ), 1f, 250f );

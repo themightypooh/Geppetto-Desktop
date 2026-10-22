@@ -509,14 +509,7 @@ public static class Program
 				}
 				mesh.Upload( gl );
 				camera.Frame( mesh.Centre, mesh.Radius );
-				if ( modelPath.EndsWith( ".fbx", StringComparison.OrdinalIgnoreCase ) ) camera.YawDegrees = -55;
-				if ( isoView )
-				{
-					camera.YawDegrees = -38.66f;
-					camera.PitchDegrees = 23.2f;
-				}
-				if ( arguments.Yaw.HasValue ) camera.YawDegrees = arguments.Yaw.Value;
-				if ( arguments.Pitch.HasValue ) camera.PitchDegrees = arguments.Pitch.Value;
+				camera.ApplyStartView( modelPath, isoView, arguments.Yaw, arguments.Pitch );
 				player = loader.Player;
 				// The clip's reference props are part of the scene: the same lit path, their
 				// own ModelDoc and materials.
