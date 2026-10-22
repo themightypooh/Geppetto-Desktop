@@ -1303,6 +1303,17 @@ class Host(QObject):
         self.scanRuns()
         self.set_status("replaying %s: %d steps" % (os.path.basename(directory), len(steps)))
 
+    @Slot(str, int)
+    def replayAt(self, directory, rev):
+        """a step clicked in the watch panel: the replay opens paused on that step (a note or REWIND HERE goes from there)"""
+        self.replayRun(directory)
+        r = self._replay
+        if not r or r.get("dir") != os.path.abspath(directory):
+            return
+        self.replayTimer.stop()
+        at = next((i for i, st in enumerate(r["steps"]) if st["rev"] == rev), r["count"] - 1)
+        self._replay_set(at, playing=False)
+
     def _replay_tick(self):
         r = self._replay
         if not r or not r.get("playing"):
@@ -1482,13 +1493,14 @@ class Host(QObject):
                     # an open script run between lines: "open" (takes more) or "held" (a bad line, waiting for its fix)
                     r["openState"] = live.get("state") if live.get("state") in live_runs.OPEN else ""
                     r["outcome"] = str(live.get("outcome") or "")[:300]
+                    r["watch"] = live_runs.watch(d, live) if run_is_live(d, live) else {}
                     if live.get("state") in ("completed", "below-target", "cancelled", "failed"):
                         r["status"] = r["activity"]
                     elif run_is_live(d, live):
                         r["status"] = "running"         # also a run started outside the chest (a script run)
                 else:
                     r.update(activity="starting" if d in self.jobs else "", operation="", wheelOp="", latestRevision=0, displayedRevision=0, preview="",
-                             paused=False, pace=0, pendingDirections=0, openState="", outcome="")
+                             paused=False, pace=0, pendingDirections=0, openState="", outcome="", watch={})
                 r["pane"] = self.pane_of(d)             # the viewport pane showing it, 0 for none
                 r["waiting"] = d in self.waiting and r["pane"] == 0   # live, but every pane is busy
                 r["collapsed"] = self.collapsed.get(d, r["status"] != "running" and r["pane"] == 0)
@@ -1595,7 +1607,7 @@ class Host(QObject):
             if run and os.path.isdir(run) and not self.pane_of(run):
                 if p.show(run):
                     p.since, p.owner_session = e.get("since") or now, e.get("session") or ""
-            elif model and os.path.isfile(model):
+            elif model and os.path.isfile(model) and os.path.abspath(model) != DEFAULT_MODEL:   # the character starts in pane 1 only
                 p.openModel(model, "", e.get("session") or "")
                 p.since = e.get("since") or now
             if self.owner_gone(p.refresh_owner(now), now):
@@ -1622,8 +1634,12 @@ class Host(QObject):
             live = self.run_live(d)
             n = self.free_pane(d)
             if not n and self._auto and self._layout < 4:
-                self._apply_layout(2 if self._layout == 1 else 4)   # AUTO: make room, nobody loses their pane
-                n = self.free_pane(d)
+                # AUTO: make room, nobody loses their pane. Growing the layout runs autoFollow again, which
+                # places this run (and the rest of the queue) itself: carrying on here would remove d twice
+                self._apply_layout(2 if self._layout == 1 else 4)
+                if placed:
+                    kwin_raise()
+                return
             if not n and not live:
                 self.waiting.remove(d)      # a finished run doesn't queue for a pane: its card has it
                 continue
@@ -2402,6 +2418,9 @@ def main():
     host.autoFollow()                  # a run still building when the chest opens: boot straight into watching it
     if model:
         host.openModel(model)
+    elif not host.watching and os.path.isfile(DEFAULT_MODEL):
+        host.openModel(DEFAULT_MODEL)  # pane 1 starts on our character; runs can still take it
+        host._mine = False
     elif not host.watching:
         # pane 1 starts empty, open to any run; VIEWPORTS > MY SCENE opens your own model there
         host.set_status("pane 1 is open: any run can land in it. VIEWPORTS > MY SCENE for your own")

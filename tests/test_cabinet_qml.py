@@ -90,6 +90,46 @@ class CabinetQmlTests(unittest.TestCase):
             self.host.runsChanged.emit()
         self.assertEqual(self.qml_errors(), [])
 
+    def test_a_held_script_run_shows_line_part_error_and_its_steps(self):
+        """pane 1's watch panel: LINE x/n, the part, the whole line, a held run's error in red, newest step first"""
+        import time
+        panel = self.root.findChild(QObject, "watchPanel1")
+        self.assertIsNotNone(panel)
+        saved = (self.host._runs, self.host.watching)
+        self.host.runTimer.stop()
+        try:
+            steps = [{"rev": i, "op": "line %d: x" % i, "code": "set Eraser blend=0.0%d" % i, "part": "Eraser"} for i in range(1, 9)]
+            self.host._runs = [{"dir": "/tmp/fake-run", "name": "fake-run", "prompt": "script", "status": "running",
+                                "activity": "held at a bad line", "paused": False, "bench": False, "openState": "held",
+                                "outcome": "line 9: no feature 'Eraserr'", "started": time.time() - 5, "lastEvent": time.time(),
+                                "latestRevision": 8, "watch": {"line": 9, "total": 12, "code": "set Eraserr voxel=0.012",
+                                "part": "Eraserr", "building": False, "error": "line 9: no feature 'Eraserr'",
+                                "steps": steps, "count": 8}}]
+            self.host.watching = "/tmp/fake-run"
+            self.host.runsChanged.emit()
+            self.settle(1.2)
+            panel.setProperty("room", 400)               # a big pane: room for the step list under the line
+            self.settle(0.4)
+            self.assertTrue(panel.property("visible"))
+            self.assertGreater(panel.property("fit"), 0, panel.property("room"))
+            def walk(item):                              # repeater rows sit in the visual tree, not the object tree
+                for c in item.childItems():
+                    yield c
+                    yield from walk(c)
+            texts = [t.property("text") for t in walk(panel) if isinstance(t.property("text"), str)]
+            self.assertIn("LINE 9/12", texts)
+            self.assertIn("PART Eraserr", texts)
+            self.assertTrue(any("set Eraserr voxel=0.012" in t for t in texts), texts)
+            self.assertTrue(any(t.startswith("HELD AT line 9: no feature") for t in texts), texts)
+            rows = [t for t in texts if t.startswith("R")]
+            self.assertTrue(rows and rows[0].startswith("R8"), rows)          # newest first
+            self.assertLessEqual(panel.property("height"), panel.property("room"))
+        finally:
+            self.host._runs, self.host.watching = saved
+            self.host.runTimer.start()
+            self.host.runsChanged.emit()
+        self.assertEqual(self.qml_errors(), [])
+
     def test_reading_panels_have_solid_high_contrast_backgrounds(self):
         source = (CABINET / "cabinet.qml").read_text()
         self.assertNotIn('"sheet.png"', source)

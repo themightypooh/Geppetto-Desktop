@@ -898,6 +898,99 @@ Window {
         }
     }
 
+    // what a live script run is doing, readable at a glance: LINE x/n with a bar, the part it changes,
+    // the whole line, a held run's error in red, and its last steps (click one to replay from it)
+    component WatchPanel: Rectangle {
+        id: wp
+        property var run: null
+        property real room: 300                  // the height it may take before the pane's keys
+        signal pick(int rev)
+        readonly property var w: run && run.watch ? run.watch : ({})
+        readonly property bool held: !!run && (run.openState === "held" || !!w.error)
+        readonly property int fit: Math.max(0, Math.min((w.steps || []).length, Math.floor((room - wpHead.height - 20) / 16)))
+        visible: !!run && run.status === "running" && (w.count || 0) > 0 && room > 40
+        height: Math.min(room, wpCol.height + 12)
+        clip: true
+        color: "#16191c"; opacity: 0.92
+        border.color: held ? "#d2493a" : run && run.openState === "open" ? "#4f9a62" : "#3a2f12"
+        Column {
+            id: wpCol
+            x: 8; y: 6; width: wp.width - 16
+            spacing: 4
+            Column {
+                id: wpHead
+                width: parent.width; spacing: 3
+                Row {
+                    spacing: 8; width: parent.width
+                    Text {
+                        id: wpLine
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: wp.w.line ? "LINE " + wp.w.line + "/" + wp.w.total : "STEP " + (wp.w.count || 0)
+                        color: root.amber; font.family: root.mono; font.bold: true; font.pixelSize: 11
+                    }
+                    Rectangle {
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: Math.max(30, wpCol.width - wpLine.width - wpPart.width - 16); height: 4; radius: 2; color: "#3a3f45"
+                        Rectangle {
+                            height: parent.height; radius: 2; color: wp.held ? "#d2493a" : root.amber
+                            width: wp.w.total ? parent.width * Math.min(1, wp.w.line / wp.w.total) : 0
+                        }
+                    }
+                    Text {
+                        id: wpPart
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: Math.min(implicitWidth, wpCol.width * 0.45); elide: Text.ElideRight
+                        text: wp.w.part ? "PART " + wp.w.part : ""
+                        color: "#eef0ea"; font.family: root.mono; font.bold: true; font.pixelSize: 11
+                    }
+                }
+                Text {                              // the whole line, not the clipped op
+                    width: parent.width; visible: !!wp.w.code
+                    text: (wp.w.building ? "> " : "  ") + (wp.w.code || "")
+                    color: "#9fd18b"; font.family: root.mono; font.pixelSize: 12
+                    wrapMode: Text.WrapAnywhere; maximumLineCount: 2; elide: Text.ElideRight
+                    renderType: Text.NativeRendering
+                }
+                Text {
+                    objectName: "watchError"
+                    width: parent.width; visible: wp.held
+                    text: "HELD AT " + (wp.w.error || (wp.run ? wp.run.outcome : "")) + "\nthe model is back at its last good step; the modeller sends the fixed line, or REWIND"
+                    color: "#ff8a7a"; font.family: root.mono; font.pixelSize: 11
+                    wrapMode: Text.Wrap; maximumLineCount: 3; elide: Text.ElideRight
+                    renderType: Text.NativeRendering
+                }
+                Text {
+                    width: parent.width; visible: !!wp.run && wp.run.openState === "open"
+                    text: "OPEN: the model stays loaded for more lines. CLOSE when it's right"
+                    color: "#9fe0ae"; font.family: root.mono; font.pixelSize: 11
+                    wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
+                }
+            }
+            Repeater {
+                objectName: "watchSteps"
+                model: (wp.w.steps || []).slice((wp.w.steps || []).length - wp.fit).reverse()
+                Rectangle {
+                    required property var modelData
+                    required property int index
+                    width: wpCol.width; height: 14
+                    color: wpStep.containsMouse ? "#2b2f36" : "transparent"
+                    Text {
+                        x: 2; width: parent.width - 4; elide: Text.ElideRight
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: ("R" + modelData.rev + "   ").slice(0, 5) + (modelData.part ? modelData.part + ": " : "") + modelData.code
+                        color: index === 0 ? root.amber : root.keyText
+                        font.family: root.mono; font.pixelSize: 11
+                    }
+                    MouseArea {
+                        id: wpStep
+                        anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                        onClicked: wp.pick(modelData.rev)
+                    }
+                }
+            }
+        }
+    }
+
     // pane 2-4 of a split viewport: one run, its own camera, header, LIVE/PAUSE/STOP, step wheel,
     // replay strip and notes. A new run only lands here while it's empty; drag a run on to swap
     component SidePane: Viewport {
@@ -960,26 +1053,16 @@ Window {
             state: sp.replaying ? "REPLAY" : !sp.r ? "" : sp.live ? (sp.r.openState === "held" ? "HELD  REV " + sp.r.latestRevision
                    : sp.r.openState === "open" ? "OPEN  REV " + sp.r.latestRevision : sp.r.paused ? "PAUSED" : "LIVE  REV " + sp.r.latestRevision) : "DONE"
         }
-        Rectangle {                                  // an open run says it takes more lines; a held one says which line broke
-            id: spOpen
-            visible: !sp.replaying && sp.live && !!sp.r && sp.r.openState !== ""
-            x: 8; width: Math.min(spKeys.width, spOpenText.implicitWidth + 16); height: spOpenText.height + 10
-            y: spKeys.y - height - 6
-            color: sp.r && sp.r.openState === "held" ? "#3a1512" : "#14261a"
-            border.color: sp.r && sp.r.openState === "held" ? "#d2493a" : "#4f9a62"
-            Text {
-                id: spOpenText
-                x: 8; y: 5; width: Math.min(implicitWidth, spKeys.width - 16)
-                wrapMode: Text.Wrap; maximumLineCount: 3; elide: Text.ElideRight
-                color: sp.r && sp.r.openState === "held" ? "#ff8a7a" : "#9fe0ae"
-                font.family: root.mono; font.pixelSize: 11
-                text: !sp.r ? "" : sp.r.openState === "held"
-                      ? "HELD AT " + sp.r.outcome.toUpperCase() + "\nthe model is back at its last good revision; the modeller sends the fixed line"
-                      : "OPEN: the script is done, the model stays loaded for more lines. CLOSE when it's right"
-            }
-        }
         ReplayStrip { src: sp.pn; x: 8; y: 28; width: sp.width - 16 }
-        RunBar { run: sp.replaying ? null : sp.r; x: 8; y: 28 }
+        RunBar { id: spRunBar; run: sp.replaying ? null : sp.r; x: 8; y: 28 }
+        WatchPanel {
+            objectName: "watchPanel" + sp.n
+            run: sp.replaying ? null : sp.r
+            x: 8; y: spRunBar.visible ? spRunBar.y + spRunBar.height + 4 : 28
+            width: Math.min(sp.width - 16, 460)
+            room: (spKeys.visible ? spKeys.y : sp.height) - y - 8
+            onPick: function (rev) { sp.pn.replayAt(sp.r.dir, rev) }
+        }
         // this pane's run controls, faint until the mouse comes near
         Flow {
             id: spKeys
@@ -2974,9 +3057,18 @@ Window {
             x: 12; y: root.layoutN > 1 ? 28 : 12; width: view.width - 24
         }
         RunBar {
+            id: p1RunBar
             objectName: "p1RunBar"
             run: host.replay && host.replay.dir ? null : root.p1Run
             x: 12; y: root.layoutN > 1 ? 28 : 12
+        }
+        WatchPanel {
+            objectName: "watchPanel1"
+            run: host.replay && host.replay.dir ? null : root.p1Run
+            x: 12; y: p1RunBar.visible ? p1RunBar.y + p1RunBar.height + 4 : p1RunBar.y
+            width: Math.min(view.width - 24, 480)
+            room: camStrip.y - y - 8
+            onPick: function (rev) { host.replayAt(root.p1Run.dir, rev) }
         }
         // ---- pick mode (keys 1-4 on the view) and what's picked, s&box style: tiny, top right, out of the way
         Column {

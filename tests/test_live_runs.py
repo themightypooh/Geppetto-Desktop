@@ -158,5 +158,30 @@ class HostBindingTests(unittest.TestCase):
                 self.assertEqual(obj.watching, "")
 
 
+class WatchTests(unittest.TestCase):
+    def test_the_part_a_line_works_on(self):
+        for line, part in (("add Primitive shape=Box name=B position=3,0,0", "B"), ("add Blob 0,0,0 0.2", "Blob"),
+                           ("set Eraser blend=0.02", "Eraser"), ("remove Strap", "Strap"), ("material 0 color=#fff", "material 0"),
+                           ("echo hi", ""), ("# note", ""), ("refimage top 1 0", "refimage")):
+            self.assertEqual(live.line_part(line), part, line)
+
+    def test_watch_names_the_line_of_how_many_its_part_and_a_held_error(self):
+        with tempfile.TemporaryDirectory() as root:
+            os.makedirs(os.path.join(root, ".live", "revisions"))
+            with open(os.path.join(root, "script.txt"), "w") as f:
+                f.write("add Primitive shape=Box name=A\nset A size=2,1,1\nset Nope x=1\n")
+            events = []
+            for rev, op in ((1, "initial"), (2, "line 1: add Primitive shape=Box name=A"), (3, "line 2: set A size=2,1,1")):
+                open(os.path.join(root, ".live", "revisions", "%08d-x.effigy" % rev), "w").close()
+                events.append({"state": "revision", "operation": op, "snapshot": {"revision": rev, "path": ".live/revisions/%08d-x.effigy" % rev}})
+            with open(os.path.join(root, ".live", "events.jsonl"), "w") as f:
+                f.write("".join(json.dumps(e) + "\n" for e in events))
+            w = live.watch(root, {"state": "held", "sequence": 9, "outcome": "line 3: no feature 'Nope'", "operation": None})
+            self.assertEqual((w["line"], w["total"], w["part"]), (2, 3, "A"))
+            self.assertEqual(w["code"], "set A size=2,1,1")
+            self.assertIn("no feature 'Nope'", w["error"])
+            self.assertEqual([s["part"] for s in w["steps"]], ["", "A", "A"])
+
+
 if __name__ == '__main__':
     unittest.main()

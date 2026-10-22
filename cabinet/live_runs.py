@@ -256,6 +256,68 @@ def script_line(root, op):
     return next((x for x in lines if x.strip().startswith(recorded)), "")
 
 
+def line_part(line):
+    """The part a script line works on, for the watch panel: `set Eraser ...` -> Eraser, `add Blob ... name=Head` -> Head,
+    `material 0 ...` -> material 0; '' for lines that change no part (echo, comments)."""
+    words = (line or "").split()
+    if not words or words[0].startswith("#") or words[0] == "echo":
+        return ""
+    verb, rest = words[0], words[1:]
+    if verb == "add":
+        named = next((w[5:] for w in rest if w.startswith("name=")), "")
+        return named or (rest[0] if rest else "")
+    if verb in ("material", "materiallook"):
+        return "material " + rest[0] if rest else "material"
+    if verb in ("set", "remove", "suppress", "unsuppress", "hide", "show", "rename") and rest:
+        return rest[0]
+    return verb
+
+
+_watch = {}
+
+
+def watch(root, state, recent=6):
+    """What a live script run is doing, for the pane's watch panel: the line it is on of how many, that whole line,
+    the part it changes, the error a held/failed run stopped at, and its last few steps. Read again only when the run grows."""
+    stamp = []
+    for f in (os.path.join(root, ".live", "events.jsonl"), os.path.join(root, "script.txt")):
+        try:
+            stamp.append(os.path.getsize(f))
+        except OSError:
+            stamp.append(-1)
+    key = (tuple(stamp), state.get("sequence"))
+    hit = _watch.get(root)
+    if hit and hit[0] == key:
+        return hit[1]
+    try:
+        with open(os.path.join(root, "script.txt")) as stream:
+            lines = [x.rstrip("\n") for x in stream]
+    except OSError:
+        lines = []
+    op = state.get("operation") or ""
+    shown = steps(root)
+    if not op and shown:
+        op = shown[-1]["op"]
+    at = 0
+    if op.startswith("line "):
+        try:
+            at = int(op[5:].split(":", 1)[0])
+        except ValueError:
+            pass
+    code = script_line(root, op) if op.startswith("line ") else ""
+    error = ""
+    if state.get("state") in ("held", "failed"):
+        error = str(state.get("outcome") or "")[:300]
+    tail = []
+    for st in shown[-recent:]:
+        line = script_line(root, st["op"])
+        tail.append(dict(st, code=line or st["op"].split(": ", 1)[-1], part=line_part(line)))
+    out = {"line": at, "total": len(lines), "code": code or op.split(": ", 1)[-1], "part": line_part(code),
+           "building": state.get("state") == "building", "error": error, "steps": tail, "count": len(shown)}
+    _watch[root] = (key, out)
+    return out
+
+
 def add_note(root, rev, op, text):
     text = (text or "").strip()
     if not text or len(text) > 2000:

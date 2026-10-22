@@ -223,6 +223,9 @@ class Pane(QObject):
     @Slot()
     def clear(self):
         """empty the pane (its viewer stays up, showing nothing)"""
+        if self.model:
+            self.shut()     # a --model viewer can't be told to forget its model: "follow" left it on screen
+            return
         self._end_replay()
         self.run = ""
         self.model = ""
@@ -361,6 +364,17 @@ class Pane(QObject):
         self._replay_set(0)
         self.replayTimer.start()
         self.host.set_status("pane %d: replaying %s, %d steps" % (self.number, os.path.basename(directory), len(steps)))
+
+    @Slot(str, int)
+    def replayAt(self, directory, rev):
+        """a step clicked in the watch panel: the replay opens paused on that step (a note or REWIND HERE goes from there)"""
+        self.replayRun(directory)
+        r = self._replay
+        if not r or r.get("dir") != os.path.abspath(directory):
+            return
+        self.replayTimer.stop()
+        at = next((i for i, st in enumerate(r["steps"]) if st["rev"] == rev), r["count"] - 1)
+        self._replay_set(at, playing=False)
 
     def _replay_tick(self):
         r = self._replay
