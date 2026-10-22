@@ -98,6 +98,41 @@ internal static class ControllerFixTests
 			var sphereRot = Effigy.BuildScript.Run( new Effigy.PartStudio(), "add Blob shapes=\"sphere 0,0,0 1 rot=0,0,10\"" );
 			Check( !sphereRot.Ok && sphereRot.Error.Contains( "rot=" ), "rot= on a sphere not refused: " + sphereRot.Error );
 		} );
+		registry.Add( "controller-fixes", "spline band and strap part follow a path, face turning with it", () =>
+		{
+			const string pts = "0,-0.8,5;0,-1.8,4.6;0,-2,3;0,-1.7,1.4;0,-0.6,0.8";
+			var studio = new Effigy.PartStudio();
+			var run = Effigy.BuildScript.Run( studio,
+				$"add Spline name=Path tube=0 points={pts}\n" +
+				$"add Spline name=Band profile=band width=0.8 thickness=0.1 points={pts}\n" +
+				$"add Spline name=Edgeon profile=band width=0.8 thickness=0.1 bandfaces=1,0,0 points={pts}\n" +
+				"add Part name=Strap part=Strap along=Path size=0.8 thickness=0.1 position=50,0,0" );
+			Check( run.Ok, "band script failed: " + run );
+
+			Effigy.PolyMesh Body( string n ) => studio.Bodies.First( b => b.Name == n ).Mesh;
+			foreach ( var n in new[] { "Band", "Edgeon", "Strap" } )
+			{
+				var v = Effigy.MeshValidator.Validate( Body( n ) );
+				Check( v.NonManifoldEdges == 0 && v.BoundaryEdges == 0, $"{n} not closed: {v.NonManifoldEdges}/{v.BoundaryEdges}" );
+			}
+
+			// A curve in the YZ plane: the band's width lies across it (x), its face looks along the bend.
+			var band = Body( "Band" );
+			var wx = band.Positions.Max( p => MathF.Abs( p.x ) );
+			Check( MathF.Abs( wx - 0.4f ) < 1e-3f, $"band width not across the plane: |x| max {wx}" );
+			Check( band.Positions.Min( p => p.y ) < -1.9f && band.Positions.Min( p => p.y ) > -2.15f, "band left its path" );
+
+			var edge = Body( "Edgeon" );
+			var ex = edge.Positions.Max( p => MathF.Abs( p.x ) );
+			Check( MathF.Abs( ex - 0.05f ) < 1e-3f, $"band faces=1,0,0 should put the thickness on x: |x| max {ex}" );
+
+			var strap = Body( "Strap" );
+			Check( strap.Positions.Count == band.Positions.Count && strap.Positions.Zip( band.Positions ).All( q => (q.First - q.Second).Length < 1e-4f ),
+				"strap part along a path is not the band (Position must not move it)" );
+
+			var bad = Effigy.BuildScript.Run( new Effigy.PartStudio(), $"add Spline name=P tube=0 points={pts}\nadd Part part=Cog along=P" );
+			Check( !bad.Ok && bad.Error.Contains( "Strap" ), "cog along a path not refused: " + bad.Error );
+		} );
 		registry.Add( "controller-fixes", "blob paint shapes give thin overlays their own slot", () =>
 		{
 			// A thin lens on a shell under a deep blend keeps its own slot (it used to fall back to slot 0).

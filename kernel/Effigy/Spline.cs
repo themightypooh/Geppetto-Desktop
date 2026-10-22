@@ -292,6 +292,75 @@ public static class SplineTube
 }
 
 /// <summary>
+/// A flat band along a path: a strap, a ribbon, a belt. A rectangle <c>width</c> by
+/// <c>thickness</c> swept along the curve, its flat face turning with the path.
+///
+/// WHY NOT A TUBE WITH FOUR SIDES. A four-sided tube is a square, and squashing it would need a
+/// direction to squash in that the tube does not have. A band needs to know which way it faces at
+/// every station: by default the curve's own frame (for a curve in a plane, the face looks along
+/// the bend and the width lies across the plane, which is how a strap wraps a handle), or a world
+/// direction it is kept facing as nearly as the path allows.
+/// </summary>
+public static class SplineBand
+{
+	/// <param name="facing">The direction the band's flat face should look, or zero for the curve's
+	/// frame. At each station it is taken square to the path.</param>
+	/// <param name="endWidth">Width at the end, for a strap that tapers.</param>
+	public static PolyMesh Build( IReadOnlyList<Vec3> path, bool closed, float width, float endWidth, float thickness,
+		Vec3 facing, float twistDegrees, int material, bool capEnds = true )
+	{
+		if ( path is null || path.Count < 2 )
+			throw new ArgumentException( "A band needs a path of at least two points.", nameof( path ) );
+
+		var frames = Spline3.Frames( path, closed );
+		var total = Spline3.Length( path, closed );
+		var rings = new List<List<Vec3>>( path.Count );
+		var along = 0f;
+		var ht = thickness * 0.5f;
+		var lastNormal = Vec3.Zero;
+
+		for ( var i = 0; i < path.Count; i++ )
+		{
+			if ( i > 0 )
+				along += (path[i] - path[i - 1]).Length;
+
+			var f = total > 1e-8f ? along / total : 0f;
+			var hw = (closed ? width : width + (endWidth - width) * f) * 0.5f;
+			var twist = closed ? 0f : twistDegrees * MathF.PI / 180f * f;
+			var (t, u, v) = frames[i];
+
+			// (across, normal) keeps the tube's (u, v) handedness so the skin faces out.
+			var normal = v;
+			if ( facing.LengthSquared > 1e-12f )
+			{
+				var square = facing - t * Vec3.Dot( facing, t );
+				// Where the path runs along the facing direction there is no square part; hold the last.
+				normal = square.LengthSquared > 1e-8f ? square.Normal : (lastNormal.LengthSquared > 0f ? lastNormal : v);
+			}
+
+			lastNormal = normal;
+			var across = Vec3.Cross( normal, t ).Normal;
+
+			if ( twist != 0f )
+			{
+				var (c, sn) = (MathF.Cos( twist ), MathF.Sin( twist ));
+				(across, normal) = (across * c + normal * sn, normal * c - across * sn);
+			}
+
+			rings.Add( new List<Vec3>
+			{
+				path[i] + across * hw + normal * ht,
+				path[i] - across * hw + normal * ht,
+				path[i] - across * hw - normal * ht,
+				path[i] + across * hw - normal * ht,
+			} );
+		}
+
+		return Skinner.Skin( rings, capEnds && !closed, material, wrap: closed );
+	}
+}
+
+/// <summary>
 /// Bend a mesh along a path.
 ///
 /// The mesh's own X axis becomes distance along the curve; Y and Z become offsets in the curve's

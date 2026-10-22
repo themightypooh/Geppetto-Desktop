@@ -17,6 +17,9 @@ namespace Effigy;
 /// The points are NOT parameters: they are drawn, not typed, and the dialog shows the radius
 /// and the sides while the viewport owns the curve. Saved as a vec3s line like a sketch's
 /// region seeds.
+///
+/// Profile Band makes a flat strap instead of a round tube: Width across, Thickness through, its
+/// face following the curve (or kept looking along Band faces). See <see cref="SplineBand"/>.
 /// </summary>
 public sealed class SplineFeature : Feature
 {
@@ -27,7 +30,12 @@ public sealed class SplineFeature : Feature
 	public readonly BoolParam Closed = new( "Closed loop", false );
 	public readonly BoolParam Smooth = new( "Smooth", true );
 	public readonly BoolParam Tube = new( "Make a tube", true );
+	public readonly ChoiceParam Profile = new( "Profile", new[] { "Round", "Band" } );
 	public readonly FloatParam Radius = new( "Radius", 2f, 0.0001f, unit: "u" );
+	public readonly FloatParam Width = new( "Width", 2f, 0.0001f, unit: "u" );
+	public readonly FloatParam Thickness = new( "Thickness", 0.2f, 0.0001f, unit: "u" );
+	/// <summary>Band only: the way its flat face looks. Zero follows the curve.</summary>
+	public readonly Vec3Param Facing = new( "Band faces", Vec3.Zero );
 	public readonly FloatParam Taper = new( "End radius ×", 1f, 0f, 8f );
 	public readonly IntParam Sides = new( "Sides", 12, 3, 64 );
 	public readonly FloatParam Twist = new( "Twist", 0f, unit: "deg" );
@@ -35,9 +43,9 @@ public sealed class SplineFeature : Feature
 	public readonly IntParam Material = new( "Material slot", 0, 0, 63 ) { Slider = false };
 
 	public override IReadOnlyList<IParam> Parameters =>
-		new IParam[] { Closed, Smooth, Tube, Radius, Taper, Sides, Twist, Resolution, Material };
+		new IParam[] { Closed, Smooth, Tube, Profile, Radius, Width, Thickness, Taper, Sides, Twist, Resolution, Material };
 
-	public override IReadOnlyList<IParam> AdvancedParameters => new IParam[] { Resolution, Material };
+	public override IReadOnlyList<IParam> AdvancedParameters => new IParam[] { Facing, Resolution, Material };
 
 	/// <summary>The curve as this feature would publish it, for the viewport to draw while it is
 	/// being edited without waiting on a rebuild.</summary>
@@ -74,8 +82,18 @@ public sealed class SplineFeature : Feature
 			return;
 		}
 
-		var radius = Radius.Clamped;
-		var mesh = SplineTube.Build( path, Closed.Value, radius, radius * Taper.Clamped, Sides.Clamped, Twist.Value, Material.Clamped );
+		PolyMesh mesh;
+
+		if ( Profile.Index == 1 )
+		{
+			var width = Width.Clamped;
+			mesh = SplineBand.Build( path, Closed.Value, width, width * Taper.Clamped, Thickness.Clamped, Facing.Value, Twist.Value, Material.Clamped );
+		}
+		else
+		{
+			var radius = Radius.Clamped;
+			mesh = SplineTube.Build( path, Closed.Value, radius, radius * Taper.Clamped, Sides.Clamped, Twist.Value, Material.Clamped );
+		}
 
 		ctx.Bodies.Add( new Body( ctx.NewBodyId(), Name, mesh ) );
 	}

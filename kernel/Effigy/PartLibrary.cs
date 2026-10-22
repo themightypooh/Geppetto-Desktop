@@ -30,7 +30,7 @@ public static class PartLibrary
 		"Hinge" => "Size = knuckle radius, Length = hinge length, Thickness = leaf thickness, Count = knuckles, Angle = how far open",
 		"Panel" => "Size = width, Length = height, Thickness = thickness",
 		"Pipe elbow" => "Size = pipe radius, Length = bend radius, Angle = bend, Count = sides",
-		"Strap" => "Size = width, Length = length, Thickness = thickness",
+		"Strap" => "Size = width, Length = length, Thickness = thickness; along=SplineName lays it on that curve instead (Length is the curve's)",
 		"Buckle" => "Size = width, Length = height, Thickness = bar thickness",
 		_ => "",
 	};
@@ -259,6 +259,13 @@ public sealed class PartFeature : Feature
 	public readonly FloatParam RotationAngle = new( "Rotation", 0f, unit: "deg" );
 	public readonly IntParam Material = new( "Material slot", 0, 0, 63 ) { Slider = false };
 
+	/// <summary>
+	/// Strap only: a Spline feature to lay the strap along, its face following the curve. A strap
+	/// is never straight on the thing it holds; a box bent afterwards has no stations to bend at.
+	/// The curve is in model space, so Position and Rotation do not move a strap on one.
+	/// </summary>
+	public string Along = "";
+
 	public override IReadOnlyList<IParam> Parameters =>
 		new IParam[] { Part, Size, Length, Thickness, Count, Angle, Position, RotationAxis, RotationAngle, Material };
 
@@ -266,6 +273,27 @@ public sealed class PartFeature : Feature
 
 	protected override void Execute( FeatureContext ctx )
 	{
+		if ( !string.IsNullOrEmpty( Along ) )
+		{
+			if ( Part.Value != "Strap" )
+				Fail( $"Only a strap follows a curve; a {Part.Value} does not.",
+					"along= lays a Strap on a Spline.",
+					"Set part=Strap", "Or remove along=" );
+
+			if ( !ctx.Splines.TryGetValue( Along, out var spline ) )
+				Fail( "The strap's curve is not above it.",
+					$"along= names '{Along}', which is not a Spline feature that has run before this one.",
+					"Add the Spline first (tube=0 keeps it a bare path)", "Check the name in along=" );
+
+			var path = spline.Sample( 8 );
+			if ( path.Count < 2 )
+				Fail( "The strap's curve has fewer than two points.", "A strap needs a path to lie on.", "Give the Spline two or more points" );
+
+			var band = SplineBand.Build( path, spline.Closed, Size.Clamped, Size.Clamped, Thickness.Clamped, Vec3.Zero, 0f, Material.Clamped );
+			ctx.Bodies.Add( new Body( ctx.NewBodyId(), Name ?? Part.Value, band ) );
+			return;
+		}
+
 		var mesh = PartLibrary.Build( Part.Value, Size.Clamped, Length.Clamped, Thickness.Clamped, Count.Clamped, Angle.Clamped, Material.Clamped );
 
 		if ( RotationAngle.Value != 0f && RotationAxis.Value.LengthSquared > 1e-8f )
