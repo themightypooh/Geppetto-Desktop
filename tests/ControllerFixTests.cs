@@ -133,6 +133,37 @@ internal static class ControllerFixTests
 			var bad = Effigy.BuildScript.Run( new Effigy.PartStudio(), $"add Spline name=P tube=0 points={pts}\nadd Part part=Cog along=P" );
 			Check( !bad.Ok && bad.Error.Contains( "Strap" ), "cog along a path not refused: " + bad.Error );
 		} );
+		registry.Add( "controller-fixes", "clearance gives the gap, or the shared volume even with one part sunk inside", () =>
+		{
+			var studio = new Effigy.PartStudio();
+			Check( Effigy.BuildScript.Run( studio,
+				"add Primitive name=A shape=Box sizex=2 sizey=2 sizez=2\n" +
+				"add Primitive name=Far shape=Box sizex=2 sizey=2 sizez=2 position=3,0,0\n" +
+				"add Primitive name=Half shape=Box sizex=2 sizey=2 sizez=2 position=1.5,0,0.5\n" +
+				"add Primitive name=Sunk shape=Box sizex=0.5 sizey=0.5 sizez=0.5 position=-0.3,0.2,0" ).Ok, "boxes" );
+			Effigy.Body B( string n ) => Effigy.ModelMeasure.FindBody( studio, n );
+
+			var far = Effigy.Clearance.Measure( B( "A" ), B( "Far" ) );
+			Check( !far.Overlaps && MathF.Abs( far.Gap - 1f ) < 1e-3f, $"gap A-Far {far.Gap}" );
+
+			var half = Effigy.Clearance.Measure( B( "A" ), B( "Half" ) );
+			Check( half.Crossings > 0 && MathF.Abs( half.Overlap - 0.5f * 2f * 1.5f ) < 0.03f, $"overlap A-Half {half.Overlap}" );
+
+			var sunk = Effigy.Clearance.Measure( B( "A" ), B( "Sunk" ) );
+			Check( sunk.Crossings == 0 && MathF.Abs( sunk.Overlap - 0.125f ) < 0.005f && sunk.Describe().Contains( "wholly inside" ), $"sunk: {sunk.Describe()}" );
+
+			// Flat on A's top face: crossings on the contact, nothing shared. That is touching.
+			Check( Effigy.BuildScript.Run( studio, "add Primitive name=OnTop shape=Box sizex=0.5 sizey=0.5 sizez=0.5 position=0,0,1.25" ).Ok, "on top" );
+			var onTop = Effigy.Clearance.Measure( B( "A" ), B( "OnTop" ) );
+			Check( !onTop.Overlaps && onTop.Describe().Contains( "touching" ), "flat contact: " + onTop.Describe() );
+			Check( Effigy.BuildScript.Run( studio, "remove OnTop" ).Ok, "remove" );
+
+			var run = Effigy.BuildScript.Run( studio, "clearance A Far min=1.5\nclearance" );
+			Check( run.Ok, "clearance script: " + run.Error );
+			Check( run.Log[0].StartsWith( "A x Far!" ) && run.Log[0].Contains( "under min=1.5" ), "min not flagged: " + run.Log[0] );
+			Check( run.Log.Count == 1 + 6, $"every pair of 4 bodies is 6 lines, got {run.Log.Count - 1}" );
+			Check( !Effigy.BuildScript.Run( studio, "clearance A" ).Ok && !Effigy.BuildScript.Run( studio, "clearance A A" ).Ok, "one name / same body accepted" );
+		} );
 		registry.Add( "controller-fixes", "surface landmark finds the skin and its normal from any side", () =>
 		{
 			var studio = new Effigy.PartStudio();

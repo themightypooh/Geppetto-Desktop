@@ -10,6 +10,8 @@ namespace Effigy;
 /// <summary>
 /// The measuring verbs an agent reads a model through, beside describe/measure/symmetry:
 ///
+///   clearance [A B] [min=0.02]                         the gap between two bodies, or the volume they
+///                                                         share and how deep; no names = every pair
 ///   topology [Body|all] [poles=12]                       face kinds, poles, edge evenness, quad shape,
 ///                                                         manifold, symmetry, loops per joint
 ///   section Body|all z=10,20,30 | x=… | y=… | along=Bone [at=0,0.5,1]
@@ -48,6 +50,50 @@ public static partial class BuildScript
 			foreach ( var line in report.Describe( maxPoles ).Split( '\n' ) )
 				r.Log.Add( line );
 		}
+
+		return true;
+	}
+
+	const string ClearanceUsage = "clearance [A B] [min=0.02] — the gap between two bodies, or the volume they share; no names checks every pair";
+
+	static bool ClearanceReport( PartStudio studio, List<string> args, Result r )
+	{
+		var named = args.Where( a => !a.Contains( '=' ) ).ToList();
+		var opts = Pairs( args.Where( a => a.Contains( '=' ) ) );
+
+		foreach ( var key in opts.Keys )
+			if ( key is not "min" )
+				return Fail( r, $"clearance has no option '{key}'. {ClearanceUsage}" );
+
+		var min = opts.TryGetValue( "min", out var minText ) ? Number( minText ) : 0f;
+		var pairs = new List<(Body, Body)>();
+
+		if ( named.Count == 0 )
+		{
+			var bodies = studio.Bodies.Where( b => b.Mesh is { FaceCount: > 0 } && b.Visible && !b.IsReference ).ToList();
+
+			for ( var i = 0; i < bodies.Count; i++ )
+				for ( var j = i + 1; j < bodies.Count; j++ )
+					pairs.Add( (bodies[i], bodies[j]) );
+
+			if ( pairs.Count == 0 )
+				return Fail( r, "clearance needs two bodies with faces; the model has fewer." );
+		}
+		else if ( named.Count == 2 )
+		{
+			if ( !Targets( studio, named[0], out var a, out var whyA ) || a.Count != 1 ) return Fail( r, whyA ?? $"name one body, not all. {ClearanceUsage}" );
+			if ( !Targets( studio, named[1], out var b, out var whyB ) || b.Count != 1 ) return Fail( r, whyB ?? $"name one body, not all. {ClearanceUsage}" );
+			if ( a[0] == b[0] ) return Fail( r, $"clearance between {named[0]} and itself means nothing; name two bodies. {ClearanceUsage}" );
+			pairs.Add( (a[0], b[0]) );
+		}
+		else
+			return Fail( r, ClearanceUsage );
+
+		var prepared = new Dictionary<Body, Clearance.Prepared>();
+		Clearance.Prepared Ready( Body b ) => prepared.TryGetValue( b, out var p ) ? p : prepared[b] = new Clearance.Prepared( b.Name ?? b.Id, b.Mesh );
+
+		foreach ( var (a, b) in pairs )
+			r.Log.Add( Clearance.Measure( Ready( a ), Ready( b ) ).Describe( min ) );
 
 		return true;
 	}

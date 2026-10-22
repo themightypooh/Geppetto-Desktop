@@ -25,6 +25,7 @@ namespace Effigy;
 ///   add Stroke bodies=Sac … inkey=sac_swell   (sculpt into a finished shape key)
 ///   render out/torso.png view=sheet
 ///   describe
+///   clearance Button Shell min=0.02      (gap, or overlap volume and depth; no names = every pair)
 ///   match front reference.png out/match.png
 ///   bake Cage Sculpt out/bake size=2048 maps=normal,ao,curvature,cavity,height ss=2 vmat=1
 ///
@@ -400,6 +401,9 @@ public static partial class BuildScript
 
 				return true;
 			}
+
+			case "clearance":
+				return ClearanceReport( studio, args, r );
 
 			case "topology":
 				return Topology( studio, args, r );
