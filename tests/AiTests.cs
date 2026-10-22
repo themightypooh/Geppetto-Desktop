@@ -9,6 +9,7 @@ internal static class AiTests
     {
         void Check(string name, Action body) => r.Add("ai", name, body);
         void Assert(bool b) { if (!b) throw new Exception("AI assertion failed"); }
+        void That(bool b, string what) { if (!b) throw new Exception("AI assertion failed: " + what); }
         void Throws(Action body) { try { body(); } catch { return; } throw new Exception("Expected rejection"); }
         Check("drawer provider options reach wire request without overriding tools", () => {
             var options = AiOptions.Parse(new[]{"chat", "--model", "fixture", "--out", Path.Combine(settings.WorkDirectory, "drawer-options"), "--endpoint", "http://localhost:5678/v1/",
@@ -67,6 +68,50 @@ internal static class AiTests
             foreach (string ip in new[]{"127.0.0.1", "10.0.0.2", "169.254.169.254", "192.168.0.1", "192.0.0.192", "100.64.0.1", "::1", "::ffff:127.0.0.1", "fc00::1", "2002:7f00:1::", "2001:db8::1"}) Assert(!AiResearch.PublicAddress(IPAddress.Parse(ip)));
             Assert(AiResearch.PublicAddress(IPAddress.Parse("8.8.8.8")));
             Throws(() => new AiResearch().FetchAsync("http://localhost/private", default).GetAwaiter().GetResult());
+        });
+        Check("model sheet measures photos, samples colours and refuses unsourced sizes", () => {
+            // a 400x100 photo: white ground, a 300 px long object, steel-grey left 2/3 and brown right 1/3
+            string dir = Path.Combine(settings.WorkDirectory, "sheet-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(Path.Combine(dir, "refs"));
+            var rgb = new byte[400 * 100 * 3];
+            for (int y = 0; y < 100; y++) for (int x = 0; x < 400; x++)
+            {
+                int i = (y * 400 + x) * 3; bool inside = x >= 50 && x < 350 && y >= 40 && y < 60;
+                byte[] c = !inside ? new byte[]{255,255,255} : x < 250 ? new byte[]{120,124,128} : new byte[]{100,60,30};
+                rgb[i] = c[0]; rgb[i + 1] = c[1]; rgb[i + 2] = c[2];
+            }
+            string png = Path.Combine(dir, "refs", "01-test.png");
+            Effigy.PngWriter.WriteFile(png, rgb, 400, 100);
+            var research = new AiResearch(Path.Combine(dir, "refs"));
+            research.Sources.Add("https://museum.example/record/1");
+            research.Photos.Add(new RefPhoto { File = "refs/01-test.png", Original = "refs/01-test.png", View = "side", Width = 400, Height = 100, Licence = "CC0", Analysis = PhotoAnalysis.Read(png) });
+            var a = research.Photos[0].Analysis!;
+            if (!(a.Clean && a.Horizontal && Math.Abs(a.LongPx - 300) <= 2)) throw new Exception(a.Summary().ToJsonString());
+            string sheet = """
+{"object":"test","overall":{"length":{"value":30,"unit":"cm","basis":"measured","source":"https://museum.example/record/1"}},
+ "parts":[{"name":"blade","along":[0,0.66],"dims":{"length":{"basis":"photo","ref":"refs/01-test.png","fraction":0.66}},"cross_section":"diamond",
+           "material":{"name":"steel","sample":{"ref":"refs/01-test.png"},"metal":true,"roughness":0.3,"wear":"none"}},
+          {"name":"grip","along":[0.7,1],"dims":{"length":{"value":9,"unit":"cm","basis":"estimated","how":"rest of the length"}},"cross_section":"round",
+           "material":{"name":"wood","sample":{"ref":"refs/01-test.png"},"metal":false,"roughness":0.8,"wear":"worn"}}],
+ "build_order":["blade","grip"],"scale_cue":"about a forearm long","main_ref":"refs/01-test.png"}
+""";
+            var r = AiModelSheet.Build(JsonNode.Parse(sheet), research, "test");
+            That(r.Errors.Count == 0, "check 1");
+            var parts = r.Sheet["parts"]!.AsArray();
+            That(parts[0]!["material"]!["hex"]!.GetValue<string>() == "#787c80" && parts[1]!["material"]!["hex"]!.GetValue<string>() == "#643c1e", "check 2");
+            That(Math.Abs(parts[0]!["dims"]!["length"]!["mm"]!.GetValue<double>() - 198) < 0.5, "check 3");
+            // 30 cm over 300 px: the 100 px tall photo stands 3.94 in tall, object centred on the origin
+            string line = r.Sheet["refimage"]![0]!["line"]!.GetValue<string>();
+            That(line.StartsWith("refimage side refs/01-test.png height=3.94 offset=0,0 ", StringComparison.Ordinal), line);
+            That(r.Markdown.Contains("#787c80") && r.Markdown.Contains("museum.example"), "check 5");
+            var bad = AiModelSheet.Build(JsonNode.Parse(sheet.Replace("https://museum.example/record/1", "https://made.up/")), research, "test");
+            That(bad.Errors.Any(e => e.Contains("measured needs a source")), "check 6");
+        });
+        Check("research command needs a prompt and never builds", () => {
+            Throws(() => AiOptions.Parse(new[]{"research", "--model", "x", "--out", "new"}));
+            var o = AiOptions.Parse(new[]{"research", "--model", "x", "--out", "new", "--prompt", "rondel dagger"});
+            That(o.Research && o.Command == "research", "check 7");
+            That(AiSuiteTools.ResearchDefinitions.All(t => AiSuiteTools.IsResearchTool(t!["name"]!.GetValue<string>())), "check 8");
+            That(!AiSuiteTools.BuilderDefinitions.Any(t => AiSuiteTools.IsResearchTool(t!["name"]!.GetValue<string>())), "check 9");
         });
         Check("configuration rejects unknown flags and unsafe providers", () => {
             Throws(() => AiOptions.Parse(new[]{"create", "--no-such-option"}));
