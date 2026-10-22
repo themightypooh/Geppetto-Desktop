@@ -64,5 +64,14 @@ internal static class ControllerFixTests
 			Effigy.Render.Turnaround.Scene( clay, false, null, null, clayLog );
 			Check( clayLog.Count( l => l.Contains( "clay" ) ) == 1, "clay log not one line: " + string.Join( " | ", clayLog ) );
 		} );
+		registry.Add( "controller-fixes", "blob surface nets stay manifold on a thin hollow shell", () =>
+		{
+			const string shapes = "tube 0.0000,0.0000,0.6693|0.3937,0.0000,2.0866|0.7874,0.0000,3.5827|0.9843,0.0000,4.2126 0.6693|0.7283|0.6693|0.6496; ellipsoid 1.4173,0.0000,4.7638 1.2992,0.9055,0.4724; ellipsoid 0.5512,0.0000,4.4488 0.6299,0.7480,0.4724; ellipsoid 2.4016,0.0000,5.0000 0.3937,0.4724,0.2165 mat=3; ellipsoid 0.3543,-0.3543,2.2835 0.5512,0.3937,1.1811 mat=1; ellipsoid 0.0000,0.0000,0.6299 0.5906,0.5906,0.2756 mat=1; -ellipsoid 1.1811,0.1181,5.2439 0.4921,0.4921,0.1969; -capsule 1.8110,-0.1575,4.9702 1.8110,-0.1575,5.4427 0.2087; -capsule 1.5354,-0.4724,4.9283 1.5354,-0.4724,5.4007 0.2087; -capsule 0.6693,0.2756,4.8861 0.6693,0.2756,5.3585 0.1299; -capsule 2.2441,0.0000,4.3307 2.2835,0.0000,4.5669 0.4724; -capsule -0.0394,-0.1339,0.1181 -0.0394,0.1339,0.1181 0.0827; -capsule 0.0000,0.0000,0.6693 0.3937,0.0000,2.0866 0.5906; -capsule 0.3937,0.0000,2.0866 0.7874,0.0000,3.5827 0.5906; -capsule 0.7874,0.0000,3.5827 0.9843,0.0000,4.2126 0.5709; -ellipsoid 1.4173,0.0000,4.7638 1.2205,0.8268,0.3937; -ellipsoid 0.5512,0.0000,4.4488 0.5512,0.6693,0.3937; -ellipsoid 2.4016,0.0000,5.0000 0.3150,0.3937,0.1378; -sphere 0.0000,39.3701,2.3622 39.3701";
+			var studio = new Effigy.PartStudio();
+			var run = Effigy.BuildScript.Run( studio, $"add Blob name=Shell voxel=0.0236 blend=0.1575 cutblend=0.0118 shapes=\"{shapes}\"" );
+			Check( run.Ok, "shell failed: " + run );
+			var check = Effigy.MeshValidator.Validate( studio.Bodies[0].Mesh );
+			Check( check.NonManifoldEdges == 0 && check.BoundaryEdges == 0, $"shell: {check.NonManifoldEdges} non-manifold, {check.BoundaryEdges} open edges" );
+		} );
 	}
 }

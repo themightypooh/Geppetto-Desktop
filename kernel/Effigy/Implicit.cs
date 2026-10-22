@@ -1333,6 +1333,26 @@ public static class SurfaceNets
 
 		var cornerValues = new float[8];
 
+		// ONE VERTEX PER PATCH, NOT PER CELL. Where two sheets of surface pass through one cell (a
+		// wall thinner than a voxel, two shapes nearly touching) the naive net gave both sheets the
+		// same vertex, and every edge out of it then had four faces: non-manifold, which Shell,
+		// booleans and export all choke on. The crossed edges of a cell are grouped into the loops
+		// marching cubes would draw on its faces, each loop gets its own vertex. On a face with two
+		// diagonal inside corners the loops cut each inside corner off — both cells sharing the
+		// face read the same four values, so they always agree, and the result is manifold.
+		var cornerIndex = new int[8];
+		for ( var c = 0; c < 8; c++ ) cornerIndex[corners[c].dx + corners[c].dy * 2 + corners[c].dz * 4] = c;
+		var edgeOf = new int[64];
+		for ( var e = 0; e < edges.Length; e++ ) { edgeOf[edges[e].a * 8 + edges[e].b] = e; edgeOf[edges[e].b * 8 + edges[e].a] = e; }
+		var cubeFaces = new[] { new[] { 0, 1, 2, 3 }, new[] { 4, 5, 6, 7 }, new[] { 0, 1, 5, 4 }, new[] { 3, 2, 6, 7 }, new[] { 0, 3, 7, 4 }, new[] { 1, 2, 6, 5 } };
+		var multi = new Dictionary<long, byte[]>();
+		var patchOf = new int[12];
+		var patchSum = new Vec3[12];
+		var patchCount = new int[12];
+		var crossedEdge = new int[4];
+
+		int Root( int e ) { while ( patchOf[e] != e ) e = patchOf[e] = patchOf[patchOf[e]]; return e; }
+
 		for ( var x = 0; x < nx - 1; x++ )
 			for ( var y = 0; y < ny - 1; y++ )
 				for ( var z = 0; z < nz - 1; z++ )
@@ -1350,11 +1370,38 @@ public static class SurfaceNets
 					if ( inside == 0 || inside == 8 )
 						continue;
 
-					var sum = Vec3.Zero;
-					var count = 0;
+					for ( var e = 0; e < 12; e++ ) { patchOf[e] = e; patchSum[e] = Vec3.Zero; patchCount[e] = 0; }
 
-					foreach ( var (a, b) in edges )
+					foreach ( var f in cubeFaces )
 					{
+						// The face's crossed edges join into contour segments. Two crossings are one
+						// segment. Four (two diagonal inside corners) are two, each cutting an inside corner off.
+						var crossed = 0;
+						for ( var k = 0; k < 4; k++ )
+							if ( (cornerValues[f[k]] < 0f) != (cornerValues[f[(k + 1) & 3]] < 0f) )
+								crossedEdge[crossed++] = edgeOf[f[k] * 8 + f[(k + 1) & 3]];
+
+						if ( crossed == 2 )
+						{
+							var a = Root( crossedEdge[0] );
+							var b = Root( crossedEdge[1] );
+							if ( a != b ) patchOf[a] = b;
+						}
+						else if ( crossed == 4 )
+						{
+							for ( var k = 0; k < 4; k++ )
+							{
+								if ( cornerValues[f[k]] >= 0f ) continue;
+								var a = Root( edgeOf[f[(k + 3) & 3] * 8 + f[k]] );
+								var b = Root( edgeOf[f[k] * 8 + f[(k + 1) & 3]] );
+								if ( a != b ) patchOf[a] = b;
+							}
+						}
+					}
+
+					for ( var e = 0; e < 12; e++ )
+					{
+						var (a, b) = edges[e];
 						var va = cornerValues[a];
 						var vb = cornerValues[b];
 
@@ -1366,14 +1413,48 @@ public static class SurfaceNets
 						var cb = corners[b];
 						var pa = new Vec3( x + ca.dx, y + ca.dy, z + ca.dz );
 						var pb = new Vec3( x + cb.dx, y + cb.dy, z + cb.dz );
-						sum += pa + (pb - pa) * t;
-						count++;
+						var r = Root( e );
+						patchSum[r] += pa + (pb - pa) * t;
+						patchCount[r]++;
 					}
 
-					var local = sum / count;
-					cellVertex[Cell( x, y, z )] = positions.Count;
-					positions.Add( new Vec3( min.x + local.x * voxel, min.y + local.y * voxel, min.z + local.z * voxel ) );
+					var first = positions.Count;
+					byte[] map = null;
+					var patches = 0;
+
+					for ( var e = 0; e < 12; e++ )
+					{
+						if ( patchCount[e] == 0 ) continue;
+						var local = patchSum[e] / patchCount[e];
+						positions.Add( new Vec3( min.x + local.x * voxel, min.y + local.y * voxel, min.z + local.z * voxel ) );
+						patchCount[e] = -(++patches); // remember the patch's number on its root
+					}
+
+					cellVertex[Cell( x, y, z )] = first;
+
+					if ( patches > 1 )
+					{
+						map = new byte[12];
+						for ( var e = 0; e < 12; e++ )
+						{
+							var r = Root( e );
+							if ( patchCount[r] < 0 ) map[e] = (byte)(-patchCount[r] - 1);
+						}
+
+						multi[Cell( x, y, z )] = map;
+					}
 				}
+
+		// The vertex a cell has for one grid edge: the edge's two corners, in the cell's own numbering.
+		int At( int cx, int cy, int cz, int gx, int gy, int gz, int ax, int ay, int az )
+		{
+			var cell = Cell( cx, cy, cz );
+			var v = cellVertex[cell];
+			if ( v < 0 || !multi.TryGetValue( cell, out var map ) ) return v;
+			var a = cornerIndex[(gx - cx) + (gy - cy) * 2 + (gz - cz) * 4];
+			var b = cornerIndex[(gx + ax - cx) + (gy + ay - cy) * 2 + (gz + az - cz) * 4];
+			return v + map[edgeOf[a * 8 + b]];
+		}
 
 		// A quad across every crossed grid edge, wound so the normal points out of the solid.
 		var faces = new List<Face>();
@@ -1400,8 +1481,8 @@ public static class SurfaceNets
 					{
 						var in1 = values[Index( x + 1, y, z )] < 0f;
 						if ( in0 != in1 )
-							Quad( cellVertex[Cell( x, y - 1, z - 1 )], cellVertex[Cell( x, y, z - 1 )],
-								cellVertex[Cell( x, y, z )], cellVertex[Cell( x, y - 1, z )], flip: !in0 );
+							Quad( At( x, y - 1, z - 1, x, y, z, 1, 0, 0 ), At( x, y, z - 1, x, y, z, 1, 0, 0 ),
+								At( x, y, z, x, y, z, 1, 0, 0 ), At( x, y - 1, z, x, y, z, 1, 0, 0 ), flip: !in0 );
 					}
 
 					// Edge along y, cells vary in (z, x).
@@ -1409,8 +1490,8 @@ public static class SurfaceNets
 					{
 						var in1 = values[Index( x, y + 1, z )] < 0f;
 						if ( in0 != in1 )
-							Quad( cellVertex[Cell( x - 1, y, z - 1 )], cellVertex[Cell( x - 1, y, z )],
-								cellVertex[Cell( x, y, z )], cellVertex[Cell( x, y, z - 1 )], flip: !in0 );
+							Quad( At( x - 1, y, z - 1, x, y, z, 0, 1, 0 ), At( x - 1, y, z, x, y, z, 0, 1, 0 ),
+								At( x, y, z, x, y, z, 0, 1, 0 ), At( x, y, z - 1, x, y, z, 0, 1, 0 ), flip: !in0 );
 					}
 
 					// Edge along z, cells vary in (x, y).
@@ -1418,8 +1499,8 @@ public static class SurfaceNets
 					{
 						var in1 = values[Index( x, y, z + 1 )] < 0f;
 						if ( in0 != in1 )
-							Quad( cellVertex[Cell( x - 1, y - 1, z )], cellVertex[Cell( x, y - 1, z )],
-								cellVertex[Cell( x, y, z )], cellVertex[Cell( x - 1, y, z )], flip: !in0 );
+							Quad( At( x - 1, y - 1, z, x, y, z, 0, 0, 1 ), At( x, y - 1, z, x, y, z, 0, 0, 1 ),
+								At( x, y, z, x, y, z, 0, 0, 1 ), At( x - 1, y, z, x, y, z, 0, 0, 1 ), flip: !in0 );
 					}
 				}
 
