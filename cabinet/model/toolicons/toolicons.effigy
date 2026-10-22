@@ -1,0 +1,1255 @@
+effigy 1
+rollback 2147483647
+materiallook 0 color=#a9b0ba rough=0.45 metal=0.6
+materiallook 1 color=#e9e3cc rough=0.8 metal=0
+materiallook 2 color=#c8322a rough=0.45 metal=0
+materiallook 3 color=#d9907c rough=0.6 metal=0
+materiallook 4 color=#1d1a2a rough=0.6 metal=0
+materiallook 5 color=#c79a3e rough=0.3 metal=1
+materiallook 6 color=#3d5a8a rough=0.85 metal=0
+materiallook 7 color=#ffd25a rough=0.3 metal=0 emit=#ffc840
+feature BlobFeature
+	id d30b4926
+	name Icon_primitive
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box -0.55,0.35,0.45 0.9,0.9,0.9 r=0.04 mat=0; sphere 0.6,0.45,0.42 0.42 mat=0; cone 0.05,-0.65,0 0.45 0.05,-0.65,1 0 mat=0
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 21bc1ae7
+	name Icon_blob
+	suppressed 0
+	visible 1
+	param Blend 0.35
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes sphere 5,0,0.6 0.6 mat=0; sphere 5.6,0.35,0.4 0.42 mat=0; sphere 4.5,0.45,0.35 0.36 mat=0; sphere 5.15,-0.6,0.35 0.38 mat=0
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id b2a8fb08
+	name Icon_part
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 10,0,0.35 1.6,1,0.7 r=0.05 mat=0; cylinder 9.6,0,0.6 9.6,0,1.05 0.2 mat=5; cylinder 10.4,0,0.6 10.4,0,1.05 0.2 mat=5
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 1f550ae1
+	name Icon_sketch
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 15,0,0.03 2,1.6,0.06 mat=1; box 14.7,0.15,0.08 0.06,0.9,0.04 mat=4; box 15.1,-0.3,0.08 0.8,0.06,0.04 mat=4; box 15.25,0.3,0.08 0.06,0.6,0.04 rot=0,0,40 mat=2; cylinder 15.55,-0.5,0.15 15.9,0.5,0.75 0.07 mat=5; cone 15.55,-0.5,0.15 0.07 15.5,-0.64,0.07 0 mat=4
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 7db7c0fa
+	name Icon_profile
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 20,0,0.03 1.9,1.4,0.06 mat=1; box 19.65,0,0.45 0.5,0.08,0.84 mat=2; box 20.25,0,0.2 0.7,0.08,0.34 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 0f2d0e67
+	name Icon_spline
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes tube 24.1,-0.5,0.2|24.8,0.6,0.7|25.4,-0.4,0.9|25.9,0.5,0.4 0.08|0.08|0.08|0.08 mat=2; sphere 24.1,-0.5,0.2 0.16 mat=5; sphere 24.8,0.6,0.7 0.16 mat=5; sphere 25.4,-0.4,0.9 0.16 mat=5; sphere 25.9,0.5,0.4 0.16 mat=5
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 62ea8df6
+	name Icon_plane
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 30,0,0.4 1.9,1.9,0.05 rot=18,-12,0 mat=0; cylinder 30,0,0.45 30,0,0.98 0.07 mat=2; cone 30,0,0.98 0.182 30,0,1.3 0 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id d0c2526c
+	name Icon_import
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 35,0,0.35 1.4,1.4,0.7 r=0.03 mat=5; -box 35,0,0.75 1.1,1.1,0.6 mat=5; cylinder 35,0,1.6 35,0,0.87 0.1 mat=2; cone 35,0,0.87 0.26 35,0,0.55 0 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id db3fb5e7
+	name Icon_bodyfrombones
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes capsule 39.3,0,0.5 40.7,0,0.5 0.12 mat=1; sphere 39.25,0.13,0.5 0.18 mat=1; sphere 39.25,-0.13,0.5 0.18 mat=1; sphere 40.75,0.13,0.5 0.18 mat=1; sphere 40.75,-0.13,0.5 0.18 mat=1; ellipsoid 40,0,0.5 0.8,0.45,0.42 mat=3; paint ellipsoid 40,0,0.5 0.85,0.5,0.47 mat=3; -box 40.3,-0.3,0.75 1.2,1.2,0.8 mat=1
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 8227f63b
+	name Icon_extrude
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 0,-5,0.03 1.9,1.9,0.06 mat=1; box 0,-5,0.4 1,1,0.7 r=0.02 mat=0; cylinder 0,-5,0.75 0,-5,1.18 0.07 mat=2; cone 0,-5,1.18 0.182 0,-5,1.5 0 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id a43ca3fc
+	name Icon_revolve
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes tube 5,-5,0|5,-5,0.6|5,-5,1.2 0.55|0.3|0.45 mat=0; torus 5,-5,0.6 0.75 0.05 mat=2; cone 5.75,-5,0.6 0.14 5.75,-4.65,0.6 0 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id cbd46c88
+	name Icon_loft
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes cone 10,-5,0 0.8 10,-5,1.2 0.35 mat=0; torus 10,-5,0 0.82 0.06 mat=2; torus 10,-5,1.2 0.37 0.06 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 5c36145c
+	name Icon_sweep
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes tube 14.1,-5.4,0.3|14.7,-4.6,0.5|15.3,-5.4,0.6|15.9,-4.6,0.4 0.22|0.22|0.22|0.22 mat=0; torus 14.1,-5.4,0.3 0.3 0.05 rot=90,0,135 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id d5f094ca
+	name Icon_boolean
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 20,-5,0.5 1.3,1.3,1 r=0.03 mat=0; -sphere 20.55,-5.55,0.95 0.7 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id bec60d27
+	name Icon_mirror
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 25,-5,0.6 0.06,1.6,1.2 mat=2; cone 24.4,-5,0 0.4 24.25,-4.8,1 0.15 mat=0; cone 25.6,-5,0 0.4 25.75,-4.8,1 0.15 mat=0
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 7b2effae
+	name Icon_linearpattern
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes cylinder 29.25,-5,0 29.25,-5,0.9 0.28 mat=0; cylinder 30,-5,0 30,-5,0.9 0.28 mat=0; cylinder 30.75,-5,0 30.75,-5,0.9 0.28 mat=0; cylinder 29.1,-5.55,0.05 30.68,-5.55,0.05 0.05 mat=2; cone 30.68,-5.55,0.05 0.13 31,-5.55,0.05 0 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 7838a159
+	name Icon_circularpattern
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes cylinder 35,-5,0 35,-5,0.3 0.15 mat=5; cylinder 35.75,-5,0 35.75,-5,0.6 0.2 mat=0; cylinder 35.375,-4.3505,0 35.375,-4.3505,0.6 0.2 mat=0; cylinder 34.625,-4.3505,0 34.625,-4.3505,0.6 0.2 mat=0; cylinder 34.25,-5,0 34.25,-5,0.6 0.2 mat=0; cylinder 34.625,-5.6495,0 34.625,-5.6495,0.6 0.2 mat=0; cylinder 35.375,-5.6495,0 35.375,-5.6495,0.6 0.2 mat=0
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id e3dbb757
+	name Icon_shell
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 40,-5,0.5 1.4,1.4,1 r=0.03 mat=0; -box 40,-5,0.75 1.15,1.15,1 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 52f0cec0
+	name Icon_hole
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 45,-5,0.35 1.6,1.6,0.7 r=0.03 mat=0; -cylinder 45,-5,-0.2 45,-5,1 0.38 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 51c1c19f
+	name Icon_fillet
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 0,-10,0.55 1.4,1.4,1.1 r=0.35 mat=0; paint box 0,-10,0.55 1.5,1.5,0.18 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 9b811363
+	name Icon_chamfer
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 5,-10,0.55 1.4,1.4,1.1 mat=0; -box 5.7,-10.7,1.1 1,1,1 rot=35,0,45 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 4e84169c
+	name Icon_draft
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes cone 10,-10,0 0.85 10,-10,1.2 0.5 mat=0; box 10.95,-10,0.6 0.05,0.05,1.3 rot=0,-16,0 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 6261a68d
+	name Icon_trim
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 15,-10,0.35 1.4,1.4,0.7 mat=0; box 15,-10,1.1 1.4,1.4,0.5 rot=0,0,0 mat=0; box 15,-10,0.78 1.9,1.9,0.04 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id a4483196
+	name Icon_subdivide
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 19.45,-10,0.4 0.8,0.8,0.8 mat=0; box 20.55,-10,0.4 0.8,0.8,0.8 r=0.35 mat=0; cylinder 19.9,-10.7,0.1 19.93,-10.7,0.1 0.05 mat=2; cone 19.93,-10.7,0.1 0.13 20.25,-10.7,0.1 0 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 0d9893e2
+	name Icon_remesh
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes sphere 25,-10,0.75 0.75 mat=0; paint torus 25,-10,0.35 0.62 0.02 mat=4; paint torus 25,-10,0.75 0.75 0.02 mat=4; paint torus 25,-10,1.15 0.62 0.02 mat=4; paint torus 25,-10,0.75 0.75 0.02 rot=90,0,0 mat=4; paint torus 25,-10,0.75 0.75 0.02 rot=90,0,60 mat=4; paint torus 25,-10,0.75 0.75 0.02 rot=90,0,120 mat=4
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id db7aec73
+	name Icon_detail
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 30,-10,0.3 1.6,1.6,0.6 r=0.05 mat=0; sphere 29.45,-10.55,0.6 0.12 mat=5; sphere 29.45,-9.45,0.6 0.12 mat=5; sphere 30.55,-10.55,0.6 0.12 mat=5; sphere 30.55,-9.45,0.6 0.12 mat=5; box 30,-10,0.6 0.9,0.08,0.06 mat=4
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 0091f2e4
+	name Icon_stroke
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 35,-10,0.15 1.9,1.5,0.3 mat=0; tube 34.2,-10.4,0.3|34.8,-9.7,0.32|35.4,-10.2,0.32|35.8,-9.6,0.3 0.13|0.17|0.17|0.1 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 2e8ea72a
+	name Icon_sculpt
+	suppressed 0
+	visible 1
+	param Blend 0.08
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes ellipsoid -0.2,-15,0.45 0.75,0.6,0.45 mat=3; sphere -0.3,-14.9,0.85 0.3 mat=3; cylinder 0.2,-15.2,0.7 0.95,-15.6,1.25 0.08 mat=5; torus 0.12,-15.15,0.62 0.15 0.025 rot=60,0,30 mat=0
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id a90b71b0
+	name Icon_transform
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 5,-15,0.35 0.7,0.7,0.7 mat=0; cylinder 5.35,-15,0.35 5.83,-15,0.35 0.07 mat=2; cone 5.83,-15,0.35 0.182 6.15,-15,0.35 0 mat=2; cylinder 5,-14.65,0.35 5,-14.17,0.35 0.07 mat=5; cone 5,-14.17,0.35 0.182 5,-13.85,0.35 0 mat=5; cylinder 5,-15,0.7 5,-15,1.13 0.07 mat=4; cone 5,-15,1.13 0.182 5,-15,1.45 0 mat=4
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 5ab37867
+	name Icon_lattice
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes sphere 10,-15,0.6 0.45 mat=3; cylinder 9.25,-15.75,0 10.75,-15.75,0 0.035 mat=4; cylinder 9.25,-14.25,0 10.75,-14.25,0 0.035 mat=4; cylinder 9.25,-15.75,0 9.25,-14.25,0 0.035 mat=4; cylinder 10.75,-15.75,0 10.75,-14.25,0 0.035 mat=4; cylinder 9.25,-15.75,1.2 10.75,-15.75,1.2 0.035 mat=4; cylinder 9.25,-14.25,1.2 10.75,-14.25,1.2 0.035 mat=4; cylinder 9.25,-15.75,1.2 9.25,-14.25,1.2 0.035 mat=4; cylinder 10.75,-15.75,1.2 10.75,-14.25,1.2 0.035 mat=4; cylinder 9.25,-15.75,0 9.25,-15.75,1.2 0.035 mat=4; cylinder 10.75,-15.75,0 10.75,-15.75,1.2 0.035 mat=4; cylinder 9.25,-14.25,0 9.25,-14.25,1.2 0.035 mat=4; cylinder 10.75,-14.25,0 10.75,-14.25,1.2 0.035 mat=4; sphere 9.25,-15.75,0 0.09 mat=2; sphere 9.25,-15.75,1.2 0.09 mat=2; sphere 9.25,-14.25,0 0.09 mat=2; sphere 9.25,-14.25,1.2 0.09 mat=2; sphere 10.75,-15.75,0 0.09 mat=2; sphere 10.75,-15.75,1.2 0.09 mat=2; sphere 10.75,-14.25,0 0.09 mat=2; sphere 10.75,-14.25,1.2 0.09 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id dac0f514
+	name Icon_simpledeform
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes tube 14.1,-15,0.2|14.7,-15,0.6|15.3,-15,0.75|15.9,-15,0.55 0.25|0.25|0.25|0.25 mat=0; box 15,-15,0.07 1.9,0.5,0.04 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 0ae5a6e4
+	name Icon_curvedeform
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes tube 19.1,-15.5,0.35|19.7,-14.6,0.4|20.3,-15.4,0.4|20.9,-14.5,0.35 0.22|0.22|0.22|0.22 mat=0; tube 19.1,-15.5,0.03|19.7,-14.6,0.03|20.3,-15.4,0.03|20.9,-14.5,0.03 0.04|0.04|0.04|0.04 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id b16dc602
+	name Icon_moveface
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 25,-15,0.35 1.3,1.3,0.7 mat=0; box 25,-15,0.85 0.8,0.8,0.4 mat=2; cylinder 25,-15,1.05 25,-15,1.38 0.06 mat=4; cone 25,-15,1.38 0.156 25,-15,1.7 0 mat=4
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id bc188983
+	name Icon_edit_extrude
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 0,-20,0.35 1.4,1.4,0.7 mat=0; box 0.35,-19.65,0.9 0.7,0.7,0.5 mat=0; paint box 0.35,-19.65,1.15 0.72,0.72,0.06 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 3e31ef6b
+	name Icon_edit_inset
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 5,-20,0.35 1.6,1.6,0.7 mat=0; -box 5,-20,0.72 0.9,0.9,0.12 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id e1ec08f9
+	name Icon_edit_bevel
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 10,-20,0.55 1.4,1.4,1.1 r=0.12 mat=0; paint box 10,-19.3,1.1 1.5,0.2,0.2 mat=2; paint box 10.7,-20,1.1 0.2,1.5,0.2 mat=2; paint box 10.7,-19.3,0.55 0.2,0.2,1.2 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 406e87c2
+	name Icon_edit_loopcut
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 15,-20,0.6 1.2,1.2,1.2 r=0.03 mat=0; paint box 15,-20,0.6 1.3,1.3,0.05 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 5fe56814
+	name Icon_edit_bridge
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 19.3,-20,0.45 0.5,0.8,0.9 mat=0; box 20.7,-20,0.45 0.5,0.8,0.9 mat=0; box 20,-20,0.8 0.95,0.7,0.2 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 5ceae7d2
+	name Icon_edit_symmetrize
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes ellipsoid 25,-20,0.55 0.85,0.5,0.55 mat=0; paint box 25,-20,0.55 0.05,1.2,1.3 mat=2; sphere 24.55,-20.38,0.8 0.12 mat=4; sphere 25.45,-20.38,0.8 0.12 mat=4
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 2afcec73
+	name Icon_edit_dissolve
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 29.8,-20,0.45 1,1,0.9 mat=0; box 30.6,-19.8,0.8 0.18,0.18,0.18 rot=20,30,10 mat=2; box 30.85,-20.2,1.05 0.13,0.13,0.13 rot=20,30,10 mat=2; box 30.75,-19.55,1.3 0.09,0.09,0.09 rot=20,30,10 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id f88044ed
+	name Icon_edit_delete
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 35,-20,0.5 1,1,1 mat=0; box 35,-20.3,0.65 1.6,0.14,0.14 rot=0,45,0 mat=2; box 35,-20.3,0.65 1.6,0.14,0.14 rot=0,-45,0 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 75c61441
+	name Icon_meshedit
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 40,-20,0.5 1.1,1.1,1 mat=0; sphere 39.45,-20.55,0 0.11 mat=5; sphere 39.45,-20.55,1 0.11 mat=5; sphere 39.45,-19.45,0 0.11 mat=5; sphere 39.45,-19.45,1 0.11 mat=5; sphere 40.55,-20.55,0 0.11 mat=5; sphere 40.55,-20.55,1 0.11 mat=5; sphere 40.55,-19.45,0 0.11 mat=5; sphere 40.55,-19.45,1 0.11 mat=5; cylinder 40.55,-20.55,1 40.816,-20.7864,1.2956 0.04 mat=2; cone 40.816,-20.7864,1.2956 0.104 41,-20.95,1.5 0 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 4f252b14
+	name Icon_deleteface
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 45,-20,0.6 1.2,1.2,1.2 mat=0; -box 45,-20.3,0.6 1,1.4,1 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id e102cf49
+	name Icon_garment
+	suppressed 0
+	visible 1
+	param Blend 0.06
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 0,-25,0.55 0.8,0.35,1 r=0.08 mat=6; box -0.6,-25,0.85 0.6,0.3,0.32 r=0.06 rot=0,30,0 mat=6; box 0.6,-25,0.85 0.6,0.3,0.32 r=0.06 rot=0,-30,0 mat=6; -cylinder 0,-25,0.95 0,-25,1.15 0.17 mat=6
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id e2bc9ee3
+	name Icon_fabric
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes tube 4.1,-25,0.3|4.55,-25,0.55|5,-25,0.3|5.45,-25,0.55|5.9,-25,0.3 0.12|0.12|0.12|0.12|0.12 mat=6; tube 4.1,-25.6,0.3|4.55,-25.6,0.55|5,-25.6,0.3|5.45,-25.6,0.55|5.9,-25.6,0.3 0.12|0.12|0.12|0.12|0.12 mat=6; tube 4.1,-25.3,0.3|4.55,-25.3,0.55|5,-25.3,0.3|5.45,-25.3,0.55|5.9,-25.3,0.3 0.12|0.12|0.12|0.12|0.12 mat=6; tube 4.1,-24.7,0.3|4.55,-24.7,0.55|5,-24.7,0.3|5.45,-24.7,0.55|5.9,-24.7,0.3 0.12|0.12|0.12|0.12|0.12 mat=6; tube 4.1,-24.4,0.3|4.55,-24.4,0.55|5,-24.4,0.3|5.45,-24.4,0.55|5.9,-24.4,0.3 0.12|0.12|0.12|0.12|0.12 mat=6
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id c01a82d2
+	name Icon_padding
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 10,-25,0.3 1.6,1.6,0.6 r=0.28 mat=6; paint box 9.73,-25,0.6 0.04,1.7,0.2 mat=4; paint box 10,-25.27,0.6 1.7,0.04,0.2 mat=4; paint box 10.27,-25,0.6 0.04,1.7,0.2 mat=4; paint box 10,-24.73,0.6 1.7,0.04,0.2 mat=4
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 29f6f2f7
+	name Icon_pocket
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 15,-25,0.05 1.4,1.6,0.1 mat=6; box 15,-25.1,0.13 1,1,0.08 r=0.03 mat=6; box 15,-24.65,0.2 1.05,0.38,0.06 r=0.03 mat=6; cylinder 15,-24.7,0.2 15,-24.7,0.28 0.1 mat=5
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 0a13ce4f
+	name Icon_hardware
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 19.8,-25,0.1 1.2,1,0.2 r=0.04 mat=5; -box 19.8,-25,0.1 0.8,0.65,0.4 mat=5; cylinder 19.8,-25,0.18 20.25,-25,0.18 0.06 mat=5; box 20.8,-25,0.08 1,0.55,0.12 mat=6
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 724610a8
+	name Icon_wear
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 25,-25,0.06 1.7,1.5,0.12 mat=6; -sphere 25.3,-24.8,0.06 0.3 mat=1; -sphere 24.55,-25.35,0.06 0.18 mat=1; -sphere 25.6,-25.5,0.06 0.12 mat=1; paint box 25,-24.32,0.1 1.7,0.1,0.1 mat=1
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id e110fc60
+	name Icon_wearer
+	suppressed 0
+	visible 1
+	param Blend 0.08
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes ellipsoid 30,-25,0.5 0.55,0.32,0.5 mat=1; cylinder 30,-25,0.95 30,-25,1.15 0.14 mat=1; sphere 30,-25,1.38 0.3 mat=1; cylinder 30,-25,-0.05 30,-25,0.1 0.35 mat=5
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id fe442ea5
+	name Icon_fur
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes sphere 35,-25,0.5 0.5 mat=5; cone 35.3771,-25,0.15 0.09 35.7164,-25,-0.165 0 mat=5; cone 34.6841,-24.7106,0.2115 0.09 34.3998,-24.4502,-0.0481 0 mat=5; cone 35.0407,-25.4638,0.2731 0.09 35.0774,-25.8811,0.0688 0 mat=5; cone 35.2992,-24.6096,0.3346 0.09 35.5685,-24.2583,0.1858 0 mat=5; cone 34.4987,-25.0887,0.3962 0.09 34.0475,-25.1686,0.3027 0 mat=5; cone 35.4373,-25.2781,0.4577 0.09 35.8309,-25.5283,0.4196 0 mat=5; cone 34.865,-24.4982,0.5192 0.09 34.7435,-24.0466,0.5365 0 mat=5; cone 34.7635,-25.4557,0.5808 0.09 34.5506,-25.8658,0.6535 0 mat=5; cone 35.469,-24.8286,0.6423 0.09 35.891,-24.6743,0.7704 0 mat=5; cone 34.5594,-24.8183,0.7038 0.09 34.1629,-24.6548,0.8873 0 mat=5; cone 35.1882,-25.4019,0.7654 0.09 35.3576,-25.7635,1.0042 0 mat=5; cone 35.1191,-24.6199,0.8269 0.09 35.2262,-24.2778,1.1212 0 mat=5; cone 34.7104,-25.168,0.8885 0.09 34.4498,-25.3192,1.2381 0 mat=5; cone 35.2324,-25.051,0.95 0.09 35.4416,-25.0969,1.355 0 mat=5
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 61e70fc3
+	name Icon_material
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes sphere 0,-30,0.75 0.6 mat=2; cylinder 0,-30,0 0,-30,0.2 0.5 mat=4; paint sphere -0.18,-30.25,1.05 0.14 mat=1
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 37d53a07
+	name Icon_paint
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes cylinder 4.2,-29.5,1.1 5,-30.05,0.55 0.09 mat=5; cone 5,-30.05,0.55 0.14 5.25,-30.25,0.4 0.13 mat=0; cone 5.25,-30.25,0.4 0.13 5.55,-30.45,0.15 0.02 mat=2; ellipsoid 5.75,-30.55,0.03 0.4,0.25,0.03 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 78c91866
+	name Icon_facematerial
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 10,-30,0.55 1.1,1.1,1.1 mat=0; paint box 10,-30,1.12 1.2,1.2,0.1 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 447378de
+	name Icon_fleshmaterial
+	suppressed 0
+	visible 1
+	param Blend 0.25
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes ellipsoid 15,-30,0.45 0.85,0.65,0.45 mat=3; sphere 15.4,-29.7,0.75 0.3 mat=3; sphere 14.65,-30.2,0.75 0.25 mat=3; paint sphere 15.1,-30.35,0.85 0.1 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 1aed9ce7
+	name Icon_skin
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes capsule 19.4,-30,0.4 20.6,-30,0.4 0.4 mat=3; paint sphere 19.6,-30.3,0.7 0.06 mat=2; paint sphere 20,-30.38,0.7 0.06 mat=2; paint sphere 20.35,-30.28,0.7 0.06 mat=2; paint sphere 19.85,-29.8,0.7 0.06 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id df16e2df
+	name Icon_glow
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes sphere 25,-30,0.9 0.5 mat=7; cylinder 25,-30,0.2 25,-30,0.5 0.24 mat=5; torus 25,-30,0.28 0.24 0.035 mat=5; torus 25,-30,0.36 0.24 0.035 mat=5; torus 25,-30,0.44 0.24 0.035 mat=5
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 4ef940ab
+	name Icon_uvproject
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 30.25,-29.75,0.04 0.5,0.5,0.08 mat=1; paint box 30.12,-29.88,0.08 0.25,0.25,0.06 mat=4; paint box 30.37,-29.63,0.08 0.25,0.25,0.06 mat=4; box 29.7,-29.75,0.04 0.5,0.5,0.08 mat=1; paint box 29.57,-29.88,0.08 0.25,0.25,0.06 mat=4; paint box 29.82,-29.63,0.08 0.25,0.25,0.06 mat=4; box 30.8,-29.75,0.04 0.5,0.5,0.08 mat=1; paint box 30.67,-29.88,0.08 0.25,0.25,0.06 mat=4; paint box 30.92,-29.63,0.08 0.25,0.25,0.06 mat=4; box 30.25,-29.2,0.04 0.5,0.5,0.08 mat=1; paint box 30.12,-29.33,0.08 0.25,0.25,0.06 mat=4; paint box 30.37,-29.08,0.08 0.25,0.25,0.06 mat=4; box 30.25,-30.3,0.04 0.5,0.5,0.08 mat=1; paint box 30.12,-30.43,0.08 0.25,0.25,0.06 mat=4; paint box 30.37,-30.18,0.08 0.25,0.25,0.06 mat=4; box 30.25,-30.85,0.04 0.5,0.5,0.08 mat=1; paint box 30.12,-30.98,0.08 0.25,0.25,0.06 mat=4; paint box 30.37,-30.73,0.08 0.25,0.25,0.06 mat=4
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 18d77466
+	name Icon_bind
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes capsule -0.7,-35.3,0.3 0.7,-34.7,0.3 0.1 mat=1; sphere -0.75,-35.22,0.3 0.15 mat=1; sphere -0.75,-35.42,0.3 0.15 mat=1; sphere 0.75,-34.58,0.3 0.15 mat=1; sphere 0.75,-34.78,0.3 0.15 mat=1; torus 0,-35,0.3 0.18 0.05 rot=0,90,23 mat=2; paint ellipsoid 0,-35,0.3 0.95,0.55,0.4 mat=3; cylinder 0,-35,0.3 0,-35,1 0.04 mat=2; sphere 0,-35,1.05 0.1 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id c1b4a97a
+	name Icon_shapekey
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 5,-35,0.08 1.9,0.3,0.16 r=0.04 mat=4; box 5.25,-35,0.3 0.3,0.45,0.35 r=0.05 mat=5; sphere 4.2,-34.5,0.25 0.22 mat=3; ellipsoid 5.8,-34.5,0.25 0.3,0.18,0.18 mat=3
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 9a6d2f54
+	name Icon_shapekeyend
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 10,-35,0.08 1.9,0.3,0.16 r=0.04 mat=4; box 10.75,-35,0.3 0.3,0.45,0.35 r=0.05 mat=5; box 10.98,-35,0.35 0.1,0.55,0.6 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 2d89f4a2
+	name Icon_correctiveshapekey
+	suppressed 0
+	visible 1
+	param Blend 0.12
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes capsule 14.2,-35,0.3 15,-35,0.3 0.28 mat=3; capsule 15,-35,0.3 15.5,-35,0.95 0.25 mat=3; paint sphere 15,-35,0.3 0.32 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 52c266c3
+	name Icon_set
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes cylinder -0.85,-40.45,0.12 0.25,-39.85,0.12 0.12 mat=0; cylinder 0.5,-39.7,0 0.5,-39.7,0.24 0.36 mat=0; -box 0.72,-39.58,0.12 0.45,0.28,0.4 rot=0,0,28 mat=0; -cylinder 0.5,-39.7,-0.1 0.5,-39.7,0.4 0.14 mat=0
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 7ea853a2
+	name Icon_remove
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes cone 5,-40,0 0.5 5,-40,1 0.6 mat=0; -cylinder 5,-40,0.12 5,-40,1.2 0.5 mat=0; cylinder 5.1,-40,1.15 5.1,-40,1.25 0.68 mat=4; box 5.1,-40,1.33 0.3,0.08,0.1 mat=4; paint box 5.56,-40,0.55 0.06,0.06,0.8 mat=4; paint box 5.28,-39.515,0.55 0.06,0.06,0.8 mat=4; paint box 4.72,-39.515,0.55 0.06,0.06,0.8 mat=4; paint box 4.44,-40,0.55 0.06,0.06,0.8 mat=4; paint box 4.72,-40.485,0.55 0.06,0.06,0.8 mat=4; paint box 5.28,-40.485,0.55 0.06,0.06,0.8 mat=4
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id f5c82bcd
+	name Icon_remedy
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 10,-40,0.35 1.3,0.9,0.7 r=0.06 mat=1; paint box 10,-40.46,0.4 0.5,0.06,0.14 mat=2; paint box 10,-40.46,0.4 0.14,0.06,0.5 mat=2; box 10,-40,0.75 0.5,0.12,0.1 mat=4
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id a76cf29d
+	name Icon_fix
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 15,-40,0.5 1.2,1.2,1 r=0.03 mat=0; -box 15.15,-40.15,1 0.7,0.7,0.3 mat=0; box 15.15,-40.15,1.02 0.85,0.85,0.08 mat=2; sphere 14.78,-40.52,1.08 0.08 mat=5; sphere 15.52,-40.52,1.08 0.08 mat=5; sphere 14.78,-39.78,1.08 0.08 mat=5; sphere 15.52,-39.78,1.08 0.08 mat=5
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 5cafb83a
+	name Icon_measure
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 0,-45,0.1 2,0.5,0.2 r=0.03 mat=5; box -0.8,-45.12,0.21 0.05,0.4,0.04 mat=4; box -0.6,-45.12,0.21 0.05,0.26,0.04 mat=4; box -0.4,-45.12,0.21 0.05,0.4,0.04 mat=4; box -0.2,-45.12,0.21 0.05,0.26,0.04 mat=4; box 0,-45.12,0.21 0.05,0.4,0.04 mat=4; box 0.2,-45.12,0.21 0.05,0.26,0.04 mat=4; box 0.4,-45.12,0.21 0.05,0.4,0.04 mat=4; box 0.6,-45.12,0.21 0.05,0.26,0.04 mat=4; box 0.8,-45.12,0.21 0.05,0.4,0.04 mat=4; box -0.95,-44.8,0.45 0.1,0.1,0.7 mat=2; box 0.95,-44.8,0.45 0.1,0.1,0.7 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 273f5f2c
+	name Icon_distance
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes sphere 4.25,-45,0.35 0.35 mat=0; sphere 5.75,-45,0.35 0.35 mat=0; cylinder 5,-45,0.95 4.57,-45,0.95 0.06 mat=2; cone 4.57,-45,0.95 0.156 4.25,-45,0.95 0 mat=2; cylinder 5,-45,0.95 5.43,-45,0.95 0.06 mat=2; cone 5.43,-45,0.95 0.156 5.75,-45,0.95 0 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 4c1a7bb0
+	name Icon_symmetry
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes ellipsoid 10,-45,0.75 0.6,0.5,0.75 mat=1; sphere 9.76,-45.42,0.95 0.12 mat=4; sphere 10.24,-45.42,0.95 0.12 mat=4; paint box 10,-45.5,0.75 0.08,0.3,1.7 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id b812d1e6
+	name Icon_clearance
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 14.4,-45,0.5 0.7,1.2,1 r=0.03 mat=0; box 15.6,-45,0.5 0.7,1.2,1 r=0.03 mat=0; box 15,-45,0.5 0.5,0.5,0.12 mat=2; box 14.78,-45,0.5 0.06,0.6,0.4 mat=2; box 15.22,-45,0.5 0.06,0.6,0.4 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id f782fcd5
+	name Icon_topology
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 20,-45,0.05 1.8,1.8,0.1 mat=1; box 19.25,-45,0.12 0.06,1.56,0.06 mat=4; box 20,-45.75,0.12 1.56,0.06,0.06 mat=4; box 19.75,-45,0.12 0.06,1.56,0.06 mat=4; box 20,-45.25,0.12 1.56,0.06,0.06 mat=4; box 20.25,-45,0.12 0.06,1.56,0.06 mat=4; box 20,-44.75,0.12 1.56,0.06,0.06 mat=4; box 20.75,-45,0.12 0.06,1.56,0.06 mat=4; box 20,-44.25,0.12 1.56,0.06,0.06 mat=4; sphere 20.25,-45.25,0.18 0.13 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id bd050efe
+	name Icon_section
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes cylinder 25,-45,0 25,-45,1.2 0.75 mat=0; -cylinder 25,-45,-0.1 25,-45,1.3 0.4 mat=0; -box 25,-45.6,0.6 1.8,1.2,1.6 mat=0; paint box 25,-45,0.6 1.8,0.06,1.4 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 6bfb49fe
+	name Icon_flex
+	suppressed 0
+	visible 1
+	param Blend 0.15
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes capsule 29.2,-45,0.3 30.05,-45,0.3 0.26 mat=3; capsule 30.05,-45,0.3 30.05,-45,1.2 0.24 mat=3; cylinder 30.7,-45,0.35 30.6397,-45,0.8325 0.07 mat=2; cone 30.6397,-45,0.8325 0.182 30.6,-45,1.15 0 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 086b55bd
+	name Icon_match
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 34.45,-44.7,0.75 0.9,0.08,1.3 mat=1; box 34.45,-44.75,0.75 0.5,0.04,0.8 mat=4; box 35.55,-45,0.4 0.5,0.5,0.8 mat=0; box 35,-45.3,0.55 0.3,0.1,0.08 mat=2; box 35,-45.3,0.75 0.3,0.1,0.08 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id d70d22b0
+	name Icon_describe
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 40,-45,0.05 1.4,1.8,0.1 mat=1; box 40,-44.4,0.12 1.15,0.1,0.05 mat=4; box 39.92,-44.7,0.12 1,0.1,0.05 mat=4; box 40,-45,0.12 1.15,0.1,0.05 mat=4; box 39.92,-45.3,0.12 1,0.1,0.05 mat=4; box 40,-45.6,0.12 1.15,0.1,0.05 mat=4; cylinder 40.55,-45.75,0.15 40.95,-44.6,0.8 0.08 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 50ca0f4c
+	name Icon_render
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 0,-50,0.45 1.5,0.9,0.9 r=0.08 mat=0; cylinder 0,-50.4,0.45 0,-50.75,0.45 0.34 mat=4; cylinder 0,-50.74,0.45 0,-50.78,0.45 0.22 mat=7; box -0.45,-50,1 0.4,0.5,0.2 mat=0; sphere 0.5,-50.4,0.8 0.1 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 5f55b22d
+	name Icon_turnaround
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes cylinder 5,-50,0 5,-50,0.15 0.85 mat=5; box 5,-50,0.6 0.5,0.5,0.9 r=0.05 mat=0; torus 5,-50,0.25 0.95 0.06 mat=2; cone 5,-50.95,0.25 0.16 5.4,-50.95,0.25 0 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 8084f9fa
+	name Icon_save
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 10,-50,0.1 1.6,1.6,0.2 r=0.04 mat=4; box 10,-50.3,0.22 1,0.9,0.06 mat=1; box 10.1,-49.45,0.22 0.8,0.5,0.06 mat=0; box 10.25,-49.45,0.26 0.18,0.32,0.04 mat=4
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 02f3637d
+	name Icon_export
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 15,-50,0.35 1.4,1.4,0.7 r=0.03 mat=5; -box 15,-50,0.75 1.1,1.1,0.6 mat=5; box 15,-50,0.55 0.6,0.6,0.6 mat=0; cylinder 15,-50,0.9 15,-50,1.43 0.1 mat=2; cone 15,-50,1.43 0.26 15,-50,1.75 0 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 8af64345
+	name Icon_bake
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 19.45,-50,0.35 0.7,0.7,0.7 r=0.03 mat=0; box 20.6,-50,0.04 0.9,0.9,0.08 mat=1; paint box 20.38,-50.22,0.09 0.44,0.44,0.05 mat=4; paint box 20.82,-49.78,0.09 0.44,0.44,0.05 mat=4; cylinder 19.85,-50,0.8 20.2638,-50,0.5931 0.07 mat=2; cone 20.2638,-50,0.5931 0.182 20.55,-50,0.45 0 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 50d0d89a
+	name Icon_paintmaps
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 24.7,-49.7,0.06 1.1,1.1,0.1 mat=1; box 24.7,-49.7,0.12 0.8,0.8,0.04 mat=4; box 25,-50,0.2 1.1,1.1,0.1 mat=1; box 25,-50,0.26 0.8,0.8,0.04 mat=5; box 25.3,-50.3,0.34 1.1,1.1,0.1 mat=1; box 25.3,-50.3,0.4 0.8,0.8,0.04 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id a4d81554
+	name Icon_pivot
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes cone 30,-50,0 0.4 30,-50,0.55 0.06 mat=5; box 30,-50,0.66 2,0.3,0.14 rot=0,-14,0 mat=0; sphere 30,-50,0.66 0.17 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id ee4ac02b
+	name Icon_rebuild
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 35,-50,0.45 0.8,0.8,0.8 r=0.03 mat=0; torus 35,-50,0.45 0.85 0.07 rot=70,0,0 mat=2; cone 35.85,-50,0.45 0.18 35.85,-50,0 0 mat=2; cone 34.15,-50,0.45 0.18 34.15,-50,0.9 0 mat=2
+	param Smooth 2
+	param Voxel 0.025
+end

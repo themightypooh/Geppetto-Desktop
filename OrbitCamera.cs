@@ -16,6 +16,9 @@ public sealed class OrbitCamera
 	public float FovDegrees = 45f;
 	public float Near = 0.1f;
 	public float Far = 5000f;
+	/// <summary>Flat projection: no perspective, so a front/side/top view lines up with a reference
+	/// picture. The visible height matches what the perspective view shows at the target.</summary>
+	public bool Orthographic;
 
 	public float MinDistance = 5f;
 	public float MaxDistance = 2000f;
@@ -23,7 +26,7 @@ public sealed class OrbitCamera
 	public float MaxPitch = 89f;
 	public bool Flying { get; private set; }
 	public Vector3 FlyPosition { get; private set; }
-	public float FlySpeed { get; private set; } = 28f;
+	public float FlySpeed { get; set; } = 28f;
 
 	/// <summary>
 	/// The start view a model opens with: FBX three-quarter, --iso, then explicit --yaw/--pitch.
@@ -122,6 +125,15 @@ public sealed class OrbitCamera
 	public Matrix4x4 ProjectionMatrix( float aspect )
 	{
 		aspect = Math.Max( 1e-3f, aspect );
+		if ( Orthographic )
+		{
+			float half = Distance * MathF.Tan( FovDegrees * MathF.PI / 360f );
+			var ortho = Matrix4x4.CreateOrthographic( 2 * half * aspect, 2 * half, Near, Far );
+			// depth -1..1 like the perspective path below
+			ortho.M33 = -2f / (Far - Near);
+			ortho.M43 = -(Far + Near) / (Far - Near);
+			return ortho;
+		}
 		var projection = Matrix4x4.CreatePerspectiveFieldOfView(
 			FovDegrees * MathF.PI / 180f, aspect, Near, Far );
 		// System.Numerics uses depth 0..1; OpenGL's default clip volume is -1..1.
@@ -149,6 +161,7 @@ public sealed class OrbitCamera
 		var nearPt = new Vector3( nearH.X, nearH.Y, nearH.Z ) / MathF.Max( 1e-6f, nearH.W );
 		var farPt  = new Vector3( farH.X,  farH.Y,  farH.Z )  / MathF.Max( 1e-6f, farH.W );
 		var dir = Vector3.Normalize( farPt - nearPt );
-		return (Eye, dir);
+		// flat view: rays are parallel, each starting where the pixel sits on the near plane
+		return (Orthographic ? nearPt : Eye, dir);
 	}
 }

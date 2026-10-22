@@ -1,0 +1,23 @@
+effigy 1
+rollback 2147483647
+materiallook 0 color=#e8b417 rough=0.35 metal=0
+materiallook 1 color=#d6ae7c rough=0.8 metal=0
+materiallook 2 color=#de6e5c rough=0.9 metal=0
+materiallook 3 color=#a2a7ac rough=0.3 metal=1
+materiallook 4 color=#2c2f38 rough=0.5 metal=0
+materiallook 5 color=#b8892e rough=0.35 metal=1
+feature BlobFeature
+	id f2f01a9f
+	name Pencil
+	suppressed 0
+	visible 1
+	param Blend 0.01
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 0,-0.2,0 0.4,4.8,0.69 mat=0; box 0,-0.2,0 0.4,4.8,0.69 rot=0,60,0 mat=0; box 0,-0.2,0 0.4,4.8,0.69 rot=0,120,0 mat=0; cone 0,2.18,0 0.4 0,3.4,0 0.05 mat=1; paint cone 0,3.0,0 0.2 0,3.5,0 0.01 mat=4; cylinder 0,-3.15,0 0,-2.55,0 0.385 r=0.02 mat=3; torus 0,-3.0,0 0.385 0.035 rot=90,0,0 mat=3; torus 0,-2.72,0 0.385 0.035 rot=90,0,0 mat=3; cylinder 0,-3.55,0 0,-3.1,0 0.34 r=0.12 mat=2; paint box 0,-1.3,0.35 0.16,1.5,0.1 mat=5; paint box 0,-2.25,0.35 0.3,0.06,0.1 mat=5
+	param Smooth 2
+	param Voxel 0.018
+end

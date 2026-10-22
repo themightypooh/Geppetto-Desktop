@@ -114,6 +114,10 @@ public sealed record MaterialDescriptor
 	public float Ps1Grime { get; init; } = 0.0f;
 	public float Ps1GrimeFilm { get; init; } = 0.3f;
 	public float Ps1Glow { get; init; } = 0.0f;
+	// ps1_lit boot mud: dirt amount, toe start (object x) and cuff height (object z), inches.
+	public float Ps1BootDirt { get; init; } = 0.0f;
+	public float Ps1BootToe { get; init; } = 3.0f;
+	public float Ps1BootCuff { get; init; } = 8.86f;
 	public Vec3 EmissionFactor { get; init; } = Vec3.Zero;
 
 	/// <summary>Multiplier for tangent-space normal map XY (1 = authored).</summary>
@@ -410,6 +414,12 @@ public static class VmatParser
 				descriptor = descriptor with { Ps1GrimeFilm = film };
 			else if ( key.Equals( "g_flPs1Glow", StringComparison.OrdinalIgnoreCase ) && float.TryParse( val, out var glow ) )
 				descriptor = descriptor with { Ps1Glow = glow };
+			else if ( key.Equals( "g_flPs1BootDirt", StringComparison.OrdinalIgnoreCase ) && float.TryParse( val, out var bootDirt ) )
+				descriptor = descriptor with { Ps1BootDirt = bootDirt };
+			else if ( key.Equals( "g_flPs1BootToe", StringComparison.OrdinalIgnoreCase ) && float.TryParse( val, out var bootToe ) )
+				descriptor = descriptor with { Ps1BootToe = bootToe };
+			else if ( key.Equals( "g_flPs1BootCuff", StringComparison.OrdinalIgnoreCase ) && float.TryParse( val, out var bootCuff ) )
+				descriptor = descriptor with { Ps1BootCuff = bootCuff };
 			else if ( key.Equals( "F_RENDER_BACKFACES", StringComparison.OrdinalIgnoreCase ) && int.TryParse( val, out var backfaces ) )
 				descriptor = descriptor with { DoubleSided = backfaces != 0 };
 			else if ( TryLobeKey( descriptor, key, val, out var withLobe ) )

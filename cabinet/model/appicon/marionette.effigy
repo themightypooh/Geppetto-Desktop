@@ -1,0 +1,311 @@
+effigy 1
+rollback 2147483647
+materiallook 1 color=#a8682f rough=0.55 metal=0
+materiallook 2 color=#c4b6a2 rough=0.5 metal=0
+materiallook 3 color=#6a3418 rough=0.6 metal=0
+materiallook 4 color=#b84a3c rough=0.5 metal=0
+materiallook 5 color=#e8e2d4 rough=0.4 metal=0
+materiallook 6 color=#14100c rough=0.3 metal=0
+materiallook 7 color=#b8a07c rough=0.8 metal=0
+materiallook 8 color=#8a5428 rough=0.5 metal=0
+refimage front 51.99 7.58 26.91 0 0.55 1 /home/poo/Desktop/geppetto-desktop/cabinet/model/appicon/ref_flip.png
+feature BlobFeature
+	id cc4efb34
+	name Torso
+	suppressed 0
+	visible 1
+	param Blend 0.4
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes ellipsoid 0.0,-10.83,25.49 4.2,5.55,7.31 rot=-31,0,0 mat=1; ellipsoid 0.0,-14.22,19.74 3.6,4.2,2.71 rot=-25,0,0 mat=1
+	param Smooth 2
+	param Voxel 0.1
+end
+feature BlobFeature
+	id 9623c9f7
+	name Pelvis
+	suppressed 0
+	visible 1
+	param Blend 2
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes ellipsoid 0.0,-15.91,16.35 3.6,5.01,3.52 rot=-20,0,0 mat=1
+	param Smooth 2
+	param Voxel 0.1
+end
+feature BlobFeature
+	id 915f03ab
+	name Neck
+	suppressed 0
+	visible 1
+	param Blend 2
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes cylinder 0.0,-7.45,29.89 0.0,-4.2,27.18 1.76 r=0.2 mat=1
+	param Smooth 2
+	param Voxel 0.08
+end
+feature BlobFeature
+	id daf1126f
+	name Joints
+	suppressed 0
+	visible 1
+	param Blend 0.05
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes sphere 0.0,-14.08,31.25 1.69 mat=1; sphere 0.0,-3.25,24.48 1.56 mat=1; sphere 0.0,-24.58,33.41 1.42 mat=1; sphere 0.0,7.11,20.35 1.35 mat=1; sphere 0.0,-27.89,25.15 0.81 mat=1; sphere 0.0,8.46,11.48 0.88 mat=1; sphere 0.0,-21.19,16.01 2.17 mat=1; sphere 0.0,-13.0,13.1 2.17 mat=1; sphere 0.0,-22.88,6.06 1.56 mat=1; sphere 0.0,-9.0,4.1 1.56 mat=1
+	param Smooth 2
+	param Voxel 0.07
+end
+feature BlobFeature
+	id 5e3ddfe0
+	name UpperArms
+	suppressed 0
+	visible 1
+	param Blend 0.05
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes cone 0.0,-14.08,31.25 1.83 0.0,-24.58,33.41 1.56 mat=1; cone 0.0,-3.25,24.48 1.69 0.0,7.11,20.35 1.49 mat=1
+	param Smooth 2
+	param Voxel 0.07
+end
+feature BlobFeature
+	id ea57dfdd
+	name Forearms
+	suppressed 0
+	visible 1
+	param Blend 0.05
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes cone 0.0,-24.58,33.41 1.62 0.0,-26.54,29.22 1.96 mat=1; cone 0.0,-26.54,29.22 1.96 0.0,-27.89,25.15 1.15 mat=1; cone 0.0,7.11,20.35 1.35 0.0,7.79,15.68 1.9 mat=1; cone 0.0,7.79,15.68 1.9 0.0,8.46,11.48 1.29 mat=1
+	param Smooth 2
+	param Voxel 0.07
+end
+feature BlobFeature
+	id cc7be2da
+	name Hands
+	suppressed 0
+	visible 1
+	param Blend 2
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes ellipsoid 0.0,-27.62,21.63 1.9,1.9,2.98 mat=1; ellipsoid 0.0,8.12,7.82 1.9,1.9,2.57 mat=1
+	param Smooth 2
+	param Voxel 0.07
+end
+feature BlobFeature
+	id f7700b6c
+	name Thighs
+	suppressed 0
+	visible 1
+	param Blend 0.05
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes cone 0.0,-21.19,16.01 2.37 0.0,-21.93,11.27 2.37 mat=1; cone 0.0,-21.93,11.27 2.37 0.0,-22.88,6.06 2.1 mat=1; cone 0.0,-13.0,13.1 2.71 0.0,-11.64,8.91 2.57 mat=1; cone 0.0,-11.64,8.91 2.57 0.0,-9.0,4.1 2.17 mat=1
+	param Smooth 2
+	param Voxel 0.07
+end
+feature BlobFeature
+	id 2b740582
+	name Shins
+	suppressed 0
+	visible 1
+	param Blend 0.05
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes cone 0.0,-22.88,6.06 1.76 0.0,-26.27,-5.45 1.29 mat=1; cone 0.0,-9.0,4.1 1.76 0.0,-7.45,-6.8 1.29 mat=1
+	param Smooth 2
+	param Voxel 0.07
+end
+feature BlobFeature
+	id 3f4d9e9a
+	name Feet
+	suppressed 0
+	visible 1
+	param Blend 0.3
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes ellipsoid 1.2,-26.74,-7.21 2.6,1.76,1.49 mat=1; ellipsoid 1.2,-7.31,-8.56 2.6,1.76,1.49 mat=1; sphere 0.0,-26.27,-5.45 1.29 mat=1; sphere 0.0,-7.45,-6.8 1.29 mat=1
+	param Smooth 2
+	param Voxel 0.07
+end
+feature BlobFeature
+	id fcd4b718
+	name Head
+	suppressed 0
+	visible 1
+	param Blend 0.3
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes ellipsoid 0.0,0.34,32.26 4.7,4.9,7.0 rot=-40,0,0 mat=1
+	param Smooth 2
+	param Voxel 0.07
+end
+feature BlobFeature
+	id f8adbd2a
+	name Control
+	suppressed 0
+	visible 1
+	param Blend 0.1
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes capsule 5,-18.96,46.14 -5,4.06,51.29 1.02 mat=8; capsule 5,2.37,44.87 -5,-17.26,54.35 1.02 mat=8; cylinder 0,-7.45,48.11 0,-7.45,50.31 1.08 mat=8
+	param Smooth 2
+	param Voxel 0.07
+end
+feature SplineFeature
+	id 40911f61
+	name StringElbowL
+	suppressed 0
+	visible 1
+	param Closed 0
+	param Facing 0 0 0
+	param Material 7
+	vec3s Points -5 -15.98 53.32 0.8 -24.37 34.63
+	param Profile 0
+	param Radius 0.07
+	param Resolution 8
+	param Sides 12
+	param Smooth 1
+	param Taper 1
+	param Thickness 0.2
+	param Tube 1
+	param Twist 0
+	param Width 2
+end
+feature SplineFeature
+	id ce5e7ef2
+	name StringKneeL
+	suppressed 0
+	visible 1
+	param Closed 0
+	param Facing 0 0 0
+	param Material 7
+	vec3s Points 4.4 -17.58 46.45 1.6 -22.21 7.14
+	param Profile 0
+	param Radius 0.07
+	param Resolution 8
+	param Sides 12
+	param Smooth 1
+	param Taper 1
+	param Thickness 0.2
+	param Tube 1
+	param Twist 0
+	param Width 2
+end
+feature SplineFeature
+	id d7196882
+	name StringNeck
+	suppressed 0
+	visible 1
+	param Closed 0
+	param Facing 0 0 0
+	param Material 7
+	vec3s Points 0 -7.45 48.71 -1.5 -8.67 31.79
+	param Profile 0
+	param Radius 0.07
+	param Resolution 8
+	param Sides 12
+	param Smooth 1
+	param Taper 1
+	param Thickness 0.2
+	param Tube 1
+	param Twist 0
+	param Width 2
+end
+feature SplineFeature
+	id d46b48f6
+	name StringHead
+	suppressed 0
+	visible 1
+	param Closed 0
+	param Facing 0 0 0
+	param Material 7
+	vec3s Points 3.8 0.01 45.11 -0.5 -0.68 38.42
+	param Profile 0
+	param Radius 0.07
+	param Resolution 8
+	param Sides 12
+	param Smooth 1
+	param Taper 1
+	param Thickness 0.2
+	param Tube 1
+	param Twist 0
+	param Width 2
+end
+feature SplineFeature
+	id 8cd69bb0
+	name StringElbowR
+	suppressed 0
+	visible 1
+	param Closed 0
+	param Facing 0 0 0
+	param Material 7
+	vec3s Points -4.4 2.68 50.98 0.6 7.11 21.63
+	param Profile 0
+	param Radius 0.07
+	param Resolution 8
+	param Sides 12
+	param Smooth 1
+	param Taper 1
+	param Thickness 0.2
+	param Tube 1
+	param Twist 0
+	param Width 2
+end
+feature SplineFeature
+	id 298b2f85
+	name StringKneeR
+	suppressed 0
+	visible 1
+	param Closed 0
+	param Facing 0 0 0
+	param Material 7
+	vec3s Points 4.4 1.19 44.54 1.6 -8.8 5.52
+	param Profile 0
+	param Radius 0.07
+	param Resolution 8
+	param Sides 12
+	param Smooth 1
+	param Taper 1
+	param Thickness 0.2
+	param Tube 1
+	param Twist 0
+	param Width 2
+end

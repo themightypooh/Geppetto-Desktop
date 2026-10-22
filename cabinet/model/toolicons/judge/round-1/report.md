@@ -1,0 +1,329 @@
+# Tool icons, round 1
+
+0 / 65 pass (score >= 9, every category >= 8). Mean 6.38.
+
+- FAIL **Delete** 4.12
+  - represents 4: Cube with scattered red marks -> Missing chunk with red X
+  - distinct 4: Like Dissolve -> Red X
+  - legibility 4: Marks are pixels -> Bold X
+  - craft 5: Messy -> Clean up
+- FAIL **Skin** 4.38
+  - represents 4: Pink capsule, faint spots -> Bold freckles and pores
+  - distinct 4: Like Flesh -> Distinct spots
+  - legibility 4: Spots invisible at 1x -> Bigger spots
+  - craft 7: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Body from bones** 4.50
+  - represents 3: Pink flesh lump only, no bones visible -> Show bone ends sticking out of half-grown flesh
+  - distinct 4: Same pink lump as Flesh/Skin/Sculpt -> Make bones the dominant element
+  - legibility 6: Silhouette reads but as meat -> Cream bone knobs at both ends
+  - craft 7: Clean outline, noisy flesh texture -> Calm the texture
+- FAIL **Draft** 4.50
+  - represents 4: Grey egg with red sliver: no straight tapered walls -> Use a block with straight walls tapered inward, red angle wedge vs dashed vertical
+  - distinct 5: Looks like Blob -> Straight edges
+  - legibility 4: Red sliver is near single pixels -> Thicker red angle marker
+  - craft 6: Stray red bits on edge -> Clean edge
+- FAIL **Dissolve** 4.88
+  - represents 5: Cube with red bits flying off -> Show faded edge line on face
+  - distinct 5: Like Delete -> Distinct idea
+  - legibility 4: Lone red pixels -> Larger marks
+  - craft 6: Stray bits -> Remove strays
+- FAIL **Pocket** 5.00
+  - represents 5: Flat blue square, faint pocket -> Visible flap with stitching and button
+  - distinct 5: Like Fabric -> Flap
+  - legibility 4: Button lone pixel -> Bigger flap
+  - craft 7: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Set** 5.00
+  - represents 4: Grey spoon-like tool -> Wrench or dial knob with red pointer
+  - distinct 6: Unique -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - legibility 5: Thin -> Thicker
+  - craft 6: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Curve** 5.12
+  - represents 5: Wiggly grey body; no guide curve -> Show a separate red curve line with the body following it
+  - distinct 4: Confused with Bend and Sweep -> Visible guide
+  - legibility 6: Reads as lump -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - craft 6: Lumpy -> Cleaner curve
+- FAIL **Key end** 5.25
+  - represents 5: Bar with red end stop -> Target shape at stop
+  - distinct 4: Like Shape key -> Distinct
+  - legibility 6: Reads -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - craft 7: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Move** 5.38
+  - represents 5: Cube with black arrow and odd red/yellow blobs, not a clear gizmo -> Three clear axis arrows red/green/blue from the cube
+  - distinct 6: Black arrow like Push face -> Coloured gizmo
+  - legibility 5: Blobs read as junk -> Thick arrows
+  - craft 6: Messy -> Remove blobs
+- FAIL **Circle pattern** 5.50
+  - represents 6: Cluster of cylinders, circle arrangement not readable -> Add a red ring on the floor through the items, fewer larger items
+  - distinct 5: Same cylinders as Row pattern -> Red ring sets it apart
+  - legibility 5: Busy clump at 1x, yellow centre is a dot -> Use 5 items with gaps
+  - craft 6: Crowded -> Reduce clutter
+- FAIL **Flesh** 5.50
+  - represents 5: Pink bean blob -> Cut showing skin layer over red flesh
+  - distinct 4: Like Skin and Body from bones -> Cross-section
+  - legibility 7: Reads -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - craft 7: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Profile** 5.50
+  - represents 5: Red L-shaped bar standing on paper; looks like a 3D bracket, not a 2D outline -> Lay a flat closed red outline (half bottle profile) next to a dashed axis line
+  - distinct 5: Paper base like Sketch -> Drop the paper, use the grey plane with an axis instead
+  - legibility 6: Red shape reads, meaning doesn't -> Make outline hollow, not solid bar
+  - craft 7: Clean -> Tighter framing
+- FAIL **Shape key** 5.50
+  - represents 6: Slider with knob and two shapes -> Clear A and B shapes at ends
+  - distinct 5: Like Key end -> Distinct
+  - legibility 5: Small shapes -> Bigger shapes
+  - craft 6: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Subdivide** 5.50
+  - represents 6: Cube next to sphere, tiny red bit -> Big red arrow from cube to sphere, show facets on cube
+  - distinct 5: Like Primitive -> Arrow and faceted mid-step
+  - legibility 5: Red is lone pixels at 1x -> Enlarge arrow
+  - craft 6: Stray red bits -> Remove strays
+- FAIL **Bevel** 5.62
+  - represents 6: Cube with thin red strip on edge -> Wider red slanted strip
+  - distinct 5: Like Chamfer -> Show multiple segments
+  - legibility 5: Red strip thin at 1x -> Thicker
+  - craft 7: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Sculpt** 5.62
+  - represents 6: Pink lump with small yellow tool -> Bigger sculpt brush/loop tool pressing a visible dent; grey clay
+  - distinct 5: Pink lump like Flesh -> Grey clay
+  - legibility 5: Tool tiny at 1x -> Enlarge tool
+  - craft 7: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Spline** 5.62
+  - represents 5: Straight red segments between yellow dots: a polyline, not a smooth curve -> Make one smooth S-curve passing through 3-4 yellow points
+  - distinct 7: Only line icon in FORM -> Add tangent handles on one point
+  - legibility 5: Thin 1-2px line almost vanishes at 1x -> Thicken tube to 3px
+  - craft 6: Thin, sparse composition, lots of empty frame -> Fill frame with the curve
+- FAIL **Wear** 5.62
+  - represents 6: Blue patch with holes -> Frayed torn edge
+  - distinct 5: Like Detail -> Tears
+  - legibility 5: Holes small -> Bigger holes
+  - craft 7: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Blob** 5.75
+  - represents 5: Single grey lumpy shape reads as a rock, not shapes melting together -> Show 2-3 spheres of visibly different size joined by smooth necks
+  - distinct 5: Grey lump close to Primitive and Draft -> Tint the blend necks red to mark the melt
+  - legibility 7: Silhouette solid at 1x -> Deepen the notches between lobes
+  - craft 7: Clean outline, heavy dither texture -> Reduce dither noise
+- FAIL **Symmetrize** 5.75
+  - represents 5: Egg with red line and dark dots looks like a ladybug -> Half solid half ghost with red mirror line and arrow
+  - distinct 6: Unique -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - legibility 6: Reads -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - craft 7: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Bind** 5.88
+  - represents 6: Bone with red pin -> Mesh over bone with red link
+  - distinct 6: Unique -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - legibility 5: Thin -> Thicker bone
+  - craft 7: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Fur** 5.88
+  - represents 4: Gold spiky star/sun -> Tuft of thin strands from a patch
+  - distinct 7: Unique -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - legibility 7: Reads -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - craft 7: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Import** 5.88
+  - represents 4: Yellow open box with red stick: reads as a tray with a lever, not bringing in a file -> Add a red arrow pointing down into the tray with a small mesh cube entering
+  - distinct 7: Gold colour unique in FORM -> Keep colour
+  - legibility 7: Box shape clear at 1x -> Make arrow head wide enough to read
+  - craft 7: Clean, slight dither -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Sweep** 5.88
+  - represents 6: Bent grey tube; path and profile not shown -> Add red path line and red circle profile at the start
+  - distinct 6: Looks like Curve #32 -> Show the profile ring
+  - legibility 5: Small, thin at 1x -> Enlarge tube to fill frame
+  - craft 7: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Trim** 5.88
+  - represents 6: Box with red band at mid-height; no part removed -> Lift/ghost the cut-off half and show a red plane larger than the box
+  - distinct 4: Nearly identical to Fillet -> Separated halves
+  - legibility 7: Reads -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - craft 7: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Sketch** 6.00
+  - represents 7: Paper with pencil and doodle -> Draw a bold red rectangle/circle on the paper
+  - distinct 5: Same cream paper as Profile; similar framing to Plane -> Keep paper only for Sketch; make the drawn lines red and bold
+  - legibility 5: Drawn marks are lone dark pixels at 1x, pencil is thin -> Thicken pencil and lines to 2px
+  - craft 7: Clean outline -> Remove stray dark specks on the sheet
+- FAIL **Detail** 6.25
+  - represents 7: Slab with corner rivets and slot -> Larger rivets, red panel line
+  - distinct 6: Slab-with-dots like Wear -> Metal plate look
+  - legibility 5: Rivets are single pixels at 1x -> 2x2 rivets
+  - craft 7: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Loft** 6.25
+  - represents 6: Cone with red rings; sections are same shape, so not clearly blending -> Make bottom section square and top circle, solid blends between
+  - distinct 5: Close to Revolve (round body + red rings) -> Square base differentiates it
+  - legibility 7: Rings read at 1x -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - craft 8: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Plane** 6.38
+  - represents 6: Grey plate with red pin; pin suggests a marker rather than a construction plane -> Make a thin framed translucent plane with a red normal arrow
+  - distinct 6: Pin-on-plate resembles Import's red stick -> Replace pin with normal arrow
+  - legibility 7: Plate reads at 1x -> Brighten plate edge outline
+  - craft 7: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Fabric** 6.50
+  - represents 7: Wavy blue cloth -> Drape over sphere
+  - distinct 6: Like Pocket/Wear -> Drape
+  - legibility 6: Waves faint -> Deeper folds
+  - craft 7: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Fillet** 6.50
+  - represents 6: Rounded box but red band runs around middle, not on the rounded edge -> Put red only on one rounded top edge, keep other edges sharp
+  - distinct 6: Red band on box like Trim -> Move red to edge
+  - legibility 7: Reads -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - craft 8: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Push face** 6.50
+  - represents 7: Block with red top face and arrow -> Red arrow along normal, face offset with visible gap
+  - distinct 5: Like Extrude and Move -> Red arrow
+  - legibility 7: Reads -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - craft 7: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Primitive** 6.50
+  - represents 7: Grey cube, sphere and a cone/cylinder stack: reads as basic solids -> Separate the solids into a clear cube, sphere, cylinder, cone set instead of a fused stack
+  - distinct 6: Same flat grey as Blob and Subdivide's cube+sphere -> Add a red accent (e.g. red cone) so it differs from Subdivide
+  - legibility 6: At 1x the pieces merge into one grey lump -> Space the solids apart with dark gaps
+  - craft 7: Clean outline, slight dither on shading -> Flatten the shading to 2-3 tones
+- FAIL **Bend** 6.50
+  - represents 7: Bar bent into arc, red underside -> Add red curved arrow showing the bend
+  - distinct 5: Close to Curve -> Arrow
+  - legibility 7: Reads -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - craft 7: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Wearer** 6.50
+  - represents 5: Reads as chess pawn -> Torso mannequin on stand with shoulders
+  - distinct 7: Unique -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - legibility 8: Reads -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - craft 7: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Hole** 6.62
+  - represents 7: Slab with red round hole -> Show the hole going through (dark interior) and a drill bit above
+  - distinct 6: Close to Inset -> Drill bit differentiates
+  - legibility 6: Hole small at 1x -> Bigger hole
+  - craft 8: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Part** 6.62
+  - represents 6: Grey block with two yellow pegs reads like a battery/LEGO brick, not a bracket -> Make it an L bracket with a bolt hole plus one peg
+  - distinct 7: Yellow pegs unique in FORM -> Add red on the mounting hole
+  - legibility 7: Pegs read at 1x -> Enlarge the part slightly in frame
+  - craft 7: Clean, slightly noisy dither on block -> Smooth block shading
+- FAIL **Extrude faces** 6.75
+  - represents 7: Block with red raised face -> Arrow from face
+  - distinct 6: Like Push face -> Show new side faces
+  - legibility 7: Reads -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - craft 7: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Remove** 6.75
+  - represents 7: Trash can -> Red lid or X
+  - distinct 6: Like Delete -> Red accent
+  - legibility 7: Reads -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - craft 7: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Stroke** 6.75
+  - represents 7: Slab with red zigzag line -> Make stroke a raised bead with a brush tip at its end
+  - distinct 6: Slab like Detail -> Add tool
+  - legibility 7: Red reads -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - craft 7: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Loop cut** 6.88
+  - represents 8: Cube with red loop line around -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - distinct 6: Like Trim -> Thinner loop on a long box
+  - legibility 6: Line thin -> 2px line
+  - craft 7: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Face material** 6.88
+  - represents 7: Cube with red top face -> Checker texture on face
+  - distinct 5: Like Extrude faces -> Texture
+  - legibility 8: Reads -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - craft 8: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **UV project** 6.88
+  - represents 7: Checker cross unfolding -> Show cube unfolded flat
+  - distinct 8: Unique -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - legibility 6: Busy checker -> Larger checks
+  - craft 6: Noisy -> Simplify
+- FAIL **Extrude** 7.12
+  - represents 8: Block rising from cream sketch with red up arrow -> Show the sketch outline in red under the block
+  - distinct 6: Similar to Push face (block + arrow) -> Keep the sketch base prominent
+  - legibility 7: Arrow small at 1x -> Bigger red arrow
+  - craft 7: Clean -> Tighten framing
+- FAIL **Bridge** 7.25
+  - represents 7: Two blocks joined by red span -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - distinct 8: Unique -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - legibility 7: Reads -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - craft 7: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Remesh** 7.25
+  - represents 7: Sphere with grid lines -> Use an even triangle/quad mesh with red highlighted edges
+  - distinct 8: Unique -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - legibility 7: Grid reads -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - craft 7: Dark lines heavy -> Lighter grid
+- FAIL **Shell** 7.25
+  - represents 8: Open box with thin walls and red inside -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - distinct 6: Red interior cube like Boolean/Hole -> Make walls thinner and wall thickness edge lit
+  - legibility 7: Reads at 1x -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - craft 8: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Chamfer** 7.38
+  - represents 7: Box with red triangle facet on corner -> Make the cut face clearly flat-angled on the corner silhouette
+  - distinct 7: Different from Fillet -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - legibility 8: Red triangle reads at 1x -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - craft 8: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Corrective** 7.38
+  - represents 7: Bent limb with red at joint -> Show fix bulge
+  - distinct 7: Unique -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - legibility 8: Reads -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - craft 8: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Delete face** 7.38
+  - represents 7: Cube with red front face -> Show dark hole into interior
+  - distinct 7: Different -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - legibility 8: Reads -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - craft 8: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Lattice** 7.38
+  - represents 8: Cage with red corner points around ball -> Pull one corner point to show deformation
+  - distinct 8: Unique -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - legibility 6: Black cage lines nearly vanish on dark wheel -> Light grey cage lines
+  - craft 7: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Row pattern** 7.38
+  - represents 8: Three cylinders in a row with red direction arrow -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - distinct 7: Cylinders shared with Circle pattern -> Use cubes for one pattern
+  - legibility 7: Arrow thin at 1x -> Thicker arrow
+  - craft 7: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Material** 7.38
+  - represents 7: Red sphere on base -> Half shiny half rough sphere
+  - distinct 7: Unique -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - legibility 8: Reads -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - craft 8: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Mirror** 7.38
+  - represents 8: Two cones either side of a red plane -> Make the shape asymmetric so the mirroring is obvious
+  - distinct 7: Unique -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - legibility 7: Cones crowd the plane at 1x -> Space shapes from plane
+  - craft 7: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Paint** 7.38
+  - represents 8: Brush with paint splat -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - distinct 8: Unique -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - legibility 6: Brush thin -> Thicker handle
+  - craft 7: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Boolean** 7.50
+  - represents 8: Cube with red spherical bite cut out -> Show a ghost sphere outline as the cutter
+  - distinct 6: Red-cavity cube similar to Shell -> Make cavity clearly spherical and on a corner
+  - legibility 8: Reads at 1x -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - craft 8: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Mesh edit** 7.50
+  - represents 8: Cube with yellow vertex dots -> One red vertex with move arrow
+  - distinct 7: Unique -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - legibility 7: Reads -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - craft 8: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Garment** 7.62
+  - represents 8: Blue shirt -> Add red seam
+  - distinct 8: Unique -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - legibility 7: Reads -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - craft 7: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Padding** 7.62
+  - represents 8: Quilted cushion -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - distinct 8: Unique -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - legibility 7: Reads -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - craft 7: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Remedy** 7.62
+  - represents 7: First aid kit -> Add mesh patch
+  - distinct 8: Unique -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - legibility 8: Reads -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - craft 8: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Inset** 7.75
+  - represents 8: Slab with red inner face and border -> Draw border ring edges
+  - distinct 7: Similar to Hole -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - legibility 8: Reads -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - craft 8: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Revolve** 7.75
+  - represents 8: Vase/bottle with red orbit ring -> Add a vertical axis line through the vase
+  - distinct 7: Ring echoes Loft's rings -> Add an arrowhead on the ring
+  - legibility 8: Reads at 1x -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - craft 8: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Hardware** 8.00
+  - represents 8: Gold buckle on strap -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - distinct 8: Unique -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - legibility 8: Reads -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - craft 8: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+- FAIL **Glow** 8.25
+  - represents 8: Light bulb -> Glow halo rays
+  - distinct 9: Unique -> Keep
+  - legibility 8: Reads -> Scale the model up to fill the frame and add a 1px darker outline on the key part
+  - craft 8: Clean -> Scale the model up to fill the frame and add a 1px darker outline on the key part

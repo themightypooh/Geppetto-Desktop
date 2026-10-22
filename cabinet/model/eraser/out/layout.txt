@@ -1,0 +1,2 @@
+# part	model	pivot x	y	z	size x	y	z
+eraser	out/eraser.vmdl	-0	0	-0	2.256	0.94	0.35

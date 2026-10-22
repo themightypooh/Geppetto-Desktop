@@ -1,0 +1,2 @@
+# part	model	pivot x	y	z	size x	y	z
+pose_00	poses/pose_00.vmdl	0.001	0.274	-0.004	6.301	5.496	0.113

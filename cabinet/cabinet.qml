@@ -10,6 +10,7 @@
 import QtQuick
 import QtQuick.Window
 import QtQuick.Controls as C
+import QtQuick.Dialogs as D
 import Geppetto 1.0
 import "art/geom.js" as Geom
 
@@ -31,8 +32,6 @@ Window {
     readonly property string mono: "DejaVu Sans Mono"
 
     // ---- layout (screen px) --------------------------------------------------------------
-    // modeling tools for the tool drawer's MODELING bin: {name, cmd}. Empty until they're made.
-    property var modelingTools: []
     readonly property int tuck: 24          // how much of an open drawer stays behind the chest
     readonly property int peek: 6           // how much of a shut drawer's front shows
     readonly property int sideDrawerW: root.g0.research.bodyW
@@ -54,6 +53,60 @@ Window {
     property bool showGrid: true
     property int wire: 0
     readonly property var info: host.info
+    property bool spinning: false             // turntable
+    property bool followFrame: true           // live: keep the growing model framed every revision
+    property bool refsOpen: false             // the reference pictures panel over the camera keys
+    property bool claudeOpen: false           // the CLAUDE card: talk to Claude Code from here (Ctrl+L)
+    Shortcut { sequence: "Ctrl+L"; context: Qt.ApplicationShortcut; onActivated: { root.claudeOpen = !root.claudeOpen; if (root.claudeOpen) claudePanel.focusInput() } }
+    // the run the controls work: the one being watched if it is building, else any that is
+    readonly property var liveRun: {
+        var any = null;
+        for (const r of host.runs) if (r.status === "running" && !r.bench) { if (r.dir === host.watchedRun) return r; any = any || r; }
+        return any;
+    }
+    readonly property string liveDir: liveRun ? liveRun.dir : ""
+    // ---- the split viewport: 1, 2 (side by side) or 4 (quad) panes; pane 1 is the main viewer
+    // (bench, refs, picking), 2-4 each show one more run with their own camera and controls
+    readonly property int layoutN: host.viewLayout
+    readonly property int solo: host.soloPane      // 1 pane, po's pick: only that pane shows, full size
+    property int activePane: 1                // the pane VIEW NOW / WATCH put a run in: last one clicked
+    onLayoutNChanged: if (activePane > layoutN) activePane = 1
+    readonly property int paneGap: 1          // a hairline seam: the panes butt up, no gutter between them
+    function paneRect(n) {                    // pane n's place inside the viewport frame
+        const W = root.g0.view.w, H = root.g0.view.h, g = root.paneGap;
+        if (layoutN <= 1 || n > layoutN || solo) return { x: 0, y: 0, w: W, h: H };
+        const w = Math.floor((W - g) / 2), c = (n - 1) % 2;
+        if (layoutN === 2) return { x: c * (w + g), y: 0, w: c ? W - w - g : w, h: H };
+        const h = Math.floor((H - g) / 2), rw = n > 2 ? 1 : 0;
+        return { x: c * (w + g), y: rw * (h + g), w: c ? W - w - g : w, h: rw ? H - h - g : h };
+    }
+    function paneAt(gx, gy) {                 // which pane is under a window point (0: none)
+        if (solo) return solo;
+        for (let n = 1; n <= layoutN; n++) {
+            const r = paneRect(n), x = cabX + g0.view.x + r.x, y = cabY + g0.view.y + r.y;
+            if (gx >= x && gx < x + r.w && gy >= y && gy < y + r.h) return n;
+        }
+        return 0;
+    }
+    // a camera move in pane n; with LINK CAMS on, every pane on screen turns with it
+    function camCmd(n, line) {
+        if (host.linkCameras && layoutN > 1) host.camAll(line);
+        else if (n <= 1) host.cmd(line);
+        else host.paneList[n - 2].cmd(line);
+    }
+    // a VIEWPORTS "1: Pn" row: what that pane has in it, so po knows which one to pick
+    function soloWho(n) {
+        const own = n === 1 ? host.p1Owner : (host.paneList[n - 2] ? host.paneList[n - 2].owner : null);
+        const run = n === 1 ? host.watchedRun : (host.paneList[n - 2] ? host.paneList[n - 2].runDir : "");
+        const model = n === 1 ? (host.myScene ? "your scene" : "") : (host.paneList[n - 2] ? host.paneList[n - 2].modelPath || "" : "");
+        const what = own && own.title ? own.title : run ? host.runScript(run) : model ? model.split("/").pop() : "";
+        return "only pane " + n + (what ? ": " + what : n > layoutN ? " (hidden now)" : ": empty");
+    }
+    function runOf(dir) { if (!dir) return null; for (const r of host.runs) if (r.dir === dir) return r; return null }
+    // pane 1's own live run, for its HOLD/STOP when the view is split
+    readonly property var p1Run: { const r = runOf(host.watchedRun); return r && r.status === "running" && !r.bench ? r : null }
+    // a run starts building: pull the tool drawer out, its LIVE BUILD keys pop up on their own
+    onLiveDirChanged: if (liveDir !== "") tools.setOpen(true)
     readonly property var clip: host.clip
     readonly property var ph: host.playhead
     readonly property bool ready: info.shm !== undefined
@@ -61,8 +114,12 @@ Window {
         host.cmd("bones " + (showBones ? 1 : 0));
         host.cmd("grid " + (showGrid ? 1 : 0));
         host.cmd("wire " + wire);
+        host.cmd("spin " + (spinning ? 30 : 0));
+        host.cmd("autoframe " + (followFrame ? 1 : 0));
     }
 
+    // a picture of the whole chest for checks: grabToImage renders off to the side, so it never stalls the window
+    function snapTo(path) { root.contentItem.grabToImage(function (r) { r.saveToFile(path) }) }
     function row(label, val) {
         var s = String(label);
         while (s.length < 10) s += " ";
@@ -78,8 +135,11 @@ Window {
     }
     // the chat and the research can each pop out of the drawer into a window of their own
     property bool chatOut: false
+    property bool chatUnrolled: false         // the chat note taken out of the drawer and opened over the viewport
+    onChatUnrolledChanged: if (chatUnrolled) host.refreshChat()
     property bool researchOut: false
     property bool blinkOn: true
+    property string keyTip: ""                // the hovered key's tip
     Timer { interval: 300; repeat: true; running: true; onTriggered: root.blinkOn = !root.blinkOn }
 
     // ---- click-through: only the solid parts take the mouse ------------------------------
@@ -88,6 +148,9 @@ Window {
         [research, tools, timeline].forEach(function (d) {
             r.push(d.x + d.hitX, d.y + d.hitY, d.hitW, d.hitH);
         });
+        if (openNote.visible) r.push(openNote.x, openNote.y, openNote.width, openNote.height);
+        if (flyer.visible) r.push(flyer.x - 30, flyer.y - 30, flyer.width + 60, flyer.height + 60);
+        if (vpMenu.open) r.push(vpMenu.x, vpMenu.y, vpMenu.width, vpMenu.height);
         host.setMask(r);
     }
     function maskLater() { Qt.callLater(updateMask) }
@@ -222,15 +285,20 @@ Window {
         id: chatBox
         property string tag: "chat"           // objectName prefix: chatBox, chatLog, ...
         property bool popped: false           // true in its own window
+        property bool bare: false             // on the unrolled scroll: no sheet, tape or POP OUT of its own
         property Item popupParent: research.floorItem
+        property bool closable: false         // a close key in its top right corner
+        signal closed()
+        readonly property real headH: closable ? 40 : 26
         readonly property alias selector: chatSelector
         objectName: tag + "Box"
-        Shade { x: 6; y: 6; width: chatBox.width; height: chatBox.height }
-        Rectangle { anchors.fill: parent; color: root.sheetEdge }
-        Rectangle { anchors.fill: parent; anchors.margins: 2; color: root.panelFill }
-        Tape { x: 6; y: -6; text: "CHAT" }
+        Shade { visible: !chatBox.bare; x: 6; y: 6; width: chatBox.width; height: chatBox.height }
+        Rectangle { visible: !chatBox.bare; anchors.fill: parent; color: root.sheetEdge }
+        Rectangle { visible: !chatBox.bare; anchors.fill: parent; anchors.margins: 2; color: root.panelFill }
+        Tape { visible: !chatBox.bare; x: 6; y: -6; text: "CHAT" }
         // out into a window of its own, or back into the drawer
         Px {
+            visible: !chatBox.bare
             x: parent.width - 116; y: 4
             text: chatBox.popped ? "DOCK" : "POP OUT"; size: 6
             color: root.inkFaint
@@ -240,9 +308,16 @@ Window {
                 onClicked: root.chatOut = !chatBox.popped
             }
         }
+        Key {
+            objectName: chatBox.tag + "Close"
+            visible: chatBox.closable
+            small: true; label: "X"
+            x: parent.width - width + 4; y: -4
+            onClicked: chatBox.closed()
+        }
         // clear the transcript
         Px {
-            x: parent.width - 46; y: 4
+            x: parent.width - (chatBox.closable ? 100 : 46); y: chatBox.closable ? 8 : 4
             text: "CLEAR"; size: 6
             color: root.inkFaint
             MouseArea {
@@ -255,9 +330,9 @@ Window {
         Flickable {
             id: chatLog
             objectName: chatBox.tag + "Log"
-            x: 8; y: 26
+            x: 8; y: chatBox.headH
             width: parent.width - 16
-            height: parent.height - 126
+            height: parent.height - 100 - chatBox.headH
             contentHeight: chatLines.height
             boundsBehavior: Flickable.StopAtBounds
             clip: true
@@ -329,9 +404,68 @@ Window {
         property Item popupParent: research.floorItem
         readonly property alias selector: researchSelector
         spacing: 18
+        function bookHash(dir) { let h = 7; for (let i = 0; i < dir.length; i++) h = (h * 31 + dir.charCodeAt(i)) | 0; return Math.abs(h) }
+        // which of the baked books each run is: stable per run, never the same as the one beside it
+        readonly property var bookIds: {
+            const n = root.g0.books ? root.g0.books.length : 1, ids = [];
+            for (const r of host.runs) { let b = rp.bookHash(r.dir) % n; if (ids.length && ids[ids.length - 1] === b) b = (b + 1) % n; ids.push(b) }
+            return ids
+        }
+        // a made-up title for the spine, from what the run was asked to make
+        function bookTitle(r) {
+            if (r.spine) return String(r.spine).toUpperCase()      // lettered by you (right-click the book)
+            const skip = ["a", "an", "the", "of", "with", "and", "make", "model", "create", "me", "please", "for", "in", "on",
+                          "to", "low", "poly", "simple", "some", "that", "is", "it", "my", "detailed", "realistic", "3d"];
+            const said = String(r.title || r.prompt || r.name).toLowerCase().replace(/^script:\s*/, "").replace(/\.(txt|effigy|py)\b/g, "");
+            const words = said.replace(/[^a-z ]/g, " ").split(/ +/).filter(w => w.length > 1 && skip.indexOf(w) < 0);
+            const noun = (words.slice(-2).join(" ") || "nothing").toUpperCase();
+            const forms = ["THE BOOK OF %", "ON %", "A TREATISE ON %", "%, VOL. II", "NOTES ON %", "THE %",
+                           "% & OTHERS", "A HISTORY OF %", "COLLECTED %", "THE LAST %", "% ILLUSTRATED", "UPON %"];
+            return forms[rp.bookHash(r.dir + "t") % forms.length].replace("%", noun)
+        }
+        // a run building right now: first thing in the drawer, loud, one click to see it
+        Item {
+            id: liveCard
+            readonly property var lr: { for (const r of host.runs) if (r.status === "running") return r; return null }
+            readonly property bool watching: !!lr && host.watchedRun === lr.dir
+            visible: !!lr
+            // fixed height: a long or short prompt, or a key that can't be used right now, never moves the box
+            width: parent.width - 8; height: visible ? 34 + 44 + root.g0.key.h : 0
+            Shade { x: 6; y: 6; width: liveCard.width; height: liveCard.height }
+            Rectangle { anchors.fill: parent; color: root.inkRed }
+            Rectangle { anchors.fill: parent; anchors.margins: 4; color: root.amber }
+            Tape { x: 6; y: -6; text: "LIVE NOW" }
+            Image { x: liveCard.width - 22; y: 6; source: root.art + "lamp_on.png"; smooth: false; opacity: root.blinkOn ? 1 : 0.3 }
+            Column {
+                id: liveCol
+                x: 12; y: 26; width: liveCard.width - 24; spacing: 4
+                Item {
+                    width: liveCol.width; height: 40
+                    clip: true
+                    Px { text: liveCard.lr ? (liveCard.lr.prompt || liveCard.lr.name) : ""; maxWidth: liveCol.width; maxLines: 2 }
+                }
+                Row {
+                    spacing: 8
+                    Key {
+                        label: liveCard.lr && liveCard.lr.pane > 0 ? "LIVE " + liveCard.lr.pane : "VIEW"; lamp: true; lit: !!liveCard.lr && !(liveCard.lr.pane > 0)
+                        tip: liveCard.lr && liveCard.lr.pane > 0 ? "showing in viewport pane " + liveCard.lr.pane : "show this run in the selected viewport pane"
+                        onClicked: if (liveCard.lr && !(liveCard.lr.pane > 0)) host.showRunIn(liveCard.lr.dir, root.activePane)
+                    }
+                    Key {
+                        readonly property bool can: !!liveCard.lr && liveCard.lr.latestRevision > 0
+                        enabled: can; opacity: can ? 1 : 0.4
+                        label: liveCard.lr && liveCard.lr.paused ? "RESUME" : "PAUSE"
+                        tip: can ? "hold the build before its next change, or let it carry on" : "nothing built yet to pause"
+                        onClicked: host.togglePause(liveCard.lr.dir)
+                    }
+                    Key { label: "STOP"; tip: "end the run, keep the model"; onClicked: host.stopResearch(liveCard.lr.dir) }
+                }
+            }
+        }
         Item {
             id: newRun
             objectName: rp.tag === "" ? "newRun" : rp.tag + "NewRun"
+            z: 1                                       // its eraser lies over the top book
             readonly property int grow: rp.popped ? 120 : 0     // the prompt gets room in its own window
         width: parent.width - 8; height: 150 + grow
             Shade { x: 6; y: 6; width: newRun.width; height: newRun.height }
@@ -384,60 +518,642 @@ Window {
                 color: root.ink; font.family: root.mono; font.pixelSize: 14
                 MouseArea { anchors.fill: parent; onClicked: host.refreshChat() }
             }
-        }
-        Tape { text: host.runs.length ? host.runs.length + " RUNS" : "NO RUNS YET" }
-        Repeater {
-            model: host.runs
+            // the eraser, lying in the gap between this and the pile, on the right: click and it rubs out
+            // every finished run (to research/.cleared, nothing is deleted)
             Item {
-                id: run
-                required property var modelData
-                required property int index
-                readonly property bool live: modelData.status === "running"
-                width: rp.width - 8; height: runCol.height + 40
-                x: index % 2 ? 4 : 0
-                Shade { x: 6; y: 6; width: run.width; height: run.height }
-                Rectangle { anchors.fill: parent; color: root.sheetEdge }
-                Rectangle { anchors.fill: parent; anchors.margins: 2; color: root.panelFill }
-                Tape { x: 6; y: -6; text: run.modelData.name.substring(4, 13).replace("-", " ") }
-                Image {
-                    x: run.width - 22; y: 6
-                    source: root.art + (run.live ? "lamp_on.png" : "lamp_off.png"); smooth: false
-                    opacity: run.live ? (root.blinkOn ? 1 : 0.3) : 1
+                id: eraser
+                objectName: rp.tag === "" ? "eraser" : rp.tag + "Eraser"
+                readonly property var g: root.g0.eraser
+                property real rub: 0                    // px it is pushed sideways while rubbing
+                visible: !!g && host.runs.some(r => r.status !== "running")
+                width: g ? g.w : 0; height: g ? g.h : 0
+                x: newRun.width - width; y: newRun.height + Math.round((rp.spacing - height) / 2)
+                SequentialAnimation {                  // rubbing hard, then the books are gone
+                    id: wipe
+                    SequentialAnimation {
+                        loops: 3
+                        NumberAnimation { target: eraser; property: "rub"; to: -8; duration: 70 }
+                        NumberAnimation { target: eraser; property: "rub"; to: 3; duration: 70 }
+                    }
+                    NumberAnimation { target: eraser; property: "rub"; to: 0; duration: 60 }
+                    ScriptAction { script: host.clearFinished() }
                 }
-                Column {
-                    id: runCol
-                    x: 10; y: 28; width: run.width - 20
-                    Px { text: run.modelData.prompt || run.modelData.name; maxWidth: runCol.width; maxLines: 3 }
-                    Px { text: root.row("status", run.modelData.status); maxWidth: runCol.width; maxLines: 1; color: run.live ? root.inkRed : root.ink }
-                    Px { text: root.row("score", run.modelData.score >= 0 ? Number(run.modelData.score).toFixed(2) + "/10" : "-"); maxWidth: runCol.width }
-                    Px { visible: run.modelData.activity !== ""; text: run.modelData.activity; maxWidth: runCol.width; maxLines: 1; color: root.inkRed }
-                    Px { visible: host.watchedRun === run.modelData.dir; text: "view " + run.modelData.displayedRevision + " / latest " + run.modelData.latestRevision; maxWidth: runCol.width }
-                    Px { visible: run.live && run.modelData.pendingDirections > 0; text: run.modelData.pendingDirections + " direction(s) queued"; maxWidth: runCol.width; color: root.inkFaint }
-                    Rectangle {
-                        visible: run.live && run.modelData.latestRevision > 0
-                        width: runCol.width; height: visible ? 26 : 0
-                        color: "#f4f7ee"; border.width: 2; border.color: root.sheetEdge
-                        TextInput {
-                            id: direction
-                            anchors.fill: parent; anchors.margins: 5
-                            color: root.ink; clip: true; maximumLength: 2000
-                            font.family: root.mono; font.pixelSize: 13; font.bold: true
-                            renderType: Text.NativeRendering
-                            onAccepted: if (text.trim() !== "") { host.sendDirection(run.modelData.dir, text); text = "" }
+                Image {
+                    x: eraser.rub; y: eraserMouse.pressed ? 1 : 0
+                    source: root.art + "eraser.png"; smooth: false
+                }
+                MouseArea {
+                    id: eraserMouse
+                    anchors.fill: parent; anchors.margins: -3
+                    hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                    onContainsMouseChanged: root.keyTip = containsMouse
+                        ? "erase every finished run from the drawer (kept in research/.cleared)" : ""
+                    onClicked: if (!wipe.running) wipe.start()
+                }
+            }
+        }
+        // the pile: every run a book lying in the drawer spine up, a sliver apart, newest on top. They lie
+        // on the drawer's own floor (inside its walls) and go by with it when it scrolls, under its far
+        // wall and its front. Click: open it; double-click: open its model; right-click: letter its spine;
+        // middle-click: clear a finished one; drag up/down: scroll the pile; drag sideways: onto a viewport pane
+        Column {
+            id: shelf
+            objectName: rp.tag === "" ? "runBooks" : rp.tag + "RunBooks"
+            readonly property var bk: root.g0.books || []
+            property string editingDir: ""         // the book whose spine is being lettered
+            // what the pile scrolls in: the drawer, or the popped-out window's own
+            function scroller() { for (let p = shelf.parent; p; p = p.parent) if (p instanceof Flickable) return p; return null }
+            x: rp.popped ? 0 : Math.floor((rp.width - (bk.length ? bk[0].w : 0)) / 2)   // centred on the drawer's floor
+            spacing: -3                            // a book's shadow falls on the one below: no gap
+            visible: host.runs.length > 0 && bk.length > 0
+            Repeater {
+                model: host.runs
+                delegate: Item {
+                    id: book
+                    required property var modelData
+                    required property int index
+                    readonly property var g: shelf.bk[rp.bookIds[index] || 0]
+                    readonly property bool editing: shelf.editingDir === modelData.dir
+                    readonly property bool live: modelData.status === "running"
+                    readonly property bool shown: modelData.pane > 0 || host.replay.dir === modelData.dir
+                    width: g.w; height: g.bodyH + 2 * root.g0.S
+                    Item {
+                        id: spine
+                        width: book.g.w; height: book.g.h
+                        Image { source: root.art + "book_" + (rp.bookIds[book.index] || 0) + ".png"; smooth: false }
+                        // the title, lettered in gilt along the lettering piece
+                        Text {
+                            visible: !book.editing
+                            x: book.g.labelX + 4; y: book.g.labelY + 2
+                            width: book.g.labelW - 8; height: book.g.labelH - 4
+                            text: rp.bookTitle(book.modelData)
+                            color: book.shown || bookMouse.containsMouse ? "#fff4c8" : "#f0d68a"; style: Text.Raised; styleColor: "#2a1a06"
+                            font.family: root.mono; font.bold: true; font.pixelSize: 11
+                            fontSizeMode: Text.Fit; minimumPixelSize: 6
+                            wrapMode: Text.WordWrap; maximumLineCount: 2
+                            horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                            opacity: book.live && !root.blinkOn ? 0.45 : 1
                         }
-                        Px { x: 6; y: 4; visible: direction.text === "" && !direction.activeFocus; text: "direction..."; color: root.inkFaint }
+                        // lettering it yourself: Enter keeps it, Esc or clicking away leaves it, empty: its own title back
+                        Loader {
+                            active: book.editing
+                            x: book.g.labelX + 2; y: book.g.labelY + 2
+                            width: book.g.labelW - 4; height: book.g.labelH - 4
+                            z: 5
+                            sourceComponent: Rectangle {
+                                color: "#2a1a06"; border.width: 1; border.color: "#f0d68a"
+                                TextInput {
+                                    id: spineEdit
+                                    anchors.fill: parent; anchors.margins: 3
+                                    text: book.modelData.spine || rp.bookTitle(book.modelData)
+                                    color: "#fff4c8"; selectionColor: root.amber; selectedTextColor: "#2a1a06"
+                                    font.family: root.mono; font.bold: true; font.pixelSize: 11
+                                    font.capitalization: Font.AllUppercase
+                                    horizontalAlignment: TextInput.AlignHCenter; verticalAlignment: TextInput.AlignVCenter
+                                    maximumLength: 60; clip: true; selectByMouse: true
+                                    Component.onCompleted: { forceActiveFocus(); selectAll() }
+                                    property bool done: false
+                                    function finish(keep) {
+                                        if (done) return; done = true;
+                                        if (keep) host.renameRun(book.modelData.dir, text);
+                                        shelf.editingDir = ""
+                                    }
+                                    Keys.onReturnPressed: finish(true)
+                                    Keys.onEnterPressed: finish(true)
+                                    Keys.onEscapePressed: finish(false)
+                                    onActiveFocusChanged: if (!activeFocus) finish(false)
+                                }
+                            }
+                        }
+                        // a researched run has its model sheet sticking out of the pages: a paper slip marked SHEET
+                        Rectangle {
+                            visible: !!book.modelData.sheet
+                            x: book.g.w - width - 2; y: (book.g.h - height) / 2; width: 46; height: 16
+                            color: root.sheetDir === book.modelData.dir ? "#fff4c8" : "#e8eddc"; border.width: 2; border.color: "#1d2318"
+                            Text { anchors.centerIn: parent; text: "SHEET"; color: "#b3261c"; font.family: root.mono; font.bold: true; font.pixelSize: 10 }
+                        }
+                        // a live run has a red ribbon hanging out of its head
+                        Rectangle {
+                            visible: book.live
+                            x: -8; y: book.g.bodyH / 2 - 1; width: 14; height: 6
+                            color: root.inkRed; border.width: 1; border.color: "#2a0608"
+                        }
                     }
-                    Px { text: root.row("rounds", run.modelData.rounds) + "  src " + run.modelData.sources; maxWidth: runCol.width }
-                    Px { visible: run.live && run.modelData.log !== ""; text: run.modelData.log; maxWidth: runCol.width; maxLines: 2; color: root.inkFaint }
-                    Item { width: 1; height: 6 }
-                    Row {
-                        spacing: 8
-                        Key { visible: run.modelData.best !== ""; label: "OPEN"; onClicked: host.openModel(run.modelData.best) }
-                        Key { visible: run.modelData.latestRevision > 0; label: host.watchedRun === run.modelData.dir ? "UNWATCH" : "WATCH"; onClicked: host.watchedRun === run.modelData.dir ? host.stopWatching() : host.watchRun(run.modelData.dir) }
-                        Key { visible: run.live && run.modelData.latestRevision > 0; label: run.modelData.paused ? "RESUME" : "PAUSE"; onClicked: host.togglePause(run.modelData.dir) }
-                        Key { visible: run.live && run.modelData.latestRevision > 0; label: run.modelData.pace > 0 ? "PACE " + run.modelData.pace + "S" : "PACE N"; onClicked: host.cyclePace(run.modelData.dir) }
-                        Key { visible: run.live; label: "STOP"; onClicked: host.stopResearch(run.modelData.dir) }
+                    MouseArea {
+                        id: bookMouse
+                        anchors.fill: parent
+                        enabled: !book.editing
+                        hoverEnabled: true
+                        acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
+                        cursorShape: dragging ? Qt.ClosedHandCursor : Qt.PointingHandCursor
+                        preventStealing: true
+                        property real sx: 0
+                        property real sy: 0
+                        property real gy0: 0               // where the press was in the window, and the pile's scroll then
+                        property real cy0: 0
+                        property bool dragging: false      // sideways: the book onto a viewport pane
+                        property bool scrolling: false     // up or down: the pile scrolls under the hand
+                        property bool moved: false
+                        readonly property var r: book.modelData
+                        onContainsMouseChanged: root.keyTip = containsMouse
+                            ? (r.prompt || r.name) + "  -  " + r.status + "  -  click: open  drag: scroll  drag sideways: onto a pane  right-click: rename  middle-click: clear"
+                              + (r.score >= 0 ? "  " + Number(r.score).toFixed(1) + "/10" : "")
+                            : ""
+                        onPressed: function (m) {
+                            sx = m.x; sy = m.y; dragging = false; scrolling = false; moved = false;
+                            gy0 = mapToItem(root.contentItem, m.x, m.y).y;
+                            const f = shelf.scroller(); cy0 = f ? f.contentY : 0
+                        }
+                        onPositionChanged: function (m) {
+                            if (!pressed || !(pressedButtons & Qt.LeftButton)) return;
+                            const dx = Math.abs(m.x - sx), dy = Math.abs(m.y - sy);
+                            if (!moved && dx + dy > 10) {
+                                moved = true;
+                                if (dx > dy && r.latestRevision > 0) { dragging = true; runDrag.begin(r) } else scrolling = true
+                            }
+                            const p = mapToItem(root.contentItem, m.x, m.y);
+                            if (dragging) runDrag.moveTo(p);
+                            else if (scrolling) {
+                                const f = shelf.scroller();
+                                if (f) f.contentY = Math.max(0, Math.min(cy0 - (p.y - gy0), f.contentHeight - f.height))
+                            }
+                        }
+                        onReleased: { if (dragging) runDrag.finish(); dragging = false; scrolling = false }
+                        onCanceled: { if (dragging) runDrag.cancel(); dragging = false; scrolling = false }
+                        onClicked: function (m) {
+                            if (moved) return;
+                            if (m.button === Qt.RightButton) { shelf.editingDir = r.dir; return }
+                            if (m.button === Qt.MiddleButton) { if (!book.live) host.clearRun(r.dir); return }
+                            root.sheetDir = root.sheetDir === r.dir ? "" : r.dir   // open the book: its research, and PLAY for what was modelled
+                            if (book.live && r.pane <= 0) host.showRunIn(r.dir, root.activePane)
+                        }
+                        onDoubleClicked: if (r.best !== "") host.openModel(r.best)
                     }
+                }
+            }
+        }
+    }
+
+    // replay of a run: its kept revisions shown one after another in the viewport (nothing is recorded),
+    // a scrubber over the steps, the script line each step ran, and notes left on a step for the modeller
+    // a transport key on the replay strip: a drawn icon, not a labelled key, so it reads apart from the camera keys
+    component Transport: Item {
+        id: tk
+        property string kind: "play"      // play, pause, prev, next, first, last, close
+        property string tip: ""
+        signal clicked()
+        width: 30; height: 26
+        Rectangle { anchors.fill: parent; radius: 3; color: tkMouse.pressed ? "#3a3f45" : tkMouse.containsMouse ? "#2c3035" : "transparent" }
+        Canvas {
+            id: tkIcon
+            anchors.centerIn: parent; width: 16; height: 14
+            property string k: tk.kind
+            onKChanged: requestPaint()
+            onPaint: {
+                const c = getContext("2d"); c.reset(); c.fillStyle = tk.kind === "close" ? "#c9ccd0" : root.amber
+                function tri(x0, dir) { c.beginPath(); c.moveTo(x0, 1); c.lineTo(x0 + 7 * dir, 7); c.lineTo(x0, 13); c.closePath(); c.fill() }
+                if (tk.kind === "play") { c.beginPath(); c.moveTo(3, 0); c.lineTo(15, 7); c.lineTo(3, 14); c.closePath(); c.fill() }
+                else if (tk.kind === "pause") { c.fillRect(3, 1, 4, 12); c.fillRect(10, 1, 4, 12) }
+                else if (tk.kind === "prev") tri(12, -1)
+                else if (tk.kind === "next") tri(4, 1)
+                else if (tk.kind === "first") { c.fillRect(2, 1, 3, 12); tri(13, -1) }
+                else if (tk.kind === "last") { tri(3, 1); c.fillRect(11, 1, 3, 12) }
+                else { c.strokeStyle = "#c9ccd0"; c.lineWidth = 2; c.beginPath(); c.moveTo(3, 1); c.lineTo(13, 13); c.moveTo(13, 1); c.lineTo(3, 13); c.stroke() }
+            }
+        }
+        MouseArea {
+            id: tkMouse
+            anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+            onClicked: tk.clicked()
+            onContainsMouseChanged: root.keyTip = containsMouse ? tk.tip : ""
+        }
+    }
+
+    // a little lettered toggle (layout 1/2/4, a pane number): lit amber when it's the one in use
+    // ---- fly camera, as in s&box: hold the right mouse button to look around, WASD to fly, Q/E down/up,
+    // Shift fast, the wheel (still holding) for the speed; let go and the mouse orbits again, around
+    // whatever is in front. One per pane, never linked: each pane flies its own camera
+    function paneCmd(n, line) { if (n <= 1) host.cmd(line); else host.paneList[n - 2].cmd(line) }
+    component FlyCam: QtObject {
+        required property int n
+        property bool on: false
+        property var held: ({})
+        property bool fast: false
+        property int steps: 0                    // wheel notches on the speed, kept per pane
+        readonly property real speed: Math.pow(1.25, steps)
+        function start() {
+            on = true; held = ({}); fast = false;
+            root.paneCmd(n, "fly 1"); root.paneCmd(n, "flyspeed " + steps);
+        }
+        function stop() {
+            if (!on) return;
+            on = false; held = ({});
+            root.paneCmd(n, "flymove 0 0 0 0"); root.paneCmd(n, "fly 0");
+        }
+        function look(dx, dy) { if (on) root.paneCmd(n, "look " + dx + " " + dy) }
+        function push() {
+            const h = held;
+            root.paneCmd(n, "flymove " + ((h.w ? 1 : 0) - (h.s ? 1 : 0)) + " " + ((h.d ? 1 : 0) - (h.a ? 1 : 0))
+                         + " " + ((h.e ? 1 : 0) - (h.q ? 1 : 0)) + " " + (fast ? 1 : 0));
+        }
+        // while flying every key is the camera's: WASD/QE never reach 1-4 or anything else
+        function key(e, down) {
+            if (!on) return false;
+            e.accepted = true;
+            if (e.isAutoRepeat) return true;
+            const names = { [Qt.Key_W]: "w", [Qt.Key_A]: "a", [Qt.Key_S]: "s", [Qt.Key_D]: "d", [Qt.Key_Q]: "q", [Qt.Key_E]: "e" };
+            if (e.key === Qt.Key_Shift) fast = down;
+            else if (names[e.key] !== undefined) { const h = Object.assign({}, held); h[names[e.key]] = down; held = h; }
+            else return true;
+            push();
+            return true;
+        }
+        function wheel(w) {
+            steps = Math.max(-12, Math.min(12, steps + (w.angleDelta.y > 0 ? 1 : -1)));
+            root.paneCmd(n, "flyspeed " + steps);
+        }
+    }
+    component FlyStrip: Rectangle {             // what the keys do, and the speed, while flying
+        required property var fly
+        visible: fly.on
+        anchors.horizontalCenter: parent.horizontalCenter
+        y: parent.height - height - 54
+        width: flyText.implicitWidth + 20; height: 24; radius: 3
+        color: "#d0101214"; border.color: root.amber
+        Text {
+            id: flyText
+            anchors.centerIn: parent
+            text: "FLY  WASD move  Q/E down/up  SHIFT fast  WHEEL speed x" + parent.fly.speed.toFixed(2)
+            color: root.amber; font.family: root.mono; font.bold: true; font.pixelSize: 11
+        }
+    }
+
+    component Chip: Item {
+        id: ch
+        property string label: ""
+        property bool lit: false
+        property string tip: ""
+        signal clicked()
+        width: Math.max(22, chT.implicitWidth + 12); height: 22
+        Rectangle {
+            anchors.fill: parent; radius: 3
+            color: ch.lit ? root.amber : (chM.containsMouse ? "#3d424b" : "#1f2228"); border.color: "#0b0c0e"
+        }
+        Text {
+            id: chT; anchors.centerIn: parent; text: ch.label
+            color: ch.lit ? "#1f2228" : root.keyText
+            font.family: root.mono; font.bold: true; font.pixelSize: 11
+        }
+        MouseArea {
+            id: chM; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+            onClicked: ch.clicked()
+            onContainsMouseChanged: { if (ch.tip) root.keyTip = containsMouse ? ch.tip : ""; ch.tipReady = false; if (containsMouse) chWait.restart(); else chWait.stop() }
+        }
+        property bool tipReady: false
+        Timer { id: chWait; interval: 450; onTriggered: ch.tipReady = true }
+        Tape {
+            visible: ch.tipReady && chM.containsMouse && ch.tip !== ""
+            z: 100; x: 0; y: -30
+            text: ch.tip
+        }
+    }
+
+    // the name strip over a pane in a split view: who models in it (their session's name), whether they
+    // are still there (green: busy now, amber: quiet, grey: gone, the pane frees itself), which script, live or not
+    component PaneHeader: Rectangle {
+        id: ph
+        objectName: "paneHeader" + n
+        property int n: 1
+        property string who: ""
+        property string what: ""
+        property string state: ""
+        property var owner: ({})
+        readonly property string presence: owner && owner.presence ? owner.presence : ""
+        readonly property string title: owner && owner.title ? owner.title : ""
+        x: 0; y: 0; width: parent.width; height: 22
+        color: root.activePane === n ? "#3a2f12" : "#16191c"; opacity: 0.9
+        Rectangle {
+            id: phDot
+            visible: ph.presence !== ""
+            x: 8; anchors.verticalCenter: parent.verticalCenter
+            width: 8; height: 8; radius: 4
+            color: ph.presence === "here" ? "#5fbf6a" : ph.presence === "idle" ? root.amber : "#6b6f75"
+        }
+        Text {
+            x: phDot.visible ? 22 : 8; anchors.verticalCenter: parent.verticalCenter
+            width: parent.width - x - 8; elide: Text.ElideRight
+            text: "PANE " + ph.n + (ph.who || ph.what || ph.title
+                      ? "  " + [ph.who, ph.title ? "“" + ph.title + "”" : "", ph.what].filter(function (t) { return !!t }).join("  ")
+                      : "  empty")
+                  + (ph.presence === "idle" ? "  idle " + ph.owner.quiet : ph.presence === "left" ? "  gone " + ph.owner.quiet : "")
+                  + (ph.state ? "  [" + ph.state + "]" : "")
+            color: root.activePane === ph.n ? root.amber : root.keyText
+            font.family: root.mono; font.bold: true; font.pixelSize: 11
+        }
+    }
+
+    // a live run's bar under its pane header, always readable: what it is doing, how long it has run,
+    // how long since it last did anything (quiet over a minute lights red: it may be stuck), HOLD and STOP
+    component RunBar: Rectangle {
+        id: rb
+        property var run: null
+        property real now: Date.now() / 1000
+        // an open run is quiet on purpose (it waits for lines), so it never counts as stuck
+        readonly property real quiet: run && run.lastEvent && !run.openState ? Math.max(0, now - run.lastEvent) : 0
+        function clock(t) { t = Math.floor(t); return Math.floor(t / 60) + ":" + ("0" + t % 60).slice(-2) }
+        Timer { interval: 1000; repeat: true; running: rb.visible; onTriggered: rb.now = Date.now() / 1000 }
+        visible: !!run && run.status === "running"
+        width: rbRow.width + 16; height: rbRow.height + 8
+        color: "#16191c"; opacity: 0.92; border.color: rb.quiet > 60 ? "#c0392b" : "#3a2f12"
+        Row {
+            id: rbRow
+            x: 8; y: 4; spacing: 6
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                width: Math.min(implicitWidth, 320); elide: Text.ElideRight
+                text: !rb.run ? "" : (rb.run.paused ? "HELD" : (rb.run.activity || "working").toUpperCase())
+                      + (rb.run.started ? "  " + rb.clock(rb.now - rb.run.started) : "")
+                      + (rb.quiet > 20 ? "  quiet " + rb.clock(rb.quiet) : "")
+                color: rb.quiet > 60 ? "#e05a4a" : root.amber
+                font.family: root.mono; font.bold: true; font.pixelSize: 11
+            }
+            Key {
+                objectName: "runBarHold"
+                label: rb.run && rb.run.paused ? "GO" : "HOLD"; lamp: true; lit: !!rb.run && rb.run.paused && root.blinkOn
+                tip: rb.run && rb.run.paused ? "GO: carry on" : "HOLD: pause before its next step"
+                onClicked: host.togglePause(rb.run.dir)
+            }
+            Key {
+                objectName: "runBarStop"
+                label: rb.run && rb.run.openState ? "CLOSE" : "STOP"
+                tip: rb.run && rb.run.openState ? "CLOSE: the model is done, end the run and keep it" : "STOP: end the run, keep what it made"
+                onClicked: host.stopResearch(rb.run.dir)
+            }
+            Key {
+                objectName: "runBarClaude"
+                label: "CLAUDE"; lamp: true; lit: root.claudeOpen
+                tip: "talk to Claude here (Ctrl+L)"
+                onClicked: root.claudeOpen = !root.claudeOpen
+            }
+        }
+    }
+
+    // pane 2-4 of a split viewport: one run, its own camera, header, LIVE/PAUSE/STOP, step wheel,
+    // replay strip and notes. A new run only lands here while it's empty; drag a run on to swap
+    component SidePane: Viewport {
+        id: sp
+        required property int n
+        readonly property var pn: host.paneList[n - 2]
+        readonly property var r: root.runOf(pn.runDir)
+        readonly property bool live: !!r && r.status === "running"
+        readonly property var cell: root.paneRect(n)
+        readonly property bool replaying: !!pn.replay.dir
+        objectName: "pane" + n
+        pane: n
+        visible: !root.solo || root.solo === n
+        x: root.cabX + root.g0.view.x + cell.x; y: root.cabY + root.g0.view.y + cell.y
+        width: cell.w; height: cell.h
+        onWidthChanged: spSize.restart()
+        onHeightChanged: spSize.restart()
+        Component.onCompleted: spSize.restart()
+        Timer { id: spSize; interval: 150; onTriggered: sp.pn.setSize(sp.width, sp.height) }
+        MouseArea {
+            id: spMouse
+            anchors.fill: parent
+            acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
+            property real lx: 0
+            property real ly: 0
+            cursorShape: spFly.on ? Qt.BlankCursor : Qt.ArrowCursor
+            FlyCam { id: spFly; n: sp.n }
+            onPressed: function (m) {
+                lx = m.x; ly = m.y; root.activePane = sp.n; forceActiveFocus();
+                if (m.button === Qt.RightButton) spFly.start();
+            }
+            onReleased: function (m) { if (m.button === Qt.RightButton) spFly.stop() }
+            onCanceled: spFly.stop()
+            onPositionChanged: function (m) {
+                const dx = m.x - lx, dy = m.y - ly; lx = m.x; ly = m.y;
+                if (spFly.on) spFly.look(dx, dy);
+                else if (pressedButtons & Qt.LeftButton) root.camCmd(sp.n, "orbit " + dx + " " + dy);
+                else root.camCmd(sp.n, "pan " + dx + " " + dy);
+            }
+            onDoubleClicked: function (m) { if (m.button === Qt.LeftButton) root.camCmd(sp.n, "frame") }
+            onWheel: function (w) { if (spFly.on) spFly.wheel(w); else root.camCmd(sp.n, "zoom " + (w.angleDelta.y > 0 ? 0.9 : 1.1)) }
+            Keys.onPressed: function (e) {
+                if (spFly.key(e, true)) return;
+                if (e.key === Qt.Key_Space) { e.accepted = true; palette.show() }
+            }
+            Keys.onReleased: function (e) { spFly.key(e, false) }
+        }
+        FlyStrip { fly: spFly; z: 5 }
+        Text {                                       // an empty pane says what fills it
+            visible: !sp.pn.runDir && !sp.pn.modelPath
+            anchors.centerIn: parent; width: parent.width - 40
+            horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap
+            text: "PANE " + sp.n + " IS EMPTY\nthe next live run lands here,\nor drag a run from RUNS onto it"
+                  + (host.autoLayout ? "\n\nAUTO: empty panes fold away on their own" : "\n\nVIEWPORTS is fixed at " + root.layoutN + ": pick AUTO to fold empty panes")
+            color: "#6b6f75"; font.family: root.mono; font.pixelSize: 12
+        }
+        PaneHeader {
+            n: sp.n; who: sp.pn.modeller; what: sp.pn.script || (sp.pn.modelPath ? sp.pn.modelPath.split("/").pop() : "")
+            owner: sp.pn.owner
+            state: sp.replaying ? "REPLAY" : !sp.r ? "" : sp.live ? (sp.r.openState === "held" ? "HELD  REV " + sp.r.latestRevision
+                   : sp.r.openState === "open" ? "OPEN  REV " + sp.r.latestRevision : sp.r.paused ? "PAUSED" : "LIVE  REV " + sp.r.latestRevision) : "DONE"
+        }
+        Rectangle {                                  // an open run says it takes more lines; a held one says which line broke
+            id: spOpen
+            visible: !sp.replaying && sp.live && !!sp.r && sp.r.openState !== ""
+            x: 8; width: Math.min(spKeys.width, spOpenText.implicitWidth + 16); height: spOpenText.height + 10
+            y: spKeys.y - height - 6
+            color: sp.r && sp.r.openState === "held" ? "#3a1512" : "#14261a"
+            border.color: sp.r && sp.r.openState === "held" ? "#d2493a" : "#4f9a62"
+            Text {
+                id: spOpenText
+                x: 8; y: 5; width: Math.min(implicitWidth, spKeys.width - 16)
+                wrapMode: Text.Wrap; maximumLineCount: 3; elide: Text.ElideRight
+                color: sp.r && sp.r.openState === "held" ? "#ff8a7a" : "#9fe0ae"
+                font.family: root.mono; font.pixelSize: 11
+                text: !sp.r ? "" : sp.r.openState === "held"
+                      ? "HELD AT " + sp.r.outcome.toUpperCase() + "\nthe model is back at its last good revision; the modeller sends the fixed line"
+                      : "OPEN: the script is done, the model stays loaded for more lines. CLOSE when it's right"
+            }
+        }
+        ReplayStrip { src: sp.pn; x: 8; y: 28; width: sp.width - 16 }
+        RunBar { run: sp.replaying ? null : sp.r; x: 8; y: 28 }
+        // this pane's run controls, faint until the mouse comes near
+        Flow {
+            id: spKeys
+            x: 8; y: sp.height - height - 8; width: sp.width * 0.62
+            spacing: 4
+            opacity: spHover.hovered ? 1 : 0.5
+            visible: !!sp.pn.runDir
+            HoverHandler { id: spHover }
+            Key {
+                label: sp.replaying ? "LIVE" : sp.live ? "LIVE" : "DONE"; lamp: true; lit: sp.live && !sp.replaying && (!sp.r.paused || root.blinkOn)
+                tip: sp.replaying ? "leave the replay: back to the run's newest model" : sp.live ? "showing the run as it builds" : "the run has ended"
+                onClicked: if (sp.replaying) sp.pn.replayLive()
+            }
+            Key {
+                enabled: sp.live; opacity: enabled ? 1 : 0.4
+                label: sp.live && sp.r.paused ? "GO" : "HOLD"
+                tip: !sp.live ? "the run has ended: nothing to pause" : sp.r.paused ? "GO: carry on building" : "HOLD: pause this pane's run before its next change"
+                onClicked: host.togglePause(sp.r.dir)
+            }
+            Key {
+                enabled: sp.live && sp.r.paused; opacity: enabled ? 1 : 0.4
+                label: "STEP"; tip: enabled ? "let the held run make one more change" : "HOLD the run first, then step it one change at a time"
+                onClicked: host.stepRun(sp.r.dir)
+            }
+            Key {
+                enabled: sp.live; opacity: enabled ? 1 : 0.4
+                label: sp.live && sp.r.openState !== "" ? "CLOSE" : "STOP"
+                tip: !sp.live ? "the run has ended" : sp.r.openState !== "" ? "CLOSE: the model is done, end the run and keep it" : "STOP: end this pane's run, keep the model"
+                onClicked: host.stopResearch(sp.r.dir)
+            }
+            Key {
+                visible: !sp.replaying && !!sp.r && sp.r.latestRevision > 1
+                label: "REPLAY"; tip: "play this pane's build back step by step; leave a note on any step"
+                onClicked: sp.pn.replayRun(sp.pn.runDir)
+            }
+            Key { small: true; label: "FIT"; tip: "fit the whole model in this pane. Hold the right mouse button to fly: WASD, Q/E down/up, Shift fast, wheel speed"; onClicked: root.camCmd(sp.n, "frame") }
+            Key { small: true; label: "X"; tip: "empty this pane: the run keeps going, find it under RUNS"; onClicked: sp.pn.clear() }
+        }
+        ToolWheel {
+            id: spWheel
+            x: sp.width - width - 10; y: sp.height - height - 10
+            readonly property real fit: Math.max(0.25, Math.min(0.5, sp.height * 0.4 / height, sp.width * 0.32 / width))
+            transform: Scale { origin.x: spWheel.width; origin.y: spWheel.height; xScale: spWheel.fit; yScale: spWheel.fit }
+            readonly property var rp: sp.replaying ? sp.pn.replay : null
+            op: sp.pn.shownOp
+            working: !rp && sp.live ? (sp.r.operation || "") : ""
+            pace: rp ? 0.7 : sp.live ? (sp.r.pace || 0) : 0
+            revision: rp ? (rp.shown || 0) : sp.pn.shownRevision
+            stepping: rp ? !!rp.playing : sp.live && !sp.r.paused
+            enabled: false                           // display only: tools are picked off pane 1's wheel
+        }
+        Rectangle {                                  // the selected pane: VIEW NOW and WATCH put runs here
+            anchors.fill: parent; color: "transparent"
+            border.width: 2; border.color: root.activePane === sp.n ? root.amber : "#2b2f36"
+        }
+        Rectangle {                                  // a run dragged over: it lands here
+            anchors.fill: parent; color: root.amber; opacity: runDrag.over === sp.n ? 0.18 : 0
+        }
+    }
+
+    // the replay strip over the viewport: plays a run back from the revisions it kept (nothing is recorded),
+    // scrub to any step, see the script line that made it, and leave a note the modeller picks up
+    component ReplayStrip: Item {
+        id: rd
+        property var src: host                  // whose replay: the host (pane 1) or a split pane (2-4)
+        readonly property var r: src.replay
+        readonly property int count: r.count || 0
+        readonly property int at: r.at || 0
+        readonly property var stepNotes: (r.notes || []).filter(function (n) { return n.rev === r.rev })
+        visible: !!r.dir
+        height: stripCol.height + 16
+        Rectangle { anchors.fill: parent; radius: 4; color: "#16191c"; opacity: 0.86 }
+        Rectangle { anchors.fill: parent; radius: 4; color: "transparent"; border.width: 1; border.color: "#3a3f45" }
+        Transport { kind: "close"; tip: "close the replay and show the run's newest model"; x: rd.width - width - 8; y: 8; z: 1; onClicked: rd.src.replayLive() }
+        Column {
+            id: stripCol
+            x: 10; y: 8; width: rd.width - 20
+            spacing: 6
+            Row {
+                spacing: 2
+                Transport { kind: "first"; tip: "first step"; onClicked: rd.src.replaySeek(0) }
+                Transport { kind: "prev"; tip: "previous step"; onClicked: rd.src.replaySeek(rd.at - 1) }
+                Transport { kind: rd.r.playing ? "pause" : "play"; tip: rd.r.playing ? "pause" : "play the build back"; onClicked: rd.src.replayToggle() }
+                Transport { kind: "next"; tip: "next step"; onClicked: rd.src.replaySeek(rd.at + 1) }
+                Transport { kind: "last"; tip: "last step"; onClicked: rd.src.replaySeek(rd.count - 1) }
+                Item { width: 10; height: 1 }
+                Px { anchors.verticalCenter: parent.verticalCenter; text: "STEP " + (rd.at + 1) + "/" + rd.count; color: root.amber }
+                Item { width: 12; height: 1 }
+                Key {                           // an open run goes back to this step and builds on from here
+                    id: rdRewind; objectName: "replayRewind"
+                    anchors.verticalCenter: parent.verticalCenter
+                    readonly property var run: root.runOf(rd.r.dir)
+                    visible: !!run && !!run.openState && rd.at < rd.count - 1
+                    small: true; label: "REWIND HERE"
+                    tip: "put the model back to this step; Claude is told and builds on it from here (later steps stay in the replay)"
+                    onClicked: rd.src.replayRewind()
+                }
+                Px {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: (rd.r.op || "") + (rd.r.shown === rd.r.rev ? "" : "  loading...")
+                    maxWidth: stripCol.width - 330 - (rdRewind.visible ? rdRewind.width + 12 : 0); maxLines: 1; color: root.keyText
+                }
+            }
+            // the scrubber: drag or click along it; red ticks are steps with notes
+            Item {
+                id: scrub
+                width: stripCol.width; height: 22
+                readonly property real pitch: rd.count > 1 ? (width - 12) / (rd.count - 1) : 0
+                Rectangle { x: 6; y: 9; width: scrub.width - 12; height: 4; radius: 2; color: "#3a3f45" }
+                Rectangle { x: 6; y: 9; width: rd.at * scrub.pitch; height: 4; radius: 2; color: root.amber; opacity: 0.7 }
+                Repeater {
+                    model: rd.r.notes || []
+                    Rectangle {
+                        required property var modelData
+                        readonly property int idx: (rd.r.steps || []).findIndex(function (st) { return st.rev === modelData.rev })
+                        visible: idx >= 0
+                        x: 6 + idx * scrub.pitch - 1; y: 0; width: 3; height: 7; color: "#e0453a"
+                    }
+                }
+                Rectangle {
+                    x: 6 + rd.at * scrub.pitch - 6; y: 3; width: 12; height: 16; radius: 2
+                    color: rd.r.shown === rd.r.rev ? root.amber : "#6b6f75"
+                    border.width: 1; border.color: "#16191c"
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    property int last: -1
+                    function pick(mx) {
+                        const i = scrub.pitch > 0 ? Math.round((mx - 6) / scrub.pitch) : 0
+                        const a = Math.max(0, Math.min(rd.count - 1, i))
+                        if (a !== last) { last = a; rd.src.replaySeek(a) }
+                    }
+                    onPressed: function (m) { last = -1; pick(m.x) }
+                    onPositionChanged: function (m) { if (pressed) pick(m.x) }
+                }
+            }
+            // the script line that made this step
+            Text {
+                visible: !!rd.r.code
+                width: stripCol.width
+                text: "> " + (rd.r.code || "")
+                color: "#9fd18b"; font.family: root.mono; font.pixelSize: 12
+                wrapMode: Text.WrapAnywhere; maximumLineCount: 3; elide: Text.ElideRight
+                renderType: Text.NativeRendering
+            }
+            Repeater {
+                model: rd.stepNotes
+                Text {
+                    required property var modelData
+                    width: stripCol.width
+                    text: "note: " + modelData.text + (modelData.read ? "  (read)" : "")
+                    color: "#e0453a"; font.family: root.mono; font.pixelSize: 12
+                    wrapMode: Text.Wrap; maximumLineCount: 3; elide: Text.ElideRight
+                    renderType: Text.NativeRendering
+                }
+            }
+            Rectangle {
+                width: stripCol.width; height: 26; radius: 3
+                color: "#0d0f11"; border.width: 1; border.color: noteBox.activeFocus ? root.amber : "#3a3f45"
+                TextInput {
+                    id: noteBox
+                    objectName: "replayNote"
+                    anchors.fill: parent; anchors.margins: 5
+                    color: "#eef0ea"; clip: true; maximumLength: 2000
+                    font.family: root.mono; font.pixelSize: 13
+                    renderType: Text.NativeRendering
+                    onAccepted: if (text.trim() !== "") { rd.src.addNote(text); text = "" }
+                }
+                Text {
+                    x: 6; y: 5; visible: noteBox.text === "" && !noteBox.activeFocus
+                    text: "note on this step for the modeller, Enter to send"
+                    color: "#6b6f75"; font.family: root.mono; font.pixelSize: 13
+                    renderType: Text.NativeRendering
                 }
             }
         }
@@ -513,7 +1229,8 @@ Window {
         NumberAnimation { id: anim; target: d; property: "open"; easing.type: Easing.OutQuad; onStopped: d.gliding = false }
 
         Image { source: root.art + d.img; smooth: false }
-        Item { id: floor; x: d.g.floorX; y: d.g.floorY; width: d.g.floorW; height: d.g.floorH; clip: true }
+        property int floorExtra: 0      // content may run this far over the floor's shadow line onto the wall
+        Item { id: floor; x: d.g.floorX; y: d.g.floorY; width: d.g.floorW; height: d.g.floorH + floorExtra; clip: true }
 
         // the pull and the drawer front: grab it and pull the drawer out (or push it back) by
         // hand. It follows the mouse 1:1, glides on a little if flung, and stays where let go.
@@ -592,6 +1309,68 @@ Window {
     }
 
     // a black bakelite key, optionally with a jewel lamp
+    // ---- reference pictures: a photo stood behind the model (one per view), drawn by the viewer
+    // where the model isn't, so it never covers it. Moves are in the picture's own plane.
+    D.FileDialog {
+        id: refDialog
+        property string view: "side"
+        title: "Reference picture for the " + view + " view"
+        nameFilters: ["Pictures (*.png *.jpg *.jpeg *.webp)", "All files (*)"]
+        onAccepted: { host.refAdd(view, selectedFile.toString()); host.cmd("view " + (view === "front" ? "0 0" : view === "side" ? "-90 0" : "0 89")); host.cmd("ortho 1") }
+    }
+    component RefPanel: Rectangle {
+        id: rp
+        readonly property var images: host.refs.images || []
+        color: "#d0141518"; radius: 3
+        width: rpCol.width + 16; height: rpCol.height + 14
+        Column {
+            id: rpCol
+            x: 8; y: 7; spacing: 5
+            Px { text: rp.images.length ? "REFERENCE PICTURES" : "REFERENCE PICTURES: none up. Add one for a view:"; color: root.tapeText }
+            Repeater {
+                model: rp.images
+                delegate: Row {
+                    id: rr
+                    required property var modelData
+                    required property int index
+                    readonly property real step: Math.max(0.05, modelData.height * 0.02)
+                    function set(kv) { host.cmd("refset " + rr.index + " " + kv) }
+                    spacing: 4
+                    Px { width: 150; y: 10; text: rr.modelData.view.toUpperCase() + " " + rr.modelData.name; color: rr.modelData.visible ? root.keyText : root.inkFaint }
+                    Key { small: true; label: "-"; tip: "smaller (height " + rr.modelData.height.toFixed(2) + ")"; onClicked: rr.set("height=" + (rr.modelData.height / 1.05)) }
+                    Key { small: true; label: "+"; tip: "bigger (height " + rr.modelData.height.toFixed(2) + ")"; onClicked: rr.set("height=" + (rr.modelData.height * 1.05)) }
+                    Key { small: true; label: "<"; tip: "slide it left on its view"; onClicked: rr.set("ox=" + (rr.modelData.ox - rr.step)) }
+                    Key { small: true; label: ">"; tip: "slide it right on its view"; onClicked: rr.set("ox=" + (rr.modelData.ox + rr.step)) }
+                    Key { small: true; label: "^"; tip: "slide it up on its view"; onClicked: rr.set("oy=" + (rr.modelData.oy + rr.step)) }
+                    Key { small: true; label: "v"; tip: "slide it down on its view"; onClicked: rr.set("oy=" + (rr.modelData.oy - rr.step)) }
+                    Key { small: true; label: "o"; tip: "fainter (" + Math.round(rr.modelData.opacity * 100) + "%)"; onClicked: rr.set("opacity=" + Math.max(0.05, rr.modelData.opacity - 0.1)) }
+                    Key { small: true; label: "O"; tip: "stronger (" + Math.round(rr.modelData.opacity * 100) + "%)"; onClicked: rr.set("opacity=" + Math.min(1, rr.modelData.opacity + 0.1)) }
+                    Key { label: "SHOW"; lamp: true; lit: rr.modelData.visible; tip: "show or hide this picture"; onClicked: rr.set("visible=" + (rr.modelData.visible ? 0 : 1)) }
+                    Key { small: true; label: "X"; tip: "take this picture down"; onClicked: host.cmd("refdel " + rr.index) }
+                }
+            }
+            Row {
+                spacing: 4
+                Key { label: "+FRONT"; tip: "pick a picture of the front, to stand behind the model"; onClicked: { refDialog.view = "front"; refDialog.open() } }
+                Key { label: "+SIDE"; tip: "pick a picture of the side, to stand behind the model"; onClicked: { refDialog.view = "side"; refDialog.open() } }
+                Key { label: "+TOP"; tip: "pick a picture from above, to stand behind the model"; onClicked: { refDialog.view = "top"; refDialog.open() } }
+                Key {
+                    visible: rp.images.length > 0 && host.refs.saveable
+                    label: "SAVE"; lamp: true; lit: !!host.refs.changed
+                    tip: "save the pictures and where they sit into this model's file"
+                    onClicked: host.cmd("refsave")
+                }
+                Key {
+                    visible: rp.images.length > 0 && !host.refs.saveable
+                    label: "COPY"
+                    tip: "copy refimage lines to paste into a build script, so a rebuild puts the pictures back"
+                    onClicked: host.refCopyLines()
+                }
+            }
+            Px { visible: !!host.refs.problems; text: host.refs.problems || ""; color: root.inkRed; maxWidth: 560 }
+        }
+    }
+
     component Key: Item {
         id: k
         property string label: ""
@@ -599,6 +1378,7 @@ Window {
         property bool lit: false
         property bool latched: false
         property bool small: false            // the narrow key, for one-glyph transport keys
+        property string tip: ""               // what it does, in words, on the controls sheet's hint line
         signal clicked()
         width: small ? root.g0.keyS.w : root.g0.key.w; height: root.g0.key.h
         readonly property bool down: km.pressed && km.containsMouse || latched
@@ -615,7 +1395,22 @@ Window {
                 text: k.label; color: k.lit ? root.amber : root.keyText
             }
         }
-        MouseArea { id: km; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: k.clicked() }
+        MouseArea {
+            id: km; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: k.clicked()
+            onContainsMouseChanged: {
+                if (k.tip) root.keyTip = containsMouse ? k.tip : "";
+                k.tipReady = false;
+                if (containsMouse) kWait.restart(); else kWait.stop();
+            }
+        }
+        property bool tipReady: false
+        Timer { id: kWait; interval: 450; onTriggered: k.tipReady = true }
+        Tape {                                   // the hover tip, over the key
+            visible: k.tipReady && km.containsMouse && !km.pressed && k.tip !== ""
+            z: 100
+            x: Math.round((k.width - width) / 4) * 2; y: -30
+            text: k.tip
+        }
     }
 
     // A little 2D physics world for things lying loose on a drawer floor (Pinoch's junk
@@ -647,8 +1442,48 @@ Window {
         }
         Timer { id: tick; interval: 16; repeat: true; onTriggered: lw.step() }
 
+        // a rod's segment ends: its long axis points (-sin h, -cos h) on screen, h counter-clockwise
+        function ends(b) {
+            var ax = -Math.sin(b.heading) * b.halfLen, ay = -Math.cos(b.heading) * b.halfLen;
+            return [b.px - ax, b.py - ay, b.px + ax, b.py + ay];
+        }
+        // the point on segment (x0,y0)-(x1,y1) nearest (qx,qy)
+        function nearest(x0, y0, x1, y1, qx, qy) {
+            var ux = x1 - x0, uy = y1 - y0, l2 = ux * ux + uy * uy;
+            var t = l2 > 1e-9 ? Math.max(0, Math.min(1, ((qx - x0) * ux + (qy - y0) * uy) / l2)) : 0;
+            return [x0 + ux * t, y0 + uy * t];
+        }
+        // a rod against anything: find the rod's point nearest the other body and treat it as a ball
+        // there, then hand back where they touch (cx, cy) so the push can turn the rod
+        function rodContact(a, b) {
+            var ea = ends(a), qa, qb, c;
+            if (b.shape === "rod") {
+                var eb = ends(b);
+                // nearest points between two segments: alternate a few times, it settles fast
+                qb = [b.px, b.py];
+                for (var i = 0; i < 3; i++) {
+                    qa = nearest(ea[0], ea[1], ea[2], ea[3], qb[0], qb[1]);
+                    qb = nearest(eb[0], eb[1], eb[2], eb[3], qa[0], qa[1]);
+                }
+            } else {
+                qa = nearest(ea[0], ea[1], ea[2], ea[3], b.px, b.py);
+                qb = [b.px, b.py];
+            }
+            var ghostA = { shape: "circle", px: qa[0], py: qa[1], rad: a.rad };
+            var ghostB = b.shape === "rod" ? { shape: "circle", px: qb[0], py: qb[1], rad: b.rad }
+                       : { shape: b.shape, px: b.px, py: b.py, rad: b.rad, cw: b.cw, ch: b.ch };
+            c = contact(ghostA, ghostB);
+            if (!c) return null;
+            c.cx = qa[0] + c.nx * (a.rad - c.p / 2); c.cy = qa[1] + c.ny * (a.rad - c.p / 2);
+            return c;
+        }
         // contact between two bodies: normal (from a to b) and depth, or null
         function contact(a, b) {
+            if (a.shape === "rod") return rodContact(a, b);
+            if (b.shape === "rod") {
+                var r = rodContact(b, a);
+                return r ? { nx: -r.nx, ny: -r.ny, p: r.p, cx: r.cx, cy: r.cy } : null;
+            }
             var dx = b.px - a.px, dy = b.py - a.py, d, p;
             if (a.shape === "circle" && b.shape === "circle") {
                 d = Math.hypot(dx, dy); p = a.rad + b.rad - d;
@@ -683,17 +1518,54 @@ Window {
             var k = c.p * 0.8 / (ia + ib);
             a.px -= c.nx * k * ia; a.py -= c.ny * k * ia;
             b.px += c.nx * k * ib; b.py += c.ny * k * ib;
-            var rvx = b.vx - a.vx, rvy = b.vy - a.vy;
-            var rv = rvx * c.nx + rvy * c.ny;
+            if (c.cx === undefined) { c.cx = (a.px + b.px) / 2; c.cy = (a.py + b.py) / 2 }
+            hit(a, b, c.nx, c.ny, c.cx, c.cy);
+        }
+        // an impulse at the point where two bodies touch: it pushes them apart and, off-centre,
+        // turns a rod (b null: a fixed wall). The velocity of a point r from a body's centre is
+        // v + w x r, with w the spin (screen coords, counter-clockwise turns read as -w here)
+        function hit(a, b, nx, ny, cx, cy) {
+            var ia = a.held ? 0 : 1 / a.mass, ib = b && !b.held ? 1 / b.mass : 0;
+            var Ia = a.held || a.inertia <= 0 ? 0 : 1 / a.inertia, Ib = b && !b.held && b.inertia > 0 ? 1 / b.inertia : 0;
+            var rax = cx - a.px, ray = cy - a.py, rbx = b ? cx - b.px : 0, rby = b ? cy - b.py : 0;
+            var wa = -a.spin, wb = b ? -b.spin : 0;
+            var vax = a.vx - wa * ray, vay = a.vy + wa * rax;
+            var vbx = b ? b.vx - wb * rby : 0, vby = b ? b.vy + wb * rbx : 0;
+            var rvx = vbx - vax, rvy = vby - vay, rv = rvx * nx + rvy * ny;
             if (rv >= 0) return;
-            var j = -(1 + (a.bounce + b.bounce) / 2) * rv / (ia + ib);
-            a.vx -= j * c.nx * ia; a.vy -= j * c.ny * ia;
-            b.vx += j * c.nx * ib; b.vy += j * c.ny * ib;
-            var tv = -rvx * c.ny + rvy * c.nx, jt = -tv * 0.25 / (ia + ib);
-            a.vx -= -c.ny * jt * ia; a.vy -= c.nx * jt * ia;
-            b.vx += -c.ny * jt * ib; b.vy += c.nx * jt * ib;
+            var ran = rax * ny - ray * nx, rbn = rbx * ny - rby * nx;
+            var den = ia + ib + ran * ran * Ia + rbn * rbn * Ib;
+            if (den <= 0) return;
+            var e = b ? (a.bounce + b.bounce) / 2 : a.bounce;
+            var j = -(1 + e) * rv / den;
+            push(a, -j * nx, -j * ny, rax, ray, ia, Ia);
+            if (b) push(b, j * nx, j * ny, rbx, rby, ib, Ib);
+            // a little grip along the contact, so a glancing knock spins it too
+            var tx = -ny, ty = nx, tv = rvx * tx + rvy * ty;
+            var rat = rax * ty - ray * tx, rbt = rbx * ty - rby * tx;
+            var dt2 = ia + ib + rat * rat * Ia + rbt * rbt * Ib;
+            if (dt2 <= 0) return;
+            var jt = Math.max(-Math.abs(j) * 0.3, Math.min(Math.abs(j) * 0.3, -tv / dt2));
+            push(a, -jt * tx, -jt * ty, rax, ray, ia, Ia);
+            if (b) push(b, jt * tx, jt * ty, rbx, rby, ib, Ib);
+        }
+        function push(o, jx, jy, rx, ry, im, Im) {
+            o.vx += jx * im; o.vy += jy * im;
+            o.spin -= (rx * jy - ry * jx) * Im;
         }
         function walls(b) {
+            if (b.shape === "rod") {
+                var e2 = ends(b), r = b.rad;
+                for (var q = 0; q < 4; q += 2) {
+                    var ex = e2[q], ey = e2[q + 1], d;
+                    if ((d = minX - (ex - r)) > 0) { b.px += d; ex += d; hit(b, null, -1, 0, ex - r, ey) }
+                    if ((d = (ex + r) - width) > 0) { b.px -= d; ex -= d; hit(b, null, 1, 0, ex + r, ey) }
+                    if ((d = minY - (ey - r)) > 0) { b.py += d; ey += d; hit(b, null, 0, -1, ex, ey - r) }
+                    if ((d = (ey + r) - height) > 0) { b.py -= d; ey -= d; hit(b, null, 0, 1, ex, ey + r) }
+                    e2 = ends(b);
+                }
+                return;
+            }
             var hx = b.shape === "box" ? b.cw / 2 : b.rad, hy = b.shape === "box" ? b.ch / 2 : b.rad;
             var e = b.bounce;
             if (b.px - hx < minX) { b.px = minX + hx; if (b.vx < 0) b.vx = -b.vx * e }
@@ -718,18 +1590,41 @@ Window {
                     b.vx = 0.5 * b.vx + 0.5 * (b.px - b.lx) / dt;
                     b.vy = 0.5 * b.vy + 0.5 * (b.py - b.ly) / dt;
                     b.lx = b.px; b.ly = b.py;
+                    if (b.shape === "rod") { b.spin = 0.5 * b.spin + 0.5 * (b.heading - b.lh) / dt; b.lh = b.heading }
                     moving = true;
                     continue;
                 }
                 var vx = b.vx - (sideways ? kick : 0), vy = b.vy - (sideways ? 0 : kick);
-                // friction per axis: a pencil rolls across its length and skids along it
-                vx -= Math.sign(vx) * Math.min(Math.abs(vx), b.dragX * dt);
-                vy -= Math.sign(vy) * Math.min(Math.abs(vy), b.dragY * dt);
+                if (b.shape === "rod") {
+                    // a rod rolls across its length and skids along it, whichever way it lies
+                    var ux = -Math.sin(b.heading), uy = -Math.cos(b.heading);
+                    var al = vx * ux + vy * uy, ac = vx * -uy + vy * ux;
+                    al -= Math.sign(al) * Math.min(Math.abs(al), b.dragY * dt);
+                    ac -= Math.sign(ac) * Math.min(Math.abs(ac), b.dragX * dt);
+                    vx = al * ux - ac * uy; vy = al * uy + ac * ux;
+                    if (b.rollR > 0) b.roll += ac * dt / b.rollR;
+                    b.spin -= Math.sign(b.spin) * Math.min(Math.abs(b.spin), b.spinDrag * dt);
+                    b.spin = Math.max(-25, Math.min(25, b.spin));
+                    b.heading += b.spin * dt;
+                    if (Math.abs(b.spin) > 0.05) moving = true;
+                } else {
+                    // friction per axis: a pencil rolls across its length and skids along it
+                    vx -= Math.sign(vx) * Math.min(Math.abs(vx), b.dragX * dt);
+                    vy -= Math.sign(vy) * Math.min(Math.abs(vy), b.dragY * dt);
+                }
                 var sp = Math.hypot(vx, vy);
                 if (sp > 2400) { vx *= 2400 / sp; vy *= 2400 / sp }
                 b.vx = vx; b.vy = vy;
                 b.px += vx * dt; b.py += vy * dt;
-                if (b.rollR > 0) b.roll += vx * dt / b.rollR;
+                if (b.ball && b.rollR > 0) {
+                    // the roll axis lies across the way it goes, folded to one half-turn: rolling
+                    // back the way it came unrolls it rather than flipping it round
+                    if (sp > 4) {
+                        var bh = Math.atan2(-vy, vx);
+                        b.heading = bh >= Math.PI / 2 ? bh - Math.PI : bh < -Math.PI / 2 ? bh + Math.PI : bh;
+                    }
+                    b.roll += (-vx * -Math.cos(b.heading) + vy * -Math.sin(b.heading)) * dt / b.rollR;
+                } else if (b.shape !== "rod" && b.rollR > 0) b.roll += (b.rollAcross ? vy : vx) * dt / b.rollR;
                 if (sp > 0.5) moving = true;
             }
             for (var it = 0; it < 3; it++) {
@@ -746,7 +1641,7 @@ Window {
     // thrown, and a click that doesn't move it is a tap
     component Loose: Item {
         id: lo
-        property string shape: "box"            // box or circle
+        property string shape: "box"            // box, circle, or rod (a capsule that turns and rolls any way)
         property real cw: width                 // box collider
         property real ch: height
         property real rad: 10                   // circle collider
@@ -756,7 +1651,27 @@ Window {
         property real dragX: drag
         property real dragY: drag
         property real rollR: 0                  // > 0: it rolls about its long (vertical) axis
+        property bool ball: false               // rolls whichever way it goes: heading is its roll axis
+        property bool rollAcross: false         // its long axis lies across (x): it rolls as it moves in y
         property real roll: 0                   // radians rolled so far
+        property real halfLen: 0                // rod: half its segment (the ends are rad round)
+        property real heading: 0                // rod: which way it lies, radians counter-clockwise from point-up
+        property real spin: 0                   // rod: radians/s counter-clockwise
+        property real spinDrag: 9
+        property real lh: 0
+        property int turns: 16                  // rod: headings it was rendered at
+        // rod: the rendered frame nearest its heading, and its roll frame
+        readonly property int turnFrame: { var f = Math.round(heading / (2 * Math.PI / turns)) % turns; return f < 0 ? f + turns : f }
+        function rollFrame(n) { var f = Math.floor(roll / (2 * Math.PI / n)) % n; return f < 0 ? f + n : f }
+        function pad2(n) { return (n < 10 ? "0" : "") + n }
+        // a rod is only where it is, not its whole square: x, y local
+        function onBody(x, y) {
+            if (shape !== "rod") return true;
+            var qx = x - width / 2, qy = y - height / 2;
+            var ux = -Math.sin(heading), uy = -Math.cos(heading);
+            var t = Math.max(-halfLen, Math.min(halfLen, qx * ux + qy * uy));
+            return Math.hypot(qx - ux * t, qy - uy * t) <= rad + 4;
+        }
         property real px: 0                     // collider centre, world coords
         property real py: 0
         property real vx: 0
@@ -766,9 +1681,11 @@ Window {
         property real ly: 0
         property real lift: 0                   // a little hop when tapped
         property var world: null
-        readonly property real mass: (shape === "box" ? cw * ch : Math.PI * rad * rad) * density
-        readonly property real ox: shape === "box" ? cw / 2 : rad
-        readonly property real oy: shape === "box" ? ch / 2 : rad
+        readonly property real mass: (shape === "box" ? cw * ch : Math.PI * rad * rad + 4 * halfLen * rad) * density
+        readonly property real inertia: shape === "rod" ? mass * ((2 * halfLen) * (2 * halfLen) / 12 + rad * rad / 4) : 0
+        readonly property real ox: shape === "box" ? cw / 2 : shape === "rod" ? width / 2 : rad
+        readonly property real oy: shape === "box" ? ch / 2 : shape === "rod" ? height / 2 : rad
+        property string tip: ""               // a label that shows while the pointer rests on it
         signal tapped()
         x: Math.round((px - ox) / 2) * 2 - (held ? 2 : 0)
         y: Math.round((py - oy) / 2) * 2 - (held ? 2 : 0) - Math.round(lift / 2) * 2
@@ -781,28 +1698,68 @@ Window {
             NumberAnimation { target: lo; property: "lift"; to: 10; duration: 90; easing.type: Easing.OutQuad }
             NumberAnimation { target: lo; property: "lift"; to: 0; duration: 220; easing.type: Easing.OutBounce }
         }
+        Tape {
+            id: loTip
+            visible: lo.tip !== "" && loHover.over && !loHover.pressed && loTipWait.done
+            z: 30
+            x: Math.round((lo.width - width) / 4) * 2; y: -30
+            text: lo.tip
+        }
+        Timer {
+            id: loTipWait
+            property bool done: false
+            interval: 350
+            running: loHover.over
+            onRunningChanged: if (running) done = false
+            onTriggered: done = true
+        }
         MouseArea {
+            id: loHover
             anchors.fill: parent
             hoverEnabled: true
-            cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+            property real hx: 0
+            property real hy: 0
+            readonly property bool over: containsMouse && lo.onBody(hx, hy)
+            cursorShape: pressed ? Qt.ClosedHandCursor : over ? Qt.OpenHandCursor : Qt.ArrowCursor
             property real gx: 0
             property real gy: 0
             property real sx: 0
             property real sy: 0
             property double t0: 0
             property bool moved: false
+            property real gu: 0                 // rod: where it was grabbed, along and across its axis
+            property real gv: 0
             onPressed: function (m) {
+                if (!lo.onBody(m.x, m.y)) { m.accepted = false; return }
                 var p = mapToItem(lo.world, m.x, m.y);
                 gx = p.x - lo.px; gy = p.y - lo.py; sx = p.x; sy = p.y;
+                var ux = -Math.sin(lo.heading), uy = -Math.cos(lo.heading);
+                gu = gx * ux + gy * uy; gv = -gx * uy + gy * ux;
+                lo.lh = lo.heading; lo.spin = 0;
                 t0 = Date.now(); moved = false;
                 lo.lx = lo.px; lo.ly = lo.py; lo.vx = 0; lo.vy = 0;
                 lo.held = true;
                 lo.world.wake();
             }
             onPositionChanged: function (m) {
+                hx = m.x; hy = m.y;
                 if (!pressed) return;
                 var p = mapToItem(lo.world, m.x, m.y);
                 if (Math.abs(p.x - sx) + Math.abs(p.y - sy) > 5) moved = true;
+                if (lo.shape === "rod" && Math.hypot(gu, gv) > 6) {
+                    // the grab point follows the hand; the rest trails behind it, so the rod
+                    // turns until its centre hangs back along the way it was dragged from
+                    var gl = Math.hypot(gu, gv);
+                    var ux = -Math.sin(lo.heading), uy = -Math.cos(lo.heading);
+                    var wx = gu * ux - gv * uy, wy = gu * uy + gv * ux;      // grab offset, world
+                    var dx = lo.px - p.x, dy = lo.py - p.y, dl = Math.hypot(dx, dy);
+                    if (dl < 1e-3) return;
+                    var da = Math.atan2(-dy, -dx) - Math.atan2(wy, wx);
+                    da = Math.atan2(Math.sin(da), Math.cos(da));
+                    lo.heading -= da;
+                    lo.px = p.x + dx / dl * gl; lo.py = p.y + dy / dl * gl;
+                    return;
+                }
                 lo.px = p.x - gx; lo.py = p.y - gy;
             }
             onReleased: {
@@ -820,6 +1777,7 @@ Window {
         id: research
         objectName: "research"
         img: "drawer_research.png"; g: root.g0.research; side: "l"
+        floorExtra: 8                     // the book pile sits right down where the floor meets the wall
         shutX: root.cabX - root.peek - g.bodyX
         openX: root.cabX + root.tuck - g.bodyW - g.bodyX
         shutY: root.cabY + (root.frameH - g.bodyH) / 2 - g.bodyY
@@ -828,22 +1786,54 @@ Window {
         Flickable {
             id: researchScroll
             objectName: "researchScroll"
-            anchors.fill: parent; anchors.margins: 6; anchors.topMargin: 14
-            onMovementStarted: { chatPanel.selector.popup.close(); researchPanel.selector.popup.close() }
-            contentHeight: rsCol.height + 12
+            anchors.fill: parent; anchors.topMargin: 14   // no side or bottom margin: the book pile runs wall to wall: the book pile runs wall to wall, down to the floor wall
+            onMovementStarted: researchPanel.selector.popup.close()
+            contentHeight: rsCol.height
             boundsBehavior: Flickable.StopAtBounds
             clip: true
             Column {
                 id: rsCol
-                width: parent.width
+                x: 6; width: parent.width - 12
                 spacing: 18
 
                 // ---- the chat window: talk to the local and the hosted models.
                 // It never grows: the transcript scrolls inside a fixed window.
-                ChatPanel {
-                    id: chatPanel
+                // the chat is a crumpled ball of paper lying loose in the drawer: shove it about;
+                // tap it and it is tossed onto the viewport and opens out flat, the chat written on it
+                Item {
+                    id: chatWell
+                    objectName: "chatWell"
                     visible: !root.chatOut
-                    width: parent.width - 8; height: visible ? 222 : 0
+                    width: parent.width - 8; height: visible ? root.g0.paperball.ball.bodyH + 24 : 0
+                    LooseWorld {
+                        id: chatKit
+                        drawer: research
+                        anchors.fill: parent
+                        Loose {
+                            id: paperBall
+                            objectName: "paperBall"
+                            readonly property var gb: root.g0.paperball.ball
+                            readonly property var gr: root.g0.paperballRoll
+                            ball: true; rollR: gb.radius; turns: gr.turns
+                            visible: !root.chatUnrolled && openNote.t === 0
+                            tip: "CHAT"
+                            shape: "circle"; rad: gb.radius
+                            width: 2 * rad; height: 2 * rad
+                            px: chatKit.width / 2; py: chatKit.height / 2
+                            density: 0.3; bounce: 0.45; drag: 320     // light, springy paper: it rolls a good way
+                            Image {
+                                x: (paperBall.width - paperBall.gr.w) / 2 + 2; y: (paperBall.height - paperBall.gr.h) / 2 + 2
+                                source: root.art + "paperball_roll_" + paperBall.pad2(paperBall.turnFrame) + "_" + paperBall.pad2(paperBall.rollFrame(paperBall.gr.frames)) + ".png"
+                                smooth: false
+                            }
+                            onTapped: {
+                                var c = mapToItem(root.contentItem, width / 2, height / 2);
+                                root.ballFrom = Qt.point(c.x, c.y);
+                                root.ballHeading = heading; root.ballRoll = roll;
+                                root.chatUnrolled = true;
+                            }
+                        }
+                    }
                 }
                 PoppedNote { visible: root.chatOut; label: "CHAT"; win: chatWin; onDock: root.chatOut = false }
                 ResearchPanel {
@@ -864,14 +1854,14 @@ Window {
         openX: root.cabX + root.frameW - root.tuck - g.bodyX
         shutY: root.cabY + (root.frameH - g.bodyH) / 2 - g.bodyY
         openY: shutY
-        // the folder's label counts whatever the drawing tool has made since we last looked
+        // look again at what the drawing tool has made since the drawer was last open
         onIsOpenChanged: if (isOpen) host.refreshTools()
         Item {
             id: toolFloor
             anchors.fill: parent; anchors.margins: 6; anchors.topMargin: 14
             anchors.leftMargin: root.tuck - tools.g.floorX + 8      // clear of the chest edge
 
-            // ---- the drawing kit: a pencil and the drawings folder, lying loose in the drawer
+            // ---- the drawing kit: the pencil, lying loose in the drawer
             Tape { x: 6; y: -6; z: 20; text: "DRAWING" }
             Image {                                      // the lamp lights when the drawing tool is up
                 x: toolFloor.width - 22; y: 2; z: 20
@@ -881,87 +1871,237 @@ Window {
                 id: kit
                 objectName: "drawingKit"
                 drawer: tools
-                y: 24; width: toolFloor.width; height: 216
+                y: 24; width: toolFloor.width; height: 110
                 Rectangle { anchors.fill: parent; color: "#000000"; opacity: 0.12 }   // the well
 
-                // the pencil lies along the drawer's depth, so a yank sideways rolls it on its facets
+                // the pencil lies loose any way round: shove it across and it rolls on its facets,
+                // drag it by an end and it swings round behind your hand
                 Loose {
                     id: pencil3d
                     objectName: "pencil3d"
                     readonly property var gp: root.g0.pencil3d
+                    shape: "rod"; rad: gp.radius; halfLen: gp.halfLen; turns: gp.turns
                     width: gp.bodyW; height: gp.bodyH
-                    px: 40; py: 110
+                    px: kit.width / 2; py: kit.height / 2; heading: 1.15
                     density: 0.6; bounce: 0.25
                     dragX: 260; dragY: 1400                 // rolls easily, skids reluctantly
                     rollR: gp.radius
-                    readonly property int frame: {
-                        var n = gp.frames, f = Math.floor(roll / (2 * Math.PI / n)) % n;
-                        return f < 0 ? f + n : f;
-                    }
                     Image {
-                        x: (pencil3d.width - pencil3d.gp.w) / 2; y: (pencil3d.height - pencil3d.gp.h) / 2
-                        source: root.art + "pencil3d_" + (pencil3d.frame < 10 ? "0" : "") + pencil3d.frame + ".png"
+                        x: (pencil3d.width - pencil3d.gp.w) / 2 + 2; y: (pencil3d.height - pencil3d.gp.h) / 2 + 2
+                        source: root.art + "pencil3d_" + pencil3d.pad2(pencil3d.turnFrame) + "_" + pencil3d.pad2(pencil3d.rollFrame(pencil3d.gp.frames)) + ".png"
                         smooth: false
                     }
+                    tip: host.drawingOpen ? "DRAW: the drawing tool is up" : "DRAW: click to open the drawing tool"
                     onTapped: { hop(); host.openDrawingTool() }
-                }
-                // the folder: where every drawing Geppetto uses lives; tap it to open that folder
-                Loose {
-                    id: folder
-                    objectName: "drawingsFolder"
-                    readonly property var gf: root.g0.folder
-                    width: gf.bodyW; height: gf.bodyH
-                    px: kit.width - 70; py: 150
-                    density: 1.2; bounce: 0.15; drag: 1500
-                    Image {
-                        x: (folder.width - folder.gf.w) / 2; y: (folder.height - folder.gf.h) / 2
-                        source: root.art + "folder.png"; smooth: false
-                    }
-                    Tape {
-                        x: Math.round((folder.width - width) / 4) * 2; y: folder.gf.labelY - 12
-                        text: host.drawings.length ? "DRAWINGS " + host.drawings.length : "DRAWINGS"
-                    }
-                    onTapped: { hop(); host.openDrawingsFolder() }
                 }
             }
 
-            // ---- modeling tools: a bin waiting for them
+            // ---- LIVE BUILD: only while a model builds. Its keys pop up under the drawing kit when
+            // a run starts and fold away when it ends; hover a key for what it does.
+            QtObject {
+                id: runCtl
+                objectName: "runControls"
+                readonly property var lr: root.liveRun
+                readonly property string dir: root.liveDir
+                readonly property bool live: !!lr
+                readonly property bool paused: live && lr.paused
+            }
             Item {
-                id: modeling
-                objectName: "modelingBin"
+                id: liveRow
+                objectName: "liveBuild"
+                property real open: runCtl.live ? 1 : 0
+                Behavior on open { NumberAnimation { duration: 360; easing.type: Easing.OutQuad } }
                 y: kit.y + kit.height + 22
-                width: toolFloor.width; height: toolFloor.height - y
-                Tape { x: 6; y: -6; z: 2; text: root.modelingTools.length ? "MODELING " + root.modelingTools.length : "MODELING" }
-                Grid {
-                    id: modelGrid
-                    y: 24; columns: 3; spacing: 8
-                    readonly property real cell: Math.floor((modeling.width - 16) / 3)
-                    Repeater {
-                        // the tools that are in, then empty slots to fill out the row(s)
-                        model: Math.max(6, Math.ceil(root.modelingTools.length / 3) * 3)
+                width: toolFloor.width
+                height: Math.round(76 * open / 2) * 2
+                visible: open > 0.01
+                Tape { x: 6; y: -6; z: 2; text: runCtl.live ? "LIVE BUILD  REV " + runCtl.lr.latestRevision : "LIVE BUILD"; opacity: liveRow.open }
+                Image {                                  // lit while building, blinks while paused
+                    x: toolFloor.width - 22; y: 2; opacity: liveRow.open
+                    source: root.art + (runCtl.live && (!runCtl.paused || root.blinkOn) ? "lamp_on.png" : "lamp_off.png"); smooth: false
+                }
+                readonly property var keys: !runCtl.live ? [] : [
+                    { label: runCtl.paused ? ">" : "II", tip: runCtl.paused ? "RESUME: carry on building" : "PAUSE: hold before the next change", lit: runCtl.paused, act: "pause" },
+                    { label: ">|", tip: runCtl.paused ? "STEP: one change, then hold" : "STEP: pause first, then step", dim: !runCtl.paused, act: "step" },
+                    { label: runCtl.lr.pace > 0 ? runCtl.lr.pace + "S" : "N", tip: "PACE: seconds between changes, click for the next", act: "pace" },
+                    { label: "[]", tip: "STOP: end the run, keep the model", act: "stop" },
+                    { label: "EYE", tip: host.watchedRun === runCtl.dir ? "SHOW: this run is in the viewport" : "SHOW: put this run in the viewport", lit: host.watchedRun !== runCtl.dir, act: "show" }
+                ]
+                function run(k) {
+                    if (k.act === "pause") host.togglePause(runCtl.dir);
+                    else if (k.act === "step") { if (runCtl.paused) host.stepRun(runCtl.dir) }
+                    else if (k.act === "pace") host.cyclePace(runCtl.dir);
+                    else if (k.act === "stop") host.stopResearch(runCtl.dir);
+                    else if (k.act === "show") host.watchRun(runCtl.dir);
+                }
+                Row {
+                    x: 4; y: 26; spacing: Math.max(0, Math.floor((toolFloor.width - 8 - liveRow.keys.length * root.g0.keyS.w) / (liveRow.keys.length - 1)))
+                    Repeater {                           // each key pops up a beat after the last
+                        model: liveRow.keys
                         Item {
+                            id: lk
+                            required property var modelData
                             required property int index
-                            readonly property var tool: index < root.modelingTools.length ? root.modelingTools[index] : null
-                            width: modelGrid.cell; height: 44
-                            Rectangle {                  // a slot pressed into the drawer floor
-                                anchors.fill: parent
-                                color: "#000000"; opacity: parent.tool ? 0.22 : 0.12
-                            }
-                            Rectangle { width: parent.width; height: 2; color: "#000000"; opacity: 0.35 }
-                            Rectangle { x: 0; width: 2; height: parent.height; color: "#000000"; opacity: 0.35 }
-                            Px {
-                                anchors.centerIn: parent
-                                text: parent.tool ? parent.tool.name.toUpperCase() : "EMPTY"
-                                color: parent.tool ? root.keyText : "#5b5f66"
-                            }
-                            MouseArea {
-                                anchors.fill: parent
-                                enabled: parent.tool !== null
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: if (parent.tool.cmd) host.cmd(parent.tool.cmd)
+                            readonly property real t: Math.max(0, Math.min(1, liveRow.open * 1.9 - index * 0.18))
+                            width: kk.width; height: kk.height
+                            Key {
+                                id: kk
+                                small: true
+                                y: Math.round((1 - lk.t) * 24 / 2) * 2
+                                opacity: lk.t * (lk.modelData.dim ? 0.45 : 1)
+                                label: lk.modelData.label; lit: !!lk.modelData.lit
+                                tip: lk.modelData.tip
+                                onClicked: liveRow.run(lk.modelData)
                             }
                         }
                     }
+                }
+            }
+
+            // ---- MODELING: the folder every finished model is filed in. The sticker cut from the viewport
+            // slides in behind the cover and is gone: nothing of it shows, only the count on the tape.
+            Tape { x: 6; y: modelFolder.y - 30; z: 20; text: host.filed.length ? "MODELING " + host.filed.length : "MODELING" }
+            Key {                                        // the tool wheel, by hand: always yours when you press it
+                objectName: "wheelKey"
+                x: toolFloor.width - width - 4; y: modelFolder.y - 36; z: 20
+                label: "WHEEL"; lamp: true; lit: toolWheel.manual || toolCard.open || materialRing.open
+                tip: toolWheel.manual ? "WHEEL: put it away" : "WHEEL: pick a tool and use it on the model"
+                onClicked: toolWheel.manual = !toolWheel.manual
+            }
+            Item {
+                id: modelFolder
+                objectName: "modelingBin"
+                readonly property var gf: root.g0.modelfolder
+                property real bump: 0                   // the folder jolts as a sticker lands
+                // the sticker going in: small enough to vanish behind the cover, it starts just above its edge
+                function slipSize(aspect) {             // aspect = w / h
+                    var w = Math.min(gf.pocketW * 0.6, (gf.pocketH - 6) * aspect);
+                    return { w: Math.round(w), h: Math.round(w / aspect) };
+                }
+                function slipX(w) { return gf.pocketX + Math.round((gf.pocketW - w) / 2) }
+                function slipTop(h) { return gf.pocketY - h - 6 }
+                x: Math.round((toolFloor.width - gf.w) / 4) * 2
+                y: liveRow.y + liveRow.height + (liveRow.visible ? 22 : 0) + 58 + Math.round(bump)
+                width: gf.w; height: gf.h
+                Image { source: root.art + "modelfolder_back.png"; smooth: false }
+                Item {                                  // clipped at the folder's foot: the slip never shows below it
+                    width: modelFolder.width; height: modelFolder.gf.pocketY + modelFolder.gf.pocketH
+                    clip: true
+                    Image {
+                        id: slip
+                        objectName: "folderSlip"
+                        property real p: 0              // 0 just above the cover .. 1 all the way in
+                        visible: false
+                        smooth: true; mipmap: true; cache: false
+                        readonly property var sz: modelFolder.slipSize(implicitHeight > 0 ? implicitWidth / implicitHeight : 1)
+                        width: sz.w; height: sz.h
+                        x: modelFolder.slipX(sz.w)
+                        y: modelFolder.slipTop(sz.h) + p * (sz.h + 10)
+                    }
+                }
+                // the files in it: paper slips with a name tab, between the back and the cover. Hover and
+                // their tabs peek out; click and the cover drops open and they rise out to pick from.
+                Item {
+                    id: folderView
+                    objectName: "folderView"
+                    property bool open: false
+                    readonly property bool peek: folderMouse.containsMouse && !open
+                    readonly property var items: host.folder
+                    // what's up: the run or model followed, or, while you edit a copy, the model it's a copy of
+                    readonly property string onScreen: host.bench.dir && host.watchedRun === host.bench.dir && host.bench.back
+                        ? (host.bench.back.model || host.bench.back.watching || host.bench.back.replay || "")
+                        : host.watchedRun || host.info.model || ""
+                    property real rise: open ? 1 : peek ? 0.12 : 0
+                    Behavior on rise { NumberAnimation { duration: 240; easing.type: Easing.OutCubic } }
+                    readonly property int lip: 22           // how much of the dropped cover still shows
+                    // the pocket only: below the back leaf's tab, down to the foot
+                    y: modelFolder.gf.pocketY + 2
+                    width: modelFolder.width; height: modelFolder.gf.pocketH - 2
+                    clip: true
+                    Flickable {
+                        id: fileStack
+                        objectName: "folderFiles"
+                        x: 12; y: 2; width: parent.width - 24; height: parent.height - folderView.lip - 6   // above the dropped cover's lip
+                        contentHeight: fileCol.height; clip: true
+                        interactive: folderView.open          // the scroll wheel runs through the files
+                        boundsBehavior: Flickable.StopAtBounds
+                        flickDeceleration: 4000; maximumFlickVelocity: 1600
+                        onContentHeightChanged: if (!folderView.open) contentY = 0
+                        Column {
+                            id: fileCol
+                            width: fileStack.width; spacing: 3
+                            Repeater {
+                                objectName: "folderSlips"
+                                model: folderView.items
+                                delegate: Item {
+                                    id: fileSlip
+                                    required property var modelData
+                                    required property int index
+                                    readonly property bool here: modelData.path === folderView.onScreen
+                                    // each one up a beat after the one before it; shut, they're all down in the pocket
+                                    readonly property real t: Math.max(0, Math.min(1, folderView.rise * 1.6 - index * 0.12))
+                                    width: fileCol.width; height: 26
+                                    Rectangle {
+                                        y: Math.round((1 - fileSlip.t) * (modelFolder.gf.pocketH + 20))
+                                        width: parent.width; height: 26
+                                        color: fileMouse.containsMouse ? "#fffbe9" : "#f1ecd9"
+                                        border.color: fileSlip.here ? root.amber : "#9b937c"; border.width: fileSlip.here ? 2 : 1
+                                        Behavior on color { ColorAnimation { duration: 90 } }
+                                        Rectangle { x: 0; y: 0; width: 5; height: parent.height; color: fileSlip.modelData.kind === "model" ? root.amber : "#9b937c" }
+                                        Px {
+                                            x: 12; y: 7
+                                            text: fileSlip.modelData.name
+                                            color: fileSlip.modelData.kind === "model" ? root.ink : root.inkFaint
+                                        }
+                                        Px { anchors.right: parent.right; anchors.rightMargin: 8; y: 9; size: 6; visible: fileSlip.modelData.kind !== "model"; text: "RUN"; color: root.inkFaint }
+                                        // click to put it on screen, or drag it out onto the viewport: on pane 1
+                                        // it drops INTO the scene there (an undoable bench edit); a run dropped
+                                        // on pane 2-4 replays there
+                                        MouseArea {
+                                            id: fileMouse
+                                            anchors.fill: parent; hoverEnabled: true
+                                            cursorShape: dragging ? Qt.ClosedHandCursor : Qt.PointingHandCursor
+                                            enabled: folderView.open
+                                            preventStealing: true
+                                            property real sx: 0
+                                            property real sy: 0
+                                            property bool dragging: false
+                                            onPressed: function (m) { sx = m.x; sy = m.y; dragging = false }
+                                            onPositionChanged: function (m) {
+                                                if (!dragging && Math.abs(m.x - sx) + Math.abs(m.y - sy) > 10) {
+                                                    dragging = true; runDrag.beginSlip(fileSlip.modelData, fileSlip.index)
+                                                }
+                                                if (dragging) runDrag.moveTo(mapToItem(root.contentItem, m.x, m.y))
+                                            }
+                                            onReleased: if (dragging) { dragging = false; if (runDrag.finish()) folderView.open = false }
+                                            onCanceled: if (dragging) { dragging = false; runDrag.cancel() }
+                                            onClicked: if (!dragging) { host.openFiled(fileSlip.index); folderView.open = false }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Item {                                  // the cover: dips on hover, slides down to a lip when opened
+                    width: modelFolder.width; height: modelFolder.height
+                    clip: true                          // it goes down behind the folder's foot
+                    Image {
+                        source: root.art + "modelfolder_cover.png"; smooth: false
+                        y: Math.round(folderView.rise * (modelFolder.height - modelFolder.gf.pocketY - folderView.lip) / 2) * 2
+                    }
+                }
+                MouseArea {                             // the folder itself: hover to peek, click to open it out
+                    id: folderMouse
+                    objectName: "modelingOpen"
+                    anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                    z: -1
+                    onClicked: folderView.open = !folderView.open
+                }
+                SequentialAnimation {
+                    id: folderBump
+                    NumberAnimation { target: modelFolder; property: "bump"; to: 4; duration: 70; easing.type: Easing.OutQuad }
+                    NumberAnimation { target: modelFolder; property: "bump"; to: 0; duration: 240; easing.type: Easing.OutBounce }
                 }
             }
         }
@@ -1736,36 +2876,415 @@ Window {
     }
 
     // ---- the viewport ---------------------------------------------------------------------
-    Viewport {
-        id: view
+    // backing behind the panes: the gutter between split panes is steel, not see-through window
+    Rectangle {
         x: root.cabX + root.g0.view.x; y: root.cabY + root.g0.view.y
         width: root.g0.view.w; height: root.g0.view.h
+        color: "#1f2228"
+    }
+    Viewport {
+        id: view
+        visible: !root.solo || root.solo === 1
+        readonly property var cell: root.paneRect(1)
+        x: root.cabX + root.g0.view.x + cell.x; y: root.cabY + root.g0.view.y + cell.y
+        width: cell.w; height: cell.h
+        // render at the pane's own size, so a split pane isn't a squashed full frame
+        onWidthChanged: viewSize.restart()
+        onHeightChanged: viewSize.restart()
+        Timer { id: viewSize; interval: 150; onTriggered: host.setViewSize(view.width, view.height) }
         MouseArea {
+            id: viewMouse
+            objectName: "viewMouse"
             anchors.fill: parent
             acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
+            hoverEnabled: host.subMode !== "body"       // face/edge/vertex: light what's under the cursor
             property real lx: 0
             property real ly: 0
             property real sx: 0
             property real sy: 0
             property bool moved: false
-            onPressed: function (m) { lx = sx = m.x; ly = sy = m.y; moved = false }
+            property bool dbl: false                    // the second click of a double-click: no second pick
+            property bool cancelled: false              // Escape while held: this press neither picks nor drags
+            cursorShape: viewFly.on ? Qt.BlankCursor : Qt.ArrowCursor
+            FlyCam { id: viewFly; n: 1 }
+            onPressed: function (m) {
+                lx = sx = m.x; ly = sy = m.y; moved = false; cancelled = false; root.activePane = 1; forceActiveFocus();
+                if (m.button === Qt.RightButton) viewFly.start();
+            }
+            onCanceled: viewFly.stop()
+            Keys.onReleased: function (e) { viewFly.key(e, false) }
+            // keys 1-4 pick body/face/edge/vertex. Escape backs out one layer at a time, s&box order
+            // (EffigyViewport.OnKeyPress): the press/drag in progress, the open wheel/tool/ring,
+            // the selected bone/body, then the picked faces/edges/vertices
+            Keys.onPressed: function (e) {
+                if (viewFly.key(e, true)) return;
+                var modes = { "1": "body", "2": "face", "3": "edge", "4": "vertex" };
+                if (e.modifiers === Qt.NoModifier && modes[e.text] !== undefined) { host.setSelMode(modes[e.text]); e.accepted = true }
+                else if (e.key === Qt.Key_Space && e.modifiers === Qt.NoModifier) { e.accepted = true; palette.show() }
+                else if (e.key === Qt.Key_Escape) {
+                    e.accepted = true;
+                    if (pressed && !cancelled) cancelled = true;
+                    else if (materialRing.open) materialRing.open = false;
+                    else if (toolCard.open) toolCard.open = false;
+                    else if (toolWheel.manual) toolWheel.manual = false;
+                    else if ((host.sel.bone !== undefined && host.sel.bone >= 0) || (host.sel.body !== undefined && host.sel.body >= 0)) host.cmd("select -1");
+                    else if ((host.subSelection.count || 0) > 0) host.clearSubSelection();
+                    else e.accepted = false;
+                }
+            }
             onPositionChanged: function (m) {
+                if (!pressed) { host.subHover(m.x, m.y); return }
+                if (cancelled) return;
                 var dx = m.x - lx, dy = m.y - ly;
                 lx = m.x; ly = m.y;
+                if (viewFly.on) { viewFly.look(dx, dy); return }
                 if (Math.abs(m.x - sx) + Math.abs(m.y - sy) > 3) moved = true;
                 if (!moved) return;
-                if (pressedButtons & Qt.LeftButton) host.cmd("orbit " + dx + " " + dy);
-                else host.cmd("pan " + dx + " " + dy);
+                if (pressedButtons & Qt.LeftButton) root.camCmd(1, "orbit " + dx + " " + dy);
+                else root.camCmd(1, "pan " + dx + " " + dy);
             }
-            onReleased: function (m) { if (!moved && m.button === Qt.LeftButton) host.cmd("pick " + Math.round(m.x) + " " + Math.round(m.y)) }
-            onDoubleClicked: function (m) { if (m.button === Qt.LeftButton) host.cmd("frame") }
-            onWheel: function (w) { host.cmd("zoom " + (w.angleDelta.y > 0 ? 0.9 : 1.1)) }
+            onReleased: function (m) {
+                if (m.button === Qt.RightButton) { viewFly.stop(); return }
+                if (dbl) { dbl = false; return }        // s&box selects on each press: one pick per double-click, not two
+                if (cancelled) return;
+                if (moved || m.button !== Qt.LeftButton) return;
+                if (host.subMode !== "body")            // shift adds/toggles, ctrl removes, alt takes the opposite face too
+                    host.subPick(m.x, m.y, !!(m.modifiers & Qt.ShiftModifier), !!(m.modifiers & Qt.ControlModifier), !!(m.modifiers & Qt.AltModifier));
+                else host.cmd("pick " + Math.round(m.x) + " " + Math.round(m.y));
+            }
+            // body mode keeps double-click = frame; in face/edge/vertex mode s&box has no double-click
+            // framing (Fit view lives on the radial), so the second click is just swallowed
+            onDoubleClicked: function (m) {
+                if (m.button !== Qt.LeftButton) return;
+                dbl = true;
+                if (host.subMode === "body") root.camCmd(1, "frame");
+            }
+            onWheel: function (w) { if (viewFly.on) viewFly.wheel(w); else root.camCmd(1, "zoom " + (w.angleDelta.y > 0 ? 0.9 : 1.1)) }
         }
+        FlyStrip { fly: viewFly; z: 5 }
+        PaneHeader {
+            visible: root.layoutN > 1; n: 1
+            who: host.watchedRun ? host.runWho(host.watchedRun) : ""
+            owner: host.p1Owner
+            what: host.watchedRun ? host.runScript(host.watchedRun) : ""
+            state: host.replay && host.replay.dir ? "REPLAY" : root.p1Run ? (root.p1Run.paused ? "PAUSED" : "LIVE  REV " + root.p1Run.latestRevision) : ""
+        }
+        ReplayStrip {
+            objectName: "replayStrip"
+            x: 12; y: root.layoutN > 1 ? 28 : 12; width: view.width - 24
+        }
+        RunBar {
+            objectName: "p1RunBar"
+            run: host.replay && host.replay.dir ? null : root.p1Run
+            x: 12; y: root.layoutN > 1 ? 28 : 12
+        }
+        // ---- pick mode (keys 1-4 on the view) and what's picked, s&box style: tiny, top right, out of the way
+        Column {
+            id: subLabel
+            objectName: "subSelLabel"
+            property string tip: ""
+            anchors.right: parent.right; anchors.rightMargin: 12
+            y: 12 + (benchError.opacity > 0 ? benchError.height + 6 : 0)
+            spacing: 3
+            opacity: host.subMode !== "body" || subModeHover.hovered ? 0.95 : 0.35
+            Behavior on opacity { NumberAnimation { duration: 150 } }
+            HoverHandler { id: subModeHover }
+            Row {
+                anchors.right: parent.right
+                spacing: 2
+                Repeater {
+                    model: [["1", "body", "B", "pick whole bodies"],
+                            ["2", "face", "F", "pick faces: the face under the cursor lights blue"],
+                            ["3", "edge", "E", "pick edges: every edge drawn as wire, the one under the cursor lights blue"],
+                            ["4", "vertex", "V", "pick vertices: a dot on every point, the one under the cursor lights blue"]]
+                    Rectangle {
+                        readonly property bool lit: host.subMode === modelData[1]
+                        width: 18; height: 16; radius: 2
+                        color: lit ? "#f2a91c" : "#1f2228"; border.color: "#0b0c0e"
+                        Text {
+                            anchors.centerIn: parent; text: modelData[2]
+                            color: parent.lit ? "#1f2228" : "#c9ccd0"
+                            font.family: "DejaVu Sans Mono"; font.bold: true; font.pixelSize: 11
+                        }
+                        MouseArea {
+                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor; hoverEnabled: true
+                            onContainsMouseChanged: subLabel.tip = containsMouse ? modelData[2] + " (key " + modelData[0] + "): " + modelData[3] : ""
+                            onClicked: { host.setSelMode(modelData[1]); viewMouse.forceActiveFocus() }
+                        }
+                    }
+                }
+            }
+            // the hovered mode key's tip
+            Text {
+                anchors.right: parent.right
+                visible: subLabel.tip !== ""
+                width: Math.min(implicitWidth, view.width * 0.45); wrapMode: Text.Wrap; horizontalAlignment: Text.AlignRight
+                text: subLabel.tip; color: root.amber
+                style: Text.Outline; styleColor: "#0b0c0e"
+                font.family: "DejaVu Sans Mono"; font.pixelSize: 11
+            }
+            Text {
+                anchors.right: parent.right
+                visible: text !== ""
+                width: Math.min(implicitWidth, view.width * 0.45); wrapMode: Text.Wrap; horizontalAlignment: Text.AlignRight
+                text: host.subPrompt
+                color: (host.subSelection.lost || 0) > 0 ? "#e06c5a" : "#c9ccd0"
+                style: Text.Outline; styleColor: "#0b0c0e"
+                font.family: "DejaVu Sans Mono"; font.pixelSize: 11
+            }
+        }
+        // ---- camera keys, on the view they move: faint until the mouse comes near
+        Item {
+            id: camStrip
+            objectName: "cameraKeys"
+            x: 12; y: view.height - height - 10
+            width: camCol.width; height: camCol.height
+            opacity: camHover.hovered ? 1 : 0.4
+            // the run these keys hold or stop: split, only the one in this pane
+            readonly property var ctl: root.layoutN > 1
+                ? { live: !!root.p1Run, paused: !!root.p1Run && root.p1Run.paused, dir: root.p1Run ? root.p1Run.dir : "" } : runCtl
+            Behavior on opacity { NumberAnimation { duration: 150 } }
+            HoverHandler { id: camHover }
+            Column {
+                id: camCol
+                spacing: 4
+                Px { text: root.keyTip; color: root.amber; visible: camHover.hovered && root.keyTip !== "" }
+                RefPanel { visible: root.refsOpen }
+                Flow {
+                    width: view.width - 24 - (root.layoutN > 1 ? toolWheel.width * toolWheel.fit : 0)
+                    spacing: 4
+                    // front, side and top are flat and square on, the way their reference pictures face;
+                    // side looks from -y like the kernel's side render, so a side picture is not mirrored
+                    Key { small: true; label: "FR"; tip: "front view, flat: lines up with a front picture"; onClicked: { root.spinning = false; root.camCmd(1, "spin 0"); root.camCmd(1, "view 0 0"); root.camCmd(1, "ortho 1") } }
+                    Key { small: true; label: "SD"; tip: "side view, flat: lines up with a side picture"; onClicked: { root.spinning = false; root.camCmd(1, "spin 0"); root.camCmd(1, "view -90 0"); root.camCmd(1, "ortho 1") } }
+                    Key { small: true; label: "BK"; tip: "back view"; onClicked: { root.spinning = false; root.camCmd(1, "spin 0"); root.camCmd(1, "view 180 8"); root.camCmd(1, "ortho 0") } }
+                    Key { small: true; label: "TOP"; tip: "top-down view, flat: lines up with a top picture"; onClicked: { root.spinning = false; root.camCmd(1, "spin 0"); root.camCmd(1, "view 0 89"); root.camCmd(1, "ortho 1") } }
+                    Key { small: true; label: "3/4"; tip: "three-quarter view"; onClicked: { root.spinning = false; root.camCmd(1, "spin 0"); root.camCmd(1, "view 35 18"); root.camCmd(1, "ortho 0") } }
+                    Key { small: true; label: "+"; tip: "zoom in"; onClicked: root.camCmd(1, "zoom 0.8") }
+                    Key { small: true; label: "-"; tip: "zoom out"; onClicked: root.camCmd(1, "zoom 1.25") }
+                    Key { small: true; label: "FIT"; tip: "fit whole model. Hold the right mouse button to fly: WASD, Q/E down/up, Shift fast, wheel speed"; onClicked: root.camCmd(1, "frame") }
+                    Key {
+                        objectName: "ctlSpin"
+                        label: "SPIN"; lamp: true; lit: root.spinning; tip: "slow turntable"
+                        onClicked: { root.spinning = !root.spinning; root.camCmd(1, "spin " + (root.spinning ? 30 : 0)) }
+                    }
+                    Key {
+                        objectName: "ctlFlat"
+                        label: "FLAT"; lamp: true; lit: host.ortho
+                        tip: "flat view: no perspective, so sizes match a reference picture. Turning the view ends it"
+                        onClicked: root.camCmd(1, "ortho " + (host.ortho ? 0 : 1))
+                    }
+                    Key {                                // the live build from the viewport: hold it or let it go on
+                        objectName: "ctlRun"
+                        readonly property var c: camStrip.ctl
+                        label: !c.live ? "TIME" : c.paused ? "GO" : "HOLD"
+                        lamp: true; lit: c.live && (!c.paused || root.blinkOn)
+                        tip: !c.live ? "timeline: open the build's timeline"
+                            : c.paused ? "GO: carry on building" : "HOLD: pause before the next change"
+                        onClicked: c.live ? host.togglePause(c.dir) : timeline.toggle()
+                    }
+                    Key {
+                        objectName: "ctlRunStop"
+                        visible: camStrip.ctl.live
+                        label: "STOP"; tip: "STOP: end the run, keep the model"
+                        onClicked: host.stopResearch(camStrip.ctl.dir)
+                    }
+                    Key {
+                        objectName: "ctlFollow"
+                        label: "TRACK"; lamp: true; lit: root.followFrame; tip: "re-fit as the model grows"
+                        onClicked: { root.followFrame = !root.followFrame; host.cmd("autoframe " + (root.followFrame ? 1 : 0)) }
+                    }
+                    Key {                                // your copy on screen, or what you copied it from
+                        objectName: "ctlBenchView"
+                        readonly property bool editing: !!host.bench.dir && host.watchedRun === host.bench.dir
+                        visible: !!host.bench.dir
+                        label: editing ? "EDIT" : "RUN"; lamp: true; lit: editing
+                        tip: editing ? "showing your edit: click for the run you started from" : "showing the run: click for your edit"
+                        onClicked: host.benchView(!editing)
+                    }
+                }
+            }
+        }
+        // the tool wheel: comes up each time the live run reaches for a different tool
+        ToolWheel {
+            id: toolWheel
+            objectName: "toolWheel"
+            x: view.width - width - 18; y: view.height - height - 18
+            // shrinks to fit a short viewport (at most 60% of its height), held by its bottom-right corner
+            // split: a small wheel tucked in the corner, the same size as the other panes' wheels
+            readonly property real fit: root.layoutN > 1 ? Math.max(0.25, Math.min(0.5, view.height * 0.4 / height, view.width * 0.32 / width))
+                                                          : Math.max(0.3, Math.min(1, view.height * 0.6 / height, (view.width - 36) / width))
+            transform: Scale { origin.x: toolWheel.width; origin.y: toolWheel.height; xScale: toolWheel.fit; yScale: toolWheel.fit }
+            // in step with the viewport: the op of the revision on screen (a run, a replay, your bench);
+            // with nothing on screen, the latest change of whichever run is building
+            readonly property var rp: host.replay && host.replay.dir ? host.replay : null
+            readonly property var run: root.layoutN > 1 ? root.p1Run
+                : root.liveRun && (host.watchedRun === "" || root.liveRun.dir === host.watchedRun) ? root.liveRun : null
+            op: host.watchedRun !== "" ? host.shownOp : run ? (run.wheelOp || "") : ""
+            working: !rp && run ? (run.operation || "") : ""   // the step being built, before it lands
+            // picked by hand: the tool card comes up with that tool's fields, to use it on the model
+            onPicked: (key, label) => {
+                toolWheel.manual = false
+                // MATERIAL brings up the material ring round the wheel; every other tool its card
+                if (key === "material") { toolCard.open = false; materialRing.open = true; host.benchStart(); return }
+                materialRing.open = false
+                toolCard.label = label; toolCard.open = true; host.benchDescribe(key)
+            }
+            pace: rp ? 0.7 : run ? (run.pace || 0) : 0
+            revision: rp ? (rp.shown || 0) : run ? (run.displayedRevision || run.latestRevision || 0) : 0     // the change as the viewport shows it
+            stepping: rp ? !!rp.playing : !!run && run.status === "running" && !run.paused && !run.bench
+        }
+        // the tool you picked off the wheel: its fields, APPLY runs it on your copy of what's on screen
+        ToolCard {
+            id: toolCard
+            objectName: "toolCard"
+            x: 10; y: 10
+            maxHeight: view.height * 0.45
+            bench: host.bench
+            onApply: line => host.benchApply(line)
+            onUndo: host.benchUndo()
+            onKeep: host.benchKeep("")
+            onWheel: { open = false; toolWheel.manual = true }
+            onClosed: open = false
+        }
+        // the CLAUDE card, bottom-left over the model: Claude's replies, the tools it runs, ALLOW/DENY, PAUSE/STOP
+        ClaudePanel {
+            id: claudePanel
+            objectName: "claudePanel"
+            x: 10; y: view.height - height - 52       // clear of the FIT / SPIN / TIME keys
+            maxHeight: Math.min(440, view.height * 0.55)
+            bigHeight: view.height - 62
+            open: root.claudeOpen
+            onClosed: root.claudeOpen = false
+            onPictureClicked: path => claudePicture.pop(path, false)
+        }
+        // the FACE POSER card, top-right over the model: GMod-style flex sliders for the posed pane
+        FacePoser {
+            id: facePoser
+            objectName: "facePoser"
+            // over the whole viewport frame (not just pane 1), on the side away from the pane it poses
+            readonly property bool onLeft: root.layoutN > 1 && host.facePane > 0 && (host.facePane - 1) % 2 === 1
+            x: -view.cell.x + (onLeft ? 10 : root.g0.view.w - width - 10); y: -view.cell.y + 10
+            maxHeight: root.g0.view.h - 20
+        }
+        // a picture Claude just looked at or sent you: pops large on the right (clear of the red
+        // errors top-right), holds ~4 s, then shrinks away into the CLAUDE card's strip
+        Item {
+            id: claudePicture
+            objectName: "claudePicture"
+            property string path: ""
+            property bool held: false                 // popped by a click: stays until clicked away
+            // clear of the CLAUDE card when there's room for it
+            readonly property real room: view.width - (claudePanel.visible ? claudePanel.x + claudePanel.width + 10 : 0) - 10
+            readonly property real bigW: Math.max(Math.min(view.width * 0.42, 520, room), Math.min(200, view.width - 20))
+            readonly property real bigH: Math.min(view.height * 0.55, 420)
+            z: 45
+            visible: path !== "" && opacity > 0
+            opacity: 0
+            x: view.width - width - 10; y: 60
+            width: bigW; height: bigH
+            transformOrigin: Item.BottomLeft
+            function pop(p, timed) {
+                shrink.stop(); hold.stop()
+                path = p; held = !timed; scale = 1; opacity = 1
+                if (timed) hold.start()
+            }
+            Connections { target: host; function onClaudePicture(p) { claudePicture.pop(p, true) } }
+            Timer { id: hold; interval: 4000; onTriggered: shrink.start() }
+            ParallelAnimation {
+                id: shrink
+                NumberAnimation { target: claudePicture; property: "scale"; to: 0.12; duration: 450; easing.type: Easing.InQuad }
+                NumberAnimation { target: claudePicture; property: "opacity"; to: 0; duration: 450; easing.type: Easing.InQuad }
+            }
+            Rectangle { anchors.fill: parent; color: "#0b0c0e"; opacity: 0.92; border.color: "#f2a91c"; border.width: 2; radius: 4 }
+            Image {
+                id: claudePictureImage
+                anchors.fill: parent; anchors.margins: 6; anchors.bottomMargin: 22
+                source: claudePicture.path ? "file://" + claudePicture.path : ""
+                fillMode: Image.PreserveAspectFit; asynchronous: true; cache: false
+                sourceSize.width: 1040
+            }
+            Text {
+                anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
+                anchors.margins: 6; height: 14; elide: Text.ElideMiddle
+                text: "CLAUDE IS LOOKING AT  " + claudePicture.path.split("/").pop()
+                color: "#f2a91c"; font.family: "DejaVu Sans Mono"; font.pixelSize: 10; font.bold: true
+            }
+            MouseArea {
+                anchors.fill: parent; cursorShape: Qt.PointingHandCursor; hoverEnabled: true
+                onContainsMouseChanged: if (containsMouse) hold.stop(); else if (!claudePicture.held && !shrink.running && claudePicture.opacity > 0) hold.restart()
+                onClicked: shrink.start()
+            }
+        }
+        // why your edit didn't take: called out top-right, red, the whole reason; holds a few seconds, then fades
+        Rectangle {
+            id: benchError
+            objectName: "benchError"
+            property string shown: toolCard.problem
+            onShownChanged: if (shown) { errFade.stop(); opacity = 0.94; errFade.start() } else opacity = 0
+            visible: shown !== "" && opacity > 0
+            opacity: 0
+            z: 50
+            SequentialAnimation {
+                id: errFade
+                PauseAnimation { duration: 6000 }
+                NumberAnimation { target: benchError; property: "opacity"; to: 0; duration: 900 }
+            }
+            anchors.top: parent.top; anchors.right: parent.right; anchors.margins: 10
+            width: Math.min(420, view.width * 0.42); height: errText.implicitHeight + 16
+            radius: 4; color: "#2a0f0c"; border.color: "#e0604a"; border.width: 2
+            Text {
+                id: errText
+                anchors.fill: parent; anchors.margins: 8
+                text: "CAN'T: " + benchError.shown
+                color: "#ffb3a6"; wrapMode: Text.Wrap
+                font.family: "DejaVu Sans Mono"; font.pixelSize: 12; font.bold: true
+            }
+            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { errFade.stop(); benchError.opacity = 0 } }
+        }
+        // the material browser, after Linework's colour ring: opens round the wheel's centre
+        MaterialRing {
+            id: materialRing
+            objectName: "materialRing"
+            anchors.fill: parent
+            cx: toolWheel.x + toolWheel.width - toolWheel.fit * toolWheel.width / 2
+            cy: toolWheel.y + toolWheel.height - toolWheel.fit * toolWheel.height / 2
+            k: toolWheel.fit
+            bench: host.bench
+            onApply: line => host.benchApply(line)
+            onUndo: host.benchUndo()
+            onClosed: open = false
+        }
+        // status over the viewport: shows on each change, holds a moment, then fades out
         Px {
-            visible: !root.ready
+            id: viewStatus
+            visible: !root.ready && opacity > 0
             anchors.centerIn: parent
             text: host.status.toUpperCase(); color: root.amber
+            Connections {
+                target: host
+                function onStatusChanged() { viewStatusFade.restart() }
+            }
+            SequentialAnimation {
+                id: viewStatusFade
+                running: true
+                PropertyAction { target: viewStatus; property: "opacity"; value: 1 }
+                PauseAnimation { duration: 2500 }
+                NumberAnimation { target: viewStatus; property: "opacity"; to: 0; duration: 800 }
+            }
         }
+    }
+    // pane 1 in a split view: the selected-pane edge, and the glow when a dragged run is over it
+    Rectangle {
+        x: view.x; y: view.y; width: view.width; height: view.height
+        visible: root.layoutN > 1 && !root.solo
+        color: "transparent"; border.width: 2; border.color: root.activePane === 1 ? root.amber : "#2b2f36"
+        Rectangle { anchors.fill: parent; color: root.amber; opacity: runDrag.over === 1 ? 0.18 : 0 }
+    }
+    // panes 2-4 of the split viewport
+    Repeater {
+        model: Math.max(0, root.layoutN - 1)
+        SidePane { required property int index; n: index + 2 }
     }
 
     // ---- the chest, over the viewport's edges ----------------------------------------------
@@ -1789,6 +3308,90 @@ Window {
         y: root.cabY + root.frameH - root.g0.frame.border + (root.g0.frame.border - height) / 2
     }
 
+    // ---- the chat note, open: the paper ball flies out of the drawer onto the viewport and opens out
+    // flat (the unfold frames baked from model/paperball); click the paper round the chat to crumple
+    // it back up and toss it home
+    property point ballFrom: Qt.point(cabX, cabY + frameH / 2)    // where the ball was when it was tapped
+    property real ballHeading: 0                                     // and how it lay
+    property real ballRoll: 0
+    Item {
+        id: openNote
+        objectName: "openNote"
+        readonly property var gp: root.g0.paperball
+        property real t: root.chatUnrolled ? 1 : 0
+        Behavior on t { NumberAnimation { duration: 820; easing.type: Easing.InOutSine } }
+        readonly property real fly: Math.min(1, t / 0.3)          // the toss, then the unfolding
+        readonly property real unfold: Math.max(0, (t - 0.3) / 0.7)
+        readonly property int frame: Math.min(gp.frames - 1, Math.floor(unfold * gp.frames))
+        // where it lies open: the viewport's top left until it's dragged somewhere else
+        property real homeX: root.cabX + root.g0.view.x + 12
+        property real homeY: root.cabY + root.g0.view.y + 12
+        readonly property real s0: gp.ball.bodyW / gp.firstW      // the drawer ball's size, on the canvas's scale
+        visible: t > 0
+        width: gp.w; height: gp.h
+        x: Math.round(homeX + (root.ballFrom.x - homeX - width / 2) * (1 - fly))
+        y: Math.round(homeY + (root.ballFrom.y - homeY - height / 2) * (1 - fly) - Math.sin(fly * Math.PI) * 70)
+        scale: s0 + (1 - s0) * fly
+        onVisibleChanged: root.maskLater()
+        onFlyChanged: if (fly === 1 && visible) root.maskLater()
+
+        // in the air it tumbles on from how it lay, a turn and a bit, and lands square to open
+        readonly property var gr: root.g0.paperballRoll
+        readonly property real roll0: root.ballRoll
+        readonly property real roll1: (Math.floor(roll0 / (2 * Math.PI)) + 2) * 2 * Math.PI
+        readonly property int tumble: {
+            var a = roll0 + (roll1 - roll0) * fly, n = gr.frames;
+            var f = Math.floor(a / (2 * Math.PI / n) + 1e-6) % n; return f < 0 ? f + n : f
+        }
+        readonly property int tumbleTurn: { var f = Math.round(root.ballHeading / (2 * Math.PI / gr.turns)) % gr.turns; return f < 0 ? f + gr.turns : f }
+        Image {
+            visible: openNote.fly === 1
+            source: root.art + "paperball_unfold_" + (openNote.frame < 10 ? "0" : "") + openNote.frame + ".png"
+            smooth: false
+        }
+        Image {
+            visible: openNote.fly < 1
+            x: (openNote.width - width) / 2; y: (openNote.height - height) / 2
+            scale: openNote.gp.firstW / openNote.gr.bodyW
+            source: root.art + "paperball_roll_" + (openNote.tumbleTurn < 10 ? "0" : "") + openNote.tumbleTurn + "_" + (openNote.tumble < 10 ? "0" : "") + openNote.tumble + ".png"
+            smooth: false
+        }
+        Item {
+            x: openNote.gp.sheetX; y: openNote.gp.sheetY
+            width: openNote.gp.sheetW; height: openNote.gp.sheetH
+            // drag it by its paper anywhere in the window; a click that doesn't move it crumples it
+            MouseArea {
+                anchors.fill: parent
+                enabled: openNote.t === 1
+                cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                property point grab
+                property bool moved: false
+                onPressed: (m) => { grab = mapToItem(root.contentItem, m.x, m.y); moved = false }
+                onPositionChanged: (m) => {
+                    var p = mapToItem(root.contentItem, m.x, m.y), dx = p.x - grab.x, dy = p.y - grab.y;
+                    if (!moved && Math.hypot(dx, dy) < 4) return;
+                    moved = true;
+                    openNote.homeX = Math.max(-openNote.gp.sheetX, Math.min(root.width - openNote.gp.sheetX - openNote.gp.sheetW, openNote.homeX + dx));
+                    openNote.homeY = Math.max(-openNote.gp.sheetY, Math.min(root.height - openNote.gp.sheetY - openNote.gp.sheetH, openNote.homeY + dy));
+                    grab = p;
+                }
+                onReleased: if (moved) root.maskLater()
+                onClicked: if (!moved) root.chatUnrolled = false
+            }
+            ChatPanel {
+                id: chatPanel
+                tag: "chatNote"; bare: true; popped: true
+                closable: true
+                onClosed: root.chatUnrolled = false
+                popupParent: openNote
+                width: parent.width - 36; height: parent.height - 36
+                x: 18; y: 18
+                opacity: Math.max(0, (openNote.unfold - 0.85) / 0.15)
+                enabled: openNote.t === 1
+            }
+        }
+    }
+
     // ---- the lid: the window's title bar ---------------------------------------------------
     Item {
         id: bar
@@ -1810,10 +3413,32 @@ Window {
         Px {
             x: nameplate.x + nameplate.width + 18
             y: root.g0.bar.faceY + 8
-            maxWidth: buttons.x - x - 16
+            maxWidth: faceButton.x - x - 16
             maxLines: 1
             text: host.status
             color: "#2a0608"
+        }
+        // ---- VIEWPORTS: how many panes the viewport splits into. AUTO gives each live run its own
+        // pane (one run: one pane, a second joins: side by side, a third or fourth: quad) and goes back
+        // down when they finish; 1/2/4 hold the split where you put it
+        Chip {
+            id: vpButton
+            objectName: "viewportsMenu"
+            x: buttons.x - width - 14; y: root.g0.bar.faceY + 5
+            label: "VIEWPORTS " + (root.solo ? "PANE " + root.solo + " ONLY" : host.autoLayout ? "AUTO " + root.layoutN : root.layoutN + " FIXED") + (vpMenu.open ? " ^" : " v")
+            lit: vpMenu.open
+            tip: "viewport layout: AUTO (a pane per live run, empty panes fold away, a pane frees itself when its session leaves), or a fixed 1, 2 or 4"
+            onClicked: vpMenu.open = !vpMenu.open
+        }
+        // FACE: the Face Poser on the pane you last clicked (host.py face / pane N face from a script)
+        Chip {
+            id: faceButton
+            objectName: "faceButton"
+            x: vpButton.x - width - 8; y: root.g0.bar.faceY + 5
+            label: "FACE"
+            lit: host.facePane > 0
+            tip: "Face Poser: Garry's Mod-style flex sliders, presets and visemes for the model in the active pane"
+            onClicked: host.faceOpen(host.facePane > 0 ? 0 : root.activePane)
         }
         Row {
             id: buttons
@@ -1823,6 +3448,403 @@ Window {
             Button { glyph: "shut"; onClicked: { research.setOpen(false); tools.setOpen(false); timeline.setOpen(false) } }
             Button { glyph: "min"; onClicked: root.showMinimized() }
             Button { glyph: "close"; onClicked: Qt.quit() }
+        }
+    }
+
+    // ---- a finished model's sticker, peeled off the viewport and filed in the MODELING folder ----
+    // the send-off's last frame is the model pressed flat, square on; the host cuts it out (stickerMade)
+    // and this lifts it off the glass, flies it over to the tool drawer and slips it in behind the
+    // folder's cover, where it goes out of sight
+    Item {
+        id: flyer
+        objectName: "stickerFlyer"
+        // a pane's run finished: its sticker lifts off that pane (n 1-4) and flies to the folder
+        function launch(src, nx, ny, nw, nh, n) {
+            if (flight.running) flight.complete();
+            tools.setOpen(true);
+            const c = n > 1 ? root.paneRect(n) : null;
+            const vx = c ? root.cabX + root.g0.view.x + c.x : view.x, vy = c ? root.cabY + root.g0.view.y + c.y : view.y;
+            const vw = c ? c.w : view.width, vh = c ? c.h : view.height;
+            flyer.x0 = vx + nx * vw; flyer.y0 = vy + ny * vh;
+            flyer.w0 = nw * vw; flyer.h0 = nh * vh;
+            flyImg.source = "";
+            flyImg.source = src;
+            flyer.lift = 0; flyer.p = 0; flyer.place();
+            flyer.visible = true;
+            flight.restart();
+        }
+        z: 1000
+        visible: false
+        property real x0: 0; property real y0: 0; property real w0: 0; property real h0: 0
+        property real lift: 0                   // 0 on the glass .. 1 peeled up off it
+        property real p: 0                      // 0 over the viewport .. 1 over the folder
+        onXChanged: if (visible) root.maskLater()
+        onYChanged: if (visible) root.maskLater()
+        onVisibleChanged: root.maskLater()
+        function place() {
+            var sz = modelFolder.slipSize(w0 / h0);
+            var t = modelFolder.mapToItem(null, modelFolder.slipX(sz.w), modelFolder.slipTop(sz.h));
+            var e = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+            var grow = 1 + 0.05 * lift * (1 - e);
+            var w = (w0 + (sz.w - w0) * e) * grow, h = (h0 + (sz.h - h0) * e) * grow;
+            var cx = x0 + w0 / 2 + (t.x + sz.w / 2 - x0 - w0 / 2) * e;
+            var cy = y0 + h0 / 2 + (t.y + sz.h / 2 - y0 - h0 / 2) * e - 70 * Math.sin(Math.PI * p) - 6 * lift * (1 - e);
+            x = cx - w / 2; y = cy - h / 2; width = w; height = h;
+            rotation = -4 * lift * (1 - e);
+        }
+        onPChanged: place()
+        onLiftChanged: place()
+        Image { id: flyImg; anchors.fill: parent; smooth: true; mipmap: true; cache: false }
+        SequentialAnimation {
+            id: flight
+            NumberAnimation { target: flyer; property: "lift"; from: 0; to: 1; duration: 220; easing.type: Easing.OutQuad }
+            PauseAnimation { duration: 160 }
+            NumberAnimation { target: flyer; property: "p"; from: 0; to: 1; duration: 720 }
+            ScriptAction { script: { slip.source = flyImg.source; slip.p = 0; slip.visible = true; flyer.visible = false } }
+            NumberAnimation { target: slip; property: "p"; from: 0; to: 1; duration: 260; easing.type: Easing.InQuad }
+            ScriptAction { script: { slip.visible = false; slip.source = ""; host.stickerLanded(); folderBump.restart() } }
+        }
+        Connections {
+            target: host
+            function onPaneStickerMade(n, src, nx, ny, nw, nh) { flyer.launch(src, nx, ny, nw, nh, n) }
+            function onStickerMade(src, nx, ny, nw, nh) { flyer.launch(src, nx, ny, nw, nh, 1) }
+        }
+    }
+
+    // ---- the VIEWPORTS menu dropped from the lid
+    MouseArea {                                  // a click anywhere else puts it away
+        anchors.fill: parent; z: 2400
+        visible: vpMenu.open
+        onPressed: vpMenu.open = false
+    }
+    Rectangle {
+        id: vpMenu
+        objectName: "viewportsList"
+        property bool open: false
+        z: 2500
+        visible: open
+        // placed under the button each time it opens (a mapToItem binding goes stale before layout),
+        // right edges lined up, and added to the click mask so clicks land on it, not the desktop
+        function place() {
+            var p = vpButton.mapToItem(root.contentItem, vpButton.width, vpButton.height + 4);
+            x = Math.max(4, p.x - width); y = p.y;
+        }
+        onOpenChanged: { if (open) place(); root.maskLater() }
+        width: 330; height: vpCol.height + 12
+        radius: 4; color: "#16191c"; border.color: root.amber
+        Column {
+            id: vpCol
+            x: 6; y: 6; width: vpMenu.width - 12
+            Repeater {
+                model: [
+                    { m: 0, t: "AUTO", d: "a pane per live run: grows as runs join, shrinks when they end" },
+                    { m: 2, t: "2", d: "two panes side by side" },
+                    { m: 4, t: "4", d: "four panes (quad view)" },
+                    { m: -1, t: "1: P1", d: root.soloWho(1) },
+                    { m: -2, t: "1: P2", d: root.soloWho(2) },
+                    { m: -3, t: "1: P3", d: root.soloWho(3) },
+                    { m: -4, t: "1: P4", d: root.soloWho(4) }
+                ]
+                Rectangle {
+                    required property var modelData
+                    readonly property bool on: modelData.m < 0 ? root.solo === -modelData.m
+                        : modelData.m === 0 ? host.autoLayout && !root.solo : !host.autoLayout && !root.solo && root.layoutN === modelData.m
+                    width: vpCol.width; height: 26; radius: 2
+                    color: vpRow.containsMouse ? "#3a2f12" : "transparent"
+                    Text {
+                        x: 8; anchors.verticalCenter: parent.verticalCenter
+                        text: (parent.on ? "* " : "  ") + parent.modelData.t
+                        color: parent.on ? root.amber : root.keyText; font.family: root.mono; font.bold: true; font.pixelSize: 12
+                    }
+                    Text {
+                        x: 70; width: parent.width - 76; anchors.verticalCenter: parent.verticalCenter; elide: Text.ElideRight
+                        text: parent.modelData.d; color: "#8a8f96"; font.family: root.mono; font.pixelSize: 11
+                    }
+                    MouseArea { id: vpRow; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: { if (parent.modelData.m < 0) host.setSolo(-parent.modelData.m); else host.setViewLayout(parent.modelData.m); vpMenu.open = false } }
+                }
+            }
+            Rectangle { width: vpCol.width; height: 1; color: "#3a3f45" }
+            Rectangle {
+                objectName: "myScene"
+                width: vpCol.width; height: 26; radius: 2
+                color: msRow.containsMouse ? "#3a2f12" : "transparent"
+                Text {
+                    x: 8; anchors.verticalCenter: parent.verticalCenter
+                    text: (host.myScene ? "[x] " : "[ ] ") + "MY SCENE"
+                    color: host.myScene ? root.amber : root.keyText; font.family: root.mono; font.bold: true; font.pixelSize: 12
+                }
+                Text {
+                    anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter
+                    text: host.myScene ? "pane 1 is yours: runs stay out" : "pane 1 open to any run"
+                    color: "#8a8f96"; font.family: root.mono; font.pixelSize: 11
+                }
+                MouseArea { id: msRow; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: host.setMyScene(!host.myScene) }
+            }
+            Rectangle {
+                width: vpCol.width; height: 26; radius: 2
+                color: lcRow.containsMouse ? "#3a2f12" : "transparent"
+                Text {
+                    x: 8; anchors.verticalCenter: parent.verticalCenter
+                    text: (host.linkCameras ? "[x] " : "[ ] ") + "LINK CAMERAS"
+                    color: host.linkCameras ? root.amber : root.keyText; font.family: root.mono; font.bold: true; font.pixelSize: 12
+                }
+                Text {
+                    anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter
+                    text: "one camera turns all"; color: "#8a8f96"; font.family: root.mono; font.pixelSize: 11
+                }
+                MouseArea { id: lcRow; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: host.setLinkCameras(!host.linkCameras) }
+            }
+        }
+    }
+
+    // ---- a run card being dragged onto a viewport pane
+    Item {
+        id: runDrag
+        objectName: "runDrag"
+        z: 3000
+        property var run: null
+        property var filed: null                // a slip out of the MODELING folder: {entry, index}
+        property int over: 0
+        property point at: Qt.point(0, 0)      // the window point it was last over
+        visible: !!runDrag.run || !!runDrag.filed
+        width: dragTag.implicitWidth + 16; height: 24
+        function begin(r) { run = r; filed = null; over = 0 }
+        function beginSlip(e, i) { filed = { entry: e, index: i }; run = null; over = 0 }
+        function moveTo(p) {
+            x = p.x + 12; y = p.y + 8; at = Qt.point(p.x, p.y);
+            const n = root.paneAt(p.x, p.y), s = runDrag.filed;
+            over = s && s.entry.kind === "model" && n > 1 ? 0 : n;   // a model only goes into pane 1's scene
+            if (runDrag.run && !(runDrag.run.latestRevision > 0)) over = 0;   // nothing built yet: no pane to show it in
+        }
+        function cancel() { run = null; filed = null; over = 0 }
+        function finish() {
+            const r = runDrag.run, s = runDrag.filed, n = over;
+            cancel();
+            if ((!r && !s) || !n) return false;
+            root.activePane = n;
+            if (s) {
+                // pane 1: into the scene there, standing where it was let go; a run in 2-4 replays there
+                if (n === 1) {
+                    const v = viewMouse.mapFromItem(root.contentItem, at.x, at.y);
+                    landing.drop(at.x, at.y, s.entry.name || "");
+                    host.placeFiled(s.index, v.x, v.y);
+                }
+                else host.replayIn(s.entry.path, n);
+            } else if (r.status === "running") host.showRunIn(r.dir, n); else host.replayIn(r.dir, n);
+            return true;
+        }
+        Rectangle { anchors.fill: parent; radius: 3; color: "#16191c"; border.color: root.amber; opacity: 0.92 }
+        Text {
+            id: dragTag; anchors.centerIn: parent
+            text: (runDrag.run ? (runDrag.run.prompt || runDrag.run.name || "").slice(0, 32)
+                   : runDrag.filed ? (runDrag.filed.entry.name || "").slice(0, 32) : "")
+                  + (runDrag.over ? (runDrag.filed && runDrag.over === 1 ? "  -> INTO THE SCENE" : "  -> PANE " + runDrag.over)
+                                  : "  (drop on " + (runDrag.filed && runDrag.filed.entry.kind === "model" ? "pane 1)" : "a pane)"))
+            color: runDrag.over ? root.amber : root.keyText; font.family: root.mono; font.pixelSize: 11
+        }
+    }
+
+    // ---- a slip let go into the scene: the tag shrinks into the spot, a ring pulses there while it lands
+    Item {
+        id: landing
+        z: 2999
+        visible: false
+        property string label: ""
+        property real since: 0
+        function drop(px, py, name) { x = px; y = py; label = name; since = Date.now(); fade.stop(); land.restart() }
+        function landed() { if (!land.running) return; land.stop(); fade.restart() }
+        // pulse until the bench has it in (a big model takes a few seconds), then fade
+        Connections {
+            target: host
+            function onBenchChanged() { if (landing.visible && !host.bench.busy && Date.now() - landing.since > 400) landing.landed() }
+        }
+        Timer { running: land.running; interval: 30000; onTriggered: landing.landed() }
+        Rectangle {
+            id: landRing
+            width: 56; height: 56; radius: 28; x: -28; y: -28
+            color: "transparent"; border.color: root.amber; border.width: 2
+        }
+        Rectangle {
+            id: landDot
+            width: 8; height: 8; radius: 4; x: -4; y: -4; color: root.amber
+        }
+        Rectangle {
+            id: landTag
+            x: 12; y: 8; height: 24; width: landText.implicitWidth + 16; radius: 3
+            color: "#16191c"; border.color: root.amber
+            transformOrigin: Item.TopLeft
+            Text { id: landText; anchors.centerIn: parent; text: landing.label + "  -> INTO THE SCENE"
+                   color: root.amber; font.family: root.mono; font.pixelSize: 11 }
+        }
+        SequentialAnimation {
+            id: land
+            ScriptAction { script: { landing.visible = true; landing.opacity = 1; landTag.scale = 1; landTag.opacity = 0.92
+                                     landTag.x = 12; landTag.y = 8; landRing.scale = 0.2; landRing.opacity = 1 } }
+            ParallelAnimation {        // the tag tucks itself into the drop point
+                NumberAnimation { target: landTag; property: "scale"; to: 0.15; duration: 260; easing.type: Easing.InCubic }
+                NumberAnimation { target: landTag; property: "x"; to: 0; duration: 260; easing.type: Easing.InCubic }
+                NumberAnimation { target: landTag; property: "y"; to: 0; duration: 260; easing.type: Easing.InCubic }
+                NumberAnimation { target: landTag; property: "opacity"; to: 0; duration: 260 }
+            }
+            SequentialAnimation {      // ripples while the model comes in
+                loops: Animation.Infinite
+                ParallelAnimation {
+                    NumberAnimation { target: landRing; property: "scale"; from: 0.2; to: 1.3; duration: 520; easing.type: Easing.OutCubic }
+                    NumberAnimation { target: landRing; property: "opacity"; from: 1; to: 0; duration: 520; easing.type: Easing.OutQuad }
+                }
+            }
+        }
+        SequentialAnimation {
+            id: fade
+            NumberAnimation { target: landing; property: "opacity"; to: 0; duration: 220 }
+            ScriptAction { script: landing.visible = false }
+        }
+    }
+
+    // ---- a research run's model sheet over the viewport (click its book; click again or X to shut)
+    property string sheetDir: ""
+    Rectangle {
+        id: sheetPanel
+        objectName: "sheetPanel"
+        readonly property var run: root.runOf(root.sheetDir)
+        z: 2850
+        visible: run !== null
+        x: root.cabX + root.g0.view.x + 8; y: root.cabY + root.g0.view.y + 8
+        width: root.g0.view.w - 16; height: root.g0.view.h - 16
+        color: "#e8eddc"; border.width: 3; border.color: "#1d2318"
+        Flickable {
+            id: sheetFlick
+            anchors.fill: parent; anchors.margins: 10
+            contentHeight: sheetCol.height; clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            Column {
+                id: sheetCol
+                width: sheetFlick.width - 14; spacing: 6
+                Text {   // what the run was asked for, and how it went
+                    width: parent.width - 30; wrapMode: Text.Wrap
+                    color: "#1d2318"; font.family: "DejaVu Sans Mono"; font.pixelSize: 14; font.bold: true
+                    text: sheetPanel.run ? (sheetPanel.run.prompt || sheetPanel.run.name) : ""
+                }
+                Text {
+                    width: parent.width; wrapMode: Text.Wrap
+                    color: "#424a3c"; font.family: "DejaVu Sans Mono"; font.pixelSize: 12; font.bold: true
+                    text: !sheetPanel.run ? "" : sheetPanel.run.status
+                          + (sheetPanel.run.latestRevision > 0 ? "   " + sheetPanel.run.latestRevision + " steps modelled" : "   nothing modelled")
+                          + (sheetPanel.run.score >= 0 ? "   best " + Number(sheetPanel.run.score).toFixed(1) + "/10" : "")
+                          + (sheetPanel.run.sources > 0 ? "   " + sheetPanel.run.sources + " sources" : "")
+                }
+                Row {
+                    spacing: 10
+                    Rectangle {   // PLAY: play back what was modelled, step by step, in the selected pane
+                        objectName: "sheetPlay"
+                        visible: !!sheetPanel.run && sheetPanel.run.latestRevision > 0
+                        width: playTxt.width + 24; height: 30; radius: 3
+                        color: playMouse.containsMouse ? "#2c6a2a" : "#1d2318"; border.width: 2; border.color: "#0b0d09"
+                        Text { id: playTxt; anchors.centerIn: parent; text: "▶ PLAY"; color: "#f0d68a"; font.family: "DejaVu Sans Mono"; font.pixelSize: 15; font.bold: true }
+                        MouseArea {
+                            id: playMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                            onClicked: { const d = root.sheetDir; root.sheetDir = ""; host.replayIn(d, root.activePane) }
+                        }
+                    }
+                    Rectangle {   // OPEN: the run's best model
+                        visible: !!sheetPanel.run && (sheetPanel.run.best || "") !== ""
+                        width: openTxt.width + 24; height: 30; radius: 3
+                        color: openMouse.containsMouse ? "#5d6655" : "#424a3c"; border.width: 2; border.color: "#0b0d09"
+                        Text { id: openTxt; anchors.centerIn: parent; text: "OPEN MODEL"; color: "#f0d68a"; font.family: "DejaVu Sans Mono"; font.pixelSize: 15; font.bold: true }
+                        MouseArea {
+                            id: openMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                            onClicked: { const b = sheetPanel.run.best; root.sheetDir = ""; host.openModel(b) }
+                        }
+                    }
+                }
+                SheetView { id: sheetView; width: parent.width; run: sheetPanel.run || ({}) }
+                Text {
+                    visible: !!sheetPanel.run && !sheetView.visible
+                    color: "#424a3c"; font.family: "DejaVu Sans Mono"; font.pixelSize: 12; font.bold: true
+                    text: "no research in this run: no model sheet, no reference photos"
+                }
+            }
+        }
+        Text {
+            anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 6
+            text: "X"; color: "#b3261c"; font.family: "DejaVu Sans Mono"; font.pixelSize: 18; font.bold: true
+            MouseArea { anchors.fill: parent; anchors.margins: -6; cursorShape: Qt.PointingHandCursor; onClicked: root.sheetDir = "" }
+        }
+    }
+
+    // ---- Space on the viewport: type to find a command (layout, link cameras, views), Enter runs it
+    Item {
+        id: palette
+        objectName: "commandPalette"
+        z: 2900
+        visible: false
+        x: root.cabX + root.g0.view.x + (root.g0.view.w - width) / 2; y: root.cabY + root.g0.view.y + 40
+        width: 420; height: palCol.height + 16
+        readonly property var all: [
+            { t: "Viewports: AUTO (a pane per live run)", k: "layout auto automatic split viewports panes", f: function () { host.setViewLayout(0) } },
+            { t: "Viewport layout: 1 pane", k: "layout single one pane viewport maximize", f: function () { host.setViewLayout(1) } },
+            { t: "Viewport layout: 2 panes side by side", k: "layout split two panes viewport side by side dual", f: function () { host.setViewLayout(2) } },
+            { t: "Viewport layout: 4 panes (quad view)", k: "layout split four panes viewport quad grid", f: function () { host.setViewLayout(4) } },
+            { t: host.linkCameras ? "Unlink cameras (each pane its own)" : "Link cameras (all panes turn together)", k: "link cameras sync views lock camera", f: function () { host.setLinkCameras(!host.linkCameras) } },
+            { t: "Fly camera: hold right mouse, WASD move, Q/E down/up, Shift fast, wheel speed", k: "fly walk navigation camera wasd first person noclip move freelook look around", f: function () { host.say("fly camera: hold the right mouse button in a pane, then WASD / Q E, Shift fast, wheel for speed") } },
+            { t: "Fit whole model (selected pane)", k: "frame fit zoom extents focus", f: function () { root.camCmd(root.activePane, "frame") } },
+            { t: "Front view", k: "camera front view ortho", f: function () { root.camCmd(root.activePane, "view 0 0"); root.camCmd(root.activePane, "ortho 1") } },
+            { t: "Side view", k: "camera side view ortho right left", f: function () { root.camCmd(root.activePane, "view -90 0"); root.camCmd(root.activePane, "ortho 1") } },
+            { t: "Top view", k: "camera top view ortho down", f: function () { root.camCmd(root.activePane, "view 0 89"); root.camCmd(root.activePane, "ortho 1") } },
+            { t: "Three-quarter view", k: "camera 3/4 three quarter perspective view", f: function () { root.camCmd(root.activePane, "view 35 18"); root.camCmd(root.activePane, "ortho 0") } }
+        ].concat(host.runs.filter(function (r) { return !!r.sheet }).map(function (r) {   // every researched run's model sheet
+            return { t: "Model sheet: " + r.sheet.object, k: "sheet model research reference sizes dimensions colours photos " + (r.prompt || ""), f: function () { root.sheetDir = r.dir } }
+        }))
+        property var hits: all
+        property int pick: 0
+        function show() { palIn.text = ""; filter(); visible = true; palIn.forceActiveFocus() }
+        function hide() { visible = false; if (root.activePane === 1) viewMouse.forceActiveFocus() }
+        function filter() {
+            const words = palIn.text.toLowerCase().split(/\s+/).filter(function (w) { return w });
+            hits = all.filter(function (c) { const hay = (c.t + " " + c.k).toLowerCase(); return words.every(function (w) { return hay.indexOf(w) >= 0 }) });
+            pick = 0;
+        }
+        function run(i) { const c = hits[i]; hide(); if (c) c.f() }
+        Rectangle { anchors.fill: parent; radius: 4; color: "#16191c"; border.color: root.amber; opacity: 0.95 }
+        Column {
+            id: palCol
+            x: 8; y: 8; width: palette.width - 16
+            spacing: 2
+            Rectangle {
+                width: palCol.width; height: 26; radius: 3; color: "#0b0c0e"
+                TextInput {
+                    id: palIn
+                    anchors.fill: parent; anchors.leftMargin: 8; verticalAlignment: TextInput.AlignVCenter
+                    color: root.amber; font.family: root.mono; font.pixelSize: 13
+                    onTextChanged: palette.filter()
+                    Keys.onPressed: function (e) {
+                        if (e.key === Qt.Key_Escape) { e.accepted = true; palette.hide() }
+                        else if (e.key === Qt.Key_Down) { e.accepted = true; palette.pick = Math.min(palette.hits.length - 1, palette.pick + 1) }
+                        else if (e.key === Qt.Key_Up) { e.accepted = true; palette.pick = Math.max(0, palette.pick - 1) }
+                        else if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter) { e.accepted = true; palette.run(palette.pick) }
+                    }
+                    onActiveFocusChanged: if (!activeFocus && palette.visible) palette.hide()
+                }
+                Text {
+                    visible: !palIn.text; anchors.verticalCenter: parent.verticalCenter; x: 8
+                    text: "type a command: layout, split, quad, link cameras, fit..."; color: "#6b6f75"; font.family: root.mono; font.pixelSize: 12
+                }
+            }
+            Repeater {
+                model: palette.hits
+                Rectangle {
+                    required property var modelData
+                    required property int index
+                    width: palCol.width; height: 22; radius: 2
+                    color: index === palette.pick ? "#3a2f12" : "transparent"
+                    Text {
+                        x: 8; anchors.verticalCenter: parent.verticalCenter; text: modelData.t
+                        color: index === palette.pick ? root.amber : root.keyText; font.family: root.mono; font.pixelSize: 12
+                    }
+                    MouseArea { anchors.fill: parent; hoverEnabled: true; onEntered: palette.pick = index; onPressed: palette.run(index) }
+                }
+            }
+            Text { visible: !palette.hits.length; text: "  no command matches"; color: root.inkRed; font.family: root.mono; font.pixelSize: 12 }
         }
     }
 }

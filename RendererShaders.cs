@@ -21,6 +21,7 @@ out vec2 vUv;
 out vec3 vTangent;
 out float vHandedness;
 out float vMirror;
+out vec3 vObject;
 
 void main() {
 	vec3 pos = aPos;
@@ -55,6 +56,8 @@ void main() {
 	// the authored outward side.
 	vMirror = mirror;
 	vUv = aUv;
+	// Bind-pose object position: procedural material masks stay stuck to the surface as it moves.
+	vObject = aPos;
 	gl_Position = uMvp * world;
 }
 ";
@@ -66,6 +69,7 @@ in vec2 vUv;
 in vec3 vTangent;
 in float vHandedness;
 in float vMirror;
+in vec3 vObject;
 
 uniform vec3 uAlbedo;
 uniform sampler2D uAlbedoMap;
@@ -82,6 +86,9 @@ uniform vec3 uPs1WearColor;
 uniform float uPs1Grime;
 uniform float uPs1GrimeFilm;
 uniform float uPs1Glow;
+uniform float uPs1BootDirt;
+uniform float uPs1BootToe;
+uniform float uPs1BootCuff;
 uniform int uAlphaMode;
 uniform int uDoubleSided;
 uniform float uAlphaCutoff;
@@ -226,6 +233,21 @@ vec2 transformUv(vec2 uv, int idx) {
 	return p * uUvScale[idx] + uUvOffset[idx];
 }
 
+// ps1_lit's hash and eased value noise, so procedural masks match the game's.
+float ps1Hash(vec3 p) {
+	p = fract(p * vec3(0.1031, 0.1030, 0.0973));
+	p += dot(p, p.yzx + 33.33);
+	return fract((p.x + p.y) * p.z);
+}
+float ps1Noise(vec3 p) {
+	vec3 c = floor(p);
+	vec3 f = fract(p);
+	f = f * f * (3.0 - 2.0 * f);
+	float a = mix(mix(ps1Hash(c), ps1Hash(c + vec3(1, 0, 0)), f.x), mix(ps1Hash(c + vec3(0, 1, 0)), ps1Hash(c + vec3(1, 1, 0)), f.x), f.y);
+	float b = mix(mix(ps1Hash(c + vec3(0, 0, 1)), ps1Hash(c + vec3(1, 0, 1)), f.x), mix(ps1Hash(c + vec3(0, 1, 1)), ps1Hash(c + vec3(1, 1, 1)), f.x), f.y);
+	return mix(a, b, f.z);
+}
+
 void main() {
 	vec3 n = normalize(vNrm);
 	vec3 tProj = vTangent - n * dot(n, vTangent);
@@ -278,6 +300,26 @@ void main() {
 	// Grime: dark overlay modulated by film.
 	float grimeMask = uPs1Grime * (0.5 + 0.5 * (1.0 - n.z));
 	albedo = mix(albedo, albedo * 0.35, clamp(grimeMask * uPs1GrimeFilm, 0.0, 1.0));
+	// Boot mud: ps1_lit's g_flPs1BootDirt block, in object-space inches.
+	if (uPs1BootDirt > 0.01) {
+		vec3 p = vObject;
+		float patchN = ps1Noise(p * 1.2 + 17.3);
+		float grit = ps1Noise(p * 7.0 + 43.1);
+		float toe = smoothstep(uPs1BootToe, uPs1BootToe + 3.0, p.x);
+		float low = 1.0 - smoothstep(0.8, 2.8, p.z + (patchN - 0.5) * 0.8);
+		float cuff = smoothstep(uPs1BootCuff - 0.65, uPs1BootCuff, p.z);
+		vec3 bootSurface = normalize(cross(dFdx(p), dFdy(p)));
+		float top = smoothstep(0.45, 0.85, abs(bootSurface.z)) * smoothstep(0.65, 1.2, p.z) * (1.0 - smoothstep(3.8, 5.0, p.z));
+		float topPatch = ps1Noise(p * 0.65 + 7.8);
+		float topMud = top * smoothstep(0.28, 0.53, topPatch + (grit - 0.5) * 0.22);
+		float edgeMud = low * (0.40 + 0.60 * smoothstep(0.30, 0.66, patchN));
+		float splash = smoothstep(0.56, 0.72, patchN) * (0.20 + toe * 0.30 + cuff * 0.15);
+		float mud = clamp(max(topMud, max(edgeMud, splash)) * uPs1BootDirt, 0.0, 1.0);
+		vec3 dirt = mix(vec3(0.020, 0.014, 0.008), vec3(0.055, 0.040, 0.025), grit);
+		albedo = mix(albedo, dirt, mud);
+		rough = max(rough, mix(0.85, 1.0, mud));
+		metal = 0.0;
+	}
 	// Glow: add to emission.
 	vec3 glowAdd = uPs1Glow * albedo;
 	vec3 f0 = mix(vec3(0.04), albedo, metal);

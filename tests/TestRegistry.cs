@@ -159,6 +159,11 @@ internal static class DesktopTestHost
             AutoWeightTests.Register( registry, settings );
             WeightPaintTests.Register( registry, settings );
             ControllerFixTests.Register( registry, settings );
+            BenchTests.Register( registry, settings );
+            SubSelectionTests.Register( registry, settings );
+            FaceMaterialAssignTests.Register( registry, settings );
+            FaceBoundaryEdgeTests.Register( registry, settings );
+            OverlayDepthTests.Register( registry, settings );
             if ( settings.List )
             {
                 foreach ( var test in registry.Cases ) Console.WriteLine( $"{test.Group}/{test.Name} fixture={(test.Group == "survey" ? settings.SurveyPath : "synthetic")}" );

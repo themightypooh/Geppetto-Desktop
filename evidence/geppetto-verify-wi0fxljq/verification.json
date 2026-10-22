@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "mode": "required-egl",
+  "status": "FAIL",
+  "createdUtc": "2026-10-20T16:18:06.287773+00:00",
+  "project": "/home/poo/Desktop/geppetto-desktop",
+  "artifacts": "/tmp/opencode/geppetto-verify-wi0fxljq",
+  "platform": "Linux-7.2.11-1-cachyos-x86_64-with-glibc2.44",
+  "python": "3.14.8 (main, Oct 13 2026, 10:33:10) [GCC 16.2.1 20260810]",
+  "fixture": "/home/poo/games/projects/deep_sentance/Assets/models/player/player_suit.fbx",
+  "requireLocalFixtures": false,
+  "stages": [
+    {
+      "name": "build",
+      "command": [
+        "dotnet",
+        "build",
+        "tests/Desktop.Tests.csproj",
+        "-c",
+        "Release",
+        "--artifacts-path",
+        "/tmp/opencode/geppetto-verify-wi0fxljq/build"
+      ],
+      "cwd": "/home/poo/Desktop/geppetto-desktop",
+      "status": "PASS",
+      "log": "/tmp/opencode/geppetto-verify-wi0fxljq/build.log",
+      "exitCode": 0,
+      "wallSeconds": 4.729585454999324
+    },
+    {
+      "name": "harness-selftests",
+      "command": [
+        "/usr/bin/python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_verification.py",
+        "-v"
+      ],
+      "cwd": "/home/poo/Desktop/geppetto-desktop",
+      "status": "PASS",
+      "log": "/tmp/opencode/geppetto-verify-wi0fxljq/harness-selftests.log",
+      "exitCode": 0,
+      "wallSeconds": 0.11389681299988297
+    },
+    {
+      "name": "inventory",
+      "command": [
+        "dotnet",
+        "/tmp/opencode/geppetto-verify-wi0fxljq/build/bin/Desktop.Tests/release/Desktop.Tests.dll",
+        "--list",
+        "--survey",
+        "/home/poo/games/projects/deep_sentance/Assets/models/player/player_suit.fbx"
+      ],
+      "cwd": "/home/poo/Desktop/geppetto-desktop",
+      "status": "PASS",
+      "log": "/tmp/opencode/geppetto-verify-wi0fxljq/inventory.log",
+      "exitCode": 0,
+      "wallSeconds": 0.0640467080011149
+    },
+    {
+      "name": "cpu",
+      "command": [
+        "dotnet",
+        "/tmp/opencode/geppetto-verify-wi0fxljq/build/bin/Desktop.Tests/release/Desktop.Tests.dll",
+        "--survey",
+        "/home/poo/games/projects/deep_sentance/Assets/models/player/player_suit.fbx",
+        "--report",
+        "/tmp/opencode/geppetto-verify-wi0fxljq/cpu-results.json"
+      ],
+      "cwd": "/home/poo/Desktop/geppetto-desktop",
+      "status": "FAIL",
+      "log": "/tmp/opencode/geppetto-verify-wi0fxljq/cpu.log",
+      "exitCode": 1,
+      "reason": "cpu failed (exit 1); see /tmp/opencode/geppetto-verify-wi0fxljq/cpu.log",
+      "wallSeconds": 56.794490404998214
+    }
+  ],
+  "assemblies": [
+    {
+      "path": "/tmp/opencode/geppetto-verify-wi0fxljq/build/bin/Desktop.Tests/release/Desktop.Tests.dll",
+      "sha256": "cd0e99cc6c917edbfc0369a67f353042aaef1c404847ec97d8870bca0062456f"
+    },
+    {
+      "path": "/tmp/opencode/geppetto-verify-wi0fxljq/build/bin/Marionette.Desktop/release/marionette-desktop.dll",
+      "sha256": "8b065503203624e388d6de2d7ae0f1a873c8aafc2e8636388d50b5453853b371"
+    },
+    {
+      "path": "/tmp/opencode/geppetto-verify-wi0fxljq/build/bin/Effigy.Kernel/release/Effigy.Kernel.dll",
+      "sha256": "f73aa8d0c1ee2d62cdccf8dbc34be78f86f39e2c59d94ee5932298ab8fec6047"
+    }
+  ],
+  "gpu": {
+    "status": "NOT_RUN",
+    "reason": null
+  },
+  "cpuReport": "/tmp/opencode/geppetto-verify-wi0fxljq/cpu-results.json",
+  "reason": "cpu failed (exit 1); see /tmp/opencode/geppetto-verify-wi0fxljq/cpu.log"
+}

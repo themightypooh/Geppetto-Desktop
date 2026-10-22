@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Globalization;
 using System.Diagnostics;
 using System.IO;
 using System.IO.MemoryMappedFiles;
@@ -22,6 +24,7 @@ namespace Marionette.Desktop;
 ///   orbit DX DY | pan DX DY | zoom F | size W H | frame | play 0|1 | time T | bones 0|1 | grid 0|1
 ///   wire N | select BONE | pick X Y | clip PATH | loop 0|1 | ack | quit
 ///   keys | kmove D T:F.. | kdel T:F.. | kease E T:F.. | kins F T.. | undo | redo | save
+///   ortho 0|1 | refadd VIEW PATH | refset I key=value.. | refdel I | refsave | refs
 ///
 /// A new frame is only written after the host acks the last one, so it never reads a half-written
 /// frame and a slow host simply gets fewer frames.
@@ -65,6 +68,32 @@ public static class ServeMode
 		long displayedRevision = 0, eventSequence = 0;
 		string displayedRun = null;
 		bool framedLive = false;
+		bool everFramedLive = false;           // set once: later runs keep the camera the user left
+		int holdFrame = 0;                     // revisions still to come in without moving the camera (a drop into the scene)
+		bool autoFrame = false;                // live: reframe every revision, keeping the angle, so a growing model stays in view
+		float spin = 0;                        // turntable, degrees of yaw per second (0 = still)
+		// the part a live step touched (`focus NAME`) glows; `framebody` glides the camera onto it
+		var focus = new FocusLayer();
+		string focusName = "";
+		ViewportMesh focusMesh = null;
+		Vector3 glideFromTarget = default, glideToTarget = default;
+		float glideFromDistance = 0, glideToDistance = 0, glideSeconds = .8f;
+		float glideFromYaw = 0, glideToYaw = 0, glideFromPitch = 0, glideToPitch = 0;
+		double glideAt = -1;
+		// fly camera (s&box: hold RMB): the held WASD/QE as forward/right/up, Shift for fast, and the wheel
+		// notches on the speed; the speed itself goes with the model's size, so a dagger and a body both feel right
+		var flyMove = Vector3.Zero;
+		bool flyFast = false;
+		int flySteps = 0;
+		// send-off: a finished run's model is pressed flat onto a card facing the camera and the card turns
+		// once to show it's paper-thin. The last frame is the card alone, square on, without grid or ground
+		// shadow and flagged "card", for the cabinet to cut out as a sticker and file away; then the viewport
+		// is left empty. Display only (SceneRenderer.DisplayTransform): the camera, lighting and mesh are untouched.
+		double sendoffAt = -1;
+		bool sendoffCard = false, gridBeforeCard = false, groundBeforeCard = false;
+		Vector3 sendoffTarget = default;
+		float sendoffDistance = 0, sendoffYaw = 0;
+		const float SendoffPress = 0.35f, SendoffTurn = 0.6f;
 		string previewPath = options.WatchRun is null ? options.Model : "";
 		string previewError = null, publishedAt = null;
 
@@ -75,8 +104,86 @@ public static class ServeMode
 		// The clip's reference props: the same lit path, their own ModelDoc and materials.
 		renderer.Props = loader.Snapshot?.Props ?? Array.Empty<PropScene>();
 		using var overlay = new SkeletonOverlay( gl );
+		// The document's reference pictures, drawn behind the model. The list here is the one being
+		// shown: the cabinet edits it, and a new revision only replaces it when the document's own list
+		// changed, so a picture nudged by hand during a live run stays where it was put.
+		using var refs = new ReferenceImagePass( gl );
+		string refsSignature = null, refsProblems = "";
+		static string Signature( IEnumerable<ReferenceImage> list ) =>
+			string.Join( "\n", list.Select( StudioDocument.ReferenceImageLine ) );
+		void SyncRefs( IEnumerable<ReferenceImage> fromDocument, string documentPath )
+		{
+			var list = (fromDocument ?? Array.Empty<ReferenceImage>()).Where( i => i is not null ).ToList();
+			var signature = Signature( list );
+			refs.BaseDirectory = string.IsNullOrEmpty( documentPath ) ? null : Path.GetDirectoryName( Path.GetFullPath( documentPath ) );
+			if ( signature == refsSignature ) return;
+			refsSignature = signature;
+			refs.Images.Clear();
+			refs.Images.AddRange( list.Select( i => i.Clone() ) );
+			EmitRefs();
+		}
+		void EmitRefs( string note = null )
+		{
+			var list = new JsonArray();
+			foreach ( var i in refs.Images )
+				list.Add( new JsonObject
+				{
+					["view"] = i.View, ["path"] = i.Path, ["name"] = Path.GetFileName( i.Path ), ["height"] = i.Height,
+					["ox"] = i.Offset.x, ["oy"] = i.Offset.y, ["depth"] = i.Depth, ["opacity"] = i.Opacity, ["visible"] = i.Visible,
+					["line"] = BuildLine( i ),
+				} );
+			Emit( new JsonObject
+			{
+				["ev"] = "refs", ["images"] = list, ["problems"] = refsProblems, ["note"] = note ?? "",
+				["saveable"] = follow is null && options.Model.EndsWith( ".effigy", StringComparison.OrdinalIgnoreCase ),
+				["changed"] = Signature( refs.Images ) != refsSignature,
+			} );
+		}
+		static string BuildLine( ReferenceImage i ) => string.Create( System.Globalization.CultureInfo.InvariantCulture,
+			$"refimage {i.View} {(i.Path.Contains( ' ' ) ? "\"" + i.Path + "\"" : i.Path)} height={i.Height:0.###} offset={i.Offset.x:0.###},{i.Offset.y:0.###} depth={i.Depth:0.###} opacity={i.Opacity:0.##}{(i.Visible ? "" : " visible=0")}" );
+		ReferenceImage RefAt( string index )
+		{
+			int n = int.Parse( index, System.Globalization.CultureInfo.InvariantCulture );
+			if ( n < 0 || n >= refs.Images.Count ) throw new ArgumentException( $"No reference picture {n}; there are {refs.Images.Count}." );
+			return refs.Images[n];
+		}
+		// Face / edge / vertex picks on the shown document's bodies, lit through renderer.Live.
+		var sub = new SubSelection();
+		string subPath = null;
+		renderer.Live.Layers.AddRange( sub.Layers() );
+		renderer.Live.Layers.Add( focus );
+		void Refocus()
+		{
+			focusMesh = mesh;
+			focus.Set( mesh.Picker, FocusLayer.Match( mesh.BodyPicks, focusName ) );
+			renderer.ResetTemporalHistory();
+		}
+		void SubLoad()
+		{
+			if ( (sub.Mode == SubMode.Body && !sub.Rig) || subPath == previewPath ) return;
+			subPath = previewPath;
+			var studio = follow is null ? loader.Session?.Studio
+				: string.IsNullOrEmpty( previewPath ) ? null : StudioCache.Load( previewPath, out _ );
+			sub.Reload( studio?.Bodies ?? (IEnumerable<Body>)Array.Empty<Body>() );
+		}
+		void SubEmit()
+		{
+			var ev = sub.ToJson();
+			ev["path"] = previewPath; ev["revision"] = displayedRevision; ev["runId"] = displayedRun;
+			Emit( ev );
+		}
 		var target = new CaptureTarget( gl, width, height );
 		var camera = new OrbitCamera();
+		// s&box idle pick: a click within EdgePickPixels of a face's rim takes the edge
+		float EdgeRadius( Vector3 p ) =>
+			MathF.Tan( camera.FovDegrees * MathF.PI / 360f ) * Vector3.Distance( camera.Eye, p ) / (Math.Max( 1, height ) * .5f) * SubSelection.EdgePickPixels;
+		// box / lasso select: a world point in viewport pixels, null behind the eye
+		Vector2? ToScreen( Vector3 p )
+		{
+			var clip = Vector4.Transform( new Vector4( p, 1 ), camera.ViewMatrix() * camera.ProjectionMatrix( width / (float)Math.Max( 1, height ) ) );
+			if ( clip.W <= 1e-6f ) return null;
+			return new Vector2( (clip.X / clip.W + 1) * .5f * width, (1 - clip.Y / clip.W) * .5f * height );
+		}
 		bool fbx = options.Model.EndsWith( ".fbx", StringComparison.OrdinalIgnoreCase );
 		void Reframe()
 		{
@@ -99,6 +206,59 @@ public static class ServeMode
 			camera.PitchDegrees = 18;
 			renderer.ResetTemporalHistory();
 		}
+		// glide to these bodies (none: the whole model): close enough that the part fills even a small pane
+		void Glide( IReadOnlyList<int> bodies, float seconds )
+		{
+			var all = mesh.Picker.Bounds( player is null ? ReadOnlySpan<Matrix4x4>.Empty : player.GpuBones );
+			var (min, max) = all;
+			if ( bodies.Count > 0 )
+			{
+				min = new Vector3( float.PositiveInfinity ); max = new Vector3( float.NegativeInfinity );
+				foreach ( int b in bodies )
+				{
+					var bb = mesh.Picker.Bounds( b, player is null ? ReadOnlySpan<Matrix4x4>.Empty : player.GpuBones );
+					min = Vector3.Min( min, bb.Min ); max = Vector3.Max( max, bb.Max );
+				}
+			}
+			if ( !float.IsFinite( min.Length() ) || !float.IsFinite( max.Length() ) ) return;
+			float whole = Math.Max( (all.Max - all.Min).Length() * .5f, .1f );
+			// a part fills the pane (a small pane still shows it), the whole model keeps a margin
+			float radius = bodies.Count > 0 ? Math.Max( (max - min).Length() * .55f, whole * .07f ) : Math.Max( (max - min).Length() * .5f, .1f );
+			float vertical = camera.FovDegrees * MathF.PI / 360;
+			float horizontal = MathF.Atan( MathF.Tan( vertical ) * width / Math.Max( 1f, height ) );
+			glideFromTarget = camera.Target; glideFromDistance = camera.Distance;
+			glideToTarget = (min + max) * .5f;
+			float fit = radius * (bodies.Count > 0 ? 1.0f : 1.15f) / MathF.Sin( Math.Min( vertical, horizontal ) );
+			glideToDistance = Math.Clamp( Math.Max( radius * (bodies.Count > 0 ? 1.4f : 2.4f), fit ), camera.MinDistance, camera.MaxDistance );
+			// a part on the far side of the model: swing round to the side it sticks out of, so it isn't hidden
+			glideFromYaw = glideToYaw = camera.YawDegrees; glideFromPitch = glideToPitch = camera.PitchDegrees;
+			var side = glideToTarget - (all.Min + all.Max) * .5f;
+			side.Z = 0;
+			if ( bodies.Count > 0 && side.Length() > whole * .12f )
+			{
+				float yaw = camera.YawDegrees * MathF.PI / 180f;
+				var look = new Vector3( MathF.Cos( yaw ), MathF.Sin( yaw ), 0 );
+				if ( Vector3.Dot( Vector3.Normalize( side ), look ) < .2f )
+				{
+					// out towards the part's side, but kept a quarter turn off it so it still reads as a 3/4 view
+					float outward = MathF.Atan2( side.Y, side.X ) * 180f / MathF.PI;
+					float turn = ((outward - camera.YawDegrees) % 360 + 540) % 360 - 180;
+					glideToYaw = camera.YawDegrees + turn - Math.Sign( turn ) * 30f;
+				}
+			}
+			glideToPitch = Math.Clamp( camera.PitchDegrees, 8f, 35f );
+			if ( camera.Flying ) return;
+			camera.Far = Math.Max( camera.Far, Math.Max( glideToDistance * 20f, whole * 40f ) );
+			glideSeconds = Math.Clamp( seconds, 0f, 5f );
+			glideAt = -2;                          // starts on the next frame
+		}
+		// about a model-width and a bit a second, so a 15 in dagger and a 6 ft body take the same time to cross
+		bool FlyMoving() => camera.Flying && flyMove != Vector3.Zero;
+		void FlySpeedFromSize()
+		{
+			float size = mesh.Radius > 0.01f ? mesh.Radius : camera.Distance * 0.4f;
+			camera.FlySpeed = Math.Clamp( size * 1.2f * MathF.Pow( 1.25f, flySteps ), 0.05f, 2000f );
+		}
 		Reframe();
 		if ( mesh.TriangleCount > 0 ) mesh.Upload( gl );
 		renderer.WireframeMode = options.Wireframe ? 1 : 0;
@@ -119,12 +279,15 @@ public static class ServeMode
 		var flipped = new byte[width * height * 4];
 
 		Emit( Ready( options, mesh, player, shmPath, loader ) );
+		SyncRefs( loader.Session?.Studio?.ReferenceImages, options.WatchRun is null ? options.Model : null );
+		if ( refsSignature is null ) EmitRefs();
 		ClipKeyEditor keys = null;
 		void OpenKeys( string path )
 		{
 			keys = player?.Clip is { } clip ? new ClipKeyEditor( clip, path, () => player.InvalidateClipCache( preservePlayhead: true ) ) : null;
 			EmitKeys();
 		}
+		var face = new FacePoserService();         // the Face Poser panel's flex sliders over this pane's model
 		void EmitKeys() => Emit( keys?.Snapshot( mesh.Rig ) ?? new JsonObject { ["ev"] = "keys", ["tracks"] = new JsonArray(), ["undo"] = 0, ["redo"] = 0, ["dirty"] = false, ["saveable"] = false, ["frames"] = 0 } );
 		ClipKeyEditor Keys() => keys ?? throw new InvalidOperationException( "No clip to edit keys on." );
 		OpenKeys( options.Clip );
@@ -138,7 +301,7 @@ public static class ServeMode
 			while ( running )
 			{
 				// wait for work: block when idle, poll at ~60 Hz while playing
-				bool busy = dirty || player is { Playing: true };
+				bool busy = dirty || player is { Playing: true } || spin != 0 || sendoffAt >= 0 || FlyMoving();
 				if ( commands.TryTake( out var cmd, busy && acked ? 0 : busy ? 4 : follow is not null ? 25 : 250 ) )
 				{
 					do
@@ -164,7 +327,7 @@ public static class ServeMode
 					}
 					if ( follow.Take() is { } update )
 					{
-						if ( displayedRun is not null && (displayedRun != update.RunId || update.Revision <= displayedRevision) ) update.Mesh.Dispose();
+						if ( displayedRun is not null && (displayedRun != update.RunId || update.Revision <= displayedRevision && !follow.Pinned) ) update.Mesh.Dispose();
 						else
 						{
 							try
@@ -173,13 +336,30 @@ public static class ServeMode
 								if ( update.Mesh.TriangleCount > 0 ) update.Mesh.Upload( gl );
 								if ( gl.GetError() is var uploadError && uploadError != GLEnum.NoError ) throw new InvalidOperationException( $"Preview upload: {uploadError}" );
 								var old = mesh; mesh = update.Mesh; player = null;
+								if ( face.Sync( mesh, update.Path ) && face.HasRig ) Emit( face.Snapshot() );
+								face.Apply( mesh );               // the next revision keeps the face
 								foreach ( var prop in renderer.Props ) { prop.Mesh.ReleaseGpu( gl ); prop.Dispose(); }
 								renderer.Props = Array.Empty<PropScene>();
 								overlay.SelectedBone = overlay.SelectedBody = -1;
 								previewPath = update.Path; publishedAt = update.PublishedAt; previewError = null;
 								displayedRun = update.RunId; displayedRevision = update.Revision;
+								SyncRefs( update.Refs, update.Path );
+								if ( sub.Mode != SubMode.Body ) { SubLoad(); SubEmit(); }
 								old.ReleaseGpu( gl ); old.Dispose();
-								if ( !framedLive && mesh.TriangleCount > 0 ) { fbx = false; Reframe(); framedLive = true; }
+								// Only the first live model gets the default view; a new run (a remodel) keeps the
+								// user's camera, re-fitted at their angle when TRACK is on, untouched when it's off.
+								if ( holdFrame > 0 && mesh.TriangleCount > 0 ) { holdFrame--; framedLive = everFramedLive = true; }   // dropped in: the camera stays put
+								else if ( mesh.TriangleCount > 0 && !everFramedLive ) { fbx = false; Reframe(); framedLive = everFramedLive = true; }
+								else if ( mesh.TriangleCount > 0 && (autoFrame || !framedLive) )
+								{
+									if ( autoFrame )
+									{
+										float yaw = camera.YawDegrees, pitch = camera.PitchDegrees;
+										Reframe();
+										camera.YawDegrees = yaw; camera.PitchDegrees = pitch;
+									}
+									framedLive = true;
+								}
 								renderer.ResetTemporalHistory(); dirty = true;
 								Emit( new JsonObject { ["ev"] = "ai-preview", ["runId"] = update.RunId, ["revision"] = update.Revision,
 									["path"] = update.Path, ["tris"] = mesh.TriangleCount, ["load_ms"] = update.LoadMs,
@@ -197,7 +377,46 @@ public static class ServeMode
 
 				double now = clock.Elapsed.TotalSeconds;
 				float dt = (float)Math.Min( now - last, 0.1 );
-				if ( !acked || !(dirty || player is { Playing: true }) ) { last = now; continue; }
+				if ( !acked || !(dirty || player is { Playing: true } || spin != 0 || sendoffAt >= 0 || FlyMoving() || glideAt != -1) ) { last = now; continue; }
+				if ( spin != 0 ) camera.YawDegrees = (camera.YawDegrees + spin * dt) % 360;
+				if ( glideAt == -2 ) glideAt = now;
+				if ( glideAt >= 0 )
+				{
+					float g = glideSeconds <= 0 ? 1 : Math.Clamp( (float)(now - glideAt) / glideSeconds, 0, 1 );
+					float e = g * g * (3 - 2 * g);
+					camera.Target = Vector3.Lerp( glideFromTarget, glideToTarget, e );
+					camera.Distance = glideFromDistance + (glideToDistance - glideFromDistance) * e;
+					camera.YawDegrees = glideFromYaw + (glideToYaw - glideFromYaw) * e;
+					camera.PitchDegrees = glideFromPitch + (glideToPitch - glideFromPitch) * e;
+					camera.Near = Math.Max( 0.01f, camera.Distance * 0.001f );
+					if ( g >= 1 ) glideAt = -1;
+				}
+				if ( focusName.Length > 0 && focusMesh != mesh ) Refocus();
+				if ( FlyMoving() ) { camera.MoveFly( flyMove.X, flyMove.Y, flyMove.Z, dt, flyFast ); dirty = true; }
+				if ( sendoffAt >= 0 )
+				{
+					float t = (float)(now - sendoffAt);
+					if ( sendoffCard )                    // the card frame has gone out: done
+					{
+						EndSendoff();
+						var gone = mesh; mesh = AiLivePreview.EmptyMesh();
+						gone.ReleaseGpu( gl ); gone.Dispose();
+						follow?.Dispose(); follow = null;
+						displayedRevision = eventSequence = 0; displayedRun = null; framedLive = false;
+						previewPath = ""; previewError = publishedAt = null;
+						Emit( new JsonObject { ["ev"] = "sent-off" } );
+					}
+					else if ( t >= SendoffPress + SendoffTurn )
+					{
+						renderer.DisplayTransform = SendoffCard( SendoffPress + SendoffTurn );
+						sendoffCard = true;
+						gridBeforeCard = overlay.ShowGrid; overlay.ShowGrid = false;
+						groundBeforeCard = renderer.GroundShadow; renderer.GroundShadow = false;
+					}
+					else renderer.DisplayTransform = SendoffCard( t );
+					renderer.ResetTemporalHistory();
+					dirty = true;
+				}
 				if ( dt < 1f / 60 && !dirty ) { Thread.Sleep( 2 ); continue; }
 				last = now;
 
@@ -206,9 +425,12 @@ public static class ServeMode
 				gl.Viewport( 0, 0, (uint)width, (uint)height );
 				if ( mesh.TriangleCount > 0 ) renderer.Draw( mesh, player, camera, width, height, options.Exposure, target.Handle );
 				else { gl.ClearColor( .14f, .145f, .16f, 1 ); gl.Clear( ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit ); }
+				var viewProj = camera.ViewMatrix() * camera.ProjectionMatrix( width / (float)height );
+				if ( !sendoffCard ) refs.Draw( viewProj );
+				if ( string.Join( "\n", refs.Problems ) is var problems && problems != refsProblems ) { refsProblems = problems; EmitRefs(); }
 				(Vector3 Min, Vector3 Max)? selBounds = overlay.SelectedBody >= 0
 					? mesh.Picker.Bounds( overlay.SelectedBody, player is null ? ReadOnlySpan<Matrix4x4>.Empty : player.GpuBones ) : null;
-				overlay.Draw( camera.ViewMatrix() * camera.ProjectionMatrix( width / (float)height ), mesh.Rig,
+				overlay.Draw( viewProj, mesh.Rig,
 					player is null ? ReadOnlySpan<Xform>.Empty : player.WorldPose, mesh.BodyPicks, selBounds );
 				ReadFrame();
 				view.WriteArray( 0, flipped, 0, flipped.Length );
@@ -225,6 +447,8 @@ public static class ServeMode
 					["commit_to_frame_ms"] = publishedAt is null ? 0 : (DateTimeOffset.UtcNow - DateTimeOffset.Parse( publishedAt )).TotalMilliseconds,
 					["render_target_objects"] = RenderTarget.LiveObjects, ["mesh_textures"] = MeshResourceBudget.LiveGpuTextures,
 					["yaw"] = camera.YawDegrees, ["pitch"] = camera.PitchDegrees, ["distance"] = camera.Distance,
+					["ortho"] = camera.Orthographic,
+					["card"] = sendoffAt >= 0 && sendoffCard,
 				} );
 			}
 		}
@@ -250,6 +474,44 @@ public static class ServeMode
 				System.Buffer.BlockCopy( pixels, (height - 1 - y) * row, flipped, y * row, row );
 		}
 
+		void EndSendoff()
+		{
+			if ( sendoffAt < 0 ) return;
+			sendoffAt = -1;
+			if ( sendoffCard ) { overlay.ShowGrid = gridBeforeCard; renderer.GroundShadow = groundBeforeCard; }
+			sendoffCard = false;
+			camera.Target = sendoffTarget; camera.Distance = sendoffDistance; camera.YawDegrees = sendoffYaw;
+			renderer.DisplayTransform = Matrix4x4.Identity;
+			renderer.ResetTemporalHistory(); dirty = true;
+		}
+
+		// where the model is drawn t seconds into the send-off, as a world transform about the view's centre
+		Matrix4x4 SendoffCard( float t )
+		{
+			static float Smooth( float u ) { u = Math.Clamp( u, 0, 1 ); return u * u * (3 - 2 * u); }
+			var f = Vector3.Normalize( camera.Forward );
+			var right = Vector3.Normalize( Vector3.Cross( f, Vector3.UnitZ ) );
+			var up = Vector3.Cross( right, f );
+			// press: depth along the view collapses to 3% (not 0, so overlapping parts keep their order), with a
+			// little squash-and-recover on the face so the press reads even though the front view barely changes
+			float press = Smooth( t / SendoffPress );
+			float k = 0.97f * press;
+			float squash = 1 - 0.06f * MathF.Sin( press * MathF.PI );
+			// turn: the card swings about screen-up to nearly edge-on, overshoots back past square and settles
+			float u = Math.Clamp( (t - SendoffPress) / SendoffTurn, 0, 1 );
+			float turn = u < 0.4f ? 74 * Smooth( u / 0.4f ) : u < 0.75f ? 74 - 82 * Smooth( (u - 0.4f) / 0.35f ) : -8 * (1 - Smooth( (u - 0.75f) / 0.25f ));
+			var flatten = new Matrix4x4(
+				1 - k * f.X * f.X, -k * f.X * f.Y, -k * f.X * f.Z, 0,
+				-k * f.Y * f.X, 1 - k * f.Y * f.Y, -k * f.Y * f.Z, 0,
+				-k * f.Z * f.X, -k * f.Z * f.Y, 1 - k * f.Z * f.Z, 0,
+				0, 0, 0, 1 );
+			var c = sendoffTarget;
+			return Matrix4x4.CreateTranslation( -c ) * flatten
+				* Matrix4x4.CreateFromAxisAngle( up, turn * MathF.PI / 180 )
+				* Matrix4x4.CreateScale( squash )
+				* Matrix4x4.CreateTranslation( c );
+		}
+
 		bool Apply( string line )
 		{
 			if ( line.Length == 0 ) return true;
@@ -259,20 +521,155 @@ public static class ServeMode
 			switch ( a[0] )
 			{
 				case "follow":
+					EndSendoff();
 					follow?.Dispose(); follow = null;
 					displayedRevision = eventSequence = 0; displayedRun = null; framedLive = false; previewError = publishedAt = null;
 					if ( arg.Length > 0 ) follow = new AiLivePreview( arg );
+					subPath = null;                        // re-resolve on the next shown revision: refs on bodies that carried over stay (s&box prunes by body id)
+					refsSignature = null; SyncRefs( null, null );
 					Emit( new JsonObject { ["ev"] = "ai-follow", ["path"] = arg } );
 					return true;
+				case "seek":                              // replay: pin revision N of the followed run, 0 = back to latest
+					follow?.Seek( (long)F( 0 ) );
+					return true;
 				case "quit": return false;
+				case "sendoff":
+					if ( sendoffAt >= 0 || mesh.TriangleCount == 0 ) { Emit( new JsonObject { ["ev"] = "sent-off" } ); return true; }
+					sendoffAt = clock.Elapsed.TotalSeconds;
+					sendoffTarget = camera.Target; sendoffDistance = camera.Distance; sendoffYaw = camera.YawDegrees;
+					return true;
 				case "ack": acked = true; return true;
-				case "orbit": camera.Orbit( F( 0 ) * 0.35f, -F( 1 ) * 0.35f ); break;
+				case "orbit": camera.Orbit( F( 0 ) * 0.35f, -F( 1 ) * 0.35f ); camera.Orthographic = false; break;
+				case "ortho": camera.Orthographic = arg == "1"; renderer.ResetTemporalHistory(); break;
+				case "refs": EmitRefs(); return true;
+				case "refadd":                            // refadd VIEW PATH: one picture per view, sized to the model
+				{
+					var p = arg.Split( ' ', 2, StringSplitOptions.RemoveEmptyEntries );
+					if ( p.Length < 2 ) throw new ArgumentException( "refadd needs a view (front, side, top) and a picture." );
+					var v = p[0].ToLowerInvariant() == "right" ? "side" : p[0].ToLowerInvariant();
+					if ( Array.IndexOf( BuildScript.RefImageViews, v ) < 0 ) throw new ArgumentException( $"No view called '{p[0]}'. Views: front, side, top." );
+					var file = refs.Resolve( p[1].Trim().Trim( '"' ) );
+					if ( !File.Exists( file ) ) throw new ArgumentException( $"No picture at {file}." );
+					var image = new ReferenceImage { View = v, Path = file };
+					// Start it the size of the model, centred on it, so it lands in view; then nudge.
+					var (right, up, _) = ReferenceImagePass.Axes( v );
+					if ( mesh.TriangleCount > 0 )
+					{
+						var size = mesh.BoundsMax - mesh.BoundsMin;
+						var centre = (mesh.BoundsMin + mesh.BoundsMax) * 0.5f;
+						float aspect = refs.Aspect( image );
+						float across = MathF.Abs( Vector3.Dot( size, right ) ), tall = MathF.Abs( Vector3.Dot( size, up ) );
+						image.Height = MathF.Round( MathF.Max( tall, across / MathF.Max( aspect, 1e-3f ) ) * 1.1f, 2 );
+						image.Offset = new Vec2( MathF.Round( Vector3.Dot( centre, right ), 2 ), MathF.Round( Vector3.Dot( centre, up ), 2 ) );
+					}
+					int at = refs.Images.FindIndex( i => i.View == v );
+					if ( at >= 0 ) refs.Images[at] = image; else refs.Images.Add( image );
+					EmitRefs( $"{Path.GetFileName( file )} is up on the {v} view" );
+					break;
+				}
+				case "refset":                            // refset I height=H ox=X oy=Y depth=D opacity=O visible=0|1
+				{
+					var p = arg.Split( ' ', StringSplitOptions.RemoveEmptyEntries );
+					if ( p.Length < 2 ) throw new ArgumentException( "refset needs a picture number and key=value." );
+					var image = RefAt( p[0] );
+					foreach ( var kv in p.Skip( 1 ) )
+					{
+						var bits = kv.Split( '=', 2 );
+						if ( bits.Length != 2 ) throw new ArgumentException( $"refset: '{kv}' is not key=value." );
+						float n() => float.Parse( bits[1], System.Globalization.CultureInfo.InvariantCulture );
+						switch ( bits[0] )
+						{
+							case "height": image.Height = MathF.Max( ReferenceImagePass.MinHeight, n() ); break;
+							case "ox": image.Offset = new Vec2( n(), image.Offset.y ); break;
+							case "oy": image.Offset = new Vec2( image.Offset.x, n() ); break;
+							case "depth": image.Depth = n(); break;
+							case "opacity": image.Opacity = Math.Clamp( n(), ReferenceImagePass.MinOpacity, 1f ); break;
+							case "visible": image.Visible = bits[1] != "0"; break;
+							default: throw new ArgumentException( $"refset: no setting '{bits[0]}' (height, ox, oy, depth, opacity, visible)." );
+						}
+					}
+					EmitRefs();
+					break;
+				}
+				case "refdel":
+				{
+					var image = RefAt( arg.Trim() );
+					refs.Images.Remove( image );
+					EmitRefs( $"took down {Path.GetFileName( image.Path )}" );
+					break;
+				}
+				case "refsave":                           // write the pictures into the open .effigy
+				{
+					if ( follow is not null || !options.Model.EndsWith( ".effigy", StringComparison.OrdinalIgnoreCase ) )
+						throw new InvalidOperationException( "Only an opened .effigy saves its pictures; for a build, copy the refimage lines into the script." );
+					var lines = File.ReadAllLines( options.Model ).Where( l => !l.StartsWith( "refimage " ) ).ToList();
+					while ( lines.Count > 0 && lines[^1].Length == 0 ) lines.RemoveAt( lines.Count - 1 );
+					lines.AddRange( refs.Images.Select( StudioDocument.ReferenceImageLine ) );
+					var backup = options.Model + ".bak";
+					File.Copy( options.Model, backup, overwrite: true );
+					File.WriteAllText( options.Model, string.Join( "\n", lines ) + "\n" );
+					refsSignature = Signature( refs.Images );
+					EmitRefs( $"saved {refs.Images.Count} picture(s) into {Path.GetFileName( options.Model )}" );
+					return true;
+				}
 				case "pan":
 					var side = Vector3.Normalize( Vector3.Cross( camera.Forward, Vector3.UnitZ ) );
 					camera.Target += (-side * F( 0 ) + Vector3.UnitZ * F( 1 )) * (camera.Distance * 0.0015f);
 					break;
 				case "zoom": camera.Zoom( F( 0 ) ); break;
+				case "fly":                                // fly 1|0: RMB down / up
+					if ( arg == "1" )
+					{
+						camera.Orthographic = false;
+						camera.BeginFly();
+						FlySpeedFromSize();
+					}
+					else if ( camera.Flying )
+					{
+						// back to orbiting around what's in front: the model's depth along the view, so nothing jumps
+						float depth = Vector3.Dot( mesh.Centre - camera.FlyPosition, camera.Forward );
+						if ( depth > 0.5f ) camera.Distance = depth;
+						camera.EndFly();
+						flyMove = Vector3.Zero;
+					}
+					break;
+				case "look":                               // look DX DY: mouse-look while flying, pixels
+					if ( camera.Flying ) camera.Orbit( -F( 0 ) * 0.15f, F( 1 ) * 0.15f );
+					break;
+				case "flymove":                            // flymove FORWARD RIGHT UP FAST: the held keys, each -1..1
+					flyMove = new Vector3( F( 0 ), F( 1 ), F( 2 ) );
+					flyFast = arg.Split( ' ' ).Length > 3 && arg.Split( ' ' )[3] == "1";
+					return true;
+				case "flyspeed":                           // flyspeed N: wheel notches, each one x1.25
+					flySteps = (int)F( 0 );
+					FlySpeedFromSize();
+					return true;
 				case "frame": Reframe(); break;
+				case "focus":                              // focus NAME: the part a step touched glows teal (no name: off)
+					focusName = arg.Trim().Trim( '"' );
+					Refocus();
+					Emit( new JsonObject { ["ev"] = "focus", ["name"] = focusName, ["bodies"] = focus.Bodies.Count } );
+					break;
+				case "framebody":                          // framebody [NAME] [SECS]: glide onto that part, or the whole model
+				{
+					// the name may have spaces and commas ("Suit / boot_L,Suit / boot_R"); a trailing number is SECS
+					var bits = arg.Split( ' ', StringSplitOptions.RemoveEmptyEntries );
+					float secs = .8f;
+					var inv = System.Globalization.CultureInfo.InvariantCulture;
+					int nameWords = bits.Length;
+					if ( bits.Length > 0 && float.TryParse( bits[^1], System.Globalization.NumberStyles.Float, inv, out var s ) ) { secs = s; nameWords--; }
+					string name = string.Join( ' ', bits, 0, nameWords ).Trim( '"' );
+					if ( mesh.TriangleCount == 0 ) return true;
+					var bodies = name.Length > 0 ? FocusLayer.Match( mesh.BodyPicks, name ) : new List<int>();
+					if ( name.Length > 0 && bodies.Count == 0 ) return true;   // no such part: the camera stays
+					Glide( bodies, secs );
+					break;
+				}
+				// fixed angles: front is +x, left +y, so yaw 0 looks at the front
+				case "view": camera.YawDegrees = F( 0 ); camera.PitchDegrees = Math.Clamp( F( 1 ), camera.MinPitch, camera.MaxPitch ); break;
+				case "spin": spin = Math.Clamp( F( 0 ), -360, 360 ); break;
+				case "autoframe": autoFrame = arg == "1"; break;
+				case "holdframe": holdFrame = int.TryParse( arg, out var hf ) ? hf : 0; break;   // holdframe N: the next N revisions keep the camera
 				case "size":
 					int w = Math.Clamp( (int)F( 0 ), 16, 4096 ), h = Math.Clamp( (int)F( 1 ), 16, 4096 );
 					if ( w == width && h == height ) return true;
@@ -297,9 +694,139 @@ public static class ServeMode
 					if ( overlay.SelectedBone >= 0 ) overlay.ShowBones = true;
 					Emit( new JsonObject { ["ev"] = "selected", ["bone"] = overlay.SelectedBone, ["body"] = -1 } );
 					break;
+				case "selmode":                            // body | face | edge | vertex
+				{
+					var mode = arg.Trim().ToLowerInvariant() switch
+					{
+						"body" or "bodies" => SubMode.Body, "face" or "faces" => SubMode.Face,
+						"edge" or "edges" => SubMode.Edge, "vertex" or "vertices" or "vert" => SubMode.Vertex,
+						_ => throw new ArgumentException( "selmode: body, face, edge or vertex" ),
+					};
+					sub.SetMode( mode );
+					SubLoad();
+					SubEmit();
+					break;
+				}
+				case "selclear":
+					sub.Clear();
+					SubEmit();
+					break;
+				case "selbox":                             // selbox X0 Y0 X1 Y1 [add|remove] [xray]: drag on empty space
+				case "sellasso":                           // sellasso [add|remove] [xray] X Y X Y …: the free-hand drag
+				{
+					SubLoad();
+					var words = arg.Split( ' ', StringSplitOptions.RemoveEmptyEntries );
+					var flags = words.Where( w => !float.TryParse( w, NumberStyles.Float, CultureInfo.InvariantCulture, out _ ) ).ToHashSet();
+					var nums = words.Where( w => float.TryParse( w, NumberStyles.Float, CultureInfo.InvariantCulture, out _ ) )
+						.Select( w => float.Parse( w, CultureInfo.InvariantCulture ) ).ToList();
+					bool add = flags.Contains( "add" ), remove = flags.Contains( "remove" ), xray = flags.Contains( "xray" );
+					if ( a[0] == "selbox" )
+					{
+						if ( nums.Count < 4 ) throw new ArgumentException( "selbox X0 Y0 X1 Y1 [add|remove] [xray]" );
+						var min = new Vector2( Math.Min( nums[0], nums[2] ), Math.Min( nums[1], nums[3] ) );
+						var max = new Vector2( Math.Max( nums[0], nums[2] ), Math.Max( nums[1], nums[3] ) );
+						// barely moved: that was a click on nothing, which clears unless a modifier said otherwise
+						if ( (max - min).Length() < 3 ) sub.Click( null, add, remove );
+						else sub.SelectRegion( camera.Eye, ToScreen, q => q.X >= min.X && q.X <= max.X && q.Y >= min.Y && q.Y <= max.Y, add, remove, xray );
+					}
+					else
+					{
+						if ( nums.Count < 6 ) throw new ArgumentException( "sellasso [add|remove] [xray] X Y X Y X Y …" );
+						var lasso = new List<Vector2>();
+						for ( int i = 0; i + 1 < nums.Count; i += 2 ) lasso.Add( new Vector2( nums[i], nums[i + 1] ) );
+						sub.SelectRegion( camera.Eye, ToScreen, q => SubSelection.InsideLasso( lasso, q ), add, remove, xray );
+					}
+					SubEmit();
+					break;
+				}
+				case "selgrow": SubLoad(); sub.Apply( SubSelection.Topology.Grow ); SubEmit(); break;
+				case "selshrink": SubLoad(); sub.Apply( SubSelection.Topology.Shrink ); SubEmit(); break;
+				case "sellinked": SubLoad(); sub.Apply( SubSelection.Topology.Linked ); SubEmit(); break;
+				case "seltool":                            // seltool paint|sculpt|meshedit|materialbrush|weight|none: hide the highlight, keep the picks
+					sub.SetTool( arg );
+					SubEmit();
+					break;
+				case "selrig":                             // selrig 1|0: the rig workspace, picks take whole bodies
+					sub.SetRig( arg.Trim() == "1" );
+					SubLoad();
+					SubEmit();
+					break;
+				case "drop":                               // drop X Y [MATERIAL]: re-pick the face at the drop pixel
+				{
+					SubLoad();
+					if ( subPath != previewPath ) { subPath = previewPath; var st = follow is null ? loader.Session?.Studio : string.IsNullOrEmpty( previewPath ) ? null : StudioCache.Load( previewPath, out _ ); sub.Reload( st?.Bodies ?? (IEnumerable<Body>)Array.Empty<Body>() ); }
+					var (dox, dod) = camera.ScreenRay( F( 0 ), F( 1 ), width, height );
+					var words = arg.Split( ' ', StringSplitOptions.RemoveEmptyEntries );
+					var ev = new JsonObject { ["ev"] = "drop", ["x"] = F( 0 ), ["y"] = F( 1 ), ["material"] = words.Length > 2 ? string.Join( " ", words.Skip( 2 ) ) : null };
+					if ( sub.PickDrop( dox, dod ) is { } dh )
+					{
+						ev["ok"] = true; ev["body"] = dh.Body.Name ?? dh.Body.Id; ev["face"] = dh.Face; ev["faces"] = sub.FaceTokenOf( dh );
+					}
+					else { ev["ok"] = false; ev["refusal"] = "The drop missed the model — let go over a face to put the material on it."; }
+					ev["path"] = previewPath; ev["revision"] = displayedRevision; ev["runId"] = displayedRun;
+					Emit( ev );
+					return true;
+				}
+				case "place":                              // place X Y: where a model dropped at this pixel stands — the face under it, else the ground
+				{
+					SubLoad();
+					if ( subPath != previewPath ) { subPath = previewPath; var st = follow is null ? loader.Session?.Studio : string.IsNullOrEmpty( previewPath ) ? null : StudioCache.Load( previewPath, out _ ); sub.Reload( st?.Bodies ?? (IEnumerable<Body>)Array.Empty<Body>() ); }
+					var (po, pd) = camera.ScreenRay( F( 0 ), F( 1 ), width, height );
+					var ev = new JsonObject { ["ev"] = "place" };
+					if ( sub.PickDrop( po, pd ) is { } ph )
+					{
+						ev["ok"] = true; ev["on"] = ph.Body.Name ?? ph.Body.Id;
+						ev["at"] = new JsonArray( ph.Point.x, ph.Point.y, ph.Point.z );
+					}
+					else if ( MathF.Abs( pd.Z ) > 1e-4f && -po.Z / pd.Z > 0 )
+					{
+						var g = po + pd * (-po.Z / pd.Z);
+						// let go near the skyline: keep it within reach of what's being looked at, not miles out
+						var c = new System.Numerics.Vector3( camera.Target.X, camera.Target.Y, 0f );
+						float reach = MathF.Max( camera.Distance, 1f ), far = (g - c).Length();
+						if ( far > reach ) g = c + (g - c) * (reach / far);
+						ev["ok"] = true; ev["on"] = "ground"; ev["at"] = new JsonArray( g.X, g.Y, 0f );
+					}
+					else { ev["ok"] = false; ev["refusal"] = "That's sky: let go over the model or the floor."; }
+					if ( ev["at"] is JsonArray pa )
+					{
+						// a readable size there: about a quarter of the view's height at that depth
+						var hit = new System.Numerics.Vector3( (float)pa[0]!, (float)pa[1]!, (float)pa[2]! );
+						float depth = camera.Orthographic ? camera.Distance : (hit - camera.Eye).Length();
+						ev["size"] = 0.25f * 2f * depth * MathF.Tan( camera.FovDegrees * MathF.PI / 360f );
+					}
+					Emit( ev );
+					return true;
+				}
+				case "hover":                              // hover X Y: light the element under the cursor
+				{
+					if ( sub.Mode == SubMode.Body && !sub.Rig ) return true;
+					SubLoad();
+					var (ho, hd) = camera.ScreenRay( F( 0 ), F( 1 ), width, height );
+					int before = sub.Version;
+					sub.SetHover( sub.Pick( ho, hd, EdgeRadius ) );
+					if ( sub.Version == before ) return true;
+					break;
+				}
 				case "pick":
 				{
 					var (ro, rd) = camera.ScreenRay( F( 0 ), F( 1 ), width, height );
+					// rig workspace: a bone under the cursor is a bone click, even with the mesh in front (s&box)
+					bool rigBone = sub.Rig && player is not null && overlay.ShowBones && SkeletonOverlay.PickBone( ro, rd, mesh.Rig, player.WorldPose ) >= 0;
+					if ( (sub.Mode != SubMode.Body || sub.Rig) && !rigBone )
+					{
+						// pick X Y [add|remove|pair|loop|ring]: shift adds/toggles, ctrl removes, alt takes the
+						// opposite face too — or, on an edge, its loop; ctrl+alt on an edge its ring. Rig: whole bodies.
+						SubLoad();
+						var how = arg.Split( ' ', StringSplitOptions.RemoveEmptyEntries ).Skip( 2 ).ToHashSet();
+						bool ring = how.Contains( "ring" ), loop = how.Contains( "loop" ) || ring;
+						var hit = sub.Pick( ro, rd, EdgeRadius );
+						if ( loop && hit is { Kind: SubMode.Face } f )   // an explicit loop/ring wants the face's nearest rim edge
+							hit = sub.Pick( ro, rd, SubMode.Edge ) ?? hit;
+						sub.Click( hit, how.Contains( "add" ), how.Contains( "remove" ) || ring, how.Contains( "pair" ) || how.Contains( "alt" ) || loop );
+						SubEmit();
+						break;
+					}
 					int boneHit = player is not null && overlay.ShowBones ? SkeletonOverlay.PickBone( ro, rd, mesh.Rig, player.WorldPose ) : -1;
 					int bodyHit = -1;
 					if ( boneHit < 0 )
@@ -323,10 +850,24 @@ public static class ServeMode
 					break;
 				// the dope sheet: keys are "track:frame" refs, track being the index in the keys event
 				case "keys": EmitKeys(); break;
+				// face [set NAME VALUE [BALANCE] | preset NAME | zero | random | scale S | save NAME | export PATH]
+				case "face": Emit( face.Command( arg, mesh, previewPath ) ); break;
 				case "kmove": { var p = arg.Split( ' ' ); Keys().Move( ClipKeyEditor.ParseSelection( p.Skip( 1 ) ), int.Parse( p[0] ) ); EmitKeys(); break; }
 				case "kdel": Keys().Delete( ClipKeyEditor.ParseSelection( arg.Split( ' ' ) ) ); EmitKeys(); break;
 				case "kease": { var p = arg.Split( ' ' ); Keys().SetEase( ClipKeyEditor.ParseSelection( p.Skip( 1 ) ), (RigEase)Math.Clamp( int.Parse( p[0] ), 0, 6 ) ); EmitKeys(); break; }
 				case "kins": { var p = arg.Split( ' ' ); Keys().Insert( int.Parse( p[0] ), p.Skip( 1 ).Where( x => x.Length > 0 ).Select( int.Parse ) ); EmitKeys(); break; }
+				// kset TRACK FRAME px py pz qx qy qz qw: key a track with that local pose, and park the
+				// playhead on the frame so the viewport shows the pose it made
+				case "kset":
+				{
+					var p = arg.Split( ' ', StringSplitOptions.RemoveEmptyEntries );
+					float G( int i ) => float.Parse( p[i], CultureInfo.InvariantCulture );
+					int frame = int.Parse( p[1] );
+					Keys().Set( int.Parse( p[0] ), frame, new RigPose( new Vec3( G( 2 ), G( 3 ), G( 4 ) ), new Quat( G( 5 ), G( 6 ), G( 7 ), G( 8 ) ), Vec3.One ) );
+					if ( player?.Clip is { FrameRate: > 0 } c ) { player.Playing = false; player.Time = frame / (float)c.FrameRate; }
+					EmitKeys();
+					break;
+				}
 				case "undo": Keys().Undo(); EmitKeys(); break;
 				case "redo": Keys().Redo(); EmitKeys(); break;
 				case "save":

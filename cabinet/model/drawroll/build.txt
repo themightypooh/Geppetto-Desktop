@@ -1,0 +1,18 @@
+# The DRAWINGS prop for the Geppetto chest's TOOLS drawer: a rolled-up drawing that rolls like the pencil.
+# Long axis Y, rolls about Y. Inches.
+material 0 color=#e9edd8 rough=0.85
+material 1 color=#9bc2a8 rough=0.85
+material 2 color=#a3261c rough=0.6
+material 4 color=#2a3550 rough=0.6
+echo the sheet: engineering paper rolled up, its last turn lifting off
+add Blob name=Roll voxel=0.02 blend=0.03 cutblend=0.02 shapes="cylinder 0,-2.6,0 0,2.6,0 0.42 r=0.03 mat=0; box 0.3,0,-0.4 0.5,5.18,0.04 rot=0,-25,0 r=0.02 mat=0"
+echo the ends: the turns of the roll showing
+set Roll shapes="cylinder 0,-2.6,0 0,2.6,0 0.42 r=0.03 mat=0; box 0.3,0,-0.4 0.5,5.18,0.04 rot=0,-25,0 r=0.02 mat=0; -torus 0,2.6,0 0.12 0.025 rot=90,0,0; -torus 0,2.6,0 0.22 0.025 rot=90,0,0; -torus 0,2.6,0 0.32 0.025 rot=90,0,0; -torus 0,-2.6,0 0.12 0.025 rot=90,0,0; -torus 0,-2.6,0 0.22 0.025 rot=90,0,0; -torus 0,-2.6,0 0.32 0.025 rot=90,0,0"
+echo the grid and a drawing showing through on the outside
+set Roll shapes="cylinder 0,-2.6,0 0,2.6,0 0.42 r=0.03 mat=0; box 0.3,0,-0.4 0.5,5.18,0.04 rot=0,-25,0 r=0.02 mat=0; -torus 0,2.6,0 0.12 0.025 rot=90,0,0; -torus 0,2.6,0 0.22 0.025 rot=90,0,0; -torus 0,2.6,0 0.32 0.025 rot=90,0,0; -torus 0,-2.6,0 0.12 0.025 rot=90,0,0; -torus 0,-2.6,0 0.22 0.025 rot=90,0,0; -torus 0,-2.6,0 0.32 0.025 rot=90,0,0; paint box 0,-1.90,0.42 0.5,0.025,0.1 mat=1; paint box 0,-1.60,0.42 0.5,0.025,0.1 mat=1; paint box 0,-1.30,0.42 0.5,0.025,0.1 mat=1; paint box 0,-1.00,0.42 0.5,0.025,0.1 mat=1; paint box 0,1.2,0.42 0.03,1.6,0.1 mat=1; paint box 0,1.6,0.42 0.5,0.03,0.1 rot=0,0,35 mat=4; paint box 0.1,0.9,0.42 0.4,0.03,0.1 rot=0,0,-20 mat=4; paint cylinder 0,1.25,0.3 0,1.25,0.6 0.18 mat=4; paint cylinder 0,1.25,0.3 0,1.25,0.6 0.14 mat=0"
+echo tied with red twine and a bow
+set Roll shapes="cylinder 0,-2.6,0 0,2.6,0 0.42 r=0.03 mat=0; box 0.3,0,-0.4 0.5,5.18,0.04 rot=0,-25,0 r=0.02 mat=0; torus 0,-0.3,0 0.45 0.04 rot=90,0,0 mat=2; torus 0,0.0,0 0.45 0.04 rot=90,0,0 mat=2; torus 0.55,-0.15,0.15 0.13 0.035 rot=0,90,30 mat=2; torus 0.55,-0.15,-0.15 0.13 0.035 rot=0,90,-30 mat=2; -torus 0,2.6,0 0.12 0.025 rot=90,0,0; -torus 0,2.6,0 0.22 0.025 rot=90,0,0; -torus 0,2.6,0 0.32 0.025 rot=90,0,0; -torus 0,-2.6,0 0.12 0.025 rot=90,0,0; -torus 0,-2.6,0 0.22 0.025 rot=90,0,0; -torus 0,-2.6,0 0.32 0.025 rot=90,0,0; paint box 0,-1.90,0.42 0.5,0.025,0.1 mat=1; paint box 0,-1.60,0.42 0.5,0.025,0.1 mat=1; paint box 0,-1.30,0.42 0.5,0.025,0.1 mat=1; paint box 0,-1.00,0.42 0.5,0.025,0.1 mat=1; paint box 0,1.2,0.42 0.03,1.6,0.1 mat=1; paint box 0,1.6,0.42 0.5,0.03,0.1 rot=0,0,35 mat=4; paint box 0.1,0.9,0.42 0.4,0.03,0.1 rot=0,0,-20 mat=4; paint cylinder 0,1.25,0.3 0,1.25,0.6 0.18 mat=4; paint cylinder 0,1.25,0.3 0,1.25,0.6 0.14 mat=0"
+describe
+turnaround out shade=material size=512 name=drawroll
+save drawroll.effigy
+export out name=drawroll

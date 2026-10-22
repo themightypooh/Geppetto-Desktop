@@ -33,6 +33,13 @@ namespace Effigy;
 /// Any shape may end with mat=N for the material slot of the skin it makes. Ellipsoid, box,
 /// cylinder and torus take rot=x,y,z (degrees, XYZ order) about their centre.
 ///
+/// A SHAPE WITH k= HAS ITS OWN BLEND AND COMES AFTER THE REST, in the order written. The shapes
+/// without k= fuse at Blend and are cut at Cut blend first; then each k= shape joins (or, with a
+/// leading '-', cuts) what is there so far with its own radius. A face wants a soft skull (k 1)
+/// and a tight lip line (k 0.1), and an eyelid added after its socket was cut:
+///
+///   ellipsoid 0,0,1 4,3,4; -ellipsoid 3.8,1.2,0.1 0.5,0.8,0.5 k=0.2; ellipsoid 3.3,1.2,0.1 0.5,0.7,0.4 k=0.1
+///
 /// PAINT EXISTS FOR WHAT HAS NO SHAPE. A face takes the slot of the shape nearest its corner, so a
 /// window, label or inlay flush with the shell (nothing proud of it) can never get a slot of its own
 /// without changing the skin. A paint shape is not part of the field: after meshing, every face
@@ -73,6 +80,7 @@ public sealed class BlobFeature : Feature
 		var adds = new List<Sdf>();
 		var cuts = new List<Sdf>();
 		var paints = new List<Sdf>();
+		var ordered = new List<(Sdf Leaf, bool Cut, float K)>();
 
 		foreach ( var (text, index) in (Shapes.Value ?? "").Split( ';' ).Select( ( s, i ) => (s.Trim(), i) ) )
 		{
@@ -88,8 +96,18 @@ public sealed class BlobFeature : Feature
 			}
 
 			var cutter = text.StartsWith( '-' );
-			var leaf = ParseShape( cutter ? text[1..].Trim() : text.TrimStart( '+' ).Trim(), index + 1 );
-			(cutter ? cuts : adds).Add( leaf );
+			var leaf = ParseShape( cutter ? text[1..].Trim() : text.TrimStart( '+' ).Trim(), index + 1, out var own );
+			if ( own is float k )
+				ordered.Add( (leaf, cutter, k) );
+			else
+				(cutter ? cuts : adds).Add( leaf );
+		}
+
+		// No plain shape to start from: the first k= shape that adds is the start.
+		if ( adds.Count == 0 && ordered.FindIndex( o => !o.Cut ) is var first and >= 0 )
+		{
+			adds.Add( ordered[first].Leaf );
+			ordered.RemoveAt( first );
 		}
 
 		if ( adds.Count == 0 )
@@ -105,6 +123,9 @@ public sealed class BlobFeature : Feature
 
 		if ( cuts.Count > 0 )
 			field = new SdfSubtract( field, CutBlend.Clamped, cuts.ToArray() );
+
+		foreach ( var (leaf, cut, k) in ordered )
+			field = cut ? new SdfSubtract( field, k, leaf ) : new SdfBlend( k, field, leaf );
 
 		if ( Noise.Value > 0f )
 			field = new SdfDisplace( field, Noise.Clamped, 1f / NoiseSize.Clamped, 3, Seed.Clamped );
@@ -163,7 +184,9 @@ public sealed class BlobFeature : Feature
 
 		ctx.Bodies.Add( new Body( ctx.NewBodyId(), Name, mesh ) );
 
-		Warning = $"{mesh.FaceCount:N0} quads from {adds.Count} shape(s)" + (cuts.Count > 0 ? $" and {cuts.Count} cutter(s)" : "")
+		var addCount = adds.Count + ordered.Count( o => !o.Cut );
+		var cutCount = cuts.Count + ordered.Count( o => o.Cut );
+		Warning = $"{mesh.FaceCount:N0} quads from {addCount} shape(s)" + (cutCount > 0 ? $" and {cutCount} cutter(s)" : "")
 			+ (paints.Count > 0 ? $", {painted:N0} painted by {paints.Count} paint shape(s)" : "")
 			+ ". It has no UVs yet: add a UV project (Unwrap) before baking.";
 	}
@@ -198,8 +221,11 @@ public sealed class BlobFeature : Feature
 		return count;
 	}
 
-	Sdf ParseShape( string text, int number )
+	Sdf ParseShape( string text, int number ) => ParseShape( text, number, out _ );
+
+	Sdf ParseShape( string text, int number, out float? ownBlend )
 	{
+		ownBlend = null;
 		var words = text.Split( (char[])null, StringSplitOptions.RemoveEmptyEntries ).ToList();
 		var material = Material.Clamped;
 		var round = 0f;
@@ -211,6 +237,8 @@ public sealed class BlobFeature : Feature
 			var w = words[i];
 			if ( w.StartsWith( "mat=", StringComparison.OrdinalIgnoreCase ) )
 				material = (int)Num( w[4..], number, text );
+			else if ( w.StartsWith( "k=", StringComparison.OrdinalIgnoreCase ) )
+				ownBlend = MathF.Max( 0f, Num( w[2..], number, text ) );
 			else if ( w.StartsWith( "r=", StringComparison.OrdinalIgnoreCase ) )
 				round = Num( w[2..], number, text );
 			else if ( w.StartsWith( "rot=", StringComparison.OrdinalIgnoreCase ) )
@@ -409,10 +437,22 @@ public sealed class StrokeFeature : Feature
 			var reach = MathF.Max( radius * 4f, (hi - lo).Length * 0.05f );
 			var strength = Invert.Value ? -Strength.Clamped : Strength.Clamped;
 
-			foreach ( var p in path )
+			if ( kind is BrushKind.Grab or BrushKind.ElasticGrab )
 			{
-				if ( bvh.NearestSurface( mesh, p, reach ) is { } hit )
-					stroke.Samples.Add( new BrushSample( hit.Point, hit.Normal, radius, strength ) );
+				// A grab takes hold where the path starts and drags that patch to where it ends; the end
+				// may lie off the skin (that is the point of a grab), so it is not projected.
+				if ( path.Count > 1 && bvh.NearestSurface( mesh, path[0], reach ) is { } hold )
+					stroke.Samples.Add( new BrushSample( hold.Point, hold.Normal, radius, strength, path[^1] - path[0] ) );
+			}
+			else
+			{
+				for ( var i = 0; i < path.Count; i++ )
+				{
+					// A snake hook pulls each patch on toward the next path point.
+					var drag = kind == BrushKind.SnakeHook && i + 1 < path.Count ? path[i + 1] - path[i] : Vec3.Zero;
+					if ( bvh.NearestSurface( mesh, path[i], reach ) is { } hit )
+						stroke.Samples.Add( new BrushSample( hit.Point, hit.Normal, radius, strength, drag ) );
+				}
 			}
 
 			if ( stroke.Samples.Count == 0 )

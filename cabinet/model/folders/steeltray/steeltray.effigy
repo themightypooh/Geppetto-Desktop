@@ -1,0 +1,64 @@
+effigy 1
+rollback 2147483647
+materiallook 0 color=#5d646e rough=0.45 metal=1
+materiallook 1 color=#3a3f47 rough=0.5 metal=1
+materiallook 2 color=#b58a3a rough=0.35 metal=1
+materiallook 3 color=#efe6cc rough=0.9 metal=0
+materiallook 5 color=#6b737e rough=0.45 metal=1
+materiallook 6 color=#2a2e34 rough=0.5 metal=1
+feature BlobFeature
+	id 4d819092
+	name Back
+	suppressed 0
+	visible 1
+	param Blend 0.02
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 0,0,0 6.3,4.8,0.06 r=0.02 mat=0; cylinder -3.15,2.4,0.04 3.15,2.4,0.04 0.09 mat=1; cylinder -3.05,-2.35,0.05 -3.05,2.35,0.05 0.07 mat=1; cylinder 3.05,-2.35,0.05 3.05,2.35,0.05 0.07 mat=1
+	param Smooth 2
+	param Voxel 0.022
+end
+feature BlobFeature
+	id baa3e25a
+	name Front
+	suppressed 0
+	visible 1
+	param Blend 0.02
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 0,1.5,0 6.3,3.0,0.08 r=0.03 mat=5; cylinder -3.15,3.0,0.06 3.15,3.0,0.06 0.1 mat=6; -box 0,2.35,0.07 5.4,0.08,0.05; -box 0,0.35,0.07 5.4,0.08,0.05; box 0,0.9,0.12 1.6,0.18,0.12 r=0.05 mat=6
+	param Smooth 2
+	param Voxel 0.022
+end
+feature BlobFeature
+	id 6a0eb090
+	name Holder
+	suppressed 0
+	visible 1
+	param Blend 0.01
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 0,1.75,0.11 2.6,0.85,0.04 r=0.02 mat=2; -box 0,1.82,0.13 2.3,0.7,0.04; paint box 0,1.76,0.12 2.3,0.62,0.02 mat=3; sphere -1.2,1.75,0.14 0.07 mat=2; sphere 1.2,1.75,0.14 0.07 mat=2
+	param Smooth 2
+	param Voxel 0.016
+end
+feature TransformFeature
+	id e3374a8a
+	name Cover
+	suppressed 0
+	visible 1
+	bodies Bodies baa3e25ab0 6a0eb090b0
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Translate 0 -2.4 0.1
+end

@@ -1,0 +1,17 @@
+material 0 color=#e6d7b0 rough=0.9
+material 1 color=#5a321a rough=0.5
+material 2 color=#c8ccd2 metal=1 rough=0.25
+material 3 color=#c9a23a metal=0.8 rough=0.35
+material 4 color=#6a1428 rough=0.8
+echo two rolls of parchment, layers at the ends
+add Blob name=Rolls voxel=0.03 blend=0.03 shapes="cylinder -0.95,-3.35,0 -0.95,3.35,0 0.85 r=0.04 mat=0; -torus -0.95,3.35,0 0.30 0.03 rot=90,0,0; -torus -0.95,3.35,0 0.50 0.03 rot=90,0,0; -torus -0.95,3.35,0 0.70 0.03 rot=90,0,0; -torus -0.95,-3.35,0 0.30 0.03 rot=90,0,0; -torus -0.95,-3.35,0 0.50 0.03 rot=90,0,0; -torus -0.95,-3.35,0 0.70 0.03 rot=90,0,0; cylinder 0.95,-3.35,0 0.95,3.35,0 0.85 r=0.04 mat=0; -torus 0.95,3.35,0 0.30 0.03 rot=90,0,0; -torus 0.95,3.35,0 0.50 0.03 rot=90,0,0; -torus 0.95,3.35,0 0.70 0.03 rot=90,0,0; -torus 0.95,-3.35,0 0.30 0.03 rot=90,0,0; -torus 0.95,-3.35,0 0.50 0.03 rot=90,0,0; -torus 0.95,-3.35,0 0.70 0.03 rot=90,0,0; box 0,0,-0.8 1.9,6.7,0.04 mat=0"
+echo the wooden rollers: discs and turned handles
+add Blob name=Wood voxel=0.025 blend=0.04 shapes="cylinder -0.95,-4.4,0 -0.95,4.0,0 0.17 mat=1; cylinder -0.95,3.38,0 -0.95,3.52,0 1.0 r=0.04 mat=1; cylinder -0.95,-3.52,0 -0.95,-3.38,0 1.0 r=0.04 mat=1; ellipsoid -0.95,-4.6,0 0.24,0.32,0.24 mat=1; torus -0.95,-4.2,0 0.2 0.06 rot=90,0,0 mat=1; cylinder 0.95,-4.4,0 0.95,4.0,0 0.17 mat=1; cylinder 0.95,3.38,0 0.95,3.52,0 1.0 r=0.04 mat=1; cylinder 0.95,-3.52,0 0.95,-3.38,0 1.0 r=0.04 mat=1; ellipsoid 0.95,-4.6,0 0.24,0.32,0.24 mat=1; torus 0.95,-4.2,0 0.2 0.06 rot=90,0,0 mat=1"
+echo silver pomegranate finials, gold band, hung with bells
+add Blob name=Rimonim voxel=0.02 blend=0.03 shapes="ellipsoid -0.95,4.5,0 0.34,0.42,0.34 mat=2; cone -0.95,4.85,0 0.16 -0.95,5.15,0 0.3 mat=2; sphere -0.95,5.24,0 0.09 mat=2; torus -0.95,4.5,0 0.34 0.04 rot=90,0,0 mat=3; ellipsoid 0.95,4.5,0 0.34,0.42,0.34 mat=2; cone 0.95,4.85,0 0.16 0.95,5.15,0 0.3 mat=2; sphere 0.95,5.24,0 0.09 mat=2; torus 0.95,4.5,0 0.34 0.04 rot=90,0,0 mat=3; sphere -0.550,4.38,0.000 0.07 mat=2; sphere -0.750,4.38,0.346 0.07 mat=2; sphere -1.150,4.38,0.346 0.07 mat=2; sphere -1.350,4.38,0.000 0.07 mat=2; sphere -1.150,4.38,-0.346 0.07 mat=2; sphere -0.750,4.38,-0.346 0.07 mat=2; sphere 1.350,4.38,0.000 0.07 mat=2; sphere 1.150,4.38,0.346 0.07 mat=2; sphere 0.750,4.38,0.346 0.07 mat=2; sphere 0.550,4.38,0.000 0.07 mat=2; sphere 0.750,4.38,-0.346 0.07 mat=2; sphere 1.150,4.38,-0.346 0.07 mat=2"
+echo the velvet binder round both rolls, gold edges
+add Blob name=Binder voxel=0.02 blend=0.02 shapes="box 0,0,0 3.86,0.6,1.86 r=0.88 mat=4; -box 0,0,0 3.72,0.9,1.72 r=0.82; paint box 0,0.27,0 4.2,0.07,2.2 mat=3; paint box 0,-0.27,0 4.2,0.07,2.2 mat=3"
+describe
+turnaround out shade=material size=512 name=torah
+save torah.effigy
+export out name=torah

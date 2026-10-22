@@ -1,0 +1,30 @@
+# The tool wheel's icons for the Geppetto chest: one small object per modelling tool, a row per
+# category (FORM, BUILD, REFINE, DEFORM, MESH, CLOTH, SURFACE, RIG, TWEAK, CHECK, OUTPUT), cells 5 apart. Z up.
+# Written by make_build.py; render_icons.py cuts the export back into cells.
+material 0 color=#a9b0ba rough=0.45 metal=0.6
+material 1 color=#e9e3cc rough=0.8
+material 2 color=#c8322a rough=0.45
+material 3 color=#d9907c rough=0.6
+material 4 color=#1d1a2a rough=0.6
+material 5 color=#c79a3e metal=1 rough=0.3
+material 6 color=#3d5a8a rough=0.85
+material 7 color=#ffd25a emit=#ffc840 rough=0.3
+material 8 color=#7a4a24 rough=0.7
+echo ---- FORM
+echo ---- BUILD
+echo ---- REFINE
+echo ---- DEFORM
+echo ---- MESH
+echo Dissolve
+add Blob name=Icon_edit_dissolve voxel=0.025 blend=0.03 cutblend=0.02 shapes="box 30,-20,0.6 1.5,1.5,1.2 mat=0; box 30,-20.72,1.22 1.5,0.1,0.06 mat=1; box 30,-19.28,1.22 1.5,0.1,0.06 mat=1; box 29.28,-20,1.22 0.1,1.5,0.06 mat=1; box 30.72,-20,1.22 0.1,1.5,0.06 mat=1; box 30,-20,1.22 1.5,0.1,0.06 mat=1; box 30,-20.55,1.23 0.12,0.17,0.08 mat=2; box 30,-20.18,1.23 0.12,0.17,0.08 mat=2; box 30,-19.81,1.23 0.12,0.17,0.08 mat=2; box 30,-19.44,1.23 0.12,0.17,0.08 mat=2"
+echo ---- CLOTH
+echo ---- SURFACE
+echo ---- RIG
+echo ---- TWEAK
+echo Set
+add Blob name=Icon_set voxel=0.025 blend=0.03 cutblend=0.02 shapes="cylinder 0,-40,0 0,-40,0.12 1.05 mat=4; cylinder 0,-40,0.12 0,-40,0.7 0.72 mat=0; box -0.204,-39.728,0.72 0.16,0.16,0.08 rot=0,0,37 mat=2; box -0.072,-39.904,0.73 0.12,0.42,0.06 rot=0,0,37 mat=2; box 0.9,-40,0.14 0.2,0.07,0.05 rot=0,0,0 mat=1; box 0.7794,-39.55,0.14 0.2,0.07,0.05 rot=0,0,30 mat=1; box 0.45,-39.2206,0.14 0.2,0.07,0.05 rot=0,0,60 mat=1; box 0,-39.1,0.14 0.2,0.07,0.05 rot=0,0,90 mat=1; box -0.45,-39.2206,0.14 0.2,0.07,0.05 rot=0,0,120 mat=1; box -0.7794,-39.55,0.14 0.2,0.07,0.05 rot=0,0,150 mat=1; box -0.9,-40,0.14 0.2,0.07,0.05 rot=0,0,180 mat=1; box -0.7794,-40.45,0.14 0.2,0.07,0.05 rot=0,0,210 mat=1; box -0.45,-40.7794,0.14 0.2,0.07,0.05 rot=0,0,240 mat=1; box -0,-40.9,0.14 0.2,0.07,0.05 rot=0,0,270 mat=1; box 0.45,-40.7794,0.14 0.2,0.07,0.05 rot=0,0,300 mat=1; box 0.7794,-40.45,0.14 0.2,0.07,0.05 rot=0,0,330 mat=1"
+echo ---- CHECK
+echo Topology
+add Blob name=Icon_topology voxel=0.025 blend=0.03 cutblend=0.02 shapes="box 20,-45,0.1 2.1,2.1,0.2 mat=0; box 19.01,-45,0.22 0.1,2.08,0.06 mat=1; box 20,-45.99,0.22 2.08,0.1,0.06 mat=1; box 19.67,-45,0.22 0.1,2.08,0.06 mat=1; box 20,-45.33,0.22 2.08,0.1,0.06 mat=1; box 20.33,-45,0.22 0.1,2.08,0.06 mat=1; box 20,-44.67,0.22 2.08,0.1,0.06 mat=1; box 20.99,-45,0.22 0.1,2.08,0.06 mat=1; box 20,-44.01,0.22 2.08,0.1,0.06 mat=1; box 19.67,-45.33,0.23 0.1,0.93,0.07 rot=0,0,45 mat=2; sphere 19.67,-45.33,0.27 0.17 mat=2"
+echo ---- OUTPUT
+export out name=toolicons

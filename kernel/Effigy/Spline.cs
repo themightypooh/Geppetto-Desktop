@@ -375,24 +375,37 @@ public static class CurveDeform
 	/// is one unit of path, and a mesh longer than the path carries straight on past its end.</param>
 	public static void Apply( PolyMesh mesh, IReadOnlyList<Vec3> path, bool closed, int axis = 0, bool stretch = true )
 	{
+		if ( mesh is null || mesh.Positions.Count == 0 )
+			return;
+		var (lo, hi) = Bounds( new[] { mesh } );
+		Apply( mesh, path, closed, axis, stretch, lo, hi );
+	}
+
+	/// <summary>The box around several meshes, so parts of one thing (a fish and its fins) can be
+	/// bent as one: pass it to every part's <see cref="Apply(PolyMesh, IReadOnlyList{Vec3}, bool, int, bool, Vec3, Vec3)"/>.</summary>
+	public static (Vec3 Lo, Vec3 Hi) Bounds( IEnumerable<PolyMesh> meshes )
+	{
+		var lo = new Vec3( float.MaxValue, float.MaxValue, float.MaxValue );
+		var hi = new Vec3( float.MinValue, float.MinValue, float.MinValue );
+		foreach ( var mesh in meshes )
+			foreach ( var p in mesh.Positions )
+			{
+				lo = new Vec3( MathF.Min( lo.x, p.x ), MathF.Min( lo.y, p.y ), MathF.Min( lo.z, p.z ) );
+				hi = new Vec3( MathF.Max( hi.x, p.x ), MathF.Max( hi.y, p.y ), MathF.Max( hi.z, p.z ) );
+			}
+		return (lo, hi);
+	}
+
+	/// <param name="lo">The box the mesh is measured in (its own, or one shared by several parts).</param>
+	public static void Apply( PolyMesh mesh, IReadOnlyList<Vec3> path, bool closed, int axis, bool stretch, Vec3 lo, Vec3 hi )
+	{
 		if ( mesh is null || mesh.Positions.Count == 0 || path is null || path.Count < 2 )
 			return;
 
 		axis = Math.Clamp( axis, 0, 2 );
 
-		var min = float.MaxValue;
-		var max = float.MinValue;
-		var lo = new Vec3( float.MaxValue, float.MaxValue, float.MaxValue );
-		var hi = new Vec3( float.MinValue, float.MinValue, float.MinValue );
-
-		foreach ( var p in mesh.Positions )
-		{
-			var a = Along( p, axis );
-			min = MathF.Min( min, a );
-			max = MathF.Max( max, a );
-			lo = new Vec3( MathF.Min( lo.x, p.x ), MathF.Min( lo.y, p.y ), MathF.Min( lo.z, p.z ) );
-			hi = new Vec3( MathF.Max( hi.x, p.x ), MathF.Max( hi.y, p.y ), MathF.Max( hi.z, p.z ) );
-		}
+		var min = Along( lo, axis );
+		var max = Along( hi, axis );
 
 		// The cross-section rides the curve about the mesh's OWN centre line, not the world's: a
 		// tail modelled at z = 30 is a tail, not a tail thirty units off its path.

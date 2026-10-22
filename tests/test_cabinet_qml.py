@@ -13,7 +13,9 @@ CABINET = Path(__file__).resolve().parents[1] / "cabinet"
 sys.path.insert(0, str(CABINET))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QObject, QUrl, qInstallMessageHandler  # noqa: E402
+from PySide6.QtCore import QObject, QPoint, QPointF, Qt, QUrl, qInstallMessageHandler  # noqa: E402
+from PySide6.QtGui import QGuiApplication, QWheelEvent  # noqa: E402
+from PySide6.QtQuick import QQuickItem  # noqa: E402
 
 MESSAGES = []
 
@@ -60,6 +62,32 @@ class CabinetQmlTests(unittest.TestCase):
 
     def test_the_cabinet_loads(self):
         self.assertIsNotNone(self.root, "cabinet.qml did not load: " + "; ".join(MESSAGES[-8:]))
+        self.assertEqual(self.qml_errors(), [])
+
+    def test_a_live_run_shows_its_bar_with_hold_and_stop(self):
+        """a research run in pane 1 says what it is doing and how long it has been quiet, with HOLD and STOP"""
+        import time
+        bar = self.root.findChild(QObject, "p1RunBar")
+        self.assertIsNotNone(bar)
+        saved = (self.host._runs, self.host.watching)
+        self.host.runTimer.stop()                    # the run scan would put the real runs back
+        try:
+            self.host._runs = [{"dir": "/tmp/fake-run", "name": "fake-run", "prompt": "a pencil", "status": "running",
+                                "activity": "web search", "paused": False, "bench": False,
+                                "started": time.time() - 125, "lastEvent": time.time() - 90, "latestRevision": 0}]
+            self.host.watching = "/tmp/fake-run"
+            self.host.runsChanged.emit()
+            self.settle(1.2)
+            self.assertIsNotNone(bar.property("run"))          # pane 1 only shows when the chest has a view
+            texts = [t.property("text") for t in bar.findChildren(QQuickItem) if t.property("text")]
+            self.assertTrue(any("WEB SEARCH  2:0" in t and "quiet 1:3" in t for t in texts), texts)
+            self.assertGreater(bar.property("quiet"), 60)
+            for name in ("runBarHold", "runBarStop"):
+                self.assertIsNotNone(self.root.findChild(QObject, name), name)
+        finally:
+            self.host._runs, self.host.watching = saved
+            self.host.runTimer.start()
+            self.host.runsChanged.emit()
         self.assertEqual(self.qml_errors(), [])
 
     def test_reading_panels_have_solid_high_contrast_backgrounds(self):
@@ -192,7 +220,7 @@ class CabinetQmlTests(unittest.TestCase):
 
     def test_chat_and_research_pop_out_into_their_own_windows(self):
         """POP OUT moves a panel into a resizable window; closing it docks it back in the drawer"""
-        for flag, box, name in (("chatOut", "chatBox", "chatWindowBox"),
+        for flag, box, name in (("chatOut", "chatWell", "chatWindowBox"),
                                 ("researchOut", "newRun", "researchWindowNewRun")):
             self.root.setProperty(flag, True)
             self.settle()
@@ -208,10 +236,41 @@ class CabinetQmlTests(unittest.TestCase):
             self.assertIsNone(self.root.findChild(QObject, name))
         self.assertEqual(self.qml_errors(), [])
 
-    def test_long_chat_stays_fixed_and_does_not_overlap_research(self):
-        box = self.root.findChild(QObject, "chatBox")
-        run = self.root.findChild(QObject, "newRun")
-        log = self.root.findChild(QObject, "chatLog")
+    def test_chat_note_opens_over_the_viewport_and_crumples_back(self):
+        """the chat is a paper ball in the research drawer: open, it's a note on the viewport you can move; closed, it's back"""
+        scroll = self.root.findChild(QObject, "paperBall")
+        sheet = self.root.findChild(QObject, "openNote")
+        self.root.findChild(QObject, "research").setProperty("open", 1.0)
+        self.settle()
+        self.assertTrue(scroll.property("visible"))
+        self.assertFalse(sheet.property("visible"))
+        self.root.setProperty("chatUnrolled", True)
+        self.settle(1.0)
+        self.assertFalse(scroll.property("visible"))
+        self.assertTrue(sheet.property("visible"))
+        self.assertGreater(sheet.property("width"), 400)
+        self.assertLess(sheet.property("width"), self.root.property("g0").toVariant()["view"]["w"] / 2)
+        self.assertEqual(sheet.property("scale"), 1)
+        x0 = sheet.property("x")
+        sheet.setProperty("homeX", sheet.property("homeX") + 120)    # where a drag leaves it
+        self.settle()
+        self.assertEqual(sheet.property("x"), x0 + 120)
+        self.assertTrue(self.root.findChild(QObject, "chatNoteBox").property("enabled"))
+        close = self.root.findChild(QObject, "chatNoteClose")
+        self.assertTrue(close.property("visible"))
+        close.clicked.emit()                                          # its close key crumples it
+        self.settle(1.0)
+        self.assertFalse(self.root.property("chatUnrolled"))
+        self.assertFalse(sheet.property("visible"))
+        self.assertTrue(scroll.property("visible"))
+        self.assertEqual(self.qml_errors(), [])
+
+    def test_long_chat_stays_fixed_inside_the_note(self):
+        self.root.setProperty("chatUnrolled", True)
+        self.settle(1.0)
+        sheet = self.root.findChild(QObject, "openNote")
+        box = self.root.findChild(QObject, "chatNoteBox")
+        log = self.root.findChild(QObject, "chatNoteLog")
         original = box.property("height")
         self.host._chat = [{"role": "model", "text": "A long answer with all its lines. " * 200}]
         self.host.chatChanged.emit()
@@ -219,10 +278,12 @@ class CabinetQmlTests(unittest.TestCase):
         self.assertEqual(box.property("height"), original)
         from PySide6.QtCore import QPointF
         box_bottom = box.mapToScene(QPointF(0, box.property("height"))).y()
-        self.assertLessEqual(box_bottom, run.mapToScene(QPointF(0, 0)).y())
+        sheet_bottom = sheet.mapToScene(QPointF(0, sheet.property("height"))).y()
+        self.assertLessEqual(box_bottom, sheet_bottom)
         self.assertTrue(log.property("clip"))
         self.assertGreater(log.property("contentHeight"), log.property("height"))
-        self.assertLess(box.property("height"), 394)
+        self.root.setProperty("chatUnrolled", False)
+        self.settle(1.0)
         self.assertEqual(self.qml_errors(), [])
 
     def test_both_dropdowns_select_independently_and_stay_inside_drawer(self):
@@ -230,10 +291,12 @@ class CabinetQmlTests(unittest.TestCase):
         models = [{"id": "one", "label": "A very long local model name", "kind": "openai",
                    "endpoint": "http://localhost:9/", "model": "one", "available": True, "research": True}]
         models += [dict(models[0], id="other" + str(i), label="Other model " + str(i)) for i in range(25)]
-        self.host._models_done(models)
         self.root.findChild(QObject, "research").setProperty("open", 1.0)
+        self.root.setProperty("chatUnrolled", True)
+        self.settle(1.0)
+        self.host._models_done(models)
         self.settle()
-        for name in ("chatSelector", "researchSelector"):
+        for name, room in (("chatNoteSelector", 576), ("researchSelector", 414)):
             selector = self.root.findChild(QObject, name)
             self.assertEqual(selector.property("count"), 26)
             popup = self.root.findChild(QObject, name + "Popup")
@@ -242,9 +305,11 @@ class CabinetQmlTests(unittest.TestCase):
             self.settle(.1)
             self.assertTrue(popup.property("visible"))
             self.assertGreaterEqual(popup.property("y"), 0)
-            self.assertLessEqual(popup.property("y") + popup.property("height"), 414)
-            self.assertLessEqual(popup.property("width"), 254)
+            self.assertLessEqual(popup.property("y") + popup.property("height"), room)
+            self.assertLessEqual(popup.property("width"), 400)
             QMetaObject.invokeMethod(popup, "close", Qt.DirectConnection)
+        self.root.setProperty("chatUnrolled", False)
+        self.settle(1.0)
         self.host.setChatModel("other1")
         self.assertEqual(self.host.chatModel, "other1")
         self.assertEqual(self.host.aiModel, "one")
@@ -352,6 +417,183 @@ class CabinetQmlTests(unittest.TestCase):
         self.assertFalse(any(s.startswith("clip ") for s in viewer.sent), "the first click only warns")
         self.host.playClip("/x/run.riganim")
         self.assertTrue(any(s.startswith("clip ") for s in viewer.sent), "the second click goes ahead")
+
+    def test_the_tool_card_builds_one_script_line_from_what_you_changed(self):
+        card = self.root.findChild(QObject, "toolCard")
+        self.assertIsNotNone(card)
+        size = {"key": "size", "label": "Size", "kind": "point", "value": "1,1,1"}
+        name = {"key": "name", "label": "Name", "kind": "text", "value": ""}
+        card.setProperty("bench", {"ready": True, "bodies": ["Hull"],
+                                   "form": {"kind": "add", "type": "Primitive", "key": "primitive", "fields": [size, name]}})
+        self.assertEqual(card.line(), "add Primitive", "untouched fields stay out of the line")
+        card.setValue(size, "2,1,0.5")
+        card.setValue(name, "My Box")
+        self.assertEqual(card.line(), 'add Primitive size=2,1,0.5 name="My Box"')
+        body = {"key": "body", "label": "Body", "kind": "bodies", "value": ""}
+        dist = {"key": "distance", "label": "Distance", "kind": "number", "value": 0.1}
+        card.setProperty("bench", {"ready": True, "bodies": ["Hull", "Lid"],
+                                   "form": {"kind": "edit", "verb": "edit", "op": "bevel", "key": "edit:bevel", "fields": [body, dist]}})
+        card.setValue(dist, "0.25")
+        self.assertEqual(card.line(), "edit Lid bevel distance=0.25", "an edit goes to the last body made")
+        card.setProperty("bench", {"ready": True, "bodies": [],
+                                   "form": {"kind": "edit", "verb": "edit", "op": "bevel", "key": "edit:bevel", "fields": [body, dist]}})
+        self.assertEqual(card.line(), "")
+        self.assertIn("add something first", card.property("why"))
+        card.setProperty("open", True)
+        self.settle(0.05)
+        callout = self.root.findChild(QObject, "benchError")
+        self.assertTrue(callout.property("visible"), "the reason is called out over the viewport")
+        self.assertIn("add something first", callout.property("shown"))
+        card.setProperty("open", False)
+        self.assertEqual(self.qml_errors(), [])
+
+    def test_the_wheel_key_works_while_a_run_is_drawing_on_the_wheel(self):
+        wheel = self.root.findChild(QObject, "toolWheel")
+        key = self.root.findChild(QObject, "wheelKey")
+        wheel.setProperty("manual", False)
+        wheel.setProperty("op", "add Primitive")
+        key.clicked.emit()
+        self.assertTrue(wheel.property("manual"), "WHEEL opens the wheel by hand mid-run")
+        wheel.setProperty("op", "edit Hull bevel")
+        self.settle(0.1)
+        self.assertTrue(wheel.property("manual"), "a run op does not take the wheel back")
+        key.clicked.emit()
+        self.assertFalse(wheel.property("manual"))
+        wheel.setProperty("op", "")
+        self.assertEqual(self.qml_errors(), [])
+
+    def test_the_wheel_moves_with_the_model_and_only_with_it(self):
+        from PySide6.QtCore import QMetaObject, Q_ARG, Q_RETURN_ARG
+        wheel = self.root.findChild(QObject, "toolWheel")
+        wheel.setProperty("manual", False)
+
+        def line():
+            v = wheel.property("info")
+            return (v.toVariant() if hasattr(v, "toVariant") else v)["line"]
+
+        def parse(op):
+            v = QMetaObject.invokeMethod(wheel, "parse", Q_RETURN_ARG("QVariant"), Q_ARG("QVariant", op))
+            return v.toVariant() if hasattr(v, "toVariant") else v
+        # every kind of step a run, a replay or the bench writes lands on its tool
+        for op, key, target in [("line 3: add Primitive name=Box shape=box", "primitive", "Box"),
+                                ("add Blob Grip", "blob", "Grip"),
+                                ("add BlobFeature", "blob", ""),
+                                ("line 5: edit Box bevel width=0.1", "edit:bevel", "Box"),
+                                ("line 6: edit Box extrude individual", "edit:extrude", "Box"),
+                                ("line 7: edit Box Limited dissolve", "edit:dissolve", "Box"),
+                                ("line 4: undo add Primitive name=Lid", "primitive", "Lid"),
+                                ("line 8: material Box 0 color=#aa0000", "material", "Box"),
+                                ("line 9: measure Box.top", "measure", "Box.top"),
+                                ("line 2: set Box size=1,1,1", "set", "Box"),
+                                ("start: steeltray.effigy", "import", "steeltray.effigy")]:
+            p = parse(op)
+            self.assertEqual((p["key"], p["target"]), (key, target), op)
+        self.assertEqual(parse("line 3: add Primitive")["line"], 3)
+        self.assertIsNone(parse("initial"), "the empty document changes nothing on screen")
+        self.assertEqual(parse("echo hi")["key"], "echo", "a verb with no tile still names itself in the core")
+
+        # a new revision on screen moves the wheel at once: no reach played out after the model changed
+        wheel.setProperty("op", "line 3: add Primitive name=Box")
+        self.assertEqual(wheel.property("tool"), "primitive")
+        self.assertTrue(wheel.property("shown"))
+        wheel.setProperty("op", "line 5: edit Box bevel")
+        self.assertEqual(wheel.property("tool"), "edit:bevel", "lands on the step's tool the moment it is shown")
+        self.assertEqual(wheel.property("openGroup"), 4)
+        # the same tool again: the core presses in and the line moves on
+        wheel.setProperty("op", "line 6: edit Box bevel width=0.2")
+        self.assertEqual(line(), 6)
+        core = wheel.findChild(QObject, "wheelCore")
+        squash = 0
+        for _ in range(15):
+            self.settle(0.01)
+            squash = max(squash, core.property("squash"))
+        self.assertGreater(squash, 0.3, "the same tool again still visibly presses")
+        # nothing on screen changed: the wheel holds still
+        before = (wheel.property("tool"), wheel.property("openGroup"), line())
+        wheel.setProperty("working", "line 7: edit Box inset")   # being built, not yet shown
+        self.settle(0.3)
+        self.assertEqual((wheel.property("tool"), wheel.property("openGroup"), line()), before,
+                         "the step being built does not move the wheel before the model shows it")
+        wheel.setProperty("working", "")
+        wheel.setProperty("op", "")
+        self.assertEqual(self.qml_errors(), [])
+
+    def _modeling_sandbox(self):
+        """RUNS and MODELING pointed at a temp dir for one test: a finished run with a sticker, and a bench"""
+        import json
+        import tempfile
+        import host as chest
+        tmp = tempfile.mkdtemp(prefix="geppetto-folder-")
+        saved = chest.RUNS, chest.MODELING
+        chest.RUNS, chest.MODELING = os.path.join(tmp, "research"), os.path.join(tmp, "modeling")
+        def restore():
+            chest.RUNS, chest.MODELING = saved
+            self.host._bench, self.host._filed = {}, chest.filed_stickers()
+            self.host.benchChanged.emit()
+            self.host.filedChanged.emit()
+        self.addCleanup(restore)
+        run = os.path.join(chest.RUNS, "script-build-20261022-044521")
+        os.makedirs(run)
+        open(os.path.join(run, "sticker.png"), "wb").write(b"png")
+        json.dump({"prompt": "script: build.txt", "script": "/x/folders/steeltray/build.txt"}, open(run + ".json", "w"))
+        bench = os.path.join(chest.RUNS, "bench-steeltray-20261022-050553")
+        os.makedirs(os.path.join(bench, ".live", "revisions"))
+        open(os.path.join(bench, ".live", "revisions", "00000002.effigy"), "w").write("edited")
+        return chest, run, bench
+
+    def test_keep_files_your_edit_in_the_modeling_folder_and_saves_it_back_in_place(self):
+        chest, run, bench = self._modeling_sandbox()
+        self.host._bench = {"dir": bench, "revision": 2, "from": "script-build rev 11", "back": {"watching": run}}
+        kept = self.host.benchKeep("")
+        self.assertEqual(kept, os.path.join(chest.MODELING, "steeltray", "steeltray.effigy"),
+                         "named after what the run built, in a folder of its own")
+        self.assertEqual(open(kept).read(), "edited")
+        open(os.path.join(bench, ".live", "revisions", "00000002.effigy"), "w").write("edited again")
+        self.host._bench = {"dir": bench, "revision": 2, "from": "steeltray.effigy", "back": {"model": kept}}
+        self.assertEqual(self.host.benchKeep(""), kept, "a model opened from the folder is saved over in place")
+        self.assertEqual(open(kept).read(), "edited again")
+        self.assertEqual(os.listdir(chest.MODELING), ["steeltray"])
+        self.host._bench = {"dir": bench, "from": "empty"}
+        self.assertEqual(self.host.benchKeep(""), "")
+        self.assertIn("make an edit first", self.host._bench["error"])
+
+    def test_the_modeling_folder_opens_and_lists_what_is_filed(self):
+        chest, run, bench = self._modeling_sandbox()
+        os.makedirs(os.path.join(chest.MODELING, "knob"))
+        open(os.path.join(chest.MODELING, "knob", "sticker.png"), "wb").write(b"png")
+        open(os.path.join(chest.MODELING, "knob", "knob.effigy"), "w").write("doc")
+        self.host._filed = chest.filed_stickers()
+        self.host.filedChanged.emit()
+        folder = self.root.findChild(QObject, "folderView")
+        self.assertIsNotNone(self.root.findChild(QObject, "modelingOpen"), "the folder itself is clickable")
+        folder.setProperty("open", True)
+        self.settle(0.1)
+        names = sorted((e["name"], e["kind"]) for e in folder.property("items"))
+        self.assertEqual(names, [("knob", "model"), ("steeltray", "run")], "bench copies aren't filed; runs are named for what they built")
+        self.assertEqual(self.root.findChild(QObject, "folderSlips").property("count"), 2, "a slip for each")
+        opened = []
+        self.host.openModel = lambda p, clip="": opened.append(("model", p))
+        self.host.watchRun = lambda d: opened.append(("run", d))
+        try:
+            for i, e in enumerate(folder.property("items")):
+                self.host.openFiled(i)
+        finally:
+            del self.host.openModel, self.host.watchRun
+        self.assertEqual(sorted(opened), [("model", os.path.join(chest.MODELING, "knob", "knob.effigy")), ("run", run)])
+        # more files than fit: the scroll wheel runs through them
+        self.host._filed = self.host._filed * 6
+        self.host.filedChanged.emit()
+        self.settle(0.6)
+        files = self.root.findChild(QQuickItem, "folderFiles")
+        self.assertTrue(files.property("interactive"))
+        self.assertGreater(files.property("contentHeight"), files.height())
+        at = files.mapToScene(QPointF(files.width() / 2, files.height() / 2))
+        QGuiApplication.sendEvent(self.root, QWheelEvent(at, self.root.mapToGlobal(at.toPoint()), QPoint(), QPoint(0, -120),
+                                                         Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False))
+        self.settle(0.6)
+        self.assertGreater(files.property("contentY"), 0, "wheeled down through the files")
+        folder.setProperty("open", False)
+        self.assertEqual(self.qml_errors(), [])
 
 if __name__ == "__main__":
     unittest.main()

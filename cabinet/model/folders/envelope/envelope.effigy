@@ -1,0 +1,65 @@
+effigy 1
+rollback 2147483647
+materiallook 0 color=#b88a52 rough=0.9 metal=0
+materiallook 1 color=#8e6636 rough=0.9 metal=0
+materiallook 2 color=#2a2420 rough=0.6 metal=0
+materiallook 3 color=#c69a3a rough=0.4 metal=1
+materiallook 4 color=#d8cbb0 rough=0.9 metal=0
+materiallook 5 color=#c0945c rough=0.9 metal=0
+materiallook 6 color=#7a2a20 rough=0.7 metal=0
+feature BlobFeature
+	id d355962c
+	name Back
+	suppressed 0
+	visible 1
+	param Blend 0.015
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 0,-0.2,0 6.0,4.4,0.04 r=0.012 mat=0; box 0,2.35,0 6.0,0.7,0.04 r=0.3 mat=1
+	param Smooth 2
+	param Voxel 0.022
+end
+feature BlobFeature
+	id 4d5cac7a
+	name Front
+	suppressed 0
+	visible 1
+	param Blend 0.012
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 0,1.85,0 6.0,3.7,0.05 r=0.012 mat=5; paint box -1.5,2.2,0.03 2.6,2.6,0.02 mat=4; paint box -1.5,3.1,0.04 2.6,0.04,0.02 mat=2; paint box -1.5,2.7,0.04 2.6,0.04,0.02 mat=2; paint box -1.5,2.3,0.04 2.6,0.04,0.02 mat=2; paint box -1.5,1.9,0.04 2.6,0.04,0.02 mat=2; paint box -1.5,1.5,0.04 2.6,0.04,0.02 mat=2; -cylinder 1.8,1.0,-0.5 1.8,1.0,0.5 0.16; -cylinder 1.8,2.4,-0.5 1.8,2.4,0.5 0.16
+	param Smooth 2
+	param Voxel 0.02
+end
+feature BlobFeature
+	id fcadc59f
+	name Closure
+	suppressed 0
+	visible 1
+	param Blend 0.01
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes cylinder 0.6,3.3,0.03 0.6,3.3,0.09 0.32 r=0.03 mat=3; cylinder 0.6,1.6,0.03 0.6,1.6,0.09 0.32 r=0.03 mat=3; torus 0.6,3.3,0.1 0.2 0.03 rot=90,0,0 mat=6; cylinder 0.6,3.3,0.11 0.6,1.6,0.11 0.03 mat=6; cylinder 0.6,1.6,0.11 1.4,0.3,0.11 0.03 mat=6
+	param Smooth 2
+	param Voxel 0.014
+end
+feature TransformFeature
+	id e5b7e6db
+	name Cover
+	suppressed 0
+	visible 1
+	bodies Bodies 4d5cac7ab0 fcadc59fb0
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Translate 0 -2.45 0.08
+end

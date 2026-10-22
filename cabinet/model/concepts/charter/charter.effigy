@@ -1,0 +1,51 @@
+effigy 1
+rollback 2147483647
+materiallook 0 color=#dcc9a0 rough=0.9 metal=0
+materiallook 1 color=#a88b5a rough=0.9 metal=0
+materiallook 2 color=#8a6a3a rough=0.9 metal=0
+materiallook 3 color=#8e1a1a rough=0.3 metal=0
+feature BlobFeature
+	id a05f0199
+	name Parchment
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes cylinder 0,-3.6,0 0,3.6,0 0.85 r=0.04 mat=0; paint cylinder 0,3.48,0 0,3.80,0 0.90 mat=1; -torus 0,3.60,0 0.20 0.030 rot=90,0,0; -torus 0,3.60,0 0.38 0.030 rot=90,0,0; -torus 0,3.60,0 0.55 0.030 rot=90,0,0; -torus 0,3.60,0 0.72 0.030 rot=90,0,0; paint cylinder 0,-3.80,0 0,-3.48,0 0.90 mat=1; -torus 0,-3.60,0 0.20 0.030 rot=90,0,0; -torus 0,-3.60,0 0.38 0.030 rot=90,0,0; -torus 0,-3.60,0 0.55 0.030 rot=90,0,0; -torus 0,-3.60,0 0.72 0.030 rot=90,0,0; -sphere 0.838,3.600,0.193 0.07; -sphere 0.518,3.600,0.687 0.10; -sphere -0.045,3.600,0.859 0.13; -sphere -0.587,3.600,0.629 0.07; -sphere -0.854,3.600,0.105 0.10; -sphere -0.721,3.600,-0.468 0.13; -sphere -0.251,3.600,-0.822 0.07; -sphere 0.336,3.600,-0.792 0.10; -sphere 0.766,3.600,-0.390 0.13; -sphere 0.737,-3.600,0.443 0.07; -sphere 0.280,-3.600,0.813 0.10; -sphere -0.308,-3.600,0.803 0.13; -sphere -0.752,-3.600,0.417 0.07; -sphere -0.844,-3.600,-0.164 0.10; -sphere -0.541,-3.600,-0.668 0.13; -sphere 0.015,-3.600,-0.860 0.07; -sphere 0.564,-3.600,-0.649 0.10; -sphere 0.849,-3.600,-0.135 0.13; paint sphere -0.799,2.200,-0.291 0.25 mat=1; paint sphere -0.074,-1.900,0.847 0.18 mat=1; paint sphere 0.425,-2.900,-0.736 0.3 mat=1; paint box -0.651,0.000,0.546 0.06,7.2,0.06 mat=1
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id fbe8f4f6
+	name Twine
+	suppressed 0
+	visible 1
+	param Blend 0.02
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes torus 0,-0.14,0 0.87 0.04 rot=90,0,0 mat=2; torus 0,0.14,0 0.87 0.04 rot=90,0,0 mat=2
+	param Smooth 2
+	param Voxel 0.02
+end
+feature BlobFeature
+	id 9e64b179
+	name Seal
+	suppressed 0
+	visible 1
+	param Blend 0.04
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes cylinder 0.78,0,0 0.98,0,0 0.42 r=0.07 mat=3; sphere 0.86,0.36,0.2 0.09 mat=3; sphere 0.86,-0.33,-0.25 0.08 mat=3; -torus 1.0,0,0 0.28 0.03 rot=0,90,0; -sphere 1.06,0,0 0.13
+	param Smooth 2
+	param Voxel 0.015
+end

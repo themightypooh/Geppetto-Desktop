@@ -1,0 +1,2046 @@
+#!/usr/bin/env python3
+"""Geppetto tool-chest host: one frameless, transparent, normal window on the real desktop.
+
+The 3D viewport is rendered headless by `marionette-desktop --serve` (ServeMode.cs) and streamed
+here through a shared-memory file; mouse input goes back to it as commands on its stdin. Around it
+sits a baked steel tool chest (cabinet.qml) with three drawers that slide out onto the desktop:
+Research (left), Outliner (right) and Timeline (bottom). Only the chest, the lid and the drawers
+take the mouse: the rest of the window is masked out, so it is see-through *and* click-through.
+
+  python3 host.py [MODEL]    start (or, if already running, bring it to the front / open MODEL)
+  python3 host.py snap PATH  ask the running chest to save a picture of itself to PATH
+  python3 host.py open|shut NAME   slide a drawer (research, tools, timeline)
+  python3 host.py clip PATH  play a .riganim (on the model it was made for)
+  python3 host.py draw [PATH|ID]  bring the drawing tool up, or open one of its drawings
+  python3 host.py cmd LINE   send a command to the viewport (see ServeMode.cs)
+  python3 host.py quit       close the running chest
+"""
+import json
+import shutil
+import mmap
+import os
+import re
+import sys
+import time
+import threading
+import subprocess
+import tempfile
+
+from live_runs import TERMINAL, read_state, preview_path, activity, request_cancel, send_command, next_pace, control_state
+import live_runs
+from drawing_tools import (drawings as drawing_gallery, program as drawing_program,
+                           resolve as drawing_resolve, socket_key as drawing_socket_key,
+                           DRAWINGS as DRAWING_DIR)
+import chat as chatlib
+import panes as paneslib
+import sticker as stickerlib
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+PROJECT = os.path.dirname(HERE)
+BIN = os.path.join(PROJECT, "bin", "Release", "net8.0")
+EXE = os.path.join(BIN, "marionette-desktop")
+SOCK = "geppetto-cabinet"
+DRAWER_ALIASES = {"outliner": "tools"}      # the right drawer is the tools drawer now
+PROJECTS = os.path.expanduser("~/games/projects")
+RUNS = os.path.expanduser("~/.local/share/geppetto/research")
+VIEW_PREFS = os.path.expanduser("~/.config/geppetto/chest-view.json")   # viewport layout (1/2/4 panes), linked cameras
+MODELING = os.path.expanduser("~/.local/share/geppetto/modeling")   # models you KEEP off the bench: <name>/<name>.effigy + sticker.png
+DEFAULT_MODEL = os.path.join(PROJECTS, "deep_sentance/Assets/models/player/player_suit.fbx")
+OLLAMA = "http://localhost:11434/v1/"
+VIEW_W, VIEW_H = 1024, 576
+REPLAY_STEP_MS = 700                        # replay speed: one kept revision per tick (waits for slow loads)
+# the dope sheet before the viewer has said what keys the clip has
+NO_KEYS = {"tracks": [], "undo": 0, "redo": 0, "dirty": False, "saveable": False, "frames": 0}
+
+from PySide6.QtCore import (Q_ARG, QMetaObject, QObject, QProcess, QProcessEnvironment, QRect,  # noqa: E402
+                            QTimer, QUrl, Qt, QCoreApplication, Property, Signal, Slot)
+from PySide6.QtGui import QDesktopServices, QGuiApplication, QIcon, QImage, QRegion  # noqa: E402
+from PySide6.QtNetwork import QLocalServer, QLocalSocket  # noqa: E402
+from PySide6.QtQuick import QQuickPaintedItem  # noqa: E402
+from PySide6.QtQml import qmlRegisterType  # noqa: E402
+
+HOST = None
+
+# On Wayland a window can't put itself in front; KWin can, through a one-shot script.
+RAISE_JS = """
+for (const w of workspace.windowList()) {
+    if (w.resourceClass === "geppetto") { w.minimized = false; workspace.activeWindow = w; }
+}
+"""
+
+
+def kwin_raise():
+    """bring the chest to the front even when it doesn't have focus (KDE; silently nothing elsewhere)"""
+    def go():
+        try:
+            path = os.path.join(tempfile.gettempdir(), "geppetto-raise-%d.js" % os.getuid())
+            with open(path, "w") as f:
+                f.write(RAISE_JS)
+            q = ["qdbus6", "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting."]
+            subprocess.run(q[:3] + [q[3] + "unloadScript", "geppetto-raise"], capture_output=True, timeout=3)
+            subprocess.run(q[:3] + [q[3] + "loadScript", path, "geppetto-raise"], capture_output=True, timeout=3)
+            subprocess.run(q[:3] + [q[3] + "start"], capture_output=True, timeout=3)
+            time.sleep(0.5)
+            subprocess.run(q[:3] + [q[3] + "unloadScript", "geppetto-raise"], capture_output=True, timeout=3)
+        except (OSError, subprocess.SubprocessError):
+            pass
+    threading.Thread(target=go, daemon=True).start()
+
+
+def any_script_running():
+    """some marionette-desktop is running a live script (for older runs that recorded no pid)"""
+    for pid in os.listdir("/proc"):
+        if pid.isdigit():
+            try:
+                with open("/proc/%s/cmdline" % pid, "rb") as f:
+                    cmd = f.read()
+            except OSError:
+                continue
+            if b"marionette-desktop" in cmd and b"--script" in cmd:
+                return True
+    return False
+
+
+def run_is_live(d, state):
+    """a run still building: not finished, and its journal moved in the last 10 minutes (a crashed run goes quiet)"""
+    if not state or state.get("state") in TERMINAL:
+        return False
+    # a script run records its pid beside the folder: once that process is gone the run is dead,
+    # however fresh its journal still looks
+    try:
+        pid = int(json.load(open(d.rstrip("/") + ".json")).get("pid", 0))
+    except (OSError, ValueError, TypeError, AttributeError):
+        pid = 0
+    if pid > 0:
+        try:
+            with open("/proc/%d/cmdline" % pid, "rb") as f:
+                if b"marionette-desktop" not in f.read():
+                    return False
+        except OSError:
+            return False
+    elif not any_script_running():
+        return False
+    try:
+        return time.time() - os.stat(os.path.join(d, ".live", "events.jsonl")).st_mtime < 600
+    except OSError:
+        return False
+
+
+def send(msg):
+    """send a command to a running chest; True if one answered"""
+    s = QLocalSocket()
+    s.connectToServer(SOCK)
+    if not s.waitForConnected(500):
+        return False
+    s.write(msg.encode())
+    s.flush()
+    s.waitForBytesWritten(500)
+    s.waitForReadyRead(3000)
+    print(bytes(s.readAll()).decode() or "ok")
+    s.disconnectFromServer()
+    return True
+
+
+def project_root(path):
+    """the s&box project a file belongs to: the nearest folder up with a .sbproj in it"""
+    d = os.path.dirname(os.path.abspath(path))
+    while d.startswith(PROJECTS) and d != PROJECTS:
+        try:
+            if any(n.endswith(".sbproj") for n in os.listdir(d)):
+                return d
+        except OSError:
+            pass
+        d = os.path.dirname(d)
+    return None
+
+
+def filed_stickers():
+    """what's in the MODELING folder, newest first: finished runs' stickers and the models you kept"""
+    return sorted(stickerlib.filed(RUNS) + stickerlib.filed(MODELING), key=os.path.getmtime, reverse=True)
+
+
+def kept_model(d):
+    return os.path.join(d, os.path.basename(d) + ".effigy")
+
+
+def folder_entry(sticker):
+    """one slip in the MODELING folder: its picture, its name, and what opening it puts on screen"""
+    d = os.path.dirname(sticker)
+    if os.path.dirname(d) == MODELING:
+        try:
+            name = json.load(open(os.path.join(d, "kept.json"))).get("name", "")
+        except (OSError, ValueError, AttributeError):
+            name = ""
+        return {"sticker": "file://" + sticker, "name": name or os.path.basename(d), "kind": "model", "path": kept_model(d)}
+    return {"sticker": "file://" + sticker, "name": run_name(d), "kind": "run", "path": d}
+
+
+def run_name(d):
+    """what a run made, in a word or two: its prompt, or for a build script the folder it lives in"""
+    try:
+        meta = json.load(open(d + ".json"))
+        name = meta.get("prompt", "")
+        if meta.get("script") and name.startswith("script:"):
+            name = os.path.basename(os.path.dirname(meta["script"]))
+            if name.lower() in ("run", "runs", "scratchpad", "tmp", "build", "scripts", "out", ""):
+                name = os.path.splitext(os.path.basename(meta["script"]))[0]   # a throwaway folder: the script's own name
+    except (OSError, ValueError, AttributeError):
+        name = ""
+    if not name or name.startswith("script:"):
+        name = re.sub(r"-?\d{8}-\d{6}", "", os.path.basename(d)) or os.path.basename(d)
+    return name[:60]
+
+
+def walk(root, exts, limit, skip=("backups", ".sbox", "obj", "bin", "node_modules", ".git")):
+    out = []
+    for d, dirs, files in os.walk(root):
+        dirs[:] = sorted(x for x in dirs if x not in skip and not x.startswith("."))
+        for f in sorted(files):
+            if f.lower().endswith(exts):
+                out.append(os.path.join(d, f))
+                if len(out) >= limit:
+                    return out
+    return out
+
+
+def clip_source(clip, root):
+    """the model a .riganim was authored on (its SourceModel), as a file the viewer can load:
+    the .fbx/.effigy next to the .vmdl, else the .vmdl path itself. None if it doesn't say."""
+    try:
+        with open(clip, encoding="utf-8", errors="replace") as f:
+            m = re.search(r'"SourceModel"\s*:\s*"([^"]*)"', f.read(4096))
+    except OSError:
+        return None
+    if not m or not m.group(1):
+        return None
+    rel = m.group(1)
+    stem = os.path.splitext(os.path.join(root, "Assets", rel))[0]
+    for ext in (".fbx", ".effigy", ".FBX"):
+        if os.path.isfile(stem + ext):
+            return stem + ext
+    return stem + os.path.splitext(rel)[1]
+
+
+def same_model(a, b):
+    return bool(b) and os.path.splitext(os.path.abspath(a))[0] == os.path.splitext(os.path.abspath(b))[0]
+
+
+class Viewport(QQuickPaintedItem):
+    """shows the latest frame from the serve process, 1:1; `pane` 1 is the host's viewer, 2-4 the split panes"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setOpaquePainting(True)
+        self._pane = 1
+        HOST.frameReady.connect(self.update)
+        for pane in HOST.panes:
+            pane.frameReady.connect(self._pane_frame)
+
+    def _pane_frame(self):
+        if self._pane > 1 and self.sender() is HOST.panes[self._pane - 2]:
+            self.update()
+
+    def _set_pane(self, n):
+        self._pane = max(1, min(1 + len(HOST.panes), int(n)))
+        self.update()
+    pane = Property(int, lambda self: self._pane, _set_pane)
+
+    def paint(self, p):
+        img = HOST.image if self._pane == 1 else HOST.panes[self._pane - 2].image
+        if img is None:
+            p.fillRect(0, 0, int(self.width()), int(self.height()), Qt.black)
+            return
+        p.drawImage(QRect(0, 0, int(self.width()), int(self.height())), img)
+
+
+class Host(QObject):
+    """what cabinet.qml can ask of Python"""
+    frameReady = Signal()
+    infoChanged = Signal()
+    playheadChanged = Signal()
+    keysChanged = Signal()
+    listsChanged = Signal()
+    runsChanged = Signal()
+    statusChanged = Signal()
+    toolsChanged = Signal()
+    chatChanged = Signal()
+    chatAnswer = Signal(int, str, str)
+    chatChunk = Signal(int, str)
+    modelsAnswer = Signal(object)
+    # a finished model's sticker was cut from the viewport: its file and where it was, as fractions of the view
+    stickerMade = Signal(str, float, float, float, float)
+    filedChanged = Signal()
+    replayChanged = Signal()
+    shownOpChanged = Signal()
+    benchChanged = Signal()
+    refsChanged = Signal()             # the reference pictures standing behind the model
+    subSelectionChanged = Signal()     # faces/edges/vertices picked in the viewport (s&box-style sub-selection)
+
+    def __init__(self):
+        super().__init__()
+        self.window = None
+        self.image = None
+        self.proc = None
+        self.buf = b""
+        self.shm = None
+        self.shm_path = ""
+        self._info = {}
+        self._clip = {}
+        self._sel = {"bone": -1, "body": -1}
+        self._playhead = {"time": 0, "frame": 0, "playing": False, "loop": True}
+        self._keys = NO_KEYS
+        self._status = "starting"
+        self._models = []
+        self._clips = []
+        self._runs = []
+        self._drawings = []
+        self._drawing_open = False
+        self._chat = []                   # [{"role": "you"|"model", "text": ...}, ...]
+        self._chat_models = []
+        self._chat_model = self._chat_models[0]["id"] if self._chat_models else ""
+        self._chat_busy = False
+        self._chat_request = 0
+        self._chat_cancel = threading.Event()
+        self._catalogue_busy = False
+        self._model_preferences = {}
+        self._preferences_path = os.path.expanduser("~/.config/geppetto/model-selection.json")
+        try:
+            with open(self._preferences_path) as f:
+                self._model_preferences = json.load(f)
+        except (OSError, ValueError):
+            pass
+        if not isinstance(self._model_preferences, dict):
+            self._model_preferences = {}
+        self.drawing_key = drawing_socket_key()    # the socket the drawing tool listens on
+        self.drawing_program = drawing_program      # what to run to start it
+        self.model = ""
+        self.ai_model = self._model_preferences.get("research", "")
+        self.jobs = {}                  # run dir -> QProcess
+        self.watching = ""
+        self.live_states = {}
+        self.displayed_revision = 0
+        self.stop_requests = {}
+        self.seen_runs = None           # run dirs present at the last scan (None until the first one)
+        self.saw_building = set()       # runs seen mid-build in the viewport, so finishing them sends the model off
+        self.auto_pending = set()       # new runs to follow as soon as they publish a live identity
+        self._filed = filed_stickers()         # stickers in the MODELING folder, newest first
+        self._keep_to = ""              # a KEEP in flight: the folder its sticker goes in
+        self.collapsed = {}             # run dir -> folded by hand (unset: fold finished runs nobody is watching)
+        self.env = QProcessEnvironment.systemEnvironment()
+        dotnet = self.env.value("DOTNET_ROOT", os.path.expanduser("~/.dotnet"))
+        self.env.insert("DOTNET_ROOT", dotnet)
+        self.env.insert("PATH", dotnet + ":" + self.env.value("PATH", ""))
+        self.env.insert("LD_LIBRARY_PATH", ":".join(
+            [BIN, os.path.join(BIN, "runtimes/linux-x64/native"), self.env.value("LD_LIBRARY_PATH", "")]))
+        self._bench = {}                # your own edits: dir, alive, bodies, features, canUndo, form, error, log
+        self.bench_proc = None
+        self.bench_buf = b""
+        self._sub_mode = "body"         # viewport pick mode: body | face | edge | vertex
+        self._sub_sel = {}              # the latest @selection event from the viewer
+        self._sub_prompt = ""
+        self._sub_lost = 0
+        self._hover_at = None           # last hover sent, and the one waiting for the throttle
+        self._hover_pending = None
+        self.hoverTimer = QTimer(self)
+        self.hoverTimer.setSingleShot(True)
+        self.hoverTimer.setInterval(16)
+        self.hoverTimer.timeout.connect(self._hover_flush)
+        self._refs = {"images": [], "problems": "", "saveable": False, "changed": False}
+        self._ortho = False             # the viewer's camera is flat (front/side/top line-up)
+        self._replay = {}               # the run being replayed step by step: dir, steps, at, playing, notes
+        self.replayTimer = QTimer(self)
+        self.replayTimer.setInterval(REPLAY_STEP_MS)
+        self.replayTimer.timeout.connect(self._replay_tick)
+        self.runTimer = QTimer(self)
+        self.runTimer.setInterval(500)
+        self.runTimer.timeout.connect(self.scanRuns)
+        self.runTimer.start()
+        self.chatAnswer.connect(self._chat_done)
+        self.chatChunk.connect(self._chat_chunk)
+        self.modelsAnswer.connect(self._models_done)
+        # split viewport: pane 1 is the viewer above; panes 2-4 each run a viewer of their own
+        self.view_size = (VIEW_W, VIEW_H)
+        self.cam = None                 # pane 1's (yaw, pitch) from its last frame
+        self.panes = [paneslib.Pane(self, n, EXE, self.env) for n in (2, 3, 4)]
+        for pane in self.panes:
+            pane.changed.connect(self.panesChanged)
+        self.waiting = []               # live runs that found every pane busy, oldest first
+        self._layout, self._link = 1, False
+        self._auto = True               # AUTO: one pane per live run, the split grows and shrinks on its own
+        self._shrink_at = 0.0           # AUTO: when fewer panes started to be enough (it waits before shrinking)
+        try:
+            prefs = json.load(open(VIEW_PREFS))
+            self._layout = prefs.get("layout", 1) if prefs.get("layout") in (1, 2, 4) else 1
+            self._link = bool(prefs.get("link", False))
+            self._auto = bool(prefs.get("auto", True))
+        except (OSError, ValueError, AttributeError):
+            pass
+
+    # ---- properties ------------------------------------------------------------------------
+    def _get_info(self): return self._info
+    def _get_clip(self): return self._clip
+    def _get_sel(self): return self._sel
+    def _get_playhead(self): return self._playhead
+    def _get_status(self): return self._status
+    def _get_models(self): return self._models
+    def _get_clips(self): return self._clips
+    def _get_runs(self): return self._runs
+    def _get_ai_model(self): return self.ai_model
+    info = Property("QVariantMap", _get_info, notify=infoChanged)
+    clip = Property("QVariantMap", _get_clip, notify=infoChanged)
+    sel = Property("QVariantMap", _get_sel, notify=infoChanged)
+    playhead = Property("QVariantMap", _get_playhead, notify=playheadChanged)
+    keys = Property("QVariantMap", lambda self: self._keys, notify=keysChanged)
+    status = Property(str, _get_status, notify=statusChanged)
+    models = Property("QVariantList", _get_models, notify=listsChanged)
+    clips = Property("QVariantList", _get_clips, notify=listsChanged)
+    runs = Property("QVariantList", _get_runs, notify=runsChanged)
+    aiModel = Property(str, _get_ai_model, notify=runsChanged)
+    watchedRun = Property(str, lambda self: self.watching, notify=runsChanged)
+    drawings = Property("QVariantList", lambda self: self._drawings, notify=toolsChanged)
+    filed = Property("QVariantList", lambda self: self._filed, notify=filedChanged)
+    folder = Property("QVariantList", lambda self: [folder_entry(s) for s in self._filed], notify=filedChanged)
+    drawingOpen = Property(bool, lambda self: self._drawing_open, notify=toolsChanged)
+    chatMessages = Property("QVariantList", lambda self: self._chat, notify=chatChanged)
+    chatModels = Property("QVariantList", lambda self: self._chat_models, notify=chatChanged)
+    chatModel = Property(str, lambda self: self._chat_model, notify=chatChanged)
+    chatBusy = Property(bool, lambda self: self._chat_busy, notify=chatChanged)
+    catalogueBusy = Property(bool, lambda self: self._catalogue_busy, notify=chatChanged)
+    replay = Property("QVariantMap", lambda self: self._replay, notify=replayChanged)
+    # the op that made the revision on screen ("line 14: add Blob ..."): the tool wheel's tool, in step with
+    # the viewport, whether it follows a run, a replay or your bench
+    shownOp = Property(str, lambda self: live_runs.revision_op(self.watching, self.displayed_revision)
+                       if self.watching and self.displayed_revision else "", notify=shownOpChanged)
+    bench = Property("QVariantMap", lambda self: self._bench, notify=benchChanged)
+    researchModels = Property("QVariantList", lambda self: [m for m in self._chat_models if m.get("research", True)], notify=chatChanged)
+    # s&box-style sub-selection in the viewport: the latest @selection event, the pick mode and its prompt line
+    refs = Property("QVariantMap", lambda self: self._refs, notify=refsChanged)
+    ortho = Property(bool, lambda self: self._ortho, notify=refsChanged)
+    subSelection = Property("QVariantMap", lambda self: self._sub_sel, notify=subSelectionChanged)
+    subMode = Property(str, lambda self: self._sub_mode, notify=subSelectionChanged)
+    subPrompt = Property(str, lambda self: self._sub_prompt, notify=subSelectionChanged)
+    panesChanged = Signal()
+    paneStickerMade = Signal(int, str, float, float, float, float)   # pane number, then as stickerMade
+    paneList = Property("QVariantList", lambda self: list(self.panes), constant=True)
+    viewLayout = Property(int, lambda self: self._layout, notify=panesChanged)
+    linkCameras = Property(bool, lambda self: self._link, notify=panesChanged)
+    autoLayout = Property(bool, lambda self: self._auto, notify=panesChanged)
+
+    def set_status(self, s):
+        self._status = s
+        self.statusChanged.emit()
+
+    # ---- the window ------------------------------------------------------------------------
+    @Slot("QVariantList")
+    def setMask(self, rects):
+        """rects: flat list x, y, w, h, x, y, w, h, ... in window coordinates"""
+        if self.window is None:
+            return
+        reg = QRegion()
+        for i in range(0, len(rects) - 3, 4):
+            x, y, w, h = (int(round(v)) for v in rects[i:i + 4])
+            if w > 0 and h > 0:
+                reg = reg.united(QRegion(QRect(x, y, w, h)))
+        self.window.setMask(reg)
+
+    def snap(self, path):
+        # not grabWindow: it blocks this thread on the render thread, which needs Python (Viewport.paint) -> deadlock
+        QMetaObject.invokeMethod(self.window, "snapTo", Q_ARG("QVariant", path))
+        return True
+
+    # ---- the viewport process --------------------------------------------------------------
+    @Slot(str)
+    def openModel(self, path, clip=""):
+        path = os.path.abspath(os.path.expanduser(path))
+        if not os.path.isfile(path):
+            self.set_status("no such model: " + path)
+            return
+        self._end_replay()
+        self.watching = ""
+        self.displayed_revision = 0
+        self.runsChanged.emit()
+        self.stop()
+        self.model = path
+        self._info, self._clip, self._sel = {"model": path}, {}, {"bone": -1, "body": -1}
+        self._sub_reset()
+        self._keys = NO_KEYS
+        self.infoChanged.emit()
+        self.keysChanged.emit()
+        self.set_status("loading " + os.path.basename(path))
+        self.listFiles()
+        p = QProcess(self)
+        p.setProcessEnvironment(self.env)
+        p.setProgram(EXE)
+        p.setArguments(["--serve", "--size", "%dx%d" % self.view_size, "--model", path] + (["--clip", clip] if clip else []))
+        p.setProcessChannelMode(QProcess.SeparateChannels)
+        p.readyReadStandardOutput.connect(lambda p=p: self.onOutput(p))
+        p.readyReadStandardError.connect(lambda p=p: self._viewer_stderr(p))
+        p.finished.connect(lambda code, _st, p=p: self.onFinished(p, code))
+        self.buf = b""
+        self.proc = p
+        p.start()
+
+    def stop(self):
+        p, self.proc = self.proc, None
+        if p is not None and p.state() != QProcess.NotRunning:
+            p.write(b"quit\n")
+            if not p.waitForFinished(1500):
+                p.kill()
+                p.waitForFinished(500)
+        self.unmap()
+
+    def unmap(self):
+        if self.shm is not None:
+            self.shm.close()
+        self.shm, self.shm_path = None, ""
+
+    @Slot(str)
+    def cmd(self, line):
+        if self.proc is not None and self.proc.state() != QProcess.NotRunning:
+            self.proc.write((line + "\n").encode())     # a viewer still starting gets it once it is up
+
+    # ---- reference pictures: a photo stood behind the model to build against ----------------
+    @Slot(str, str)
+    def refAdd(self, view, url):
+        """put the picture at url (a file:// url from the file dialog) up on the front, side or top view"""
+        path = QUrl(url).toLocalFile() if url.startswith("file:") else url
+        if not path or not os.path.isfile(path):
+            self.set_status("no picture at " + (path or "?"))
+            return
+        if self.proc is None:
+            self.set_status("open a model first: the picture stands behind it")
+            return
+        self.cmd("refadd %s %s" % (view, path))
+
+    @Slot()
+    def refCopyLines(self):
+        """a build can't be saved into: copy the refimage lines, to paste into its build script"""
+        lines = [i.get("line", "") for i in self._refs.get("images", [])]
+        if not lines:
+            self.set_status("no reference pictures to copy")
+            return
+        QGuiApplication.clipboard().setText("\n".join(lines) + "\n")
+        self.set_status("copied %d refimage line(s): paste them into the build script" % len(lines))
+
+    # ---- sub-selection: faces / edges / vertices picked in the viewport (s&box Geppetto semantics) ----
+    SUB_MODES = ("body", "face", "edge", "vertex")
+
+    @staticmethod
+    def sub_prompt(ev):
+        """the s&box prompt line for a selection event: edge > face > vertex, then the notice, then lost refs"""
+        items = [i for i in (ev.get("items") or []) if isinstance(i, dict)]
+        n = {k: sum(1 for i in items if i.get("kind") == k) for k in ("face", "edge", "vertex")}
+        if not items and ev.get("count"):                    # no item list: trust kind/count
+            k = {"faces": "face", "edges": "edge", "vertices": "vertex"}.get(ev.get("kind", ""))
+            if k:
+                n[k] = int(ev["count"])
+        if n["edge"]:
+            text = "1 edge selected" if n["edge"] == 1 else "%d edges selected" % n["edge"]
+        elif n["face"] == 1:
+            body = next((i.get("body") for i in items if i.get("kind") == "face"), "") or ev.get("bodyNames", "") or "?"
+            text = "Face of %s selected — tools that take faces will use it." % body
+        elif n["face"]:
+            text = "%d faces selected" % n["face"]
+        elif n["vertex"]:
+            text = "1 vertex selected" if n["vertex"] == 1 else "%d vertices selected" % n["vertex"]
+        else:
+            text = ""
+        notice = ev.get("notice") or ""
+        if notice:
+            text = (text + " — " + notice) if text else notice
+        lost = int(ev.get("lost") or 0)
+        if lost > 0:
+            word = {"edge": ("edge", "edges"), "vertex": ("vertex", "vertices")}.get(ev.get("mode", ""), ("face", "faces"))
+            gone = ("1 picked %s no longer exists… Re-pick." % word[0]) if lost == 1 else \
+                   ("%d picked %s no longer exist… Re-pick." % (lost, word[1]))
+            text = (text + " " + gone) if text else gone
+        return text
+
+    def onSubSelection(self, ev):
+        mode = ev.get("mode") or self._sub_mode
+        if mode in self.SUB_MODES:
+            self._sub_mode = mode
+        self._sub_sel = ev
+        lost = int(ev.get("lost") or 0)
+        self._sub_prompt = self.sub_prompt(ev)       # built from the counts only, so hover events leave it alone
+        self._sub_lost = lost
+        self.subSelectionChanged.emit()
+
+    def _sub_reset(self):
+        """a new viewer starts in body mode with nothing picked"""
+        self._sub_mode, self._sub_sel, self._sub_prompt, self._sub_lost = "body", {}, "", 0
+        self._hover_at = self._hover_pending = None
+        self.hoverTimer.stop()
+        self.subSelectionChanged.emit()
+
+    @Slot(str)
+    def setSelMode(self, mode):
+        mode = (mode or "").strip().lower()
+        if mode not in self.SUB_MODES:
+            self.set_status("selection mode: body, face, edge or vertex")
+            return
+        self._sub_mode = mode
+        self._hover_at = self._hover_pending = None
+        self.cmd("selmode " + mode)
+        self.subSelectionChanged.emit()               # the viewer answers with the (cleared) selection
+
+    @Slot(float, float, bool, bool, bool)
+    def subPick(self, x, y, shift=False, ctrl=False, alt=False):
+        """a click in face/edge/vertex mode: plain replaces, shift toggles in, ctrl removes, alt takes the opposite face too"""
+        line = "pick %d %d" % (round(x), round(y))
+        if shift:
+            line += " add"
+        if ctrl:
+            line += " remove"
+        if alt:
+            line += " pair"
+        self.cmd(line)
+
+    @Slot(float, float)
+    def subHover(self, x, y):
+        """the cursor over the viewport: light what's under it, at most ~60 a second and only when it moved"""
+        if self._sub_mode == "body":
+            return
+        at = (round(x), round(y))
+        if at == self._hover_at:
+            self._hover_pending = None
+            return
+        if self.hoverTimer.isActive():
+            self._hover_pending = at                  # sent when the timer runs out, so the last one isn't lost
+            return
+        self._hover_send(at)
+
+    def _hover_send(self, at):
+        self._hover_at = at
+        self._hover_pending = None
+        self.cmd("hover %d %d" % at)
+        self.hoverTimer.start()
+
+    def _hover_flush(self):
+        if self._hover_pending is not None and self._hover_pending != self._hover_at:
+            self._hover_send(self._hover_pending)
+
+    @Slot()
+    def clearSubSelection(self):
+        self.cmd("selclear")
+
+    @Slot(int)
+    def assignFacesToSlot(self, slot):
+        """the picked faces onto material slot N of your bench copy (0 = detach them)"""
+        faces = (self._sub_sel.get("faces") or "").strip()
+        if not faces:
+            self.set_status("no faces picked: switch to face mode (2) and click some")
+            return
+        self.benchApply("facematerial slot=%d faces=%s" % (int(slot), faces))
+
+    def _viewer_stderr(self, p):
+        text = bytes(p.readAllStandardError()).decode(errors="replace")
+        lines = [x for x in text.splitlines() if x.strip()]
+        if lines:
+            self.viewer_err = lines[-1][:160]
+
+    def onFinished(self, p, code):
+        if p is self.proc:
+            self.proc = None
+            self.unmap()
+            if not self._status.startswith("error"):
+                self.set_status("viewer exited (%d)" % code + (": " + self.viewer_err if code and getattr(self, "viewer_err", "") else ""))
+
+    def onOutput(self, p):
+        if p is not self.proc:
+            p.readAllStandardOutput()
+            return
+        self.buf += bytes(p.readAllStandardOutput())
+        *lines, self.buf = self.buf.split(b"\n")
+        frame = None
+        for raw in lines:
+            if not raw.startswith(b"@"):
+                continue
+            try:
+                ev = json.loads(raw[1:])
+            except ValueError:
+                continue
+            kind = ev.get("ev")
+            if kind == "frame":
+                frame = ev                      # only the latest of a burst is worth showing
+            elif kind == "ready":
+                self._info = ev
+                self._clip = ev.get("clip") or {}
+                self.infoChanged.emit()
+                self.set_status("%s  %d tris  %.1fs" % (os.path.basename(ev["model"]), ev.get("tris", 0), ev.get("load_s", 0)))
+            elif kind == "ai-activity":
+                if self.watching:
+                    self.live_states[self.watching] = ev
+                    self.maybeSendOff(self.watching, ev)
+                    self.set_status(activity(ev))
+                    self.scanRuns()
+            elif kind == "ai-preview":
+                self.displayed_revision = ev.get("revision", 0)
+                self.shownOpChanged.emit()
+                if self._replay:
+                    self._replay = dict(self._replay, shown=self.displayed_revision)
+                    self.replayChanged.emit()
+                self._info.update({"model": ev.get("path", ""), "tris": ev.get("tris", 0),
+                                   "bodies": [], "bones": [], "materials": []})
+                self._clip, self._sel = {}, {"bone": -1, "body": -1}
+                self.infoChanged.emit()
+                self.scanRuns()
+            elif kind == "sent-off":
+                if self._keep_to:
+                    # a KEEP flew off: put the kept model back on screen, so the next edit and KEEP carry on from it
+                    kept, self._keep_to = self._keep_to, ""
+                    tool = (self._bench.get("form") or {}).get("key", "")
+                    self.openModel(kept_model(kept))
+                    if tool:                                   # the card stays up, now on a copy of the kept model
+                        self.benchDescribe(tool)
+                elif self.watching and not self._replay:
+                    self.set_status("finished " + os.path.basename(self.watching))
+                    self.watching = ""
+                    self.displayed_revision = 0
+                    self.scanRuns()
+            elif kind == "ai-preview-error":
+                self.set_status("preview: " + ev.get("msg", "?"))
+            elif kind == "clip":
+                self._clip = ev
+                self.infoChanged.emit()
+            elif kind == "keys":
+                self._keys = ev
+                self.keysChanged.emit()
+                if self._clip and ev.get("frames", 0) != self._clip.get("frames", 0):
+                    self._clip = dict(self._clip, frames=ev.get("frames", 0))   # a key dragged past the end
+                    self.infoChanged.emit()
+            elif kind == "saved":
+                self.set_status("saved %s (backup in %s)" % (os.path.basename(ev.get("path", "")), os.path.dirname(ev.get("backup", ""))))
+            elif kind == "selected":
+                self._sel = {"bone": ev.get("bone", -1), "body": ev.get("body", -1)}
+                self.infoChanged.emit()
+            elif kind == "selection":
+                self.onSubSelection(ev)
+            elif kind == "refs":
+                self._refs = ev
+                self.refsChanged.emit()
+                if ev.get("problems"):
+                    self.set_status(ev["problems"].split("\n")[0])
+                elif ev.get("note"):
+                    self.set_status(ev["note"])
+            elif kind == "error":
+                self.set_status("error: " + ev.get("msg", "?"))
+            elif kind == "loading":
+                pass
+        if frame is not None:
+            self.onFrame(frame)
+
+    def onFrame(self, ev):
+        w, h = ev["w"], ev["h"]
+        path = self._info.get("shm", "")
+        try:
+            if self.shm is None or self.shm_path != path or len(self.shm) != w * h * 4:
+                self.unmap()
+                with open(path, "rb") as f:
+                    self.shm = mmap.mmap(f.fileno(), w * h * 4, access=mmap.ACCESS_READ)
+                self.shm_path = path
+            data = self.shm[:w * h * 4]
+            self.image = QImage(data, w, h, w * 4, QImage.Format_RGBX8888).copy()
+            if ev.get("card") and (self._keep_to or self.watching):
+                self.fileSticker(data, w, h)
+        except (OSError, ValueError) as e:
+            self.set_status("frame: %s" % e)
+        self.cmd("ack")
+        self.cam = (ev.get("yaw", 0), ev.get("pitch", 0))
+        if bool(ev.get("ortho")) != self._ortho:
+            self._ortho = bool(ev.get("ortho"))
+            self.refsChanged.emit()
+        self._playhead = {"time": ev.get("time", 0), "frame": ev.get("frame", 0), "playing": ev.get("playing", False),
+                          "loop": ev.get("loop", True)}
+        self.playheadChanged.emit()
+        self.frameReady.emit()
+
+    def fileSticker(self, data, w, h):
+        """the send-off's card frame: cut the model out as a sticker, keep it with its run, and tell QML
+        where it sat so it can be peeled off the viewport and filed"""
+        got = stickerlib.cut(data, w, h)
+        if got is None:
+            return
+        rgba, (x, y, sw, sh) = got
+        path = os.path.join(self._keep_to or self.watching, "sticker.png")
+        if not QImage(rgba.tobytes(), sw, sh, sw * 4, QImage.Format_RGBA8888).save(path):
+            self.set_status("sticker: could not write " + path)
+            return
+        self._landing = [path] + [f for f in self._filed if f != path]
+        self.stickerMade.emit("file://" + path, x / w, y / h, sw / w, sh / h)
+
+    @Slot()
+    def stickerLanded(self):
+        """the flying sticker is in the folder: now it's filed"""
+        if getattr(self, "_landing", None) is not None:
+            self._filed, self._landing = self._landing, None
+            self.filedChanged.emit()
+
+    # ---- files -----------------------------------------------------------------------------
+    def listFiles(self):
+        models = walk(PROJECTS, (".effigy",), 200)
+        root = project_root(self.model) if self.model else None
+        if root:
+            models += walk(os.path.join(root, "Assets", "models"), (".fbx",), 200)
+        if self.model and self.model not in models:
+            models.insert(0, self.model)
+        self._models = [{"path": m, "name": os.path.basename(m),
+                         "where": os.path.relpath(os.path.dirname(m), PROJECTS) if m.startswith(PROJECTS) else os.path.dirname(m)}
+                        for m in models]
+        clips = walk(root, (".riganim",), 300) if root else []
+        self._clips = []
+        for c in clips:
+            src = clip_source(c, root)
+            self._clips.append({"path": c, "name": os.path.splitext(os.path.basename(c))[0],
+                                "where": os.path.relpath(os.path.dirname(c), root),
+                                "source": src or "",
+                                "fits": src is None or same_model(src, self.model)})
+        # clips made on this model first
+        self._clips.sort(key=lambda c: (not c["fits"], c["name"]))
+        self.listsChanged.emit()
+
+    @Slot(str)
+    def playClip(self, path):
+        """play a clip on the model it was made for: a clip on the wrong rig only mangles it"""
+        if self._keys.get("dirty") and getattr(self, "_drop_edits", None) != path:
+            self._drop_edits = path           # a second click on the same clip means it
+            self.set_status("unsaved key edits: SAVE them, or click the clip again to drop them")
+            return
+        self._drop_edits = None
+        c = next((c for c in self._clips if c["path"] == path), None)
+        if c is None or c["fits"]:
+            self.cmd("clip " + path)
+        elif c["source"] and os.path.isfile(c["source"]):
+            self.openModel(c["source"], path)
+        else:
+            self.set_status("%s was made for %s, which isn't here" % (c["name"], os.path.basename(c["source"]) or "another model"))
+
+    @Slot(str)
+    def watchRun(self, directory):
+        directory = os.path.abspath(directory)
+        state = read_state(directory)
+        if not state.get("runId"):
+            self.set_status("run is starting; try Watch again shortly")
+            return
+        if self._replay and self._replay["dir"] != directory:
+            self._end_replay()      # following another run: the old run's replay strip goes
+        self.watching = directory
+        self.displayed_revision = 0
+        self.live_states[directory] = state
+        if self.proc is None or self.proc.state() == QProcess.NotRunning:
+            # Boot the existing headless server directly into its blank/follow mode.
+            self.stop()
+            p = QProcess(self)
+            p.setProcessEnvironment(self.env)
+            p.setProgram(EXE)
+            p.setArguments(["--serve", "--watch-run", directory, "--size", "%dx%d" % self.view_size])
+            p.setProcessChannelMode(QProcess.SeparateChannels)
+            p.readyReadStandardOutput.connect(lambda p=p: self.onOutput(p))
+            p.readyReadStandardError.connect(lambda p=p: self._viewer_stderr(p))
+            p.finished.connect(lambda code, _st, p=p: self.onFinished(p, code))
+            self.buf = b""
+            self.proc = p
+            p.start()
+        else:
+            self.cmd("follow " + directory)
+        self.set_status("watching " + os.path.basename(directory))
+        self.scanRuns()
+
+    SEND_OFF_DELAY_MS = 1800
+
+    def maybeSendOff(self, directory, ev):
+        """A run watched while it built has just completed: let the last model sit a moment, then send it
+        off and leave the viewport empty. Opening a finished run's card later just shows it."""
+        state = ev.get("state")
+        if directory == self._bench.get("dir"):
+            return
+        if state not in TERMINAL:
+            self.saw_building.add(directory)
+        elif state == "completed" and directory in self.saw_building:
+            self.saw_building.discard(directory)
+            def go(d=directory):
+                if self.watching == d and not self._replay:
+                    self.cmd("sendoff")
+            QTimer.singleShot(self.SEND_OFF_DELAY_MS, go)
+
+    @Slot()
+    def stopWatching(self):
+        self._end_replay()
+        self.cmd("follow")
+        self.watching = ""
+        self.displayed_revision = 0
+        self.scanRuns()
+
+    # ---- the bench: tools from the wheel, used by hand on your own copy ------------------------
+    # Whatever is on screen is copied into a bench run of its own (--bench), and every tool you apply
+    # is a script line there, published as a revision the viewport follows. The run you scrubbed or
+    # watched is only ever read: its journal, revisions and script stay as they were, and the AI
+    # building it carries on untouched.
+    def bench_alive(self):
+        return self.bench_proc is not None and self.bench_proc.state() != QProcess.NotRunning
+
+    def _bench_set(self, **fields):
+        self._bench = dict(self._bench, **fields)
+        self.benchChanged.emit()
+
+    def _bench_source(self):
+        """(document to copy or "", line to run first or "", what it came from) for what is on screen"""
+        if self._replay:
+            d, rev = self._replay["dir"], self._replay.get("rev", 0)
+            path = live_runs.revision_path(d, rev)
+            if path:
+                return path, "", "%s step %d" % (os.path.basename(d), self._replay.get("at", 0) + 1)
+        if self.watching:
+            state = self.live_states.get(self.watching) or read_state(self.watching)
+            rev = self.displayed_revision
+            path = live_runs.revision_path(self.watching, rev) if rev else ""
+            path = path or preview_path(self.watching, state)
+            if path:
+                return path, "", "%s rev %d" % (os.path.basename(self.watching), rev or (state.get("snapshot") or {}).get("revision", 0))
+        if self.model and os.path.isfile(self.model):
+            if self.model.endswith(".effigy"):
+                return self.model, "", os.path.basename(self.model)
+            return "", 'add Import source="%s"' % self.model, os.path.basename(self.model)
+        return "", "", "empty"
+
+    def _bench_current(self):
+        """the bench already on screen, still running and not scrubbed back: keep editing it"""
+        return (self.bench_alive() and self.watching == self._bench.get("dir")
+                and (not self._replay or self._replay.get("dir") != self._bench.get("dir")))
+
+    def bench_ensure(self):
+        if self._bench_current():
+            return True
+        source, first, label = self._bench_source()
+        # what was on screen, so the EDIT/RUN key can put it back: the scrubbed step, the run followed, the model
+        back = {"replay": self._replay.get("dir", ""), "at": self._replay.get("at", 0),
+                "watching": "" if self._replay else self.watching, "model": self.model}
+        self.benchClose()
+        stem = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-")[:40] or "empty"
+        d = os.path.join(RUNS, "bench-%s-%s" % (stem, time.strftime("%Y%m%d-%H%M%S")))
+        k = 2
+        while os.path.exists(d) or os.path.exists(d + ".json"):
+            d, k = d.rstrip("-0123456789") + "-%d" % k, k + 1
+        args = ["--bench", d, "--from", label]
+        if source:
+            # a copy beside the bench, so loading it can't write anything into the run it came from
+            base = d + ".base.effigy"
+            os.makedirs(RUNS, exist_ok=True)
+            shutil.copyfile(source, base)
+            args += ["--doc", base]
+        p = QProcess(self)
+        p.setProcessEnvironment(self.env)
+        p.setProgram(EXE)
+        p.setArguments(args)
+        p.setProcessChannelMode(QProcess.SeparateChannels)
+        p.readyReadStandardOutput.connect(lambda p=p: self._bench_output(p))
+        p.readyReadStandardError.connect(lambda p=p: self._bench_stderr(p))
+        p.finished.connect(lambda code, _st, p=p: self._bench_finished(p, code))
+        self.bench_buf = b""
+        self.bench_proc = p
+        self._bench = {"dir": d, "alive": True, "ready": False, "from": label, "bodies": [], "features": [],
+                       "canUndo": False, "form": {}, "error": "", "log": "", "busy": True,
+                       "back": back, "view": "edit"}
+        self.benchChanged.emit()
+        p.start()
+        if first:
+            self._bench_send("apply " + first)
+        self.set_status("editing a copy of " + label)
+        return True
+
+    def _bench_send(self, line):
+        if self.bench_alive():
+            self.bench_proc.write((line + "\n").encode())
+
+    def _bench_stderr(self, p):
+        err = bytes(p.readAllStandardError()).decode(errors="replace").strip()
+        if err and p is self.bench_proc:
+            self._bench_set(error=err.splitlines()[-1][:300])
+
+    def _bench_finished(self, p, code):
+        if p is self.bench_proc:
+            self.bench_proc = None
+            self._bench_set(alive=False, busy=False)
+            self.scanRuns()
+
+    def _bench_output(self, p):
+        if p is not self.bench_proc:
+            p.readAllStandardOutput()
+            return
+        self.bench_buf += bytes(p.readAllStandardOutput())
+        *lines, self.bench_buf = self.bench_buf.split(b"\n")
+        for raw in lines:
+            if not raw.startswith(b"@"):
+                continue
+            try:
+                ev = json.loads(raw[1:])
+            except ValueError:
+                continue
+            kind = ev.get("ev")
+            state = ev.get("state") if isinstance(ev.get("state"), dict) else ev
+            keep = {k: state[k] for k in ("bodies", "features", "canUndo", "revision", "slots", "presets") if k in state}
+            if kind == "ready":
+                self._bench_set(ready=True, busy=False, **keep)
+                self.watchRun(self._bench["dir"])
+            elif kind in ("applied", "undone", "state"):
+                self._bench_set(busy=False, error="", log=ev.get("log", "") or ("undid " + ev["line"] if kind == "undone" else ""), **keep)
+                if kind != "state":
+                    self.set_status(("undid " if kind == "undone" else "") + ev.get("line", "")[:80])
+            elif kind == "failed":
+                self._bench_set(busy=False, error=ev.get("error", "failed"))
+                self.set_status("can't: " + ev.get("error", "")[:100])
+            elif kind == "describe":
+                self._bench_set(form=ev, error=ev.get("error", ""))
+
+    @Slot(str)
+    def benchDescribe(self, key):
+        """a tool picked off the wheel by hand: its fields, for the tool card"""
+        if self.bench_ensure():
+            self._bench_set(form={"key": key, "loading": True}, error="")
+            self._bench_send("describe " + key)
+
+    @Slot()
+    def benchStart(self):
+        """the material browser opened: a bench on what's on screen, so it can list the slots"""
+        if self.bench_ensure() and self._bench.get("ready"):
+            self._bench_send("state")
+
+    @Slot(str)
+    def benchApply(self, line):
+        line = " ".join(line.split())
+        if not line:
+            return
+        if self.bench_ensure():
+            self._bench_set(busy=True, error="")
+            self._bench_send("apply " + line)
+
+    @Slot()
+    def benchUndo(self):
+        if self._bench_current():
+            self._bench_set(busy=True)
+            self._bench_send("undo")
+
+    @Slot(bool)
+    def benchView(self, edit):
+        """the EDIT/RUN key: your copy on screen, or what you copied it from (the run's step, the run, the model)"""
+        if not self._bench:
+            return
+        if edit:
+            if os.path.isdir(self._bench["dir"]):
+                self.watchRun(self._bench["dir"])
+                self._bench_set(view="edit")
+            return
+        b = self._bench.get("back") or {}
+        if b.get("replay"):
+            self.replayRun(b["replay"])
+            self.replaySeek(b.get("at", 0))
+        elif b.get("watching"):
+            self.watchRun(b["watching"])
+        elif b.get("model") and os.path.isfile(b["model"]):
+            self.openModel(b["model"])
+        else:
+            self.set_status("nothing behind the bench: it started empty")
+            return
+        self._bench_set(view="run")
+
+    @Slot(str)
+    def benchKeep(self, name=""):
+        """KEEP: your edit becomes a real model in the MODELING folder. A model you opened from the folder
+        is saved over in place; anything else (a run's step, a run, an empty bench) gets a folder of its own.
+        It flies off the viewport into the folder like a finished run, then comes back up to carry on with."""
+        b = self._bench
+        if not b.get("dir") or not b.get("revision"):
+            self._bench_set(error="nothing to keep yet: make an edit first")
+            return ""
+        src = live_runs.revision_path(b["dir"], b["revision"])
+        if not src:
+            self._bench_set(error="can't find revision %s of your edit" % b["revision"])
+            return ""
+        model = (b.get("back") or {}).get("model", "")
+        if not name and model and os.path.dirname(os.path.dirname(model)) == MODELING and os.path.isfile(model):
+            d = os.path.dirname(model)                    # opened from the folder: save it back where it was
+        else:
+            back = b.get("back") or {}
+            src_dir = back.get("replay") or back.get("watching")
+            name = name or (run_name(src_dir) if src_dir else os.path.splitext(os.path.basename(model))[0] if model else "model")
+            stem = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:40] or "model"
+            d, k = os.path.join(MODELING, stem), 2
+            while os.path.exists(d):
+                d, k = os.path.join(MODELING, "%s-%d" % (stem, k)), k + 1
+        os.makedirs(d, exist_ok=True)
+        try:
+            meta = json.load(open(os.path.join(d, "kept.json")))
+        except (OSError, ValueError):
+            meta = {"name": name or os.path.basename(d), "from": b.get("from", "")}
+        meta.update(saved=time.strftime("%Y-%m-%d %H:%M:%S"), bench=b["dir"], revision=b["revision"])
+        shutil.copyfile(src, kept_model(d))
+        json.dump(meta, open(os.path.join(d, "kept.json"), "w"), indent=1)
+        self.set_status("kept " + meta["name"] + " in MODELING")
+        self._keep_to = d
+        if self.proc is not None and self.proc.state() != QProcess.NotRunning:
+            self.cmd("sendoff")                            # card frame -> sticker -> folder; sent-off reopens it
+        else:
+            self._keep_to = ""
+        return kept_model(d)
+
+    @Slot(int)
+    def openFiled(self, i):
+        """a slip out of the MODELING folder, on screen: a kept model opens to edit, a run shows what it built"""
+        if not 0 <= i < len(self._filed):
+            return
+        e = folder_entry(self._filed[i])
+        if e["kind"] == "model":
+            self.openModel(e["path"])
+        elif os.path.isdir(e["path"]):
+            self.watchRun(e["path"])
+
+    @Slot()
+    def benchClose(self):
+        """put the tools down: the bench keeps its revisions on disk (KEEP files the result), the process ends"""
+        p = self.bench_proc
+        if p is not None and p.state() != QProcess.NotRunning:
+            p.write(b"quit\n")
+            p.closeWriteChannel()
+            if not p.waitForFinished(3000):
+                p.kill()
+        self.bench_proc = None
+        if self._bench:
+            self._bench = dict(self._bench, alive=False, busy=False, form={})
+            self.benchChanged.emit()
+
+    # ---- replay: scrub a run's kept revisions, leave notes on steps ------------------------
+    def _replay_step(self, at):
+        steps = self._replay.get("steps", [])
+        if not steps:
+            return {}
+        at = max(0, min(len(steps) - 1, at))
+        st = steps[at]
+        return {"at": at, "rev": st["rev"], "op": st["op"], "code": live_runs.script_line(self._replay["dir"], st["op"])}
+
+    def _replay_set(self, at, **extra):
+        step = self._replay_step(at)
+        if not step:
+            return
+        self._replay = dict(self._replay, **step, **extra)
+        self.cmd("seek %d" % step["rev"])
+        self.replayChanged.emit()
+
+    @Slot(str)
+    def replayRun(self, directory):
+        """WATCH on a run card: play the build back from its first step, using the revisions the run kept"""
+        directory = os.path.abspath(directory)
+        steps = live_runs.steps(directory)
+        if not steps:
+            self.set_status("nothing kept to replay for " + os.path.basename(directory))
+            return
+        if self.watching != directory:
+            self.watchRun(directory)
+        if self.watching != directory:
+            return
+        self._replay = {"dir": directory, "steps": steps, "count": len(steps), "playing": True, "shown": 0,
+                        "notes": live_runs.notes(directory), "live": directory in self.jobs or run_is_live(directory, read_state(directory))}
+        self.collapsed[directory] = False       # open the card: the scrubber and notes live on it
+        self._replay_set(0)
+        self.replayTimer.start()
+        self.scanRuns()
+        self.set_status("replaying %s: %d steps" % (os.path.basename(directory), len(steps)))
+
+    def _replay_tick(self):
+        r = self._replay
+        if not r or not r.get("playing"):
+            self.replayTimer.stop()
+            return
+        if r.get("shown") != r.get("rev"):
+            return                              # still loading this step: hold it until it shows
+        if r["at"] >= r["count"] - 1:
+            fresh = live_runs.steps(r["dir"])   # a live run may have moved on meanwhile
+            if len(fresh) > r["count"]:
+                self._replay = dict(r, steps=fresh, count=len(fresh))
+            else:
+                self._replay = dict(r, playing=False)
+                self.replayTimer.stop()
+                self.replayChanged.emit()
+                return
+        self._replay_set(self._replay["at"] + 1)
+
+    @Slot(int)
+    def replaySeek(self, at):
+        """the scrubber: show step `at` (0-based) and stop playing"""
+        if self._replay:
+            self.replayTimer.stop()
+            self._replay_set(at, playing=False)
+
+    @Slot()
+    def replayToggle(self):
+        r = self._replay
+        if not r:
+            return
+        if r.get("playing"):
+            self.replayTimer.stop()
+            self._replay = dict(r, playing=False)
+            self.replayChanged.emit()
+        else:
+            self._replay_set(0 if r["at"] >= r["count"] - 1 else r["at"], playing=True)
+            self.replayTimer.start()
+
+    @Slot()
+    def replayLive(self):
+        """stop replaying and go back to the run's latest model"""
+        self._end_replay()
+        self.cmd("seek 0")
+
+    def _end_replay(self):
+        if self._replay:
+            self.replayTimer.stop()
+            self._replay = {}
+            self.replayChanged.emit()
+
+    @Slot(str)
+    def addNote(self, text):
+        """a note on the step on screen: kept with the run for whoever models next (geppetto-notes /
+        geppetto-live print it); a run still going also gets it as a direction right away"""
+        r = self._replay
+        if not r or not text.strip():
+            return
+        try:
+            note = live_runs.add_note(r["dir"], r["rev"], r["op"], text)
+        except (OSError, ValueError) as e:
+            self.set_status("note: " + str(e))
+            return
+        # a script run takes no directions: its modeller's session picks the note up (geppetto-notes --follow)
+        sent = "" if not os.path.basename(r["dir"]).startswith("script-") else "; the modeller picks it up"
+        if not sent and (r["dir"] in self.jobs or run_is_live(r["dir"], read_state(r["dir"]))):
+            try:
+                send_command(r["dir"], "instruct", text="note on step %d (%s): %s" % (r["rev"], r["op"][:200], note["text"]))
+                sent = "; sent to the run"
+            except (OSError, ValueError):
+                pass
+        self._replay = dict(r, notes=live_runs.notes(r["dir"]))
+        self.replayChanged.emit()
+        self.set_status("note kept on step %d%s" % (r["rev"], sent))
+
+
+    # ---- research runs ---------------------------------------------------------------------
+    @Slot()
+    def scanRuns(self):
+        for directory in list(self.stop_requests):
+            self.tryCancel(directory)
+        out = []
+        if os.path.isdir(RUNS):
+            for name in sorted(os.listdir(RUNS), reverse=True):
+                d = os.path.join(RUNS, name)
+                if name.startswith(".") or not os.path.isdir(d):
+                    continue
+                files = set(os.listdir(d))
+                r = {"dir": d, "name": name, "status": "running" if d in self.jobs else "unknown",
+                     "score": -1, "best": "", "sources": 0, "rounds": 0, "prompt": ""}
+                meta = os.path.join(RUNS, name + ".json")
+                try:
+                    j = json.load(open(meta))
+                    r["prompt"] = j.get("prompt", "")
+                    r["bench"] = bool(j.get("bench"))
+                except (OSError, ValueError, AttributeError):
+                    pass
+                if not r["prompt"]:
+                    for f in sorted(files):
+                        if f.endswith("-brief.txt"):
+                            r["prompt"] = open(os.path.join(d, f)).read().split("\n")[1][:200]
+                            break
+                for f in sorted(files):
+                    p = os.path.join(d, f)
+                    try:
+                        if f.endswith("-result.json"):
+                            j = json.load(open(p))
+                            r["status"] = j.get("status", r["status"])
+                            r["best"] = os.path.join(d, j.get("best", "")) if j.get("best") else ""
+                            r["rounds"] = len(j.get("rounds", []))
+                            sc = [x.get("score", 0) for x in j.get("rounds", [])]
+                            if sc:
+                                r["score"] = max(sc)
+                        elif f == "stopped.json" and d not in self.jobs:
+                            j = json.load(open(p))
+                            r["status"] = "stopped: " + str(j.get("reason", ""))[:60]
+                            if j.get("bestCheckpoint"):
+                                r["best"] = os.path.join(d, j["bestCheckpoint"])
+                        elif f.endswith("-sources.json"):
+                            r["sources"] += len(json.load(open(p)))
+                        elif f.endswith("-selection.json") and r["score"] < 0:
+                            r["score"] = json.load(open(p)).get("score", -1)
+                    except (OSError, ValueError, AttributeError):
+                        pass
+                if r["status"] == "unknown" and d not in self.jobs:
+                    r["status"] = "ended"
+                if not r["best"]:
+                    eff = sorted(f for f in files if f.endswith(".effigy"))
+                    if eff:
+                        r["best"] = os.path.join(d, eff[-1])
+                live = read_state(d)
+                if live:
+                    self.live_states[d] = live
+                    r["activity"] = activity(live)
+                    r["operation"] = live.get("operation") or ""     # the line being built: the tool wheel's tool
+                    r["latestRevision"] = (live.get("snapshot") or {}).get("revision", 0)
+                    r["displayedRevision"] = self.displayed_revision if self.watching == d else 0
+                    r["wheelOp"] = live_runs.revision_op(d, r["latestRevision"])   # the op of its latest change: the wheel, unwatched
+                    r["preview"] = preview_path(d, live)
+                    control = control_state(live)
+                    r["paused"] = bool(control.get("paused") or control.get("pauseRequested"))
+                    r["pace"] = control.get("paceSeconds", 0) or 0
+                    r["pendingDirections"] = control.get("pendingDirections", 0) or 0
+                    if live.get("state") in ("completed", "below-target", "cancelled", "failed"):
+                        r["status"] = r["activity"]
+                    elif run_is_live(d, live):
+                        r["status"] = "running"         # also a run started outside the chest (a script run)
+                else:
+                    r.update(activity="starting" if d in self.jobs else "", operation="", wheelOp="", latestRevision=0, displayedRevision=0, preview="",
+                             paused=False, pace=0, pendingDirections=0)
+                r["pane"] = self.pane_of(d)             # the viewport pane showing it, 0 for none
+                r["waiting"] = d in self.waiting and r["pane"] == 0   # live, but every pane is busy
+                r["collapsed"] = self.collapsed.get(d, r["status"] != "running" and r["pane"] == 0)
+                log = os.path.join(RUNS, name + ".log")
+                r["log"] = ""
+                try:
+                    with open(log, "rb") as f:
+                        f.seek(max(0, os.path.getsize(log) - 400))
+                        tail = [x for x in f.read().decode(errors="replace").splitlines() if x.strip() and not x.startswith("@")]
+                        r["log"] = tail[-1][:120] if tail else ""
+                except OSError:
+                    pass
+                if not r.get("bench"):          # your bench copies stay off the list: what you KEEP goes in MODELING
+                    out.append(r)
+        out.sort(key=lambda r: r["status"] != "running")    # live runs on top
+        dirs = {r["dir"] for r in out}
+        if self.seen_runs is not None:
+            self.auto_pending |= dirs - self.seen_runs
+        else:
+            # the chest just opened: pick up whatever is still building, as if it had been open all along
+            self.auto_pending |= {r["dir"] for r in out if r["status"] == "running"}
+        self.seen_runs = dirs
+        if out != self._runs:
+            self._runs = out
+            self.runsChanged.emit()
+        if self.auto_pending or self.waiting:
+            QTimer.singleShot(0, self.autoFollow)
+        self.auto_shrink()
+
+    def autoFollow(self):
+        """a run that started after the chest did: put it in an EMPTY pane and bring the chest to the front.
+        A pane showing a live run (or a replay, or your bench) is never taken: with every pane busy the run
+        waits on its card ("waiting for a pane") until one frees up or po drags it into one."""
+        for d in sorted(self.auto_pending):
+            state = read_state(d)
+            if not os.path.isdir(d) or (state and not run_is_live(d, state)):
+                self.auto_pending.discard(d)
+            elif state.get("runId"):
+                self.auto_pending.discard(d)
+                self.collapsed.pop(d, None)
+                if d != self._bench.get("dir") and not self.pane_of(d) and d not in self.waiting:
+                    self.waiting.append(d)
+        placed = False
+        for d in list(self.waiting):
+            if not os.path.isdir(d) or not self.run_live(d) or self.pane_of(d):
+                self.waiting.remove(d)
+                continue
+            n = self.free_pane()
+            if not n and self._auto and self._layout < 4:
+                self._apply_layout(2 if self._layout == 1 else 4)   # AUTO: make room, nobody loses their pane
+                n = self.free_pane()
+            if not n:
+                self.set_status("%s waits for a pane: every pane shows a live run" % os.path.basename(d))
+                break
+            self.waiting.remove(d)
+            self.showRunIn(d, n)
+            placed = True
+        if placed:
+            kwin_raise()
+
+    SHRINK_AFTER = 8.0      # s a pane stays up after its run ends: the sticker flies, po sees the finished model
+
+    def auto_shrink(self):
+        """AUTO: back down to the fewest panes the busy ones need, once they have been enough for a while"""
+        if not self._auto or self._layout == 1 or self.waiting or self.auto_pending:
+            self._shrink_at = 0.0
+            return
+        busy = sum(1 for n in range(1, self._layout + 1) if self.pane_busy(n))
+        need = 1 if busy <= 1 else 2 if busy == 2 else 4
+        if need >= self._layout:
+            self._shrink_at = 0.0
+            return
+        now = time.monotonic()
+        if not self._shrink_at:
+            self._shrink_at = now
+        elif now - self._shrink_at >= self.SHRINK_AFTER:
+            self._shrink_at = 0.0
+            # busy panes the smaller layout hides go back to waiting and land in its free panes
+            self._apply_layout(need)
+
+    # ---- split viewport: 1, 2 or 4 panes, each with a run of its own ---------------------------
+    def run_live(self, d):
+        return d in self.jobs or run_is_live(d, read_state(d))
+
+    def pane_of(self, d):
+        """the pane number (1-4) showing run d, 0 for none"""
+        if not d:
+            return 0
+        if self.watching == d:
+            return 1
+        return next((p.number for p in self.panes[:self._layout - 1] if p.run == d), 0)
+
+    def pane_busy(self, n):
+        if n == 1:
+            return bool(self._replay) or self.bench_alive() or (bool(self.watching) and self.run_live(self.watching))
+        return self.panes[n - 2].busy()
+
+    def free_pane(self):
+        """the first shown pane with nothing live in it, 0 when all are busy"""
+        return next((n for n in range(1, self._layout + 1) if not self.pane_busy(n)), 0)
+
+    def pane_setup(self):
+        """what a fresh pane viewer is told: pane 1's camera when they are linked"""
+        return ["autoframe 1"] + (["view %g %g" % self.cam] if self._link and self.cam else [])
+
+    @Slot(str, result=str)
+    def runWho(self, d):
+        """the modeller building run d (a pane's header)"""
+        return paneslib.modeller(d) if d else ""
+
+    @Slot(str, result=str)
+    def runScript(self, d):
+        """run d's script as folder/file, or its prompt"""
+        return paneslib.script_label(d) if d else ""
+
+    @Slot(str, int)
+    def showRunIn(self, d, n):
+        """put run d in pane n (1-4), live; it leaves whichever pane had it"""
+        d = os.path.abspath(d)
+        n = max(1, min(self._layout, n))
+        if d in self.waiting:
+            self.waiting.remove(d)
+        for p in self.panes:
+            if p.run == d and p.number != n:
+                p.clear()
+        if n == 1:
+            if self.bench_alive():
+                self.set_status("pane 1 has your edit: KEEP or close it first, or put the run in another pane")
+                return
+            self.watchRun(d)
+        else:
+            if self.watching == d:
+                self.stopWatching()
+            if self.panes[n - 2].show(d):
+                self.set_status("pane %d: %s" % (n, os.path.basename(d)))
+        self.collapsed.pop(d, None)
+        self.scanRuns()
+
+    @Slot(str, int)
+    def replayIn(self, d, n):
+        """WATCH/REPLAY on a run card, into pane n"""
+        if n <= 1:
+            self.replayRun(d)
+        else:
+            self.panes[n - 2].replayRun(d)
+        self.scanRuns()
+
+    @Slot(int)
+    def clearPane(self, n):
+        if n == 1:
+            self.stopWatching()
+        elif 2 <= n <= 4:
+            self.panes[n - 2].clear()
+            self.scanRuns()
+
+    @Slot(int)
+    def setViewLayout(self, n):
+        """1, 2 or 4 panes, picked by hand: AUTO goes off. 0 is AUTO"""
+        if n == 0:
+            self._auto = True
+            self._shrink_at = 0.0
+            self._save_view_prefs()
+            self.panesChanged.emit()
+            self.set_status("viewports: AUTO, a pane for each live run")
+            self.scanRuns()
+            return
+        if n not in (1, 2, 4):
+            self.set_status("viewports takes AUTO, 1, 2 or 4")
+            return
+        self._auto = False
+        self._apply_layout(n)
+
+    def _apply_layout(self, n):
+        """show n panes. Panes the layout hides let their live runs go back to waiting for a pane, and
+        a live run moves from a hidden pane into a free shown one before anything else"""
+        if n == self._layout:
+            self._save_view_prefs()
+            self.panesChanged.emit()
+            return
+        moved = []
+        for p in self.panes[n - 1:]:
+            if p.run and (self.run_live(p.run) or p.busy()) and p.run not in self.waiting:
+                moved.append(p.run)
+            if p.alive() or p.run:
+                p.shut()
+        self.waiting[:0] = moved
+        self._layout = n
+        self._save_view_prefs()
+        self.panesChanged.emit()
+        self.set_status("viewports: %s%d pane%s" % ("AUTO, " if self._auto else "", n, "" if n == 1 else "s"))
+        self.scanRuns()
+        if self.waiting:
+            self.autoFollow()
+
+    @Slot(bool)
+    def setLinkCameras(self, on):
+        self._link = bool(on)
+        self._save_view_prefs()
+        if self._link and self.cam:
+            self.camAll("view %g %g" % self.cam)
+        self.panesChanged.emit()
+        self.set_status("cameras linked: turning one pane turns them all" if self._link else "each pane has its own camera")
+
+    @Slot(str)
+    def camAll(self, line):
+        """a camera move for every shown pane (link cameras)"""
+        self.cmd(line)
+        for p in self.panes[:self._layout - 1]:
+            p.cmd(line)
+
+    @Slot(int, int)
+    def setViewSize(self, w, h):
+        """pane 1 was resized by the layout: render at its size, so it isn't stretched"""
+        w, h = max(16, int(w)), max(16, int(h))
+        if (w, h) != self.view_size:
+            self.view_size = (w, h)
+            self.cmd("size %d %d" % (w, h))
+
+    def _save_view_prefs(self):
+        try:
+            os.makedirs(os.path.dirname(VIEW_PREFS), exist_ok=True)
+            with open(VIEW_PREFS + ".tmp", "w") as f:
+                json.dump({"layout": self._layout, "link": self._link, "auto": self._auto}, f)
+            os.replace(VIEW_PREFS + ".tmp", VIEW_PREFS)
+        except OSError:
+            self.set_status("could not save the viewport layout")
+
+    def paneSticker(self, pane, data, w, h):
+        """a run finishing in pane 2-4: its sticker, cut and filed like pane 1's"""
+        got = stickerlib.cut(data, w, h)
+        if got is None:
+            return
+        rgba, (x, y, sw, sh) = got
+        path = os.path.join(pane.run, "sticker.png")
+        if not QImage(rgba.tobytes(), sw, sh, sw * 4, QImage.Format_RGBA8888).save(path):
+            self.set_status("sticker: could not write " + path)
+            return
+        self._landing = [path] + [f for f in self._filed if f != path]
+        self.paneStickerMade.emit(pane.number, "file://" + path, x / w, y / h, sw / w, sh / h)
+
+    def note_sent(self, r, text):
+        """a note left in pane 2-4: a research run still going gets it as a direction too"""
+        sent = "; the modeller picks it up" if os.path.basename(r["dir"]).startswith("script-") else ""
+        if not sent and self.run_live(r["dir"]):
+            try:
+                send_command(r["dir"], "instruct", text="note on step %d (%s): %s" % (r["rev"], r["op"][:200], text.strip()))
+                sent = "; sent to the run"
+            except (OSError, ValueError):
+                pass
+        self.set_status("note kept on step %d%s" % (r["rev"], sent))
+
+    def _save_model_preferences(self):
+        self._model_preferences = {"chat": self._chat_model, "research": self.ai_model}
+        try:
+            os.makedirs(os.path.dirname(self._preferences_path), exist_ok=True)
+            temporary = self._preferences_path + ".tmp"
+            with open(temporary, "w") as f:
+                json.dump(self._model_preferences, f)
+            os.replace(temporary, self._preferences_path)
+        except OSError:
+            self.set_status("could not save model selection")
+
+    @Slot(str)
+    def setAiModel(self, model_id):
+        model = chatlib.find(model_id, self._chat_models)
+        if model and model.get("research", True) and model.get("available", True):
+            self.ai_model = model_id
+            self._save_model_preferences()
+            self.runsChanged.emit()
+
+    @Slot()
+    def cycleAiModel(self):
+        names = [m["id"] for m in self.researchModels if m.get("available", True)]
+        if names:
+            self.setAiModel(names[(names.index(self.ai_model) + 1) % len(names)] if self.ai_model in names else names[0])
+
+    @Slot(str, result=bool)
+    def startResearch(self, prompt):
+        prompt = prompt.strip()
+        if not prompt:
+            return False
+        model = chatlib.find(self.ai_model, self._chat_models)
+        if not model:
+            self.set_status("select a research model first")
+            return False
+        try:
+            connection = chatlib.research_arguments(model)
+        except RuntimeError as e:
+            self.set_status(str(e))
+            return False
+        os.makedirs(RUNS, exist_ok=True)
+        slug = re.sub(r"[^a-z0-9]+", "-", prompt.lower()).strip("-")[:32] or "run"
+        name = time.strftime("%Y%m%d-%H%M%S-") + str(time.time_ns() % 1000000) + "-" + slug
+        d = os.path.join(RUNS, name)
+        with open(os.path.join(RUNS, name + ".json"), "w") as f:
+            json.dump({"prompt": prompt, "model": model["label"], "started": time.time()}, f)
+        p = QProcess(self)
+        env = QProcessEnvironment(self.env)
+        if model.get("key_env"):
+            env.insert(model["key_env"], chatlib.key(model))
+        p.setProcessEnvironment(env)
+        p.setProgram(EXE)
+        p.setArguments(["--ai", "create", "--research"] + connection +
+                       ["--out", d, "--prompt", prompt])
+        p.setProcessChannelMode(QProcess.MergedChannels)
+        p.setStandardOutputFile(os.path.join(RUNS, name + ".log"))
+        p.finished.connect(lambda *_a, d=d: (self.jobs.pop(d, None), self.stop_requests.pop(d, None), self.scanRuns()))
+        def failed(_error, d=d):
+            self.jobs.pop(d, None)
+            self.set_status("research process failed to start; check the desktop executable")
+            self.scanRuns()
+        p.errorOccurred.connect(failed)
+        self.jobs[d] = p
+        p.start()
+        self.set_status("research started: " + model["label"])
+        self.scanRuns()
+        return True
+
+    @Slot(str)
+    def toggleRun(self, d):
+        """fold or unfold a run card"""
+        r = next((r for r in self._runs if r["dir"] == d), None)
+        self.collapsed[d] = not (r["collapsed"] if r else False)
+        self.scanRuns()
+
+    @Slot(str)
+    def clearRun(self, d):
+        """CLEAR on a finished run card: move the run out of the drawer into research/.cleared (nothing is deleted)"""
+        d = os.path.abspath(d)
+        if os.path.dirname(d) != RUNS or not os.path.isdir(d):
+            self.set_status("not a research run")
+            return
+        state = (read_state(d) or {}).get("state", "")
+        if d in self.jobs or state in ("running", "revision", "building", "paused", "cancelling"):
+            self.set_status("run is still going; STOP it first")
+            return
+        if self.watching == d:
+            self.stopWatching()
+        bin_dir = os.path.join(RUNS, ".cleared")
+        os.makedirs(bin_dir, exist_ok=True)
+        name = os.path.basename(d)
+        try:
+            for src in (d, d + ".json", d + ".log"):
+                if os.path.exists(src):
+                    os.replace(src, os.path.join(bin_dir, os.path.basename(src)))
+        except OSError as e:
+            self.set_status("clear: " + str(e))
+            return
+        self.set_status("cleared %s (kept in %s)" % (name, bin_dir))
+        self.scanRuns()
+
+    @Slot(str)
+    def stopResearch(self, d):
+        p = self.jobs.get(d)
+        if p is not None or run_is_live(d, read_state(d)):
+            self.stop_requests[d] = time.monotonic()
+            self.tryCancel(d)
+
+    def live_command(self, d, command, done, **fields):
+        if d not in self.jobs and not run_is_live(d, read_state(d)):
+            self.set_status("run is not active")
+            return False
+        try:
+            send_command(d, command, **fields)
+        except (OSError, ValueError) as e:
+            self.set_status(str(e))
+            return False
+        self.set_status(done)
+        return True
+
+    @Slot(str)
+    def togglePause(self, d):
+        control = control_state(read_state(d))
+        if control.get("paused") or control.get("pauseRequested"):
+            self.live_command(d, "resume", "resume requested")
+        else:
+            self.live_command(d, "pause", "pausing after the current operation")
+
+    @Slot(str)
+    def stepRun(self, d):
+        """while paused: let the run make its next change, then hold again"""
+        self.live_command(d, "step", "one step")
+
+    @Slot(str)
+    def cyclePace(self, d):
+        seconds = next_pace(control_state(read_state(d)).get("paceSeconds", 0))
+        self.live_command(d, "pace", "build pace: " + ("normal" if seconds == 0 else "%gs between operations" % seconds), seconds=seconds)
+
+    @Slot(str, str)
+    def sendDirection(self, d, text):
+        self.live_command(d, "instruct", "direction sent", text=text)
+
+    def tryCancel(self, directory):
+        try:
+            request_cancel(directory)
+            self.set_status("stop requested; waiting for cancellation acknowledgement")
+            self.stop_requests.pop(directory, None)
+        except (OSError, ValueError):
+            # Startup may not have created the run identity yet. Retry without killing
+            # the parent and leaving its native rebuild process orphaned.
+            if time.monotonic() - self.stop_requests.get(directory, time.monotonic()) > 10:
+                self.set_status("stop pending: run has not published its control identity")
+
+
+    # ---- the chat window (research drawer) -------------------------------------------------
+    @Slot()
+    def refreshChat(self):
+        if self._catalogue_busy:
+            return
+        self._catalogue_busy = True
+        self.chatChanged.emit()
+        def discover():
+            try:
+                catalogue = chatlib.models()
+            except Exception:
+                catalogue = []
+            self.modelsAnswer.emit(catalogue)
+        threading.Thread(target=discover, daemon=True).start()
+
+    @Slot(object)
+    def _models_done(self, catalogue):
+        self._chat_models = catalogue
+        self._catalogue_busy = False
+        available = [m for m in catalogue if m.get("available", True)]
+        wanted = self._chat_model or self._model_preferences.get("chat", "")
+        self._chat_model = wanted if any(m["id"] == wanted for m in available) else (available[0]["id"] if available else "")
+        research = [m for m in available if m.get("research", True)]
+        if not any(m["id"] == self.ai_model for m in research):
+            self.ai_model = research[0]["id"] if research else ""
+        self.chatChanged.emit()
+        self.runsChanged.emit()
+        if not catalogue:
+            self.set_status("no models found; start Ollama or configure a provider")
+
+    @Slot(str)
+    def setChatModel(self, model_id):
+        model = chatlib.find(model_id, self._chat_models)
+        if model and model.get("available", True) and not self._chat_busy:
+            self._chat_model = model_id
+            self._save_model_preferences()
+            self.chatChanged.emit()
+
+    @Slot()
+    def stopChat(self):
+        self._chat_cancel.set()
+        self._chat_request += 1  # ignore late chunks/completion from the cancelled request
+        self._chat_busy = False
+        self.chatChanged.emit()
+
+    @Slot()
+    def clearChat(self):
+        self.stopChat()
+        self._chat = []
+        self.chatChanged.emit()
+
+    @Slot(str)
+    def sendChat(self, text):
+        text = (text or "").strip()[:8000]
+        if not text or self._chat_busy:
+            return
+        model = chatlib.find(self._chat_model, self._chat_models)
+        if model is None:
+            self.set_status("no chat model is selected")
+            return
+        self._chat.append({"role": "you", "text": text})
+        history = [dict(m) for m in self._chat if m["role"] in ("you", "model") and m["text"]]
+        self._chat.append({"role": "model", "text": "", "label": model["label"]})
+        self._chat = self._chat[-40:]
+        self._chat_busy = True
+        self._chat_request += 1
+        self._chat_cancel = threading.Event()
+        self.chatChanged.emit()
+        self._chat_reply(model, history)
+
+    def _chat_notes(self):
+        """Notes from the watched research run, else the newest run that has any."""
+        runs = [self.watching] if self.watching else []
+        try:
+            runs += [os.path.join(RUNS, n) for n in sorted(os.listdir(RUNS), reverse=True)]
+        except OSError:
+            pass
+        for d in runs:
+            if d and os.path.isdir(d):
+                notes = chatlib.research_notes(d)
+                if notes:
+                    return notes
+        return ""
+
+    def _chat_reply(self, model, history):
+        request_id, cancel = self._chat_request, self._chat_cancel
+        notes = self._chat_notes()
+        api = chatlib.effigy_reference(history[-1]["text"] if history else "")
+        def work():
+            text = ""
+            last_update = 0.0
+            try:
+                for chunk in chatlib.stream(model, history, cancel, notes=notes, api=api):
+                    if cancel.is_set():
+                        return
+                    text += chunk
+                    if chunk and time.monotonic() - last_update >= 0.05:
+                        self.chatChunk.emit(request_id, text)
+                        last_update = time.monotonic()
+                error = "" if text.strip() else "the model sent back no text"
+            except Exception as e:
+                error = str(e)
+            self.chatAnswer.emit(request_id, text, error)
+        threading.Thread(target=work, daemon=True).start()
+
+    @Slot(int, str)
+    def _chat_chunk(self, request_id, text):
+        if request_id == self._chat_request and self._chat_busy and self._chat:
+            self._chat[-1] = dict(self._chat[-1], text=text)
+            self.chatChanged.emit()
+
+    @Slot(int, str, str)
+    def _chat_done(self, request_id, text, error):
+        if request_id != self._chat_request:
+            return
+        self._chat_busy = False
+        if self._chat and self._chat[-1]["role"] == "model":
+            if text:
+                self._chat[-1] = dict(self._chat[-1], text=text)
+            else:
+                self._chat.pop()
+        if error:
+            self._chat.append({"role": "error", "text": error})
+        self._chat = self._chat[-40:]
+        self.chatChanged.emit()
+
+    # ---- the drawing tool (Linework) -------------------------------------------------------
+    def drawing_running(self):
+        """is the drawing tool up? ask the socket it listens on"""
+        sock = QLocalSocket()
+        sock.connectToServer(self.drawing_key)
+        return sock.waitForConnected(400)
+
+    def drawing_send(self, path=""):
+        """hand a file to the drawing tool: it opens it and comes up. False if it isn't up."""
+        sock = QLocalSocket()
+        sock.connectToServer(self.drawing_key)
+        if not sock.waitForConnected(400):
+            return False
+        sock.write(((path + "\n") if path else "\n").encode())
+        sock.flush()
+        sock.waitForBytesWritten(400)
+        sock.disconnectFromServer()
+        return True
+
+    def drawing_start(self, path=""):
+        """start the drawing tool; if it is already up it raises its own window"""
+        program = self.drawing_program()
+        if not os.path.isfile(program):
+            self.set_status("no drawing tool: " + program)
+            return False
+        args = [path] if path else []
+        try:
+            ok, _pid = QProcess.startDetached(program, args, os.path.expanduser("~"))
+        except (OSError, ValueError) as e:
+            self.set_status("drawing tool: " + str(e))
+            return False
+        if not ok:
+            self.set_status("the drawing tool would not start")
+            return False
+        self.set_status("drawing up" + ("" if not path else ": " + os.path.basename(path)))
+        return True
+
+    @Slot()
+    def refreshTools(self):
+        """what the tool drawer shows: the drawings, and whether the tool is up"""
+        self._drawings = drawing_gallery()
+        self._drawing_open = self.drawing_running()
+        self.toolsChanged.emit()
+
+    @Slot()
+    def openDrawingTool(self):
+        """the pencil: bring the drawing tool up (it raises its window if it is already up)"""
+        if not os.path.isfile(self.drawing_program()):
+            self.set_status("no drawing tool on this machine")
+            return
+        if self.drawing_send():
+            self.set_status("drawing is up")
+            self._drawing_open = True
+        elif self.drawing_start():
+            self._drawing_open = True
+        self.toolsChanged.emit()
+
+    @Slot(str)
+    def openDrawingFile(self, path):
+        """open one of the drawings in the drawing tool"""
+        path = os.path.abspath(os.path.expanduser(path))
+        if not os.path.isfile(path):
+            self.set_status("no such drawing: " + os.path.basename(path))
+            return
+        if self.drawing_send(path):
+            self.set_status("opened " + os.path.basename(path))
+            self._drawing_open = True
+        elif self.drawing_start(path):
+            self._drawing_open = True
+        self.toolsChanged.emit()
+
+    @Slot()
+    def openDrawingsFolder(self):
+        """the DRAWINGS folder in the tool drawer: show where the drawings live, in the file manager"""
+        try:
+            os.makedirs(DRAWING_DIR, exist_ok=True)
+        except OSError as e:
+            self.set_status("drawings folder: " + str(e))
+            return
+        if QDesktopServices.openUrl(QUrl.fromLocalFile(DRAWING_DIR)):
+            self.set_status("drawings: " + DRAWING_DIR)
+        else:
+            self.set_status("could not open " + DRAWING_DIR)
+
+
+def main():
+    if len(sys.argv) > 1 and sys.argv[1] in ("snap", "quit", "open", "shut", "page", "cmd", "mask", "clip", "draw", "tools", "replay", "layout", "vpmenu"):
+        app = QCoreApplication(sys.argv)
+        cmd = sys.argv[1] + (" " + os.path.abspath(sys.argv[2]) if sys.argv[1] in ("snap", "clip", "replay") else
+                             " " + " ".join(sys.argv[2:]) if len(sys.argv) > 2 else "")
+        sys.exit(0 if send(cmd) else 1)
+
+    from PySide6.QtQml import QQmlApplicationEngine
+    from PySide6 import QtQuick  # noqa: F401  (so the root window comes back as a QQuickWindow)
+    app = QGuiApplication(sys.argv)
+    model = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else None
+    if send("model " + model if model else "raise"):
+        return
+    app.setApplicationName("Geppetto")
+    app.setDesktopFileName("geppetto")
+    icon = os.path.join(PROJECT, "geppetto.svg")
+    if os.path.exists(icon):
+        app.setWindowIcon(QIcon(icon))
+
+    global HOST
+    HOST = host = Host()
+    qmlRegisterType(Viewport, "Geppetto", 1, 0, "Viewport")
+    eng = QQmlApplicationEngine()
+    eng.rootContext().setContextProperty("host", host)
+    eng.load(QUrl.fromLocalFile(os.path.join(HERE, "cabinet.qml")))
+    if not eng.rootObjects():
+        sys.exit(1)
+    host.window = eng.rootObjects()[0]
+    host.scanRuns()
+    host.refreshTools()
+    host.refreshChat()
+    host.autoFollow()                  # a run still building when the chest opens: boot straight into watching it
+    if not host.watching or model:
+        # nothing building: open the newest run's model, not the default suit
+        done = sorted((r for r in host._runs if r["best"] and os.path.isfile(r["best"])),
+                      key=lambda r: os.path.getmtime(r["best"]), reverse=True)
+        host.openModel(model or (done[0]["best"] if done else DEFAULT_MODEL))
+    app.aboutToQuit.connect(host.benchClose)
+    app.aboutToQuit.connect(host.stop)
+    app.aboutToQuit.connect(lambda: [p.shut() for p in host.panes])
+
+    # single instance + a tiny command channel (raise / model PATH / snap PATH / open|shut NAME / wheel / pick KEY / card K=V / apply / undo / keep [NAME] / folder / openfiled N / view edit|run / seek N / quit)
+    QLocalServer.removeServer(SOCK)
+    server = QLocalServer()
+    server.listen(SOCK)
+
+    def on_conn():
+        c = server.nextPendingConnection()
+
+        def on_read():
+            msg = bytes(c.readAll()).decode().strip()
+            reply = "ok"
+            if msg == "raise" or msg.startswith("model "):
+                host.window.show()
+                host.window.raise_()
+                host.window.requestActivate()
+                kwin_raise()
+                if msg.startswith("model "):
+                    host.openModel(msg[6:])
+            elif msg == "mask":
+                m = host.window.mask()
+                reply = "%d rects, bounds %s, window %dx%d" % (m.rectCount(), m.boundingRect().getRect(), host.window.width(), host.window.height())
+            elif msg.startswith("clip "):
+                host.playClip(msg[5:])
+            elif msg.startswith("replay "):
+                host.replayRun(msg[7:])
+            elif msg.startswith("cmd "):
+                host.cmd(msg[4:])
+            elif msg.startswith("snap "):
+                reply = "saved" if host.snap(msg[5:]) else "snap failed"
+            elif msg.startswith(("open ", "shut ")):
+                name = msg[5:].strip()
+                name = DRAWER_ALIASES.get(name, name)      # the outliner drawer is the tools drawer now
+                d = host.window.findChild(QObject, name)
+                if name == "chat":                         # the chat note: toss it out and open it, or crumple it back
+                    host.window.setProperty("chatUnrolled", msg[:4] == "open")
+                elif d is None:
+                    reply = "no such drawer"
+                else:
+                    QMetaObject.invokeMethod(d, "setOpen", Q_ARG("QVariant", msg[:4] == "open"))
+            elif msg.startswith("page "):                  # page keys|time: the timeline drawer's page switch
+                host.window.findChild(QObject, "timelineFloor").setProperty("page", 1 if msg[5:].strip() == "keys" else 0)
+            elif msg == "draw":
+                host.openDrawingTool()
+            elif msg.startswith("draw "):
+                what = msg[5:].strip()
+                host.openDrawingFile(drawing_resolve(DRAWING_DIR, what) or what)
+            elif msg in ("vpmenu", "vpmenu shut"):           # the lid's VIEWPORTS dropdown, open or shut
+                host.window.findChild(QObject, "viewportsList").setProperty("open", msg == "vpmenu")
+            elif msg == "wheel":                         # the WHEEL key
+                w = host.window.findChild(QObject, "toolWheel")
+                w.setProperty("manual", not w.property("manual"))
+            elif msg.startswith("pick "):                  # pick KEY [LABEL]: a tool off the hand wheel
+                key, _, label = msg[5:].strip().partition(" ")
+                QMetaObject.invokeMethod(host.window.findChild(QObject, "toolWheel"), "picked",
+                                         Q_ARG("QString", key), Q_ARG("QString", label or key.upper()))
+            elif msg.startswith("card "):                  # card KEY=VALUE: type into the tool card
+                k, _, v = msg[5:].partition("=")
+                card = host.window.findChild(QObject, "toolCard")
+                QMetaObject.invokeMethod(card, "setKey", Q_ARG("QVariant", k.strip()), Q_ARG("QVariant", v.strip()))
+            elif msg == "apply":                           # the card's APPLY
+                QMetaObject.invokeMethod(host.window.findChild(QObject, "toolCard"), "applyNow")
+            elif msg == "undo":
+                host.benchUndo()
+            elif msg in ("view edit", "view run"):         # the EDIT/RUN key
+                host.benchView(msg == "view edit")
+            elif msg.startswith("layout "):                # layout 1|2|4: the viewport's panes
+                host.setViewLayout(int(msg[7:]))
+            elif msg.startswith("seek "):                  # scrub the replay to step N
+                host.replaySeek(int(msg[5:]))
+            elif msg == "keep" or msg.startswith("keep "):   # the card's KEEP [as NAME]
+                reply = host.benchKeep(msg[5:].strip()) or host._bench.get("error", "nothing kept")
+            elif msg == "folder":                          # open/shut the MODELING folder
+                f = host.window.findChild(QObject, "folderView")
+                f.setProperty("open", not f.property("open"))
+            elif msg.startswith("openfiled "):             # a slip out of the folder, on screen
+                host.openFiled(int(msg[10:]))
+            elif msg == "tools":
+                host.refreshTools()
+                reply = "%d drawing(s)" % len(host._drawings)
+            elif msg == "quit":
+                c.write(b"bye")
+                c.flush()
+                app.quit()
+                return
+            c.write(reply.encode())
+            c.flush()
+        c.readyRead.connect(on_read)
+    server.newConnection.connect(on_conn)
+
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()

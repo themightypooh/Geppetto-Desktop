@@ -1,0 +1,2 @@
+# part	model	pivot x	y	z	size x	y	z
+handscroll	out/handscroll.vmdl	0.03	0	-1.18	2.418	8.6	2.361

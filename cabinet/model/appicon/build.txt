@@ -1,0 +1,52 @@
+# Geppetto's app icon: the marionette from po's pixel art, every part TRACED off ref.png (pixel points in trace.py).
+# Z up, front +X, left +Y. The X control bar's top ends (cut off in the pic) are mirrored from the bottom ends.
+refimage front ref.png height=51.99 offset=-7.58,26.91 depth=8 opacity=0.6
+echo the torso: traced barrel chest, leaning like the pic
+add Blob name=Torso voxel=0.1 blend=0.4 shapes="ellipsoid 0.0,10.83,24.48 3.6,5.42,7.45 rot=31,0,0 mat=1"
+material 1 color=#a8682f rough=0.55
+echo the pelvis
+add Blob name=Pelvis voxel=0.1 shapes="ellipsoid 0.0,15.91,16.35 3.2,4.74,2.84 rot=20,0,0 mat=1; cylinder 0.0,13.54,18.72 0.0,14.56,17.37 2.71 mat=1"
+echo the neck peg
+add Blob name=Neck voxel=0.08 shapes="cylinder 0.0,9.14,29.22 0.0,5.08,26.85 1.49 r=0.2 mat=1"
+echo ball joints: shoulders, elbows, wrists, hips, knees
+add Blob name=Joints voxel=0.07 blend=0.05 shapes="sphere 0.0,14.08,31.38 1.62 mat=1; sphere 0.0,2.03,24.14 1.62 mat=1; sphere 0.0,24.91,33.28 1.35 mat=1; sphere 0.0,-7.11,20.21 1.29 mat=1; sphere 0.0,27.89,25.02 0.95 mat=1; sphere 0.0,-8.46,11.48 0.95 mat=1; sphere 0.0,19.97,15.68 1.76 mat=1; sphere 0.0,12.86,13.64 1.76 mat=1; sphere 0.0,22.48,6.33 1.69 mat=1; sphere 0.0,8.94,4.17 1.69 mat=1"
+echo upper arms
+add Blob name=UpperArms voxel=0.07 blend=0.05 shapes="cone 0.0,15.44,31.79 1.9 0.0,23.56,33.55 1.42 mat=1; cone 0.0,0.54,23.26 1.83 0.0,-5.96,20.82 1.35 mat=1"
+echo forearms
+add Blob name=Forearms voxel=0.07 blend=0.05 shapes="cone 0.0,25.32,32.06 1.62 0.0,27.28,25.97 1.15 mat=1; cone 0.0,-7.45,18.92 1.76 0.0,-8.39,12.43 1.29 mat=1"
+echo egg hands
+add Blob name=Hands voxel=0.07 shapes="ellipsoid 0.0,27.62,21.43 1.9,1.9,2.84 mat=1; ellipsoid 0.0,-7.99,8.09 2.03,2.03,2.71 mat=1"
+echo thighs
+add Blob name=Thighs voxel=0.07 blend=0.05 shapes="cone 0.0,20.51,14.46 2.23 0.0,22.27,7.69 1.69 mat=1; cone 0.0,12.39,12.29 2.23 0.0,9.48,5.52 1.69 mat=1"
+echo shins (below the frame: carried on down the same line)
+add Blob name=Shins voxel=0.07 blend=0.05 shapes="cone 0.0,22.81,4.98 1.83 0.0,24.03,-4.63 1.29 mat=1; cone 0.0,8.6,2.68 1.83 0.0,6.97,-6.67 1.29 mat=1"
+echo feet
+add Blob name=Feet voxel=0.07 blend=0.3 shapes="ellipsoid 1.0,24.24,-7.0 2.6,1.62,1.35 mat=1; ellipsoid 1.0,6.77,-9.04 2.6,1.62,1.35 mat=1"
+echo the head: big pale painted egg, tilted like the pic, with its ear
+add Blob name=Head voxel=0.07 blend=0.3 shapes="ellipsoid 0.0,-0.34,32.26 6.03,6.43,6.91 rot=40,0,0 mat=2; ellipsoid 2.63,4.4,35.17 0.6,0.9,1.3 rot=40,0,0 mat=2"
+material 2 color=#c4b6a2 rough=0.5
+echo carved brown hair cap
+set Head shapes="ellipsoid 0.0,-0.34,32.26 6.03,6.43,6.91 rot=40,0,0 mat=2; ellipsoid 2.63,4.4,35.17 0.6,0.9,1.3 rot=40,0,0 mat=2; ellipsoid -1.0,-1.37,33.49 6.23,6.68,6.09 rot=40,0,0 mat=3; paint ellipsoid -1.6,-3.04,35.48 7.43,7.43,4.4 rot=40,0,0 mat=3; paint ellipsoid -5.5,-0.34,32.26 3,7.43,7.43 rot=40,0,0 mat=3"
+material 3 color=#6a3418 rough=0.6
+echo big round eyes
+set Head shapes="ellipsoid 0.0,-0.34,32.26 6.03,6.43,6.91 rot=40,0,0 mat=2; ellipsoid 2.63,4.4,35.17 0.6,0.9,1.3 rot=40,0,0 mat=2; ellipsoid -1.0,-1.37,33.49 6.23,6.68,6.09 rot=40,0,0 mat=3; paint ellipsoid -1.6,-3.04,35.48 7.43,7.43,4.4 rot=40,0,0 mat=3; paint ellipsoid -5.5,-0.34,32.26 3,7.43,7.43 rot=40,0,0 mat=3; paint sphere 6.09,1.69,31.92 1.29 mat=5; paint sphere 5.31,-1.22,28.74 1.29 mat=5; paint sphere 6.11,1.62,31.86 0.74 mat=6; paint sphere 5.25,-1.29,28.67 0.74 mat=6"
+material 5 color=#e8e2d4 rough=0.4
+material 6 color=#14100c rough=0.3
+echo nose, rosy cheeks and the hinged jaw slot
+set Head shapes="ellipsoid 0.0,-0.34,32.26 6.03,6.43,6.91 rot=40,0,0 mat=2; ellipsoid 2.63,4.4,35.17 0.6,0.9,1.3 rot=40,0,0 mat=2; ellipsoid -1.0,-1.37,33.49 6.23,6.68,6.09 rot=40,0,0 mat=3; paint ellipsoid -1.6,-3.04,35.48 7.43,7.43,4.4 rot=40,0,0 mat=3; paint ellipsoid -5.5,-0.34,32.26 3,7.43,7.43 rot=40,0,0 mat=3; paint sphere 6.09,1.69,31.92 1.29 mat=5; paint sphere 5.31,-1.22,28.74 1.29 mat=5; paint sphere 6.11,1.62,31.86 0.74 mat=6; paint sphere 5.25,-1.29,28.67 0.74 mat=6; sphere 5.02,0.95,29.22 1.08 mat=4; paint sphere 4.27,4.33,31.11 1.35 mat=4; paint sphere 3.12,-0.41,26.64 1.22 mat=4; -box 1.81,3.25,27.32 2.4,3.25,0.3 rot=40,0,0; -box 0.35,4.87,26.37 2.4,0.3,2.03 rot=40,0,0; -box 0.35,1.49,25.56 2.4,0.3,1.76 rot=40,0,0"
+material 4 color=#b84a3c rough=0.5
+echo the control: an X of two bars, the cut-off ends filled in
+add Blob name=Control voxel=0.07 blend=0.1 shapes="capsule 5,18.96,46.14 -5,-4.06,51.29 1.02 mat=8; capsule 5,-2.37,44.87 -5,17.26,54.35 1.02 mat=8; cylinder 0,7.45,48.11 0,7.45,50.31 1.08 mat=8"
+material 8 color=#8a5428 rough=0.5
+echo strings, each one as it runs in the pic
+add Spline name=StringElbowL points=-5.0,15.98,53.32;0.8,24.37,34.63 tube=1 radius=0.07 material=7
+material 7 color=#b8a07c rough=0.8
+add Spline name=StringKneeL points=4.4,17.58,46.45;1.6,22.21,7.14 tube=1 radius=0.07 material=7
+add Spline name=StringNeck points=0,7.45,48.71;-1.5,8.67,31.79 tube=1 radius=0.07 material=7
+add Spline name=StringHead points=3.8,-0.01,45.11;-0.5,0.68,38.42 tube=1 radius=0.07 material=7
+add Spline name=StringElbowR points=-4.4,-2.68,50.98;0.6,-7.11,21.63 tube=1 radius=0.07 material=7
+add Spline name=StringKneeR points=4.4,-1.19,44.54;1.6,8.8,5.52 tube=1 radius=0.07 material=7
+describe
+turnaround out shade=material size=768 name=marionette views=front,quarter,side,back
+save marionette.effigy
+export out name=marionette

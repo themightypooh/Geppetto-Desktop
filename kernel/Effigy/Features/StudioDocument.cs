@@ -63,6 +63,13 @@ public static class StudioDocument
 	public static void WriteFile( PartStudio studio, string path ) =>
 		File.WriteAllText( path, Write( studio ) );
 
+	/// <summary>One picture's document line, without the newline: refimage VIEW HEIGHT OX OY DEPTH OPACITY VISIBLE PATH.</summary>
+	public static string ReferenceImageLine( ReferenceImage image ) =>
+		new StringBuilder( "refimage " ).Append( image.View ).Append( ' ' ).Append( Num( image.Height ) ).Append( ' ' )
+			.Append( Num( image.Offset.x ) ).Append( ' ' ).Append( Num( image.Offset.y ) ).Append( ' ' )
+			.Append( Num( image.Depth ) ).Append( ' ' ).Append( Num( image.Opacity ) ).Append( ' ' )
+			.Append( image.Visible ? 1 : 0 ).Append( ' ' ).Append( OneLine( image.Path ) ).ToString();
+
 	public static string Write( PartStudio studio )
 	{
 		if ( studio is null )
@@ -136,10 +143,7 @@ public static class StudioDocument
 			if ( image is null || string.IsNullOrWhiteSpace( image.Path ) )
 				continue;
 
-			sb.Append( "refimage " ).Append( image.View ).Append( ' ' ).Append( Num( image.Height ) ).Append( ' ' )
-				.Append( Num( image.Offset.x ) ).Append( ' ' ).Append( Num( image.Offset.y ) ).Append( ' ' )
-				.Append( Num( image.Depth ) ).Append( ' ' ).Append( Num( image.Opacity ) ).Append( ' ' )
-				.Append( image.Visible ? 1 : 0 ).Append( ' ' ).Append( OneLine( image.Path ) ).Append( '\n' );
+			sb.Append( ReferenceImageLine( image ) ).Append( '\n' );
 		}
 
 		// Same rule as origin: a document with no variables must not grow a line. Names sorted so

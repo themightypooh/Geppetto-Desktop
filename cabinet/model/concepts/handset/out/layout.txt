@@ -1,0 +1,2 @@
+# part	model	pivot x	y	z	size x	y	z
+handset	out/handset.vmdl	0.155	0.025	-0.22	2.225	7.365	1.862

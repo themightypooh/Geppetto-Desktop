@@ -1,0 +1,2 @@
+# part	model	pivot x	y	z	size x	y	z
+marionette	out/marionette.vmdl	-0.565	9.75	-10.389	13.329	39.539	65.758

@@ -164,6 +164,138 @@ internal static class ControllerFixTests
 			Check( run.Log.Count == 1 + 6, $"every pair of 4 bodies is 6 lines, got {run.Log.Count - 1}" );
 			Check( !Effigy.BuildScript.Run( studio, "clearance A" ).Ok && !Effigy.BuildScript.Run( studio, "clearance A A" ).Ok, "one name / same body accepted" );
 		} );
+		registry.Add( "controller-fixes", "live script run: a revision per add/set/edit line, paced, cancellable, cabinet-readable", () =>
+		{
+			string Root() => Path.Combine( Path.GetTempPath(), "effigy-scriptlive-" + Guid.NewGuid().ToString( "N" ) );
+			const string script =
+				"# a comment, then three changes with a measure between\n" +
+				"add Primitive shape=Box sizex=2 sizey=2 sizez=2 name=Base\n" +
+				"describe\n" +
+				"set Base sizex=3\n" +
+				"add Primitive shape=Sphere name=Ball position=3,0,0\n";
+			Check( Effigy.BuildScript.Mutates( "add" ) && Effigy.BuildScript.Mutates( "SET" ) && !Effigy.BuildScript.Mutates( "describe" ), "verb classes" );
+			Check( Effigy.BuildScript.VerbOf( "  edit Base x=1" ) == "edit" && Effigy.BuildScript.VerbOf( "# no" ) is null, "VerbOf" );
+
+			// Paced: one revision per changing line on top of the initial one, at least pace apart.
+			var root = Root();
+			var clock = System.Diagnostics.Stopwatch.StartNew();
+			var done = ScriptLive.Execute( new Effigy.PartStudio(), script, root, root, 0.25, new CancellationTokenSource() );
+			clock.Stop();
+			Check( done.State == "completed" && done.Result.Ok, $"run: {done.State} {done.Result}" );
+			Check( done.Revisions == 4, $"initial + 3 changing lines = 4 revisions, got {done.Revisions}" );
+			Check( clock.Elapsed.TotalSeconds >= 0.45, $"pace 0.25 not honoured between 3 changes: {clock.Elapsed.TotalSeconds:0.00}s" );
+			var revisions = Directory.GetFiles( Path.Combine( root, ".live/revisions" ), "*.effigy" ).OrderBy( p => p ).ToArray();
+			Check( revisions.Length == 4, $"revision files {revisions.Length}" );
+			var counts = revisions.Select( p => Effigy.StudioDocument.Read( File.ReadAllText( p ) ).Features.Count ).ToArray();
+			Check( string.Join( ",", counts ) == "0,1,1,2", $"features per revision {string.Join( ",", counts )}" );
+			var latest = AiLiveRun.ReadLatest( root )!;
+			Check( latest["state"]!.GetValue<string>() == "completed" && latest["snapshot"]!["revision"]!.GetValue<long>() == 4, "journal end: " + latest.ToJsonString() );
+			var lines = File.ReadAllLines( Path.Combine( root, ".live/events.jsonl" ) );
+			Check( lines.Count( l => l.Contains( "\"state\":\"revision\"" ) ) == 4, "revision events" );
+			Check( lines.Any( l => l.Contains( "line 4: set Base" ) ), "operation names the line" );
+			Check( lines.Any( l => l.Contains( "\"paceSeconds\":0.25" ) ), "starting pace not published for the cabinet's pace control" );
+
+			// A failing line ends the run failed, keeping the revisions before it.
+			var bad = Root();
+			var failed = ScriptLive.Execute( new Effigy.PartStudio(), "add Primitive shape=Box name=A\nset Nope x=1\n", bad, bad, 0, new CancellationTokenSource() );
+			Check( failed.State == "failed" && failed.Revisions == 2 && failed.Result.ErrorLine == 2, $"failed run: {failed.State} {failed.Revisions} {failed.Result}" );
+			Check( AiLiveRun.ReadLatest( bad )!["state"]!.GetValue<string>() == "failed", "failed state" );
+
+			// The cabinet's cancel (a command file) stops a slow run at its next change.
+			var slow = Root();
+			var cancel = new CancellationTokenSource();
+			var task = Task.Run( () => ScriptLive.Execute( new Effigy.PartStudio(), script, slow, slow, 5, cancel ) );
+			string? runId = null;
+			for ( int i = 0; i < 400 && runId is null; i++ )
+			{
+				var s = AiLiveRun.ReadLatest( slow );
+				if ( s?["snapshot"]?["revision"]?.GetValue<long>() >= 2 ) runId = s["runId"]!.GetValue<string>();
+				else Thread.Sleep( 10 );
+			}
+			Check( runId is not null, "slow run never committed its first change" );
+			var body = new System.Text.Json.Nodes.JsonObject { ["schemaVersion"] = 1, ["runId"] = runId, ["id"] = "test-cancel", ["command"] = "cancel" };
+			Directory.CreateDirectory( Path.Combine( slow, ".live/commands" ) );
+			AiLiveRun.AtomicWrite( Path.Combine( slow, ".live/commands/test-cancel.json" ), body.ToJsonString() );
+			Check( task.Wait( 3000 ), "cancel did not stop the paced run" );
+			Check( task.Result.State == "cancelled" && task.Result.Revisions == 2, $"cancelled run: {task.Result.State} {task.Result.Revisions}" );
+			Check( AiLiveRun.ReadLatest( slow )!["state"]!.GetValue<string>() == "cancelled", "cancelled state" );
+		} );
+		registry.Add( "controller-fixes", "open script run: stays up for more lines, a bad line holds it, fix/skip/rewind/close, idle close", () =>
+		{
+			string Root() => Path.Combine( Path.GetTempPath(), "effigy-scriptopen-" + Guid.NewGuid().ToString( "N" ) );
+			string Answer( string root, string name )
+			{
+				string path = Path.Combine( root, ".live/answers", name + ".txt" );
+				for ( int i = 0; i < 1000 && !File.Exists( path ); i++ ) Thread.Sleep( 10 );
+				Check( File.Exists( path ), "no answer to " + name );
+				return File.ReadAllText( path );
+			}
+			string State( string root ) => AiLiveRun.ReadLatest( root )!["state"]!.GetValue<string>();
+			string More( string root, string kind, string text = "" ) => Answer( root, Inbox.Put( root, kind, text ) );
+
+			var root = Root();
+			var task = Task.Run( () => ScriptLive.Execute( new Effigy.PartStudio(),
+				"add Primitive shape=Box name=Base\nadd Primitive shape=Sphere name=B position=3,0,0\n", root, root, 0, new CancellationTokenSource(), open: true, idleMinutes: 1 ) );
+			string start = Answer( root, Inbox.Start );
+			Check( start.Contains( "added Sphere 'B'" ) && start.Contains( "run is open" ), "start answer: " + start );
+			Check( State( root ) == "open" && !task.IsCompleted, "the run should wait, not end: " + State( root ) );
+
+			// More lines go into the same document, numbered after the script's own.
+			string set = More( root, "txt", "set Base sizex=5" );
+			Check( set.Contains( "set Base" ) && set.Contains( "run is open" ), "set answer: " + set );
+			Check( File.ReadAllLines( Path.Combine( root, ".live/events.jsonl" ) ).Any( l => l.Contains( "line 3: set Base" ) ), "line 3 not named" );
+
+			// A bad line holds the run; the line before it stays, the line after it waits.
+			string held = More( root, "txt", "add Primitive shape=Box name=C\nset Nope x=1\nadd Primitive shape=Sphere name=D\n" );
+			Check( held.Contains( "ERROR line 5" ) && held.Contains( "held at line 5" ) && held.Contains( "1 line(s)" ), "held answer: " + held );
+			Check( State( root ) == "held" && !task.IsCompleted, "held state: " + State( root ) );
+
+			// The fix runs first, then the waiting line.
+			string fixd = More( root, "txt", "add Primitive shape=Sphere name=E" );
+			Check( fixd.Contains( "'E'" ) && fixd.Contains( "'D'" ) && fixd.IndexOf( "'E'" ) < fixd.IndexOf( "'D'" ) && fixd.Contains( "run is open" ), "fix answer: " + fixd );
+
+			// skip drops the waiting lines.
+			Check( More( root, "txt", "set Nope y=1\nadd Primitive shape=Box name=Z" ).Contains( "held" ), "second hold" );
+			Check( More( root, "skip" ).Contains( "run is open" ), "skip answer" );
+
+			string closed = More( root, "close" );
+			Check( closed.Contains( "run completed" ) && task.Wait( 3000 ), "close: " + closed );
+			var names = task.Result.Studio.Features.Select( f => f.Name ).ToArray();
+			Check( string.Join( ",", names ) == "Base,B,C,E,D", "features: " + string.Join( ",", names ) );
+			Check( task.Result.State == "completed" && State( root ) == "completed", "closed state " + task.Result.State );
+			var last = Effigy.StudioDocument.Read( File.ReadAllText( Directory.GetFiles( Path.Combine( root, ".live/revisions" ), "*.effigy" ).OrderBy( p => p ).Last() ) );
+			Check( last.Features.Count == 5, "last revision has " + last.Features.Count );
+			Check( File.ReadAllText( Path.Combine( root, "script.txt" ) ).Split( '\n' ).Length >= 9, "script.txt keeps every line given" );
+
+			// A script that fails at once still answers, and an open run left alone closes itself.
+			var idle = Root();
+			var lonely = Task.Run( () => ScriptLive.Execute( new Effigy.PartStudio(), "set Nope x=1\n", idle, idle, 0, new CancellationTokenSource(), open: true, idleMinutes: 0.01 ) );
+			Check( Answer( idle, Inbox.Start ).Contains( "held at line 1" ), "held at start" );
+			Check( lonely.Wait( 5000 ) && lonely.Result.State == "failed", "idle close: " + (lonely.IsCompleted ? lonely.Result.State : "still open") );
+
+			// Rewind: an earlier step becomes the model again (as a new revision), held lines are dropped,
+			// and lines sent after it build on that step.
+			var back = Root();
+			var rewound = Task.Run( () => ScriptLive.Execute( new Effigy.PartStudio(),
+				"add Primitive shape=Box name=A\nadd Primitive shape=Box name=B position=3,0,0\nadd Primitive shape=Box name=C position=6,0,0\n", back, back, 0, new CancellationTokenSource(), open: true, idleMinutes: 1 ) );
+			Answer( back, Inbox.Start );
+			Check( More( back, "txt", "set Nope x=1\nadd Primitive shape=Box name=W" ).Contains( "held" ), "held before rewind" );
+			string rw = More( back, "rewind", "3" );       // revision 1 is the empty start, 3 is after B
+			Check( rw.Contains( "rewound to step 3" ) && rw.Contains( "run is open" ), "rewind answer: " + rw );
+			Check( State( back ) == "open", "rewind clears the hold: " + State( back ) );
+			Check( More( back, "rewind", "99" ).Contains( "no step '99'" ), "a missing step rewinds nothing" );
+			More( back, "txt", "add Primitive shape=Sphere name=F position=0,4,0" );
+			More( back, "close" );
+			Check( rewound.Wait( 3000 ), "rewind run closes" );
+			var after = rewound.Result.Studio.Features.Select( f => f.Name ).ToArray();
+			Check( string.Join( ",", after ) == "A,B,F", "after rewind: " + string.Join( ",", after ) );
+			Check( File.ReadAllText( Path.Combine( back, ".live/events.jsonl" ) ).Contains( "rewind to step 3" ), "the rewind is a revision of its own" );
+
+			// Without --open nothing changed: a failure ends the run.
+			var once = Root();
+			Check( ScriptLive.Execute( new Effigy.PartStudio(), "set Nope x=1\n", once, once, 0, new CancellationTokenSource() ).State == "failed"
+				&& !Directory.Exists( Path.Combine( once, ".live/answers" ) ), "a closed run answers nothing" );
+		} );
 		registry.Add( "controller-fixes", "clip plane cuts renders open: welded section, shaded half, script render and turnaround", () =>
 		{
 			Check( Effigy.ClipPlane.TryParse( "y>0", out var keepLeft, out _ ) && keepLeft.Keeps( new( 0, 1, 0 ) ) && !keepLeft.Keeps( new( 0, -1, 0 ) ), "y>0" );

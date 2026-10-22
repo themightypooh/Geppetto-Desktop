@@ -14,6 +14,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'cabinet'))
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 import chat
 
+REAL_CLAUDE = chat.CLAUDE
+chat.CLAUDE = '/no/claude'   # the catalogue tests see only their own fake models
+
 
 def fixture(**kw):
     m = dict(id='local', label='Local test', kind='openai', endpoint='http://127.0.0.1:9/v1/',
@@ -104,6 +107,29 @@ class CatalogueTests(unittest.TestCase):
             self.assertEqual(chat.effigy_reference('save', path=Path(d) / 'missing.md'), '')
         body = chat._body(fixture(), [dict(role='you', text='hi')], api='PartStudio')
         self.assertIn('<effigy_api>\nPartStudio', body['messages'][0]['content'])
+
+    def test_claude_cli_streams_on_its_own_login(self):
+        with tempfile.TemporaryDirectory() as d:
+            fake = Path(d) / 'claude'
+            fake.write_text('#!/usr/bin/env python3\nimport json, os, sys\n'
+                            'said = sys.stdin.read()\n'
+                            'assert \'ANTHROPIC_API_KEY\' not in os.environ\n'
+                            'assert \'Bash(geppetto-live *)\' in sys.argv and \'--dangerously-skip-permissions\' not in sys.argv\n'
+                            'assert sys.argv[sys.argv.index(\'--session-id\') + 1] == \'s1\'\n'
+                            'print(json.dumps(dict(type=\'system\')))\n'
+                            'for t in (\'saw \', str(\'teal\' in said)):\n'
+                            '    print(json.dumps(dict(type=\'stream_event\', event=dict(delta=dict(type=\'text_delta\', text=t)))))\n'
+                            'print(json.dumps(dict(type=\'result\', is_error=False)))\n')
+            fake.chmod(0o755)
+            with patch.object(chat, 'CLAUDE', str(fake)), patch.object(chat, '_get', side_effect=OSError), \
+                 patch.object(chat, 'CONFIG', '/no/file'), patch.object(chat, 'DEFAULT_MODELS', []), \
+                 patch.dict(os.environ, {'ANTHROPIC_API_KEY': 'must-not-be-used'}):
+                models = chat.models()
+                self.assertEqual([m['id'] for m in models], ['claude/haiku', 'claude/opus', 'claude/sonnet'])
+                self.assertFalse(any(m['research'] for m in models))
+                history = [dict(role='you', text='I like teal'), dict(role='model', text='ok'), dict(role='you', text='colour?')]
+                self.assertEqual(''.join(chat.stream(chat.find('claude/sonnet', models), history, session='s1')), 'saw True')
+                self.assertIn('s1', chat._claude_sessions)   # the next turn resumes it
 
 
 class Handler(BaseHTTPRequestHandler):

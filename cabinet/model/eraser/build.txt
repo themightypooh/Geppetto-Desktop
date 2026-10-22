@@ -1,0 +1,19 @@
+# The clear button over the RESEARCH drawer's book pile: an old two-tone pencil/ink eraser.
+# Lying flat, Z up, long along X, inches. Off photo 02 (refs/two_tone_eraser.png): 2.28 x 0.94 x 0.35,
+# pink end 63% of the length, ends slanted (top 0.15 shorter each end), top long edges bevelled.
+# One bar: slot 0 the pink rubber, 1 the blue ink rubber (painted on), 3 the cream stripe on the pink slant.
+refimage top ref/two_tone_eraser.png height=1.1 offset=0,1.4 depth=0 opacity=0.85
+echo the bar: 2.28 long, both ends slanted, bevelled top edges
+add Blob name=Eraser voxel=0.012 blend=0.01 cutblend=0.01 shapes="box 0,0,0.175 2.280,0.940,0.350 r=0.04 mat=0; -box -1.525,0,0.372 1,2,2 rot=0,23.2,0; -box 1.525,0,0.372 1,2,2 rot=0,-23.2,0; -box 0,0.607,0.487 3,0.5,0.5 rot=45,0,0; -box 0,-0.607,0.487 3,0.5,0.5 rot=45,0,0"
+material 0 color=#c8695c rough=0.8
+echo blue ink end: the last 0.84 in
+set Eraser shapes="box 0,0,0.175 2.280,0.940,0.350 r=0.04 mat=0; -box -1.525,0,0.372 1,2,2 rot=0,23.2,0; -box 1.525,0,0.372 1,2,2 rot=0,-23.2,0; -box 0,0.607,0.487 3,0.5,0.5 rot=45,0,0; -box 0,-0.607,0.487 3,0.5,0.5 rot=45,0,0; paint box 0.770,0,0.175 0.940,1.2,0.6 mat=1"
+material 1 color=#5f86a8 rough=0.8
+echo cream stripe across the pink end's slant
+set Eraser shapes="box 0,0,0.175 2.280,0.940,0.350 r=0.04 mat=0; -box -1.525,0,0.372 1,2,2 rot=0,23.2,0; -box 1.525,0,0.372 1,2,2 rot=0,-23.2,0; -box 0,0.607,0.487 3,0.5,0.5 rot=45,0,0; -box 0,-0.607,0.487 3,0.5,0.5 rot=45,0,0; paint box 0.770,0,0.175 0.940,1.2,0.6 mat=1; paint box -1.065,0,0.175 0.08,1.2,0.07 rot=0,23.2,0 mat=3"
+material 3 color=#e6dcc4 rough=0.7
+describe
+render out/eraser_sheet.png view=sheet
+turnaround out shade=material size=512 name=eraser
+export out name=eraser
+save eraser.effigy

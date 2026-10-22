@@ -1,0 +1,185 @@
+effigy 1
+rollback 2147483647
+origin 0.0003579855 0.00035762787 -0.00036374916
+materiallook 0 color=#e9dcbc rough=0.85 metal=0
+materiallook 1 color=#cdb98e rough=0.9 metal=0
+materiallook 2 color=#1c2a4a rough=0.7 metal=0
+materiallook 3 color=#c9a23a rough=0.35 metal=0.7
+materiallook 4 color=#8e1a1a rough=0.3 metal=0
+materiallook 5 color=#f4ecd6 rough=0.9 metal=0
+materiallook 6 color=#d8c49a rough=0.9 metal=0
+feature BlobFeature
+	id 46b5f094
+	name Back
+	suppressed 0
+	visible 1
+	param Blend 0.02
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 0,0,0.02 6.4,4.2,0.04 r=0.015 mat=0; paint box 0,0,0.05 6.2,4.0,0.03 mat=2; paint box -2.75,-1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -2.75,-0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -2.75,0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -2.75,1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -2.50,-1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -2.25,-1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -2.50,-0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -2.25,-0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -2.50,0.00,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -2.25,0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -2.50,0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -2.25,1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -2.50,1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -2.00,-1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.75,-1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -2.00,-0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.75,-0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -2.00,0.00,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.75,0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -2.00,0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.75,1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -2.00,1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.50,-1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.25,-1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.50,-0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.25,-0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.50,0.00,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.25,0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.50,0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.25,1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.50,1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.00,-1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -0.75,-1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.00,-0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -0.75,-0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.00,0.00,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -0.75,0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.00,0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -0.75,1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.00,1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -0.50,-1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -0.25,-1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -0.50,-0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -0.25,-0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -0.50,0.00,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -0.25,0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -0.50,0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -0.25,1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -0.50,1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.00,-1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.25,-1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.00,-0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.25,-0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.00,0.00,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.25,0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.00,0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.25,1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.00,1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.50,-1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.75,-1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.50,-0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.75,-0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.50,0.00,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.75,0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.50,0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.75,1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.50,1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.00,-1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.25,-1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.00,-0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.25,-0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.00,0.00,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.25,0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.00,0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.25,1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.00,1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.50,-1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.75,-1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.50,-0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.75,-0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.50,0.00,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.75,0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.50,0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.75,1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.50,1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.00,-1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.25,-1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.00,-0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.25,-0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.00,0.00,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.25,0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.00,0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.25,1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.00,1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.50,-1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.75,-1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.50,-0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.75,-0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.50,0.00,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.75,0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.50,0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.75,1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.50,1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3
+	param Smooth 2
+	param Voxel 0.02
+end
+feature BlobFeature
+	id f0e80cfd
+	name Pocket
+	suppressed 0
+	visible 1
+	param Blend 0.02
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 0,0,0.17 6.4,4.2,0.03 r=0.012 mat=0; -box 0,2.1,0.17 4.5,4.5,0.2 rot=0,0,45; box -3.15,0,0.095 0.1,4.2,0.15 mat=0; box 3.15,0,0.095 0.1,4.2,0.15 mat=0; box 0,-2.05,0.095 6.4,0.1,0.15 mat=0; box 0,-2.1,0.195 4.2,4.2,0.02 rot=0,0,45 r=0.01 mat=0; -box 0,-4.5,0.2 8,4.8,0.3; -box -4.6,0,0.2 3,6,0.3; -box 4.6,0,0.2 3,6,0.3; paint box -1.6,-1.0,0.21 0.04,2.6,0.06 rot=0,0,-45 mat=1; paint box 1.6,-1.0,0.21 0.04,2.6,0.06 rot=0,0,45 mat=1; paint box -1.9,1.25,0.19 0.04,1.8,0.06 rot=0,0,45 mat=1; paint box 1.9,1.25,0.19 0.04,1.8,0.06 rot=0,0,-45 mat=1
+	param Smooth 2
+	param Voxel 0.026
+end
+feature BlobFeature
+	id 167ff81b
+	name LetterM
+	suppressed 0
+	visible 1
+	param Blend 0.01
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 0,0,0 5.8,1.3,0.02 r=0.006 mat=5; paint box 0,0.64,0 5.9,0.04,0.1 mat=6; paint box 0,-0.64,0 5.9,0.04,0.1 mat=6
+	param Smooth 2
+	param Voxel 0.022
+end
+feature BlobFeature
+	id 2f582fdf
+	name LetterT
+	suppressed 0
+	visible 1
+	param Blend 0.01
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 0,0.65,0 5.8,1.3,0.02 r=0.006 mat=5; paint box 0,1.28,0 5.9,0.06,0.1 mat=6
+	param Smooth 2
+	param Voxel 0.022
+end
+feature BlobFeature
+	id e0fc6638
+	name LetterB
+	suppressed 0
+	visible 1
+	param Blend 0.01
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 0,-0.65,0 5.8,1.3,0.02 r=0.006 mat=5; paint box 0,-1.28,0 5.9,0.06,0.1 mat=6
+	param Smooth 2
+	param Voxel 0.022
+end
+feature TransformFeature
+	id 35bbefe5
+	name FoldT
+	suppressed 0
+	visible 1
+	bodies Bodies 2f582fdfb0
+	param RotationAngle 0
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Translate 0 0.65 0
+end
+feature TransformFeature
+	id d8376b4b
+	name FoldB
+	suppressed 0
+	visible 1
+	bodies Bodies e0fc6638b0
+	param RotationAngle 0
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Translate 0 -0.65 0
+end
+feature TransformFeature
+	id 1be6efbc
+	name Lift
+	suppressed 0
+	visible 1
+	bodies Bodies 167ff81bb0 2f582fdfb0 e0fc6638b0
+	param RotationAngle 0
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Translate 0 0.4 0.45
+end
+feature BlobFeature
+	id 4272ae8e
+	name Flap
+	suppressed 0
+	visible 1
+	param Blend 0.01
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 0,0,0 4.53,4.53,0.03 rot=0,0,45 r=0.012 mat=0; -box 0,2.5,0 9,5,1; -sphere -2.773,-0.427,0 0.075; -sphere -2.347,-0.853,0 0.100; -sphere -1.920,-1.280,0 0.050; -sphere -1.493,-1.707,0 0.075; -sphere -1.067,-2.133,0 0.100; -sphere -0.640,-2.560,0 0.050; -sphere -0.213,-2.987,0 0.075; -sphere 0.213,-2.987,0 0.100; -sphere 0.640,-2.560,0 0.050; -sphere 1.067,-2.133,0 0.075; -sphere 1.493,-1.707,0 0.100; -sphere 1.920,-1.280,0 0.050; -sphere 2.347,-0.853,0 0.075; -sphere 2.773,-0.427,0 0.100; paint box 0,-1.4,-0.012 6.4,2.8,0.012 mat=2; paint box -2.25,-0.45,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box -1.75,-0.45,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box -2.00,-0.90,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box -1.25,-0.45,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box -1.50,-0.90,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box -1.25,-1.35,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box -0.75,-0.45,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box -1.00,-0.90,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box -0.75,-1.35,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box -1.00,-1.80,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box -0.25,-0.45,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box -0.50,-0.90,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box -0.25,-1.35,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box -0.50,-1.80,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box -0.25,-2.25,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 0.25,-0.45,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 0.00,-0.90,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 0.25,-1.35,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 0.00,-1.80,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 0.25,-2.25,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 0.00,-2.70,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 0.75,-0.45,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 0.50,-0.90,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 0.75,-1.35,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 0.50,-1.80,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 1.25,-0.45,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 1.00,-0.90,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 1.25,-1.35,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 1.00,-1.80,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 1.75,-0.45,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 1.50,-0.90,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 2.25,-0.45,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 2.00,-0.90,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3
+	param Smooth 2
+	param Voxel 0.022
+end
+feature BlobFeature
+	id 577a1040
+	name SealA
+	suppressed 0
+	visible 1
+	param Blend 0.04
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes cylinder 0,-3.1,0.01 0,-3.1,0.14 0.62 r=0.06 mat=4; sphere 0.55,-3.45,0.03 0.14 mat=4; sphere -0.5,-2.7,0.03 0.12 mat=4; sphere -0.62,-3.3,0.03 0.1 mat=4; sphere 0.45,-2.65,0.03 0.09 mat=4; -torus 0,-3.1,0.16 0.42 0.035; -cylinder 0,-3.1,0.12 0,-3.1,0.3 0.12; -box 0.000,-2.900,0.15 0.06,0.26,0.1 rot=0,0,0; -box -0.190,-3.038,0.15 0.06,0.26,0.1 rot=0,0,72; -box -0.118,-3.262,0.15 0.06,0.26,0.1 rot=0,0,144; -box 0.118,-3.262,0.15 0.06,0.26,0.1 rot=0,0,216; -box 0.190,-3.038,0.15 0.06,0.26,0.1 rot=0,0,288; -box 0,-3.72,0.1 3,1.2,1
+	param Smooth 2
+	param Voxel 0.015
+end
+feature BlobFeature
+	id 05830423
+	name SealB
+	suppressed 0
+	visible 1
+	param Blend 0.04
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes cylinder 0,-3.1,0.01 0,-3.1,0.14 0.62 r=0.06 mat=4; sphere 0.55,-3.45,0.03 0.14 mat=4; sphere -0.5,-2.7,0.03 0.12 mat=4; sphere -0.62,-3.3,0.03 0.1 mat=4; sphere 0.45,-2.65,0.03 0.09 mat=4; -torus 0,-3.1,0.16 0.42 0.035; -cylinder 0,-3.1,0.12 0,-3.1,0.3 0.12; -box 0.000,-2.900,0.15 0.06,0.26,0.1 rot=0,0,0; -box -0.190,-3.038,0.15 0.06,0.26,0.1 rot=0,0,72; -box -0.118,-3.262,0.15 0.06,0.26,0.1 rot=0,0,144; -box 0.118,-3.262,0.15 0.06,0.26,0.1 rot=0,0,216; -box 0.190,-3.038,0.15 0.06,0.26,0.1 rot=0,0,288; -box 0,-2.48,0.1 3,1.2,1
+	param Smooth 2
+	param Voxel 0.015
+end
+feature TransformFeature
+	id a636198e
+	name SealStay
+	suppressed 0
+	visible 1
+	bodies Bodies 05830423b0
+	param RotationAngle 0
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Translate 0 2.1 0.2
+end
+feature TransformFeature
+	id 764b27b4
+	name Hinge
+	suppressed 0
+	visible 1
+	bodies Bodies 4272ae8eb0 577a1040b0
+	param RotationAngle -180
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Translate 0 2.1 0.2
+end

@@ -1,0 +1,2 @@
+# part	model	pivot x	y	z	size x	y	z
+scroll	out/scroll.vmdl	0.162	0.001	-1.206	2.644	11.885	2.365

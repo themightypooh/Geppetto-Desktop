@@ -1,0 +1,26 @@
+# edits the traced marionette: run with geppetto-live edit2.txt marionette.effigy .
+refimage front ref_flip.png offset=7.58,26.91 depth=0 opacity=0.55
+echo un-mirrored: head, control and strings now sit where the pic has them
+set Head shapes="ellipsoid 0.0,0.34,32.26 6.03,6.43,6.91 rot=-40,0,0 mat=2; ellipsoid 2.63,-4.4,35.17 0.6,0.9,1.3 rot=-40,0,0 mat=2; ellipsoid -1.0,1.37,33.49 6.23,6.68,6.09 rot=-40,0,0 mat=3; paint ellipsoid -1.6,3.04,35.48 7.43,7.43,4.4 rot=-40,0,0 mat=3; paint ellipsoid -5.5,0.34,32.26 3,7.43,7.43 rot=-40,0,0 mat=3; paint sphere 6.09,-1.69,31.92 1.29 mat=5; paint sphere 5.31,1.22,28.74 1.29 mat=5; paint sphere 6.11,-1.62,31.86 0.74 mat=6; paint sphere 5.25,1.29,28.67 0.74 mat=6; sphere 5.02,-0.95,29.22 1.08 mat=4; paint sphere 4.27,-4.33,31.11 1.35 mat=4; paint sphere 3.12,0.41,26.64 1.22 mat=4; -box 1.81,-3.25,27.32 2.4,3.25,0.3 rot=-40,0,0; -box 0.35,-4.87,26.37 2.4,0.3,2.03 rot=-40,0,0; -box 0.35,-1.49,25.56 2.4,0.3,1.76 rot=-40,0,0"
+set Control shapes="capsule 5,-18.96,46.14 -5,4.06,51.29 1.02 mat=8; capsule 5,2.37,44.87 -5,-17.26,54.35 1.02 mat=8; cylinder 0,-7.45,48.11 0,-7.45,50.31 1.08 mat=8"
+set StringElbowL points=-5.0,-15.98,53.32;0.8,-24.37,34.63
+set StringKneeL points=4.4,-17.58,46.45;1.6,-22.21,7.14
+set StringNeck points=0,-7.45,48.71;-1.5,-8.67,31.79
+set StringHead points=3.8,0.01,45.11;-0.5,-0.68,38.42
+set StringElbowR points=-4.4,2.68,50.98;0.6,7.11,21.63
+set StringKneeR points=4.4,1.19,44.54;1.6,-8.8,5.52
+echo torso fills the drawn chest, waist and pelvis
+set Torso shapes="ellipsoid 0.0,-10.83,25.49 4.2,5.55,7.31 rot=-31,0,0 mat=1; ellipsoid 0.0,-14.22,19.74 3.6,4.2,2.71 rot=-25,0,0 mat=1"
+set Pelvis shapes="ellipsoid 0.0,-15.91,16.35 3.6,5.01,3.52 rot=-20,0,0 mat=1"
+set Neck shapes="cylinder 0.0,-7.45,29.89 0.0,-4.2,27.18 1.76 r=0.2 mat=1"
+echo joints at their drawn size
+set Joints shapes="sphere 0.0,-14.08,31.25 1.69 mat=1; sphere 0.0,-3.25,24.48 1.56 mat=1; sphere 0.0,-24.58,33.41 1.42 mat=1; sphere 0.0,7.11,20.35 1.35 mat=1; sphere 0.0,-27.89,25.15 0.81 mat=1; sphere 0.0,8.46,11.48 0.88 mat=1; sphere 0.0,-21.19,16.01 2.17 mat=1; sphere 0.0,-13.0,13.1 2.17 mat=1; sphere 0.0,-22.88,6.06 1.56 mat=1; sphere 0.0,-9.0,4.1 1.56 mat=1"
+echo limbs as thick as drawn, forearms swelling toward the wrist like the pic
+set UpperArms shapes="cone 0.0,-14.08,31.25 1.83 0.0,-24.58,33.41 1.56 mat=1; cone 0.0,-3.25,24.48 1.69 0.0,7.11,20.35 1.49 mat=1"
+set Forearms shapes="cone 0.0,-24.58,33.41 1.62 0.0,-26.54,29.22 1.96 mat=1; cone 0.0,-26.54,29.22 1.96 0.0,-27.89,25.15 1.15 mat=1; cone 0.0,7.11,20.35 1.35 0.0,7.79,15.68 1.9 mat=1; cone 0.0,7.79,15.68 1.9 0.0,8.46,11.48 1.29 mat=1"
+set Hands shapes="ellipsoid 0.0,-27.62,21.63 1.9,1.9,2.98 mat=1; ellipsoid 0.0,8.12,7.82 1.9,1.9,2.57 mat=1"
+set Thighs shapes="cone 0.0,-21.19,16.01 2.37 0.0,-21.93,11.27 2.37 mat=1; cone 0.0,-21.93,11.27 2.37 0.0,-22.88,6.06 2.1 mat=1; cone 0.0,-13.0,13.1 2.71 0.0,-11.64,8.91 2.57 mat=1; cone 0.0,-11.64,8.91 2.57 0.0,-9.0,4.1 2.17 mat=1"
+set Shins shapes="cone 0.0,-22.88,6.06 1.76 0.0,-26.27,-5.45 1.29 mat=1; cone 0.0,-9.0,4.1 1.76 0.0,-7.45,-6.8 1.29 mat=1"
+set Feet shapes="ellipsoid 1.2,-26.74,-7.21 2.6,1.76,1.49 mat=1; ellipsoid 1.2,-7.31,-8.56 2.6,1.76,1.49 mat=1; sphere 0.0,-26.27,-5.45 1.29 mat=1; sphere 0.0,-7.45,-6.8 1.29 mat=1"
+render out/front_edit2.png view=front size=900 wire=0 grid=0 labels=0
+save marionette.effigy

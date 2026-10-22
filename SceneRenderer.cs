@@ -111,6 +111,10 @@ public sealed class SceneRenderer : IDisposable
 	public void ResetTemporalHistory() { _taa.Reset(); _motionBlur.Reset(); _bloom.ResetHistory(); }
 	public Vector3 KeyDirection { get; set; } = KeyShadowMap.Direction;
 	public int WireframeMode { get; set; } = 0; // 0: shaded, 1: overlay, 2: wireframe only
+	/// <summary>Display-only world transform applied to where the scene lands on screen, not to
+	/// how it is shaded: lighting, shadows and the mesh itself stay as they are (the send-off
+	/// presses the model flat onto a card this way).</summary>
+	public Matrix4x4 DisplayTransform { get; set; } = Matrix4x4.Identity;
 
 	public SceneRenderer( GL gl )
 	{
@@ -300,9 +304,22 @@ public sealed class SceneRenderer : IDisposable
 		_stats.EndFrame( GC.GetAllocatedBytesForCurrentThread() - frameAlloc );
 	}
 
+	readonly Dictionary<string, float> _mergedWeights = new( StringComparer.Ordinal );
+
+	/// <summary>A clip's morph weights with the mesh's own (the Face Poser's) on top, so a face set on
+	/// the sliders still shows while a clip plays.</summary>
+	IReadOnlyDictionary<string, float> MergedWeights( IReadOnlyDictionary<string, float> clip, Dictionary<string, float> mesh )
+	{
+		if ( mesh.Count == 0 ) return clip;
+		_mergedWeights.Clear();
+		if ( clip is not null ) foreach ( var kv in clip ) _mergedWeights[kv.Key] = kv.Value;
+		foreach ( var kv in mesh ) _mergedWeights[kv.Key] = kv.Value;
+		return _mergedWeights;
+	}
+
 	void ShadowPass( in Frame f )
 	{
-		f.Mesh.ApplyMorphWeights( _gl, f.Player is null ? f.Mesh.MorphWeights : f.Player.MorphWeights );
+		f.Mesh.ApplyMorphWeights( _gl, f.Player is null ? f.Mesh.MorphWeights : MergedWeights( f.Player.MorphWeights, f.Mesh.MorphWeights ) );
 		_shadow.LightDirection = KeyDirection;
 		// R9: live geometry is built once per frame here, before the first pass that draws it.
 		if ( !Live.IsEmpty )
@@ -346,13 +363,14 @@ public sealed class SceneRenderer : IDisposable
 		// Row-vector projection: clip x/y gain jitter*clip.w (perspective M34=-1).
 		proj.M31 += jitter.X * proj.M34;
 		proj.M32 += jitter.Y * proj.M34;
+		if ( proj.M34 == 0 ) { proj.M41 += jitter.X; proj.M42 += jitter.Y; }   // orthographic: w is 1
 		var viewProj = view * proj;
 		_frameViewProjection = viewProj;
 		Matrix4x4.Invert( proj, out var invProj );
 		var eye = f.Camera.Eye;
 		var key = KeyDirection.LengthSquared() > 1e-4f ? Vector3.Normalize( KeyDirection ) : KeyShadowMap.Direction;
 		_shader.Use();
-		_shader.SetMatrix( _mvp, viewProj ); _shader.SetMatrix( _model, Matrix4x4.Identity );
+		_shader.SetMatrix( _mvp, DisplayTransform * viewProj ); _shader.SetMatrix( _model, Matrix4x4.Identity );
 		_shader.SetMatrix( _view, view ); _shader.SetMatrix( _projection, proj ); _shader.SetMatrix( _invProjection, invProj );
 		_shader.SetVec3( _eye, eye.X, eye.Y, eye.Z );
 		_shader.SetVec3( _key, key.X, key.Y, key.Z );

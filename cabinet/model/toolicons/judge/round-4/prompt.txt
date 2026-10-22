@@ -1,0 +1,100 @@
+You are judging icons for a 3D modelling app's tool wheel. Each icon is pixel art baked from a small
+3D model. They sit on a dark steel wheel at 1x (the top row of each sheet); the 2x row below is the same
+icon enlarged so you can see it. Each icon is numbered and labelled with its tool; below is what each
+tool does. Judge how well each icon represents its tool.
+
+For every numbered icon, score each rubric category 0-10 with the evidence you actually see in the
+picture, and a concrete fix (what to change in the 3D object: add/remove/move/recolour a part). Empty
+fix only for a 10.
+
+Be strict. 9 means a modeller would get it instantly and nothing needs changing; 7 means it works but
+something is weak; 5 or less means wrong or unreadable. Do not be generous to be nice.
+
+Rubric:
+- represents (weight 3): The icon shows what this tool does: its own idea (object or action), so a modeller seeing it next to the name gets it instantly. Not a generic shape that could be any tool.
+- distinct (weight 2): It can't be confused with any other icon in the same category (shape, colour and action differ).
+- legibility (weight 2): At wheel size (the 1x row) the silhouette and the key part read clearly: nothing important is a lone pixel, thin parts survive, the red accent marks the action.
+- craft (weight 1): Clean pixel art in the chest's style: solid outline, no muddy dithering, no stray bits, well framed.
+
+## FORM
+Sheet: /home/poo/Desktop/geppetto-desktop/cabinet/model/toolicons/judge/round-4/form.png
+- #1 Blob: adds smooth shapes that melt together into one organic body
+- #2 Sketch: draws 2D lines and shapes on paper, to build solids from later
+- #3 Profile: draws the 2D cross-section outline a solid is made from
+- #4 Spline: a smooth curve through control points
+- #5 Import: brings in a mesh from a file
+- #6 Body from bones: grows a body's flesh around a skeleton's bones
+(Unnumbered, grey-labelled icons on this sheet are context only: don't score them, but judge distinctness against them: Primitive, Part, Plane)
+
+## BUILD
+Sheet: /home/poo/Desktop/geppetto-desktop/cabinet/model/toolicons/judge/round-4/build.png
+- #7 Loft: makes a solid that blends between two or more different cross-sections
+- #8 Sweep: drags a cross-section along a path to make a tube or rail
+- #9 Circle pattern: repeats a feature around a circle
+(Unnumbered, grey-labelled icons on this sheet are context only: don't score them, but judge distinctness against them: Extrude, Revolve, Boolean, Mirror, Row pattern, Shell, Hole)
+
+## REFINE
+Sheet: /home/poo/Desktop/geppetto-desktop/cabinet/model/toolicons/judge/round-4/refine.png
+- #10 Fillet: rounds a body's sharp edges
+- #11 Draft: tapers a body's walls at an angle (as for moulding)
+- #12 Trim: cuts a body along a plane and keeps one side
+(Unnumbered, grey-labelled icons on this sheet are context only: don't score them, but judge distinctness against them: Chamfer, Subdivide, Remesh, Detail, Stroke)
+
+## DEFORM
+Sheet: /home/poo/Desktop/geppetto-desktop/cabinet/model/toolicons/judge/round-4/deform.png
+- #13 Sculpt: pushes and pulls a soft surface by hand with sculpting tools
+- #14 Move: moves, rotates or scales a body (gizmo with axis arrows)
+- #15 Bend: bends, twists or tapers a whole body
+- #16 Curve: makes a body follow along a curve
+(Unnumbered, grey-labelled icons on this sheet are context only: don't score them, but judge distinctness against them: Lattice, Push face)
+
+## MESH
+Sheet: /home/poo/Desktop/geppetto-desktop/cabinet/model/toolicons/judge/round-4/mesh.png
+- #17 Bevel: bevels selected mesh edges into narrow slanted faces
+- #18 Symmetrize: makes one half of a mesh match the other half across the middle
+- #19 Dissolve: removes edges/vertices while keeping the surface closed
+- #20 Delete: deletes the selected mesh elements
+(Unnumbered, grey-labelled icons on this sheet are context only: don't score them, but judge distinctness against them: Extrude faces, Inset, Loop cut, Bridge, Mesh edit, Delete face)
+
+## CLOTH
+Sheet: /home/poo/Desktop/geppetto-desktop/cabinet/model/toolicons/judge/round-4/cloth.png
+- #21 Pocket: sews a pocket with a flap onto clothing
+- #22 Wear: adds wear and tear to clothing: holes, frays, scuffs
+- #23 Fur: grows fur / hair strands over a surface
+(Unnumbered, grey-labelled icons on this sheet are context only: don't score them, but judge distinctness against them: Garment, Fabric, Padding, Hardware, Wearer)
+
+## SURFACE
+Sheet: /home/poo/Desktop/geppetto-desktop/cabinet/model/toolicons/judge/round-4/surface.png
+- #24 Flesh: a skin-and-flesh material for characters
+- #25 Skin: skin surface details: pores, freckles, spots
+(Unnumbered, grey-labelled icons on this sheet are context only: don't score them, but judge distinctness against them: Material, Paint, Face material, Glow, UV project)
+
+## RIG
+Sheet: /home/poo/Desktop/geppetto-desktop/cabinet/model/toolicons/judge/round-4/rig.png
+- #26 Shape key: a morph target: a slider that blends a body between two shapes
+- #27 Key end: ends a shape key: the slider's far stop, the target shape
+(Unnumbered, grey-labelled icons on this sheet are context only: don't score them, but judge distinctness against them: Bind, Corrective)
+
+## TWEAK
+Sheet: /home/poo/Desktop/geppetto-desktop/cabinet/model/toolicons/judge/round-4/tweak.png
+- #28 Set: changes a setting/parameter on an existing feature
+- #29 Fix mesh: repairs a mesh: closes holes, removes loose bits, fixes normals
+(Unnumbered, grey-labelled icons on this sheet are context only: don't score them, but judge distinctness against them: Remove, Remedy)
+
+## CHECK
+Sheet: /home/poo/Desktop/geppetto-desktop/cabinet/model/toolicons/judge/round-4/check.png
+- #30 Symmetry: checks whether a body is the same on both sides
+- #31 Topology: reports on the mesh's polygons: quads, poles, bad faces
+- #32 Flex: bends the model's joints to check how it deforms
+- #33 Describe: writes a text description / report of the model
+(Unnumbered, grey-labelled icons on this sheet are context only: don't score them, but judge distinctness against them: Measure, Distance, Clearance, Section, Match)
+
+## OUTPUT
+Sheet: /home/poo/Desktop/geppetto-desktop/cabinet/model/toolicons/judge/round-4/output.png
+- #34 Export: writes the model out to a mesh file
+- #35 Bake: bakes the model into game-ready files and texture maps
+(Unnumbered, grey-labelled icons on this sheet are context only: don't score them, but judge distinctness against them: Render, Turnaround, Save, Paint maps, Pivot, Rebuild)
+
+Look at every sheet with the Read tool. Reply with ONLY this JSON (no prose), every icon number once:
+{"icons": [{"n": 1, "scores": {"represents": {"score": 0, "evidence": "", "fix": ""},
+ "distinct": {...}, "legibility": {...}, "craft": {...}}}, ...]}

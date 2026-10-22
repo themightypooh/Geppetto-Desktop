@@ -1,0 +1,153 @@
+effigy 1
+rollback 2147483647
+materiallook 0 color=#a8794a rough=0.6 metal=0
+materiallook 2 color=#8e1a1a rough=0.5 metal=0
+materiallook 5 color=#c9a23a rough=0.35 metal=0.8
+materiallook 7 color=#6e1c1c rough=0.6 metal=0
+materiallook 8 color=#1e2a44 rough=0.6 metal=0
+materiallook 9 color=#1f3b2a rough=0.6 metal=0
+materiallook 10 color=#d6cdb6 rough=0.6 metal=0
+materiallook 11 color=#6b3f24 rough=0.6 metal=0
+materiallook 12 color=#2a211c rough=0.6 metal=0
+materiallook 13 color=#4a1a26 rough=0.6 metal=0
+materiallook 14 color=#7a5a2a rough=0.6 metal=0
+materiallook 15 color=#1d2c44 rough=0.5 metal=0
+materiallook 16 color=#8e1a1a rough=0.5 metal=0
+materiallook 17 color=#2a1a10 rough=0.5 metal=0
+materiallook 18 color=#1f4a33 rough=0.5 metal=0
+refimage top 14 14 4.5 4 0.85 1 /home/poo/Desktop/geppetto-desktop/cabinet/model/booknook/ref/antique_books.jpg
+feature BlobFeature
+	id 7cb82438
+	name Book1
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box -6.300,4.500,0.700 1.200,9.000,1.000 r=0.384 mat=0; box -6.300,8.200,0.730 1.230,0.16,1.060 r=0.07 mat=0; box -6.300,7.550,0.730 1.230,0.16,1.060 r=0.07 mat=0; box -6.300,1.450,0.730 1.230,0.16,1.060 r=0.07 mat=0; box -6.300,0.800,0.730 1.230,0.16,1.060 r=0.07 mat=0; box -6.300,8.910,0.710 1.220,0.18,1.020 r=0.08 mat=0; box -6.300,0.09,0.710 1.220,0.18,1.020 r=0.08 mat=0; paint box -6.300,4.500,1.200 0.936,4.800,0.2 mat=2; paint box -6.300,8.050,1.200 1.300,0.035,0.2 mat=5; paint box -6.300,8.350,1.200 1.300,0.035,0.2 mat=5; paint box -6.300,7.400,1.200 1.300,0.035,0.2 mat=5; paint box -6.300,7.700,1.200 1.300,0.035,0.2 mat=5; paint box -6.300,1.300,1.200 1.300,0.035,0.2 mat=5; paint box -6.300,1.600,1.200 1.300,0.035,0.2 mat=5; paint box -6.300,0.650,1.200 1.300,0.035,0.2 mat=5; paint box -6.300,0.950,1.200 1.300,0.035,0.2 mat=5; paint box -6.300,7.020,1.200 1.008,0.035,0.2 mat=5; paint box -6.300,1.980,1.200 1.008,0.035,0.2 mat=5; paint box -6.300,8.650,1.200 1.300,0.035,0.2 mat=5; paint box -6.300,0.350,1.200 1.300,0.035,0.2 mat=5
+	param Smooth 2
+	param Voxel 0.03
+end
+feature BlobFeature
+	id d4d1b154
+	name Book2
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box -4.865,4.500,0.700 1.550,9.000,1.000 r=0.496 mat=7; box -4.865,8.200,0.730 1.580,0.16,1.060 r=0.07 mat=7; box -4.865,7.550,0.730 1.580,0.16,1.060 r=0.07 mat=7; box -4.865,1.450,0.730 1.580,0.16,1.060 r=0.07 mat=7; box -4.865,0.800,0.730 1.580,0.16,1.060 r=0.07 mat=7; box -4.865,8.910,0.710 1.570,0.18,1.020 r=0.08 mat=7; box -4.865,0.09,0.710 1.570,0.18,1.020 r=0.08 mat=7; paint box -4.865,4.500,1.200 1.209,4.800,0.2 mat=15; paint box -4.865,8.050,1.200 1.650,0.035,0.2 mat=5; paint box -4.865,8.350,1.200 1.650,0.035,0.2 mat=5; paint box -4.865,7.400,1.200 1.650,0.035,0.2 mat=5; paint box -4.865,7.700,1.200 1.650,0.035,0.2 mat=5; paint box -4.865,1.300,1.200 1.650,0.035,0.2 mat=5; paint box -4.865,1.600,1.200 1.650,0.035,0.2 mat=5; paint box -4.865,0.650,1.200 1.650,0.035,0.2 mat=5; paint box -4.865,0.950,1.200 1.650,0.035,0.2 mat=5; paint box -4.865,7.020,1.200 1.302,0.035,0.2 mat=5; paint box -4.865,1.980,1.200 1.302,0.035,0.2 mat=5; paint box -4.865,8.650,1.200 1.650,0.035,0.2 mat=5; paint box -4.865,0.350,1.200 1.650,0.035,0.2 mat=5
+	param Smooth 2
+	param Voxel 0.03
+end
+feature BlobFeature
+	id 5258044f
+	name Book3
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box -3.355,4.500,0.700 1.350,9.000,1.000 r=0.432 mat=8; box -3.355,8.200,0.730 1.380,0.16,1.060 r=0.07 mat=8; box -3.355,7.550,0.730 1.380,0.16,1.060 r=0.07 mat=8; box -3.355,1.450,0.730 1.380,0.16,1.060 r=0.07 mat=8; box -3.355,0.800,0.730 1.380,0.16,1.060 r=0.07 mat=8; box -3.355,8.910,0.710 1.370,0.18,1.020 r=0.08 mat=8; box -3.355,0.09,0.710 1.370,0.18,1.020 r=0.08 mat=8; paint box -3.355,4.500,1.200 1.053,4.800,0.2 mat=16; paint box -3.355,8.050,1.200 1.450,0.035,0.2 mat=5; paint box -3.355,8.350,1.200 1.450,0.035,0.2 mat=5; paint box -3.355,7.400,1.200 1.450,0.035,0.2 mat=5; paint box -3.355,7.700,1.200 1.450,0.035,0.2 mat=5; paint box -3.355,1.300,1.200 1.450,0.035,0.2 mat=5; paint box -3.355,1.600,1.200 1.450,0.035,0.2 mat=5; paint box -3.355,0.650,1.200 1.450,0.035,0.2 mat=5; paint box -3.355,0.950,1.200 1.450,0.035,0.2 mat=5; paint box -3.355,7.020,1.200 1.134,0.035,0.2 mat=5; paint box -3.355,1.980,1.200 1.134,0.035,0.2 mat=5; paint box -3.355,8.650,1.200 1.450,0.035,0.2 mat=5; paint box -3.355,0.350,1.200 1.450,0.035,0.2 mat=5
+	param Smooth 2
+	param Voxel 0.03
+end
+feature BlobFeature
+	id 9d91bbaf
+	name Book4
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box -1.770,4.500,0.700 1.700,9.000,1.000 r=0.544 mat=9; box -1.770,8.200,0.730 1.730,0.16,1.060 r=0.07 mat=9; box -1.770,7.550,0.730 1.730,0.16,1.060 r=0.07 mat=9; box -1.770,1.450,0.730 1.730,0.16,1.060 r=0.07 mat=9; box -1.770,0.800,0.730 1.730,0.16,1.060 r=0.07 mat=9; box -1.770,8.910,0.710 1.720,0.18,1.020 r=0.08 mat=9; box -1.770,0.09,0.710 1.720,0.18,1.020 r=0.08 mat=9; paint box -1.770,4.500,1.200 1.326,4.800,0.2 mat=17; paint box -1.770,8.050,1.200 1.800,0.035,0.2 mat=5; paint box -1.770,8.350,1.200 1.800,0.035,0.2 mat=5; paint box -1.770,7.400,1.200 1.800,0.035,0.2 mat=5; paint box -1.770,7.700,1.200 1.800,0.035,0.2 mat=5; paint box -1.770,1.300,1.200 1.800,0.035,0.2 mat=5; paint box -1.770,1.600,1.200 1.800,0.035,0.2 mat=5; paint box -1.770,0.650,1.200 1.800,0.035,0.2 mat=5; paint box -1.770,0.950,1.200 1.800,0.035,0.2 mat=5; paint box -1.770,7.020,1.200 1.428,0.035,0.2 mat=5; paint box -1.770,1.980,1.200 1.428,0.035,0.2 mat=5; paint box -1.770,8.650,1.200 1.800,0.035,0.2 mat=5; paint box -1.770,0.350,1.200 1.800,0.035,0.2 mat=5
+	param Smooth 2
+	param Voxel 0.03
+end
+feature BlobFeature
+	id a1ac10aa
+	name Book5
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box -0.285,4.500,0.700 1.150,9.000,1.000 r=0.368 mat=10; box -0.285,8.200,0.730 1.180,0.16,1.060 r=0.07 mat=10; box -0.285,7.550,0.730 1.180,0.16,1.060 r=0.07 mat=10; box -0.285,1.450,0.730 1.180,0.16,1.060 r=0.07 mat=10; box -0.285,0.800,0.730 1.180,0.16,1.060 r=0.07 mat=10; box -0.285,8.910,0.710 1.170,0.18,1.020 r=0.08 mat=10; box -0.285,0.09,0.710 1.170,0.18,1.020 r=0.08 mat=10; paint box -0.285,4.500,1.200 0.897,4.800,0.2 mat=2; paint box -0.285,8.050,1.200 1.250,0.035,0.2 mat=5; paint box -0.285,8.350,1.200 1.250,0.035,0.2 mat=5; paint box -0.285,7.400,1.200 1.250,0.035,0.2 mat=5; paint box -0.285,7.700,1.200 1.250,0.035,0.2 mat=5; paint box -0.285,1.300,1.200 1.250,0.035,0.2 mat=5; paint box -0.285,1.600,1.200 1.250,0.035,0.2 mat=5; paint box -0.285,0.650,1.200 1.250,0.035,0.2 mat=5; paint box -0.285,0.950,1.200 1.250,0.035,0.2 mat=5; paint box -0.285,7.020,1.200 0.966,0.035,0.2 mat=5; paint box -0.285,1.980,1.200 0.966,0.035,0.2 mat=5; paint box -0.285,8.650,1.200 1.250,0.035,0.2 mat=5; paint box -0.285,0.350,1.200 1.250,0.035,0.2 mat=5
+	param Smooth 2
+	param Voxel 0.03
+end
+feature BlobFeature
+	id 43412ebe
+	name Book6
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 1.075,4.500,0.700 1.450,9.000,1.000 r=0.464 mat=11; box 1.075,8.200,0.730 1.480,0.16,1.060 r=0.07 mat=11; box 1.075,7.550,0.730 1.480,0.16,1.060 r=0.07 mat=11; box 1.075,1.450,0.730 1.480,0.16,1.060 r=0.07 mat=11; box 1.075,0.800,0.730 1.480,0.16,1.060 r=0.07 mat=11; box 1.075,8.910,0.710 1.470,0.18,1.020 r=0.08 mat=11; box 1.075,0.09,0.710 1.470,0.18,1.020 r=0.08 mat=11; paint box 1.075,4.500,1.200 1.131,4.800,0.2 mat=18; paint box 1.075,8.050,1.200 1.550,0.035,0.2 mat=5; paint box 1.075,8.350,1.200 1.550,0.035,0.2 mat=5; paint box 1.075,7.400,1.200 1.550,0.035,0.2 mat=5; paint box 1.075,7.700,1.200 1.550,0.035,0.2 mat=5; paint box 1.075,1.300,1.200 1.550,0.035,0.2 mat=5; paint box 1.075,1.600,1.200 1.550,0.035,0.2 mat=5; paint box 1.075,0.650,1.200 1.550,0.035,0.2 mat=5; paint box 1.075,0.950,1.200 1.550,0.035,0.2 mat=5; paint box 1.075,7.020,1.200 1.218,0.035,0.2 mat=5; paint box 1.075,1.980,1.200 1.218,0.035,0.2 mat=5; paint box 1.075,8.650,1.200 1.550,0.035,0.2 mat=5; paint box 1.075,0.350,1.200 1.550,0.035,0.2 mat=5
+	param Smooth 2
+	param Voxel 0.03
+end
+feature BlobFeature
+	id 42a11a50
+	name Book7
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 2.760,4.500,0.700 1.800,9.000,1.000 r=0.576 mat=12; box 2.760,8.200,0.730 1.830,0.16,1.060 r=0.07 mat=12; box 2.760,7.550,0.730 1.830,0.16,1.060 r=0.07 mat=12; box 2.760,1.450,0.730 1.830,0.16,1.060 r=0.07 mat=12; box 2.760,0.800,0.730 1.830,0.16,1.060 r=0.07 mat=12; box 2.760,8.910,0.710 1.820,0.18,1.020 r=0.08 mat=12; box 2.760,0.09,0.710 1.820,0.18,1.020 r=0.08 mat=12; paint box 2.760,4.500,1.200 1.404,4.800,0.2 mat=15; paint box 2.760,8.050,1.200 1.900,0.035,0.2 mat=5; paint box 2.760,8.350,1.200 1.900,0.035,0.2 mat=5; paint box 2.760,7.400,1.200 1.900,0.035,0.2 mat=5; paint box 2.760,7.700,1.200 1.900,0.035,0.2 mat=5; paint box 2.760,1.300,1.200 1.900,0.035,0.2 mat=5; paint box 2.760,1.600,1.200 1.900,0.035,0.2 mat=5; paint box 2.760,0.650,1.200 1.900,0.035,0.2 mat=5; paint box 2.760,0.950,1.200 1.900,0.035,0.2 mat=5; paint box 2.760,7.020,1.200 1.512,0.035,0.2 mat=5; paint box 2.760,1.980,1.200 1.512,0.035,0.2 mat=5; paint box 2.760,8.650,1.200 1.900,0.035,0.2 mat=5; paint box 2.760,0.350,1.200 1.900,0.035,0.2 mat=5
+	param Smooth 2
+	param Voxel 0.03
+end
+feature BlobFeature
+	id 599b0562
+	name Book8
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 4.370,4.500,0.700 1.300,9.000,1.000 r=0.416 mat=13; box 4.370,8.200,0.730 1.330,0.16,1.060 r=0.07 mat=13; box 4.370,7.550,0.730 1.330,0.16,1.060 r=0.07 mat=13; box 4.370,1.450,0.730 1.330,0.16,1.060 r=0.07 mat=13; box 4.370,0.800,0.730 1.330,0.16,1.060 r=0.07 mat=13; box 4.370,8.910,0.710 1.320,0.18,1.020 r=0.08 mat=13; box 4.370,0.09,0.710 1.320,0.18,1.020 r=0.08 mat=13; paint box 4.370,4.500,1.200 1.014,4.800,0.2 mat=17; paint box 4.370,8.050,1.200 1.400,0.035,0.2 mat=5; paint box 4.370,8.350,1.200 1.400,0.035,0.2 mat=5; paint box 4.370,7.400,1.200 1.400,0.035,0.2 mat=5; paint box 4.370,7.700,1.200 1.400,0.035,0.2 mat=5; paint box 4.370,1.300,1.200 1.400,0.035,0.2 mat=5; paint box 4.370,1.600,1.200 1.400,0.035,0.2 mat=5; paint box 4.370,0.650,1.200 1.400,0.035,0.2 mat=5; paint box 4.370,0.950,1.200 1.400,0.035,0.2 mat=5; paint box 4.370,7.020,1.200 1.092,0.035,0.2 mat=5; paint box 4.370,1.980,1.200 1.092,0.035,0.2 mat=5; paint box 4.370,8.650,1.200 1.400,0.035,0.2 mat=5; paint box 4.370,0.350,1.200 1.400,0.035,0.2 mat=5
+	param Smooth 2
+	param Voxel 0.03
+end
+feature BlobFeature
+	id 4ef523e3
+	name Book9
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 5.880,4.500,0.700 1.600,9.000,1.000 r=0.512 mat=14; box 5.880,8.200,0.730 1.630,0.16,1.060 r=0.07 mat=14; box 5.880,7.550,0.730 1.630,0.16,1.060 r=0.07 mat=14; box 5.880,1.450,0.730 1.630,0.16,1.060 r=0.07 mat=14; box 5.880,0.800,0.730 1.630,0.16,1.060 r=0.07 mat=14; box 5.880,8.910,0.710 1.620,0.18,1.020 r=0.08 mat=14; box 5.880,0.09,0.710 1.620,0.18,1.020 r=0.08 mat=14; paint box 5.880,4.500,1.200 1.248,4.800,0.2 mat=2; paint box 5.880,8.050,1.200 1.700,0.035,0.2 mat=5; paint box 5.880,8.350,1.200 1.700,0.035,0.2 mat=5; paint box 5.880,7.400,1.200 1.700,0.035,0.2 mat=5; paint box 5.880,7.700,1.200 1.700,0.035,0.2 mat=5; paint box 5.880,1.300,1.200 1.700,0.035,0.2 mat=5; paint box 5.880,1.600,1.200 1.700,0.035,0.2 mat=5; paint box 5.880,0.650,1.200 1.700,0.035,0.2 mat=5; paint box 5.880,0.950,1.200 1.700,0.035,0.2 mat=5; paint box 5.880,7.020,1.200 1.344,0.035,0.2 mat=5; paint box 5.880,1.980,1.200 1.344,0.035,0.2 mat=5; paint box 5.880,8.650,1.200 1.700,0.035,0.2 mat=5; paint box 5.880,0.350,1.200 1.700,0.035,0.2 mat=5
+	param Smooth 2
+	param Voxel 0.03
+end

@@ -1,0 +1,4 @@
+# icon render, keyable
+refimage front visible=0
+turnaround out shade=material size=1024 name=iconkey views=front backdrop=key
+refimage front visible=1

@@ -1,0 +1,17 @@
+# edits the traced marionette: run with geppetto-live edit1.txt marionette.effigy .
+refimage front depth=0 opacity=0.55
+echo torso: chest, waist and pelvis stacked like the drawing
+set Torso shapes="ellipsoid 0.0,9.82,25.83 3.6,5.96,6.23 rot=31,0,0 mat=1; ellipsoid 0.0,13.68,19.87 3.0,3.93,2.3 rot=25,0,0 mat=1"
+set Pelvis shapes="ellipsoid 0.0,16.25,15.95 3.2,4.87,2.98 rot=20,0,0 mat=1"
+set Neck shapes="cylinder 0.0,7.45,29.89 0.0,4.2,27.18 1.62 r=0.2 mat=1"
+echo ball joints on the traced joint centres
+set Joints shapes="sphere 0.0,14.08,31.38 1.62 mat=1; sphere 0.0,2.03,24.14 1.62 mat=1; sphere 0.0,24.91,33.28 1.35 mat=1; sphere 0.0,-7.11,20.21 1.29 mat=1; sphere 0.0,27.76,25.15 0.95 mat=1; sphere 0.0,-8.46,11.61 0.95 mat=1; sphere 0.0,19.97,15.68 1.76 mat=1; sphere 0.0,12.86,13.64 1.76 mat=1; sphere 0.0,22.48,6.33 1.69 mat=1; sphere 0.0,8.94,4.17 1.69 mat=1"
+echo limbs run joint to joint, no gaps
+set UpperArms shapes="cone 0.0,14.08,31.38 1.83 0.0,24.91,33.28 1.42 mat=1; cone 0.0,2.03,24.14 1.83 0.0,-7.11,20.21 1.35 mat=1"
+set Forearms shapes="cone 0.0,24.91,33.28 1.56 0.0,27.76,25.15 1.15 mat=1; cone 0.0,-7.11,20.21 1.69 0.0,-8.46,11.61 1.22 mat=1"
+set Hands shapes="ellipsoid 0.0,27.62,21.63 1.9,1.9,2.98 mat=1; ellipsoid 0.0,-7.99,8.36 2.03,2.03,2.98 mat=1"
+set Thighs shapes="cone 0.0,19.97,15.68 2.3 0.0,22.48,6.33 1.69 mat=1; cone 0.0,12.86,13.64 2.3 0.0,8.94,4.17 1.69 mat=1"
+set Shins shapes="cone 0.0,22.48,6.33 1.83 0.0,24.1,-5.31 1.22 mat=1; cone 0.0,8.94,4.17 1.83 0.0,6.97,-7.0 1.22 mat=1"
+set Feet shapes="ellipsoid 1.2,24.37,-7.34 2.6,1.62,1.49 mat=1; ellipsoid 1.2,6.77,-9.04 2.6,1.62,1.49 mat=1; sphere 0.0,24.1,-5.45 1.15 mat=1; sphere 0.0,6.97,-7.14 1.15 mat=1"
+render out/front_edit1.png view=front size=900 wire=0 grid=0 labels=0
+save marionette.effigy

@@ -89,6 +89,17 @@ public sealed class MeshPicker
 		return (min, max);
 	}
 
+	public int Count => _parts.Count;
+
+	/// <summary>Body <paramref name="index"/>'s triangles as posed by <paramref name="palette"/> (the chest's part glow).</summary>
+	public void Triangles( int index, ReadOnlySpan<Matrix4x4> palette, Action<Vector3, Vector3, Vector3> each )
+	{
+		Bounds( index, palette );
+		var part = _parts[index];
+		for ( int t = 0; t + 2 < part.Triangles.Length; t += 3 )
+			each( part.Posed[part.Triangles[t]], part.Posed[part.Triangles[t + 1]], part.Posed[part.Triangles[t + 2]] );
+	}
+
 	public int Pick( Vector3 origin, Vector3 direction, ReadOnlySpan<Matrix4x4> palette )
 	{
 		float nearest = float.MaxValue;

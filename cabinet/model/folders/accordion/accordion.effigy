@@ -1,0 +1,80 @@
+effigy 1
+rollback 2147483647
+materiallook 0 color=#8e2a22 rough=0.75 metal=0
+materiallook 1 color=#5e1913 rough=0.8 metal=0
+materiallook 2 color=#d9b45a rough=0.6 metal=0
+materiallook 3 color=#e8a33a rough=0.6 metal=0
+materiallook 4 color=#3f7a6a rough=0.6 metal=0
+materiallook 5 color=#a33228 rough=0.75 metal=0
+materiallook 6 color=#1c1a1a rough=0.6 metal=0
+feature BlobFeature
+	id 2a104ff9
+	name Back
+	suppressed 0
+	visible 1
+	param Blend 0.015
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 0,0,0 6.3,4.6,0.06 r=0.015 mat=0; box 0,2.45,-0.02 6.3,0.6,0.05 r=0.2 mat=1
+	param Smooth 2
+	param Voxel 0.022
+end
+feature BlobFeature
+	id beda4fe5
+	name Tabs
+	suppressed 0
+	visible 1
+	param Blend 0.012
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box -2.1,2.55,0.05 1.4,0.5,0.03 r=0.08 mat=2; box -0.2,2.45,0.07 1.4,0.5,0.03 r=0.08 mat=3; box 1.7,2.6,0.09 1.4,0.5,0.03 r=0.08 mat=4
+	param Smooth 2
+	param Voxel 0.018
+end
+feature BlobFeature
+	id c7bd1905
+	name Gusset
+	suppressed 0
+	visible 1
+	param Blend 0.01
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box -3.12,0,0.1 0.12,4.5,0.16 mat=1; box -3.2,0,0.1 0.06,4.5,0.12 mat=0; box -3.28,0,0.1 0.06,4.5,0.08 mat=1; box 3.12,0,0.1 0.12,4.5,0.16 mat=1; box 3.2,0,0.1 0.06,4.5,0.12 mat=0; box 3.28,0,0.1 0.06,4.5,0.08 mat=1
+	param Smooth 2
+	param Voxel 0.018
+end
+feature BlobFeature
+	id bcd79942
+	name Front
+	suppressed 0
+	visible 1
+	param Blend 0.015
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 0,1.6,0 6.3,3.2,0.06 r=0.015 mat=5; -box 0,3.2,0 1.4,0.5,0.2 r=0.2; box 1.8,1.6,0.05 0.22,3.25,0.04 r=0.02 mat=6
+	param Smooth 2
+	param Voxel 0.022
+end
+feature TransformFeature
+	id d00bcb60
+	name Cover
+	suppressed 0
+	visible 1
+	bodies Bodies bcd79942b0
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Translate 0 -2.3 0.24
+end

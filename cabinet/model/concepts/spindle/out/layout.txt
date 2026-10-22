@@ -1,0 +1,2 @@
+# part	model	pivot x	y	z	size x	y	z
+spindle	out/spindle.vmdl	-0	0	-1.15	2.3	11.201	2.3

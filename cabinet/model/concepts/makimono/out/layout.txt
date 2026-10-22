@@ -1,0 +1,2 @@
+# part	model	pivot x	y	z	size x	y	z
+makimono	out/makimono.vmdl	0.029	-0	-1.123	2.304	8.602	2.246

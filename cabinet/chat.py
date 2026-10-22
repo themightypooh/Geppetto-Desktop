@@ -8,7 +8,10 @@ optionally key_env, env_file, auth_header, extra_body and research (tool support
 import json
 import re
 import os
+import shutil
 import socket
+import subprocess
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -29,6 +32,18 @@ DEFAULT_MODELS = [
     dict(id='mimo/mimo-v2.6-pro', label='MiMo V2.6 Pro · cloud', kind='openai',
          endpoint='https://token-plan-sgp.xiaomimimo.com/v1/', model='mimo-v2.6-pro', key_env='MIMO_API_KEY',
          env_file='~/local-llm/.mimo.env', auth_header='api-key', extra_body={'thinking': {'type': 'disabled'}}),
+    # listed even before its key is set, marked (key missing): put MINIMAX_API_KEY=... in ~/local-llm/.minimax.env
+    dict(id='minimax/MiniMax-M3', label='MiniMax M3 · cloud', kind='openai', always=True,
+         endpoint='https://api.minimax.io/v1/', model='MiniMax-M3', key_env='MINIMAX_API_KEY',
+         env_file='~/local-llm/.minimax.env', extra_body={'reasoning_split': True}),
+]
+
+# Claude through the claude CLI, on its own login (the Max plan), never an API key
+CLAUDE = shutil.which('claude') or os.path.expanduser('~/.local/bin/claude')
+CLAUDE_MODELS = [
+    dict(id='claude/opus', label='Claude Opus · Max plan', kind='claude-cli', model='opus', endpoint='cli', research=False),
+    dict(id='claude/sonnet', label='Claude Sonnet · Max plan', kind='claude-cli', model='sonnet', endpoint='cli', research=False),
+    dict(id='claude/haiku', label='Claude Haiku · Max plan', kind='claude-cli', model='haiku', endpoint='cli', research=False),
 ]
 
 
@@ -84,8 +99,10 @@ def models(discover=True):
                                 endpoint='http://127.0.0.1:5001/v1/', model=m['id'], research=False))
         except (OSError, ValueError, KeyError):
             pass
+    if os.access(CLAUDE, os.X_OK):
+        out += [dict(m) for m in CLAUDE_MODELS]
     for m in DEFAULT_MODELS:
-        if key(m):
+        if key(m) or m.get('always'):
             out.append(dict(m))
     # Custom records override discovery/presets, without hiding the user's installed models.
     by_id = {m['id']: m for m in out}
@@ -244,11 +261,84 @@ def _request(model, history, streaming, notes='', api=''):
     return urllib.request.Request(_url(model), data=json.dumps(_body(model, history, streaming, notes, api)).encode(), headers=headers, method='POST')
 
 
-def stream(model, history, cancel=None, timeout=120, notes='', api=''):
+CLAUDE_HOME = os.path.expanduser('~/.local/share/geppetto/chat')
+CLAUDE_TOOLS = ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Skill', 'WebSearch', 'WebFetch',
+                'Bash(geppetto-live *)', 'Bash(python3 */cabinet/host.py *)', 'Bash(ls *)', 'Bash(mkdir *)', 'Bash(cat *)']
+CLAUDE_CHAT = ("You are the chat in Geppetto's cabinet (the paper ball), talking to po. You can model:"
+               " use the geppetto skill, write Effigy build scripts in this folder and run them with"
+               " `geppetto-live build.txt - outdir` so po watches each step in a viewport pane; the run stays open"
+               " with the model loaded: change it with `geppetto-live more RUN edit.txt` (a few lines), never a"
+               " new run or a rebuild; a bad line holds the run, send the fix with `more`; `geppetto-live close RUN`"
+               " when po is happy. po flags steps with notes in the chest; they reach you at your next tool call. Never restart, quit or"
+               " take over the Geppetto chest. The chat window is small: keep replies short.")
+_claude_sessions = set()      # chat sessions the CLI has already started; later turns --resume them
+
+
+def _claude_cli(model, history, cancel, timeout, session=''):
+    """Claude via `claude -p` on its own login (the Max plan), with modelling tools, one CLI session per chat."""
+    history = [h for h in history if h['role'] in ('you', 'model')][-16:]
+    while history and history[0]['role'] != 'you':
+        history = history[1:]
+    resume = bool(session) and session in _claude_sessions
+    if resume or len(history) == 1:
+        prompt = history[-1]['text']
+    else:     # the chat began with another model: hand Claude what was said so far
+        prompt = ('The conversation so far:\n\n' +
+                  '\n\n'.join(('User: ' if h['role'] == 'you' else 'Assistant: ') + h['text'] for h in history[:-1]) +
+                  '\n\nReply to the user\'s latest message:\n\n' + history[-1]['text'])
+    env = {k: v for k, v in os.environ.items() if k not in ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN')}
+    args = [CLAUDE, '-p', '--model', model['model'], '--output-format', 'stream-json', '--include-partial-messages',
+            '--verbose', '--setting-sources', 'user', '--append-system-prompt', CLAUDE_CHAT,
+            '--allowedTools', *CLAUDE_TOOLS]
+    if session:
+        args += ['--resume', session] if resume else ['--session-id', session]
+    else:
+        args.append('--no-session-persistence')
+    os.makedirs(CLAUDE_HOME, exist_ok=True)
+    p = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
+                         cwd=CLAUDE_HOME, text=True)
+    timer = threading.Timer(max(timeout, 3600), p.kill)     # a build can take a while
+    timer.start()
+    said = False
+    try:
+        p.stdin.write(prompt)
+        p.stdin.close()
+        for line in p.stdout:
+            if cancel is not None and cancel.is_set():
+                return
+            try:
+                data = json.loads(line)
+            except ValueError:
+                continue
+            if session and data.get('type') == 'system':
+                _claude_sessions.add(session)
+            if data.get('type') == 'stream_event':
+                event = data['event']
+                delta = event.get('delta', {})
+                if delta.get('type') == 'text_delta':
+                    said = True
+                    yield delta.get('text', '')
+                elif event.get('type') == 'content_block_start' and event.get('content_block', {}).get('type') == 'tool_use':
+                    yield ('\n\n' if said else '') + '[' + event['content_block'].get('name', 'tool') + ']\n\n'
+                    said = False
+            elif data.get('type') == 'result' and data.get('is_error'):
+                raise RuntimeError('Claude: ' + str(data.get('result') or 'the request failed'))
+        if p.wait() != 0:
+            raise RuntimeError('claude CLI failed: ' + (p.stderr.read().strip()[-300:] or 'exit %d' % p.returncode))
+    finally:
+        timer.cancel()
+        if p.poll() is None:
+            p.kill()
+
+
+def stream(model, history, cancel=None, timeout=120, notes='', api='', session=''):
     """Yield answer text; native Ollama NDJSON and OpenAI SSE stream immediately."""
     if cancel is not None and cancel.is_set():
         return
     kind = model['kind']
+    if kind == 'claude-cli':
+        yield from _claude_cli(model, history, cancel, timeout, session)
+        return
     streaming = kind in ('ollama', 'openai')
     try:
         with urllib.request.urlopen(_request(model, history, streaming, notes, api), timeout=timeout) as response:

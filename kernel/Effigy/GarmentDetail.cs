@@ -209,6 +209,7 @@ public static class DetailSpots
 	{
 		"Chest", "Belly", "Back", "Shoulder", "Collar", "Hip", "Seat",
 		"Thigh", "Knee", "Shin", "Upper arm", "Elbow", "Forearm", "Wrist",
+		"Ankle", "Calf", "Toe",
 	};
 
 	public static readonly string[] SideNames = { "Left", "Right", "Both" };
@@ -239,6 +240,9 @@ public static class DetailSpots
 		"Elbow" => (BodyRegion.UpperArm, 0.97f, 0f, new Vec3( -1, 0, 0 )),
 		"Forearm" => (BodyRegion.LowerArm, 0.45f, 0f, new Vec3( 0.2f, 1, 0.8f )),
 		"Wrist" => (BodyRegion.LowerArm, 0.88f, 0f, new Vec3( 0.2f, 1, 0.8f )),
+		"Ankle" => (BodyRegion.LowerLeg, 0.8f, 0f, new Vec3( 1, 0, 0 )),
+		"Calf" => (BodyRegion.LowerLeg, 0.6f, 0f, new Vec3( -1, 0, 0 )),
+		"Toe" => (BodyRegion.Foot, 0.75f, 0f, new Vec3( 0.5f, 0, 1 )),
 		_ => (BodyRegion.Torso, 0.3f, 0f, new Vec3( 1, 0, 0 )),
 	};
 

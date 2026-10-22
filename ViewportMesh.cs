@@ -27,6 +27,7 @@ public sealed class ViewportMesh : IDisposable
 		public readonly float Er, Eg, Eb;
 		public readonly float Ps1Occlusion, Ps1Wear, Ps1Grime, Ps1GrimeFilm, Ps1Glow;
 		public readonly float Wr, Wg, Wb;
+		public readonly float Ps1BootDirt, Ps1BootToe, Ps1BootCuff;
 		public readonly int IndexOffset; // bytes into the element buffer
 		public readonly int IndexCount;
 		public readonly DecodedImage AlbedoImage;
@@ -86,6 +87,7 @@ public sealed class ViewportMesh : IDisposable
 			Ps1Occlusion = descriptor.Ps1Occlusion; Ps1Wear = descriptor.Ps1Wear; Ps1Grime = descriptor.Ps1Grime;
 			Ps1GrimeFilm = descriptor.Ps1GrimeFilm; Ps1Glow = descriptor.Ps1Glow;
 			Wr = descriptor.Ps1WearColor.x; Wg = descriptor.Ps1WearColor.y; Wb = descriptor.Ps1WearColor.z;
+			Ps1BootDirt = descriptor.Ps1BootDirt; Ps1BootToe = descriptor.Ps1BootToe; Ps1BootCuff = descriptor.Ps1BootCuff;
 			if ( descriptor.EmissionMap is not null && Er == 0 && Eg == 0 && Eb == 0 )
 			{
 				Er = Eg = Eb = 1.0f;
@@ -693,6 +695,10 @@ public sealed class ViewportMesh : IDisposable
 		// over it. beforeTranslucent runs once between the two groups when any translucent exists.
 		bool anyTranslucent = false;
 		foreach ( var b in Batches ) anyTranslucent |= b.Translucent;
+		// ps1_lit boot mud lives only in the main lit shader, which is the one that takes ps1 glow.
+		int bootDirtLoc = ps1GlowLoc >= 0 ? shader.Uniform( "uPs1BootDirt" ) : -1;
+		int bootToeLoc = bootDirtLoc >= 0 ? shader.Uniform( "uPs1BootToe" ) : -1;
+		int bootCuffLoc = bootDirtLoc >= 0 ? shader.Uniform( "uPs1BootCuff" ) : -1;
 		Span<uint> bound = stackalloc uint[7];
 		for ( int group = 0; group < 2; group++ )
 		{
@@ -738,6 +744,12 @@ public sealed class ViewportMesh : IDisposable
 			if ( ps1GrimeLoc >= 0 ) shader.SetFloat( ps1GrimeLoc, batch.Ps1Grime );
 			if ( ps1GrimeFilmLoc >= 0 ) shader.SetFloat( ps1GrimeFilmLoc, batch.Ps1GrimeFilm );
 			if ( ps1GlowLoc >= 0 ) shader.SetFloat( ps1GlowLoc, batch.Ps1Glow );
+			if ( bootDirtLoc >= 0 )
+			{
+				shader.SetFloat( bootDirtLoc, batch.Ps1BootDirt );
+				shader.SetFloat( bootToeLoc, batch.Ps1BootToe );
+				shader.SetFloat( bootCuffLoc, batch.Ps1BootCuff );
+			}
 			if ( doubleSidedLoc >= 0 ) shader.SetInt( doubleSidedLoc, batch.DoubleSided ? 1 : 0 );
 			lobes?.Apply( shader, batch.Lobes );
 			bool blend = batch.AlphaMode == AlphaMode.Blend;

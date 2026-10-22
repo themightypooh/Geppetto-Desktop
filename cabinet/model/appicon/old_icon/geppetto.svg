@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="woodGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#b88350"/>
+      <stop offset="50%" stop-color="#8a5c32"/>
+      <stop offset="100%" stop-color="#5a381a"/>
+    </linearGradient>
+    <linearGradient id="brassGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffe066"/>
+      <stop offset="50%" stop-color="#cca020"/>
+      <stop offset="100%" stop-color="#886610"/>
+    </linearGradient>
+    <linearGradient id="orangeGlow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ff9922"/>
+      <stop offset="100%" stop-color="#cc5500"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background Base Tile (Amiga Workbench Steel) -->
+  <rect x="6" y="6" width="116" height="116" rx="24" fill="#141418" stroke="#2a2c31" stroke-width="2"/>
+  <rect x="10" y="10" width="108" height="108" rx="20" fill="#20242a"/>
+
+  <!-- Inset Bevel Shadow -->
+  <rect x="12" y="12" width="104" height="104" rx="18" fill="none" stroke="#333842" stroke-width="2"/>
+
+  <!-- Marionette Control Crossbars (Top Cross) -->
+  <path d="M64 22 L64 54" stroke="#757980" stroke-width="5" stroke-linecap="round"/>
+  <path d="M34 36 L94 36" stroke="url(#woodGrad)" stroke-width="6" stroke-linecap="round"/>
+  <circle cx="64" cy="36" r="5" fill="url(#brassGrad)" stroke="#141418" stroke-width="1.5"/>
+
+  <!-- Marionette Strings -->
+  <line x1="38" y1="38" x2="48" y2="76" stroke="#9fe1cb" stroke-width="1.8" stroke-dasharray="3,2"/>
+  <line x1="90" y1="38" x2="80" y2="76" stroke="#9fe1cb" stroke-width="1.8" stroke-dasharray="3,2"/>
+  <line x1="64" y1="52" x2="64" y2="70" stroke="#35e6ff" stroke-width="1.8"/>
+
+  <!-- Articulated Puppet Ball Socket Joint -->
+  <circle cx="64" cy="80" r="16" fill="url(#woodGrad)" stroke="#141418" stroke-width="2.5"/>
+  <circle cx="64" cy="80" r="10" fill="url(#brassGrad)" stroke="#141418" stroke-width="1.5"/>
+
+  <!-- Precision Brass CAD Crosshair & Pin -->
+  <line x1="56" y1="80" x2="72" y2="80" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/>
+  <line x1="64" y1="72" x2="64" y2="88" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="64" cy="80" r="3.5" fill="url(#orangeGlow)"/>
+
+  <!-- Lower Limbs / Peg -->
+  <path d="M58 96 L70 96 L67 114 L61 114 Z" fill="url(#woodGrad)" stroke="#141418" stroke-width="2"/>
+  
+  <!-- Amiga Style Outer Corner Accent Dots -->
+  <circle cx="22" cy="22" r="2.5" fill="#ff8800"/>
+  <circle cx="106" cy="22" r="2.5" fill="#35e6ff"/>
+</svg>

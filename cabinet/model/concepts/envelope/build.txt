@@ -1,0 +1,14 @@
+material 0 color=#e8dcc0 rough=0.85
+material 1 color=#d4c4a0 rough=0.85
+material 2 color=#8e1a1a rough=0.3
+material 3 color=#b8892e metal=1 rough=0.35
+echo a thick paper envelope, lying flat
+add Blob name=Body voxel=0.025 blend=0.03 shapes="box 0,0,0.12 4.2,6.4,0.24 r=0.06 mat=0; paint box 0,0,0.25 4.0,0.05,0.04 rot=0,0,33 mat=1; paint box 0,0,0.25 4.0,0.05,0.04 rot=0,0,-33 mat=1"
+echo the flap folded down over it, a point at the middle
+add Blob name=Flap voxel=0.02 blend=0.02 shapes="box 0,0,0.27 3.0,3.0,0.05 rot=0,0,45 r=0.02 mat=1; -box -2.2,0,0.27 4.4,8,1; -box 0,-3.3,0.27 8,0.2,1; -box 0,3.3,0.27 8,0.2,1"
+echo a red wax seal where the flap meets, a crest pressed in
+add Blob name=Seal voxel=0.015 blend=0.05 shapes="cylinder 0.05,0,0.27 0.05,0,0.42 0.55 r=0.08 mat=2; sphere 0.35,0.45,0.3 0.12 mat=2; sphere -0.3,-0.48,0.3 0.1 mat=2; sphere 0.5,-0.3,0.3 0.09 mat=2; -torus 0.05,0,0.45 0.36 0.035; -sphere 0.05,0,0.5 0.14"
+describe
+turnaround out shade=material size=512 name=envelope
+save envelope.effigy
+export out name=envelope

@@ -33,6 +33,23 @@ tray, and clicking it brings the 2D drawing app (Linework) up, or opens one of i
 drawings from the gallery underneath. The outliner cards that used to live in that drawer
 are gone; `host.py draw [PATH]` does the same from the command line.
 
+Under the pencil sits the **MODELING** folder, where finished models are filed
+(`~/.local/share/geppetto/modeling/<name>/<name>.effigy` with `sticker.png` and `kept.json`;
+finished AI runs file their sticker in `research/` as before). Hover it and the cover tips
+open; click it and the cover drops while paper files with each name rise out of it (orange
+edge = a model you kept, RUN = an AI run; the one on screen is outlined). The scroll wheel
+runs through them; click one to open it. The tool card's **KEEP** files your edit there:
+a model opened from the folder is saved over in place, anything else gets a new folder named
+for what it is. Bench edit copies (`research/bench-*`) no longer show in the runs list.
+Socket: `keep [NAME]`, `folder`, `openfiled N`.
+
+The **tool wheel** over the viewport (`cabinet/ToolWheel.qml`) shows which tool made the
+change on screen. It moves in lockstep with the model: on every revision the viewport
+shows, during a live run, a replay/scrub or a bench edit, it lights that step's category
+and tool at once and names the script line. Between revisions it holds still, apart from
+the countdown ring, and it goes when the model leaves. WHEEL in the tools drawer opens it
+by hand. See [handoffs/33-tool-wheel.md](handoffs/33-tool-wheel.md).
+
 ## Running the current prototype
 
 Run `dotnet run -c Release` to view Survey's player (suit plus its separate authored head/neck). Pass `--model path/to/file.effigy` or `--model path/to/file.fbx` for other sources. The source assets are never edited. Materials resolve the **declared standard texture channels** of the source — base colour, normal, roughness, metallic, emission, occlusion — with sRGB upload for colour and linear upload for data. They are **not** the game's `ps1_lit` shader; see the unsupported-features list below.

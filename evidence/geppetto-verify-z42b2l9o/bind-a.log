@@ -1,0 +1,103 @@
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+screenshot: /tmp/opencode/geppetto-verify-z42b2l9o/bind-a.png
+loaded   : 23 pieces/bodies, 141098 tris, 26 material batches, 94 bones
+clip     : no clip (translation scale 1.0000)
+material : Warning hab_leather: Unsupported shader 'shaders/ps1_lit.shader' in material 'hab_leather'. Falling back to standard CPU PBR descriptor.
+material : Warning hab_leather: Unsupported .vmat parameter or semantic 'F_TEXTURE_FILTERING' in 'hab_leather'.
+material : Warning hab_leather: Unsupported .vmat parameter or semantic 'g_flSignalPalette' in 'hab_leather'.
+material : Warning hab_mustard: Unsupported shader 'shaders/ps1_lit.shader' in material 'hab_mustard'. Falling back to standard CPU PBR descriptor.
+material : Warning hab_mustard: Unsupported .vmat parameter or semantic 'F_TEXTURE_FILTERING' in 'hab_mustard'.
+material : Warning hab_mustard: Unsupported .vmat parameter or semantic 'g_flPs1BootDirt' in 'hab_mustard'.
+material : Warning hab_mustard: Unsupported .vmat parameter or semantic 'g_flPs1BootToe' in 'hab_mustard'.
+material : Warning hab_mustard: Unsupported .vmat parameter or semantic 'g_flPs1BootCuff' in 'hab_mustard'.
+material : Warning hab_mustard: Unsupported .vmat parameter or semantic 'g_flSignalPalette' in 'hab_mustard'.
+material : Warning hab_mustard: Unsupported .vmat parameter or semantic 'g_flSignalHot' in 'hab_mustard'.
+material : Warning hab_mustard: Unsupported .vmat parameter or semantic 'g_flSignalPaletteGrime' in 'hab_mustard'.
+material : Warning hab_steel: Unsupported shader 'shaders/ps1_lit.shader' in material 'hab_steel'. Falling back to standard CPU PBR descriptor.
+material : Warning hab_steel: Unsupported .vmat parameter or semantic 'F_TEXTURE_FILTERING' in 'hab_steel'.
+material : Warning hab_steel: Unsupported .vmat parameter or semantic 'g_flPs1GrimeRuns' in 'hab_steel'.
+material : Warning hab_steel: Unsupported .vmat parameter or semantic 'g_flSignalPaletteGrime' in 'hab_steel'.
+material : Warning armour_glove_L: Unsupported shader 'shaders/ps1_lit.shader' in material 'armour_glove_L'. Falling back to standard CPU PBR descriptor.
+material : Warning armour_glove_L: Unsupported .vmat parameter or semantic 'g_flSignalPalette' in 'armour_glove_L'.
+material : Warning armour_glove_L: Unsupported .vmat parameter or semantic 'g_flSignalGain' in 'armour_glove_L'.
+material : Warning armour_glove_R: Unsupported shader 'shaders/ps1_lit.shader' in material 'armour_glove_R'. Falling back to standard CPU PBR descriptor.
+material : Warning armour_glove_R: Unsupported .vmat parameter or semantic 'g_flSignalPalette' in 'armour_glove_R'.
+material : Warning armour_glove_R: Unsupported .vmat parameter or semantic 'g_flSignalGain' in 'armour_glove_R'.
+material : Warning arm_ring: Unsupported shader 'shaders/ps1_lit.shader' in material 'arm_ring'. Falling back to standard CPU PBR descriptor.
+material : Warning arm_ring: Unsupported .vmat parameter or semantic 'F_TEXTURE_FILTERING' in 'arm_ring'.
+material : Warning hab_gunmetal: Unsupported shader 'shaders/ps1_lit.shader' in material 'hab_gunmetal'. Falling back to standard CPU PBR descriptor.
+material : Warning hab_gunmetal: Unsupported .vmat parameter or semantic 'F_TEXTURE_FILTERING' in 'hab_gunmetal'.
+material : Warning hab_gunmetal: Unsupported .vmat parameter or semantic 'g_flPs1GrimeRuns' in 'hab_gunmetal'.
+material : Warning hab_gunmetal: Unsupported .vmat parameter or semantic 'g_flSignalPaletteGrime' in 'hab_gunmetal'.
+material : Warning hab_glow_green: Unsupported shader 'shaders/ps1_lit.shader' in material 'hab_glow_green'. Falling back to standard CPU PBR descriptor.
+material : Warning hab_glow_green: Unsupported .vmat parameter or semantic 'F_TEXTURE_FILTERING' in 'hab_glow_green'.
+material : Warning hab_rubber: Unsupported shader 'shaders/ps1_lit.shader' in material 'hab_rubber'. Falling back to standard CPU PBR descriptor.
+material : Warning hab_rubber: Unsupported .vmat parameter or semantic 'F_TEXTURE_FILTERING' in 'hab_rubber'.
+material : Warning hab_rubber: Unsupported .vmat parameter or semantic 'g_flSignalPalette' in 'hab_rubber'.
+material : Warning hab_rubber: Unsupported .vmat parameter or semantic 'g_flSignalHot' in 'hab_rubber'.
+material : Warning arm_web: Unsupported shader 'shaders/ps1_lit.shader' in material 'arm_web'. Falling back to standard CPU PBR descriptor.
+material : Warning arm_web: Unsupported .vmat parameter or semantic 'g_flSignalPalette' in 'arm_web'.
+material : Warning hab_readout: Unsupported shader 'shaders/ps1_lit.shader' in material 'hab_readout'. Falling back to standard CPU PBR descriptor.
+material : Warning hab_readout: Unsupported .vmat parameter or semantic 'F_TEXTURE_FILTERING' in 'hab_readout'.
+material : Warning hab_glow_amber: Unsupported shader 'shaders/ps1_lit.shader' in material 'hab_glow_amber'. Falling back to standard CPU PBR descriptor.
+material : Warning hab_glow_amber: Unsupported .vmat parameter or semantic 'F_TEXTURE_FILTERING' in 'hab_glow_amber'.
+material : Warning armour_sleeve_L: Unsupported shader 'shaders/ps1_lit.shader' in material 'armour_sleeve_L'. Falling back to standard CPU PBR descriptor.
+material : Warning armour_sleeve_L: Unsupported .vmat parameter or semantic 'g_flSignalPalette' in 'armour_sleeve_L'.
+material : Warning armour_sleeve_L: Unsupported .vmat parameter or semantic 'g_flSignalGain' in 'armour_sleeve_L'.
+material : Warning armour_sleeve_R: Unsupported shader 'shaders/ps1_lit.shader' in material 'armour_sleeve_R'. Falling back to standard CPU PBR descriptor.
+material : Warning armour_sleeve_R: Unsupported .vmat parameter or semantic 'g_flSignalPalette' in 'armour_sleeve_R'.
+material : Warning armour_sleeve_R: Unsupported .vmat parameter or semantic 'g_flSignalGain' in 'armour_sleeve_R'.
+material : Warning suit_body: Unsupported shader 'shaders/ps1_lit.shader' in material 'suit_body'. Falling back to standard CPU PBR descriptor.
+material : Warning suit_body: Unsupported .vmat parameter or semantic 'g_flSignalPalette' in 'suit_body'.
+material : Warning face_hair: Unsupported shader 'shaders/ps1_lit.shader' in material 'face_hair'. Falling back to standard CPU PBR descriptor.
+material : Warning face_hair: Unsupported .vmat parameter or semantic 'F_TEXTURE_FILTERING' in 'face_hair'.
+material : Warning face_hair: Unsupported .vmat parameter or semantic 'g_flSignalHot' in 'face_hair'.
+material : Warning face_hair: Unsupported .vmat parameter or semantic 'g_flSignalPalette' in 'face_hair'.
+material : Warning face_hair: Unsupported .vmat parameter or semantic 'g_flSignalGain' in 'face_hair'.
+material : Warning face_eyes: Unsupported shader 'shaders/ps1_lit.shader' in material 'face_eyes'. Falling back to standard CPU PBR descriptor.
+material : Warning face_eyes: Unsupported .vmat parameter or semantic 'F_TEXTURE_FILTERING' in 'face_eyes'.
+material : Warning face_eyes: Unsupported .vmat parameter or semantic 'g_flSignalHot' in 'face_eyes'.
+material : Warning face_eyes: Unsupported .vmat parameter or semantic 'g_flSignalPalette' in 'face_eyes'.
+material : Warning face_eyes: Unsupported .vmat parameter or semantic 'g_flSignalGain' in 'face_eyes'.
+material : Warning face_skin: Unsupported shader 'shaders/ps1_lit.shader' in material 'face_skin'. Falling back to standard CPU PBR descriptor.
+material : Warning face_skin: Unsupported .vmat parameter or semantic 'F_TEXTURE_FILTERING' in 'face_skin'.
+material : Warning face_skin: Unsupported .vmat parameter or semantic 'g_flSignalHot' in 'face_skin'.
+material : Warning face_skin: Unsupported .vmat parameter or semantic 'g_flSignalPalette' in 'face_skin'.
+material : Warning face_skin: Unsupported .vmat parameter or semantic 'g_flSignalGain' in 'face_skin'.
+material : Warning collar_rubber: Unsupported shader 'shaders/ps1_lit.shader' in material 'collar_rubber'. Falling back to standard CPU PBR descriptor.
+material : Warning collar_rubber: Unsupported .vmat parameter or semantic 'F_TEXTURE_FILTERING' in 'collar_rubber'.
+material : Warning collar_rubber: Unsupported .vmat parameter or semantic 'g_flSignalHot' in 'collar_rubber'.
+material : Warning collar_rubber: Unsupported .vmat parameter or semantic 'g_flSignalPalette' in 'collar_rubber'.
+material : Warning collar_rubber: Unsupported .vmat parameter or semantic 'g_flSignalGain' in 'collar_rubber'.
+material : Warning collar_brass: Unsupported shader 'shaders/ps1_lit.shader' in material 'collar_brass'. Falling back to standard CPU PBR descriptor.
+material : Warning collar_brass: Unsupported .vmat parameter or semantic 'F_TEXTURE_FILTERING' in 'collar_brass'.
+material : Warning collar_brass: Unsupported .vmat parameter or semantic 'g_flSignalHot' in 'collar_brass'.
+material : Warning collar_brass: Unsupported .vmat parameter or semantic 'g_flSignalPalette' in 'collar_brass'.
+material : Warning collar_brass: Unsupported .vmat parameter or semantic 'g_flSignalGain' in 'collar_brass'.
+material : Warning collar_trim: Unsupported shader 'shaders/ps1_lit.shader' in material 'collar_trim'. Falling back to standard CPU PBR descriptor.
+material : Warning collar_trim: Unsupported .vmat parameter or semantic 'F_TEXTURE_FILTERING' in 'collar_trim'.
+material : Warning collar_trim: Unsupported .vmat parameter or semantic 'g_flSignalHot' in 'collar_trim'.
+material : Warning collar_trim: Unsupported .vmat parameter or semantic 'g_flSignalPalette' in 'collar_trim'.
+material : Warning collar_trim: Unsupported .vmat parameter or semantic 'g_flSignalGain' in 'collar_trim'.
+material : Warning collar_dark: Unsupported shader 'shaders/ps1_lit.shader' in material 'collar_dark'. Falling back to standard CPU PBR descriptor.
+material : Warning collar_dark: Unsupported .vmat parameter or semantic 'F_TEXTURE_FILTERING' in 'collar_dark'.
+material : Warning collar_dark: Unsupported .vmat parameter or semantic 'g_flSignalHot' in 'collar_dark'.
+material : Warning collar_dark: Unsupported .vmat parameter or semantic 'g_flSignalPalette' in 'collar_dark'.
+material : Warning collar_dark: Unsupported .vmat parameter or semantic 'g_flSignalGain' in 'collar_dark'.
+material : Warning collar_plate: Unsupported shader 'shaders/ps1_lit.shader' in material 'collar_plate'. Falling back to standard CPU PBR descriptor.
+material : Warning collar_plate: Unsupported .vmat parameter or semantic 'F_TEXTURE_FILTERING' in 'collar_plate'.
+material : Warning collar_plate: Unsupported .vmat parameter or semantic 'g_flSignalHot' in 'collar_plate'.
+material : Warning collar_plate: Unsupported .vmat parameter or semantic 'g_flSignalPalette' in 'collar_plate'.
+material : Warning collar_plate: Unsupported .vmat parameter or semantic 'g_flSignalGain' in 'collar_plate'.
+material : Warning collar_liner: Unsupported shader 'shaders/ps1_lit.shader' in material 'collar_liner'. Falling back to standard CPU PBR descriptor.
+material : Warning collar_liner: Unsupported .vmat parameter or semantic 'F_TEXTURE_FILTERING' in 'collar_liner'.
+material : Warning collar_liner: Unsupported .vmat parameter or semantic 'g_flSignalHot' in 'collar_liner'.
+material : Warning collar_liner: Unsupported .vmat parameter or semantic 'g_flSignalPalette' in 'collar_liner'.
+material : Warning collar_liner: Unsupported .vmat parameter or semantic 'g_flSignalGain' in 'collar_liner'.
+cache    : fbx import: 23 piece(s), 23 skinned, 0 inward
+timing   : load 0.347s extract 0.842s total 1.898s
+load_s 0.347
+total_s 1.898
+headless : drew 120 frame(s) in 0.224s (GPU completion included; not present/vsync FPS)

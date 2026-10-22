@@ -1,0 +1,8 @@
+# drafting-doll head: a smooth egg, taller than wide, no ear
+echo oval mannequin head
+set Head shapes="ellipsoid 0.0,0.34,32.26 4.7,4.9,7.0 rot=-40,0,0 mat=1"
+refimage front visible=0
+turnaround out shade=material size=1024 name=iconkey views=front backdrop=key
+turnaround out shade=material size=1024 name=icon views=front
+refimage front visible=1
+save marionette.effigy

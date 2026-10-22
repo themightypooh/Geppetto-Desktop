@@ -14,9 +14,28 @@ public abstract class GarmentDetailFeature : Feature, IDetailMaterials
 	public readonly FloatParam Across = new( "Across", 0f, -20f, 20f, "in" );
 	public readonly FloatParam Up = new( "Up", 0f, -20f, 20f, "in" );
 	public readonly FloatParam Angle = new( "Angle", 0f, -180f, 180f, "deg" );
+	/// <summary>Which way the wearer's front points. The named places are worked out for a body
+	/// facing +X with its left on +Y; an imported character built facing -Y (the citizen rig, most
+	/// FBX exports) is turned to that for the search and the detail turned back after.</summary>
+	public readonly ChoiceParam Facing = new( "Faces", new[] { "+X", "-Y", "+Y", "-X" } );
 	protected readonly List<DetailMaterial> Materials = new();
 	public IReadOnlyList<DetailMaterial> DetailMaterials => Materials;
-	protected IParam[] Placement => new IParam[] { Bodies, Spot, Side, Across, Up, Angle };
+	protected IParam[] Placement => new IParam[] { Bodies, Spot, Side, Across, Up, Angle, Facing };
+	/// <summary>The rig as <see cref="Build"/> searched it: turned to face +X.</summary>
+	protected Skeleton FacingRig;
+	/// <summary>The turn that brings this wearer to face +X, about the up axis.</summary>
+	protected Xform ToFront => Xform.Rotate( new Vec3( 0, 0, 1 ), Facing.Index switch { 1 => 90f, 2 => -90f, 3 => 180f, _ => 0f } * MathF.PI / 180f );
+	static Skeleton Turned( Skeleton rig, Xform turn )
+	{
+		var turned = new Skeleton();
+		foreach ( var bone in rig.Bones )
+		{
+			var copy = bone.Clone();
+			if ( copy.Parent < 0 ) copy.Local = turn * copy.Local;
+			turned.Bones.Add( copy );
+		}
+		return turned;
+	}
 	protected static int NextSlot( FeatureContext ctx ) => ctx.Bodies.SelectMany( b => b.Mesh.Faces )
 		.Select( f => f.Material ).Concat( ctx.ShellSlots ).DefaultIfEmpty( 0 ).Max() + 1;
 	protected int Metal( FeatureContext ctx, string finish )
@@ -70,17 +89,27 @@ public abstract class GarmentDetailFeature : Feature, IDetailMaterials
 	protected void Build( FeatureContext ctx, List<Body> targets,
 		Action<PolyMesh, DetailSurface, SurfaceFrame, Body, int> make )
 	{
-		var map = new BodyRegions.Map( ctx.Rig );
+		var turned = Facing.Index != 0;
+		var toFront = ToFront;
+		FacingRig = turned ? Turned( ctx.Rig, toFront ) : ctx.Rig;
+		var map = new BodyRegions.Map( FacingRig );
 		var made = 0;
 		foreach ( var target in targets )
 		{
-			var sheet = DetailEdges.Sheet( target.Mesh );
+			var cloth = target.Mesh;
+			if ( turned )
+			{
+				cloth = cloth.Clone();
+				MeshTransform.Apply( cloth, toFront );
+			}
+			var sheet = DetailEdges.Sheet( cloth );
 			var surface = new DetailSurface( sheet );
 			var mesh = new PolyMesh();
 			foreach ( var side in DetailSpots.Sides( Side.Index ) )
 				if ( DetailSpots.Find( surface, map, Spot.Value, side, Across.Clamped, Up.Clamped ) is { } f )
 					make( mesh, surface, f.Turned( Angle.Clamped ), target, side );
 			if ( mesh.FaceCount == 0 ) continue;
+			if ( turned ) MeshTransform.Apply( mesh, toFront.Inverse );
 			AddDetail( ctx, target, mesh, $"{Name ?? TypeName} on {target.Name}" );
 			made++;
 		}
@@ -220,7 +249,7 @@ public sealed class HardwareFeature : GarmentDetailFeature
 			}
 			if ( Style.Index == 6 )
 			{
-				var map = new BodyRegions.Map( ctx.Rig );
+				var map = new BodyRegions.Map( FacingRig );
 				if ( DetailSpots.Axis( map, Spot.Value, side, out var c, out var axis ) )
 				{
 					c += axis * -Up.Clamped;

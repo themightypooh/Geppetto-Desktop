@@ -1,0 +1,2 @@
+# part	model	pivot x	y	z	size x	y	z
+toolicons	out/toolicons.vmdl	14.861	-32.642	-0.001	31.822	26.825	1.271

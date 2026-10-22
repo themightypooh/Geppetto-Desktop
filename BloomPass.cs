@@ -244,7 +244,13 @@ public sealed class BloomPass : IDisposable
 		SetInt( "uViewTransform", (int)view.Transform ); SetInt( "uLook", (int)view.Look );
 		var balance = WhiteBalance.Gain( view.WhiteBalanceTemperature, view.WhiteBalanceTint );
 		_gl.Uniform3( _uniforms[_compositeProg, "uWhiteBalance"], balance.X, balance.Y, balance.Z );
+		// With a scene depth texture the composite also writes that depth into the target, so
+		// overlays drawn after it are hidden by the model on any target, multisampled included.
+		bool writeDepth = depthTex != 0;
+		SetInt( "uWriteDepth", writeDepth ? 1 : 0 );
+		if ( writeDepth ) { _gl.Enable( EnableCap.DepthTest ); _gl.DepthFunc( DepthFunction.Always ); _gl.DepthMask( true ); }
 		_gl.DrawArrays( PrimitiveType.Triangles, 0, 3 );
+		if ( writeDepth ) _gl.DepthFunc( DepthFunction.Less );
 	}
 
 	/// <summary>False until a frame has been stored since creation, resize or reset; SSR then

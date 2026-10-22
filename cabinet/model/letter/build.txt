@@ -1,0 +1,82 @@
+material 0 color=#e9dcbc rough=0.85
+material 1 color=#cdb98e rough=0.9
+material 2 color=#1c2a4a rough=0.7
+material 3 color=#c9a23a metal=0.7 rough=0.35
+material 4 color=#8e1a1a rough=0.3
+material 5 color=#f4ecd6 rough=0.9
+material 6 color=#d8c49a rough=0.9
+echo the envelope's back panel, its inside lined in navy with a gold lozenge pattern
+add Blob name=Back voxel=0.02 blend=0.02 shapes="box 0,0,0.02 6.4,4.2,0.04 r=0.015 mat=0; paint box 0,0,0.05 6.2,4.0,0.03 mat=2; paint box -2.75,-1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -2.75,-0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -2.75,0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -2.75,1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -2.50,-1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -2.25,-1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -2.50,-0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -2.25,-0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -2.50,0.00,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -2.25,0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -2.50,0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -2.25,1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -2.50,1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -2.00,-1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.75,-1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -2.00,-0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.75,-0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -2.00,0.00,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.75,0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -2.00,0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.75,1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -2.00,1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.50,-1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.25,-1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.50,-0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.25,-0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.50,0.00,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.25,0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.50,0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.25,1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.50,1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.00,-1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -0.75,-1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.00,-0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -0.75,-0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.00,0.00,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -0.75,0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.00,0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -0.75,1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -1.00,1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -0.50,-1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -0.25,-1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -0.50,-0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -0.25,-0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -0.50,0.00,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -0.25,0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -0.50,0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -0.25,1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box -0.50,1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.00,-1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.25,-1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.00,-0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.25,-0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.00,0.00,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.25,0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.00,0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.25,1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.00,1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.50,-1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.75,-1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.50,-0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.75,-0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.50,0.00,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.75,0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.50,0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.75,1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 0.50,1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.00,-1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.25,-1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.00,-0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.25,-0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.00,0.00,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.25,0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.00,0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.25,1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.00,1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.50,-1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.75,-1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.50,-0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.75,-0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.50,0.00,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.75,0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.50,0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.75,1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 1.50,1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.00,-1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.25,-1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.00,-0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.25,-0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.00,0.00,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.25,0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.00,0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.25,1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.00,1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.50,-1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.75,-1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.50,-0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.75,-0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.50,0.00,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.75,0.45,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.50,0.90,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.75,1.35,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3; paint box 2.50,1.80,0.05 0.12,0.12,0.03 rot=0,0,45 mat=3"
+echo the pocket: side flaps and bottom flap folded over, a V opening at the top, creased seams
+add Blob name=Pocket voxel=0.026 blend=0.02 shapes="box 0,0,0.17 6.4,4.2,0.03 r=0.012 mat=0; -box 0,2.1,0.17 4.5,4.5,0.2 rot=0,0,45; box -3.15,0,0.095 0.1,4.2,0.15 mat=0; box 3.15,0,0.095 0.1,4.2,0.15 mat=0; box 0,-2.05,0.095 6.4,0.1,0.15 mat=0; box 0,-2.1,0.195 4.2,4.2,0.02 rot=0,0,45 r=0.01 mat=0; -box 0,-4.5,0.2 8,4.8,0.3; -box -4.6,0,0.2 3,6,0.3; -box 4.6,0,0.2 3,6,0.3; paint box -1.6,-1.0,0.21 0.04,2.6,0.06 rot=0,0,-45 mat=1; paint box 1.6,-1.0,0.21 0.04,2.6,0.06 rot=0,0,45 mat=1; paint box -1.9,1.25,0.19 0.04,1.8,0.06 rot=0,0,45 mat=1; paint box 1.9,1.25,0.19 0.04,1.8,0.06 rot=0,0,-45 mat=1"
+echo the letter inside, folded in three
+add Blob name=LetterM voxel=0.022 blend=0.01 shapes="box 0,0,0 5.8,1.3,0.02 r=0.006 mat=5; paint box 0,0.64,0 5.9,0.04,0.1 mat=6; paint box 0,-0.64,0 5.9,0.04,0.1 mat=6"
+add Blob name=LetterT voxel=0.022 blend=0.01 shapes="box 0,0.65,0 5.8,1.3,0.02 r=0.006 mat=5; paint box 0,1.28,0 5.9,0.06,0.1 mat=6"
+add Blob name=LetterB voxel=0.022 blend=0.01 shapes="box 0,-0.65,0 5.8,1.3,0.02 r=0.006 mat=5; paint box 0,-1.28,0 5.9,0.06,0.1 mat=6"
+add Transform name=FoldT bodies=LetterT rotationaxis=1,0,0 rotationangle=180 translate=0,0.65,0.025
+add Transform name=FoldB bodies=LetterB rotationaxis=1,0,0 rotationangle=-180 translate=0,-0.65,0.05
+add Transform name=Lift bodies=LetterM,LetterT,LetterB rotationaxis=1,0,0 rotationangle=0 translate=0,-0.45,0.09
+echo the flap: deckled edge, navy lining underneath, hinged on the top edge
+add Blob name=Flap voxel=0.022 blend=0.01 shapes="box 0,0,0 4.53,4.53,0.03 rot=0,0,45 r=0.012 mat=0; -box 0,2.5,0 9,5,1; -sphere -2.773,-0.427,0 0.075; -sphere -2.347,-0.853,0 0.100; -sphere -1.920,-1.280,0 0.050; -sphere -1.493,-1.707,0 0.075; -sphere -1.067,-2.133,0 0.100; -sphere -0.640,-2.560,0 0.050; -sphere -0.213,-2.987,0 0.075; -sphere 0.213,-2.987,0 0.100; -sphere 0.640,-2.560,0 0.050; -sphere 1.067,-2.133,0 0.075; -sphere 1.493,-1.707,0 0.100; -sphere 1.920,-1.280,0 0.050; -sphere 2.347,-0.853,0 0.075; -sphere 2.773,-0.427,0 0.100; paint box 0,-1.4,-0.012 6.4,2.8,0.012 mat=2; paint box -2.25,-0.45,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box -1.75,-0.45,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box -2.00,-0.90,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box -1.25,-0.45,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box -1.50,-0.90,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box -1.25,-1.35,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box -0.75,-0.45,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box -1.00,-0.90,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box -0.75,-1.35,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box -1.00,-1.80,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box -0.25,-0.45,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box -0.50,-0.90,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box -0.25,-1.35,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box -0.50,-1.80,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box -0.25,-2.25,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 0.25,-0.45,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 0.00,-0.90,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 0.25,-1.35,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 0.00,-1.80,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 0.25,-2.25,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 0.00,-2.70,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 0.75,-0.45,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 0.50,-0.90,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 0.75,-1.35,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 0.50,-1.80,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 1.25,-0.45,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 1.00,-0.90,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 1.25,-1.35,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 1.00,-1.80,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 1.75,-0.45,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 1.50,-0.90,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 2.25,-0.45,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3; paint box 2.00,-0.90,-0.015 0.12,0.12,0.012 rot=0,0,45 mat=3"
+echo the wax seal over the flap's point: drips, a ring and a star pressed in, split where it will crack
+add Blob name=SealA voxel=0.015 blend=0.04 shapes="cylinder 0,-3.1,0.01 0,-3.1,0.14 0.62 r=0.06 mat=4; sphere 0.55,-3.45,0.03 0.14 mat=4; sphere -0.5,-2.7,0.03 0.12 mat=4; sphere -0.62,-3.3,0.03 0.1 mat=4; sphere 0.45,-2.65,0.03 0.09 mat=4; -torus 0,-3.1,0.16 0.42 0.035; -cylinder 0,-3.1,0.12 0,-3.1,0.3 0.12; -box 0.000,-2.900,0.15 0.06,0.26,0.1 rot=0,0,0; -box -0.190,-3.038,0.15 0.06,0.26,0.1 rot=0,0,72; -box -0.118,-3.262,0.15 0.06,0.26,0.1 rot=0,0,144; -box 0.118,-3.262,0.15 0.06,0.26,0.1 rot=0,0,216; -box 0.190,-3.038,0.15 0.06,0.26,0.1 rot=0,0,288; -box 0,-3.72,0.1 3,1.2,1"
+add Blob name=SealB voxel=0.015 blend=0.04 shapes="cylinder 0,-3.1,0.01 0,-3.1,0.14 0.62 r=0.06 mat=4; sphere 0.55,-3.45,0.03 0.14 mat=4; sphere -0.5,-2.7,0.03 0.12 mat=4; sphere -0.62,-3.3,0.03 0.1 mat=4; sphere 0.45,-2.65,0.03 0.09 mat=4; -torus 0,-3.1,0.16 0.42 0.035; -cylinder 0,-3.1,0.12 0,-3.1,0.3 0.12; -box 0.000,-2.900,0.15 0.06,0.26,0.1 rot=0,0,0; -box -0.190,-3.038,0.15 0.06,0.26,0.1 rot=0,0,72; -box -0.118,-3.262,0.15 0.06,0.26,0.1 rot=0,0,144; -box 0.118,-3.262,0.15 0.06,0.26,0.1 rot=0,0,216; -box 0.190,-3.038,0.15 0.06,0.26,0.1 rot=0,0,288; -box 0,-2.48,0.1 3,1.2,1"
+add Transform name=SealStay bodies=SealB rotationaxis=1,0,0 rotationangle=0 translate=0,2.1,0.2
+add Transform name=Hinge bodies=Flap,SealA rotationaxis=1,0,0 rotationangle=0 translate=0,2.1,0.2
+pivot model @Back.bottom
+describe
+turnaround out shade=material size=512 name=letter_closed
+export poses name=pose_00
+echo the seal cracks as the flap lifts
+set Hinge translate=0,2.1,0.24 rotationangle=-6
+export poses name=pose_01
+echo the flap swings open
+set Hinge translate=0,2.1,0.2 rotationangle=-35
+export poses name=pose_02
+echo the flap swings open
+set Hinge translate=0,2.1,0.2 rotationangle=-70
+export poses name=pose_03
+echo the flap swings open
+set Hinge translate=0,2.1,0.2 rotationangle=-105
+export poses name=pose_04
+echo the flap swings open
+set Hinge translate=0,2.1,0.2 rotationangle=-140
+export poses name=pose_05
+echo the flap swings open
+set Hinge translate=0,2.1,0.2 rotationangle=-180
+export poses name=pose_06
+echo the letter slides up out of the pocket
+set Lift translate=0,0.60,0.09
+export poses name=pose_07
+echo the letter slides up out of the pocket
+set Lift translate=0,1.70,0.09
+export poses name=pose_08
+echo the letter slides up out of the pocket
+set Lift translate=0,2.80,0.09
+export poses name=pose_09
+echo it lifts clear
+set Lift translate=0,2.0,0.45
+export poses name=pose_10
+echo and comes forward over the envelope
+set Lift translate=0,0.4,0.45
+export poses name=pose_11
+echo the bottom third unfolds
+set FoldB rotationangle=-120 translate=0,-0.65,0.04
+export poses name=pose_12
+echo the bottom third unfolds
+set FoldB rotationangle=-60 translate=0,-0.65,0.02
+export poses name=pose_13
+echo the bottom third unfolds
+set FoldB rotationangle=0 translate=0,-0.65,0.00
+export poses name=pose_14
+echo the top third unfolds
+set FoldT rotationangle=120 translate=0,0.65,0.020
+export poses name=pose_15
+echo the top third unfolds
+set FoldT rotationangle=60 translate=0,0.65,0.010
+export poses name=pose_16
+echo the top third unfolds
+set FoldT rotationangle=0 translate=0,0.65,0.000
+export poses name=pose_17
+turnaround out shade=material size=512 name=letter_open
+save letter.effigy

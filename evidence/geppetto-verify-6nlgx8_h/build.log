@@ -1,0 +1,18 @@
+  Determining projects to restore...
+  Restored /home/poo/Desktop/geppetto-desktop/kernel/Effigy.Kernel.csproj (in 63 ms).
+  Restored /home/poo/Desktop/geppetto-desktop/tests/Desktop.Tests.csproj (in 190 ms).
+  Restored /home/poo/Desktop/geppetto-desktop/Marionette.Desktop.csproj (in 190 ms).
+/home/poo/Desktop/geppetto-desktop/kernel/Effigy/Render/ShadeEnvironment.cs(205,21): warning CA2014: Potential stack overflow. Move the stackalloc out of the loop. (https://learn.microsoft.com/dotnet/fundamentals/code-analysis/quality-rules/ca2014) [/home/poo/Desktop/geppetto-desktop/kernel/Effigy.Kernel.csproj]
+  Effigy.Kernel -> /tmp/opencode/geppetto-verify-6nlgx8_h/build/bin/Effigy.Kernel/release/Effigy.Kernel.dll
+  Marionette.Desktop -> /tmp/opencode/geppetto-verify-6nlgx8_h/build/bin/Marionette.Desktop/release/marionette-desktop.dll
+/home/poo/Desktop/geppetto-desktop/tests/DocumentSaveTests.cs(131,12): warning CS8602: Dereference of a possibly null reference. [/home/poo/Desktop/geppetto-desktop/tests/Desktop.Tests.csproj]
+  Desktop.Tests -> /tmp/opencode/geppetto-verify-6nlgx8_h/build/bin/Desktop.Tests/release/Desktop.Tests.dll
+
+Build succeeded.
+
+/home/poo/Desktop/geppetto-desktop/kernel/Effigy/Render/ShadeEnvironment.cs(205,21): warning CA2014: Potential stack overflow. Move the stackalloc out of the loop. (https://learn.microsoft.com/dotnet/fundamentals/code-analysis/quality-rules/ca2014) [/home/poo/Desktop/geppetto-desktop/kernel/Effigy.Kernel.csproj]
+/home/poo/Desktop/geppetto-desktop/tests/DocumentSaveTests.cs(131,12): warning CS8602: Dereference of a possibly null reference. [/home/poo/Desktop/geppetto-desktop/tests/Desktop.Tests.csproj]
+    2 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:05.81

@@ -1,0 +1,2 @@
+# part	model	pivot x	y	z	size x	y	z
+accordion	out/accordion.vmdl	-0	0.262	-0.045	6.621	5.168	0.356

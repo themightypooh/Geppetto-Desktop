@@ -1,0 +1,21 @@
+echo the back of a red pressboard expanding file, its flap folded down behind
+add Blob name=Back voxel=0.022 blend=0.015 shapes="box 0,0,0 6.3,4.6,0.06 r=0.015 mat=0; box 0,2.45,-0.02 6.3,0.6,0.05 r=0.2 mat=1"
+echo the index tabs standing up between the pleats
+add Blob name=Tabs voxel=0.018 blend=0.012 shapes="box -2.1,2.55,0.05 1.4,0.5,0.03 r=0.08 mat=2; box -0.2,2.45,0.07 1.4,0.5,0.03 r=0.08 mat=3; box 1.7,2.6,0.09 1.4,0.5,0.03 r=0.08 mat=4"
+echo the pleated gussets down both sides
+add Blob name=Gusset voxel=0.018 blend=0.01 shapes="box -3.12,0,0.1 0.12,4.5,0.16 mat=1; box -3.2,0,0.1 0.06,4.5,0.12 mat=0; box -3.28,0,0.1 0.06,4.5,0.08 mat=1; box 3.12,0,0.1 0.12,4.5,0.16 mat=1; box 3.2,0,0.1 0.06,4.5,0.12 mat=0; box 3.28,0,0.1 0.06,4.5,0.08 mat=1"
+echo the front, cut low, with an elastic band round it
+add Blob name=Front voxel=0.022 blend=0.015 shapes="box 0,1.6,0 6.3,3.2,0.06 r=0.015 mat=5; -box 0,3.2,0 1.4,0.5,0.2 r=0.2; box 1.8,1.6,0.05 0.22,3.25,0.04 r=0.02 mat=6"
+echo now the colours, slot by slot
+material 0 color=#8e2a22 rough=0.75
+material 1 color=#5e1913 rough=0.8
+material 2 color=#d9b45a rough=0.6
+material 3 color=#e8a33a rough=0.6
+material 4 color=#3f7a6a rough=0.6
+material 5 color=#a33228 rough=0.75
+material 6 color=#1c1a1a rough=0.6
+add Transform name=Cover bodies=Front translate=0,-2.3,0.24
+describe
+turnaround out shade=material size=512 name=accordion
+save accordion.effigy
+export out name=accordion

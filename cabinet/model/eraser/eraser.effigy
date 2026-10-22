@@ -1,0 +1,21 @@
+effigy 1
+rollback 2147483647
+materiallook 0 color=#c8695c rough=0.8 metal=0
+materiallook 1 color=#5f86a8 rough=0.8 metal=0
+materiallook 3 color=#e6dcc4 rough=0.7 metal=0
+refimage top 1.1 0 1.4 0 0.85 1 /home/poo/Desktop/geppetto-desktop/cabinet/model/eraser/ref/two_tone_eraser.png
+feature BlobFeature
+	id 9af6157e
+	name Eraser
+	suppressed 0
+	visible 1
+	param Blend 0.01
+	param CutBlend 0.01
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 0,0,0.175 2.280,0.940,0.350 r=0.04 mat=0; -box -1.525,0,0.372 1,2,2 rot=0,23.2,0; -box 1.525,0,0.372 1,2,2 rot=0,-23.2,0; -box 0,0.607,0.487 3,0.5,0.5 rot=45,0,0; -box 0,-0.607,0.487 3,0.5,0.5 rot=45,0,0; paint box 0.770,0,0.175 0.940,1.2,0.6 mat=1; paint box -1.065,0,0.175 0.08,1.2,0.07 rot=0,23.2,0 mat=3
+	param Smooth 2
+	param Voxel 0.012
+end

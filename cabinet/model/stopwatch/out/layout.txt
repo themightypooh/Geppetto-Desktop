@@ -1,0 +1,2 @@
+# part	model	pivot x	y	z	size x	y	z
+stopwatch	out/stopwatch.vmdl	-0	0.481	-0	2	2.963	0.561

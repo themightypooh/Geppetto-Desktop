@@ -1,0 +1,586 @@
+{
+ "cell": 5.0,
+ "icons": {
+  "primitive": {
+   "label": "Primitive",
+   "group": "FORM",
+   "body": "Icon_primitive",
+   "cx": 0.0,
+   "cy": 0.0
+  },
+  "blob": {
+   "label": "Blob",
+   "group": "FORM",
+   "body": "Icon_blob",
+   "cx": 5.0,
+   "cy": 0.0
+  },
+  "part": {
+   "label": "Part",
+   "group": "FORM",
+   "body": "Icon_part",
+   "cx": 10.0,
+   "cy": 0.0
+  },
+  "sketch": {
+   "label": "Sketch",
+   "group": "FORM",
+   "body": "Icon_sketch",
+   "cx": 15.0,
+   "cy": 0.0
+  },
+  "profile": {
+   "label": "Profile",
+   "group": "FORM",
+   "body": "Icon_profile",
+   "cx": 20.0,
+   "cy": 0.0
+  },
+  "spline": {
+   "label": "Spline",
+   "group": "FORM",
+   "body": "Icon_spline",
+   "cx": 25.0,
+   "cy": 0.0
+  },
+  "plane": {
+   "label": "Plane",
+   "group": "FORM",
+   "body": "Icon_plane",
+   "cx": 30.0,
+   "cy": 0.0
+  },
+  "import": {
+   "label": "Import",
+   "group": "FORM",
+   "body": "Icon_import",
+   "cx": 35.0,
+   "cy": 0.0
+  },
+  "bodyfrombones": {
+   "label": "Body from bones",
+   "group": "FORM",
+   "body": "Icon_bodyfrombones",
+   "cx": 40.0,
+   "cy": 0.0
+  },
+  "extrude": {
+   "label": "Extrude",
+   "group": "BUILD",
+   "body": "Icon_extrude",
+   "cx": 0.0,
+   "cy": -5.0
+  },
+  "revolve": {
+   "label": "Revolve",
+   "group": "BUILD",
+   "body": "Icon_revolve",
+   "cx": 5.0,
+   "cy": -5.0
+  },
+  "loft": {
+   "label": "Loft",
+   "group": "BUILD",
+   "body": "Icon_loft",
+   "cx": 10.0,
+   "cy": -5.0
+  },
+  "sweep": {
+   "label": "Sweep",
+   "group": "BUILD",
+   "body": "Icon_sweep",
+   "cx": 15.0,
+   "cy": -5.0
+  },
+  "boolean": {
+   "label": "Boolean",
+   "group": "BUILD",
+   "body": "Icon_boolean",
+   "cx": 20.0,
+   "cy": -5.0
+  },
+  "mirror": {
+   "label": "Mirror",
+   "group": "BUILD",
+   "body": "Icon_mirror",
+   "cx": 25.0,
+   "cy": -5.0
+  },
+  "linearpattern": {
+   "label": "Row pattern",
+   "group": "BUILD",
+   "body": "Icon_linearpattern",
+   "cx": 30.0,
+   "cy": -5.0
+  },
+  "circularpattern": {
+   "label": "Circle pattern",
+   "group": "BUILD",
+   "body": "Icon_circularpattern",
+   "cx": 35.0,
+   "cy": -5.0
+  },
+  "shell": {
+   "label": "Shell",
+   "group": "BUILD",
+   "body": "Icon_shell",
+   "cx": 40.0,
+   "cy": -5.0
+  },
+  "hole": {
+   "label": "Hole",
+   "group": "BUILD",
+   "body": "Icon_hole",
+   "cx": 45.0,
+   "cy": -5.0
+  },
+  "fillet": {
+   "label": "Fillet",
+   "group": "REFINE",
+   "body": "Icon_fillet",
+   "cx": 0.0,
+   "cy": -10.0
+  },
+  "chamfer": {
+   "label": "Chamfer",
+   "group": "REFINE",
+   "body": "Icon_chamfer",
+   "cx": 5.0,
+   "cy": -10.0
+  },
+  "draft": {
+   "label": "Draft",
+   "group": "REFINE",
+   "body": "Icon_draft",
+   "cx": 10.0,
+   "cy": -10.0
+  },
+  "trim": {
+   "label": "Trim",
+   "group": "REFINE",
+   "body": "Icon_trim",
+   "cx": 15.0,
+   "cy": -10.0
+  },
+  "subdivide": {
+   "label": "Subdivide",
+   "group": "REFINE",
+   "body": "Icon_subdivide",
+   "cx": 20.0,
+   "cy": -10.0
+  },
+  "remesh": {
+   "label": "Remesh",
+   "group": "REFINE",
+   "body": "Icon_remesh",
+   "cx": 25.0,
+   "cy": -10.0
+  },
+  "detail": {
+   "label": "Detail",
+   "group": "REFINE",
+   "body": "Icon_detail",
+   "cx": 30.0,
+   "cy": -10.0
+  },
+  "stroke": {
+   "label": "Stroke",
+   "group": "REFINE",
+   "body": "Icon_stroke",
+   "cx": 35.0,
+   "cy": -10.0
+  },
+  "sculpt": {
+   "label": "Sculpt",
+   "group": "DEFORM",
+   "body": "Icon_sculpt",
+   "cx": 0.0,
+   "cy": -15.0
+  },
+  "transform": {
+   "label": "Move",
+   "group": "DEFORM",
+   "body": "Icon_transform",
+   "cx": 5.0,
+   "cy": -15.0
+  },
+  "lattice": {
+   "label": "Lattice",
+   "group": "DEFORM",
+   "body": "Icon_lattice",
+   "cx": 10.0,
+   "cy": -15.0
+  },
+  "simpledeform": {
+   "label": "Bend",
+   "group": "DEFORM",
+   "body": "Icon_simpledeform",
+   "cx": 15.0,
+   "cy": -15.0
+  },
+  "curvedeform": {
+   "label": "Curve",
+   "group": "DEFORM",
+   "body": "Icon_curvedeform",
+   "cx": 20.0,
+   "cy": -15.0
+  },
+  "moveface": {
+   "label": "Push face",
+   "group": "DEFORM",
+   "body": "Icon_moveface",
+   "cx": 25.0,
+   "cy": -15.0
+  },
+  "edit:extrude": {
+   "label": "Extrude faces",
+   "group": "MESH",
+   "body": "Icon_edit_extrude",
+   "cx": 0.0,
+   "cy": -20.0
+  },
+  "edit:inset": {
+   "label": "Inset",
+   "group": "MESH",
+   "body": "Icon_edit_inset",
+   "cx": 5.0,
+   "cy": -20.0
+  },
+  "edit:bevel": {
+   "label": "Bevel",
+   "group": "MESH",
+   "body": "Icon_edit_bevel",
+   "cx": 10.0,
+   "cy": -20.0
+  },
+  "edit:loopcut": {
+   "label": "Loop cut",
+   "group": "MESH",
+   "body": "Icon_edit_loopcut",
+   "cx": 15.0,
+   "cy": -20.0
+  },
+  "edit:bridge": {
+   "label": "Bridge",
+   "group": "MESH",
+   "body": "Icon_edit_bridge",
+   "cx": 20.0,
+   "cy": -20.0
+  },
+  "edit:symmetrize": {
+   "label": "Symmetrize",
+   "group": "MESH",
+   "body": "Icon_edit_symmetrize",
+   "cx": 25.0,
+   "cy": -20.0
+  },
+  "edit:dissolve": {
+   "label": "Dissolve",
+   "group": "MESH",
+   "body": "Icon_edit_dissolve",
+   "cx": 30.0,
+   "cy": -20.0
+  },
+  "edit:delete": {
+   "label": "Delete",
+   "group": "MESH",
+   "body": "Icon_edit_delete",
+   "cx": 35.0,
+   "cy": -20.0
+  },
+  "meshedit": {
+   "label": "Mesh edit",
+   "group": "MESH",
+   "body": "Icon_meshedit",
+   "cx": 40.0,
+   "cy": -20.0
+  },
+  "deleteface": {
+   "label": "Delete face",
+   "group": "MESH",
+   "body": "Icon_deleteface",
+   "cx": 45.0,
+   "cy": -20.0
+  },
+  "garment": {
+   "label": "Garment",
+   "group": "CLOTH",
+   "body": "Icon_garment",
+   "cx": 0.0,
+   "cy": -25.0
+  },
+  "fabric": {
+   "label": "Fabric",
+   "group": "CLOTH",
+   "body": "Icon_fabric",
+   "cx": 5.0,
+   "cy": -25.0
+  },
+  "padding": {
+   "label": "Padding",
+   "group": "CLOTH",
+   "body": "Icon_padding",
+   "cx": 10.0,
+   "cy": -25.0
+  },
+  "pocket": {
+   "label": "Pocket",
+   "group": "CLOTH",
+   "body": "Icon_pocket",
+   "cx": 15.0,
+   "cy": -25.0
+  },
+  "hardware": {
+   "label": "Hardware",
+   "group": "CLOTH",
+   "body": "Icon_hardware",
+   "cx": 20.0,
+   "cy": -25.0
+  },
+  "wear": {
+   "label": "Wear",
+   "group": "CLOTH",
+   "body": "Icon_wear",
+   "cx": 25.0,
+   "cy": -25.0
+  },
+  "wearer": {
+   "label": "Wearer",
+   "group": "CLOTH",
+   "body": "Icon_wearer",
+   "cx": 30.0,
+   "cy": -25.0
+  },
+  "fur": {
+   "label": "Fur",
+   "group": "CLOTH",
+   "body": "Icon_fur",
+   "cx": 35.0,
+   "cy": -25.0
+  },
+  "material": {
+   "label": "Material",
+   "group": "SURFACE",
+   "body": "Icon_material",
+   "cx": 0.0,
+   "cy": -30.0
+  },
+  "paint": {
+   "label": "Paint",
+   "group": "SURFACE",
+   "body": "Icon_paint",
+   "cx": 5.0,
+   "cy": -30.0
+  },
+  "facematerial": {
+   "label": "Face material",
+   "group": "SURFACE",
+   "body": "Icon_facematerial",
+   "cx": 10.0,
+   "cy": -30.0
+  },
+  "fleshmaterial": {
+   "label": "Flesh",
+   "group": "SURFACE",
+   "body": "Icon_fleshmaterial",
+   "cx": 15.0,
+   "cy": -30.0
+  },
+  "skin": {
+   "label": "Skin",
+   "group": "SURFACE",
+   "body": "Icon_skin",
+   "cx": 20.0,
+   "cy": -30.0
+  },
+  "glow": {
+   "label": "Glow",
+   "group": "SURFACE",
+   "body": "Icon_glow",
+   "cx": 25.0,
+   "cy": -30.0
+  },
+  "uvproject": {
+   "label": "UV project",
+   "group": "SURFACE",
+   "body": "Icon_uvproject",
+   "cx": 30.0,
+   "cy": -30.0
+  },
+  "bind": {
+   "label": "Bind",
+   "group": "RIG",
+   "body": "Icon_bind",
+   "cx": 0.0,
+   "cy": -35.0
+  },
+  "shapekey": {
+   "label": "Shape key",
+   "group": "RIG",
+   "body": "Icon_shapekey",
+   "cx": 5.0,
+   "cy": -35.0
+  },
+  "shapekeyend": {
+   "label": "Key end",
+   "group": "RIG",
+   "body": "Icon_shapekeyend",
+   "cx": 10.0,
+   "cy": -35.0
+  },
+  "correctiveshapekey": {
+   "label": "Corrective",
+   "group": "RIG",
+   "body": "Icon_correctiveshapekey",
+   "cx": 15.0,
+   "cy": -35.0
+  },
+  "set": {
+   "label": "Set",
+   "group": "TWEAK",
+   "body": "Icon_set",
+   "cx": 0.0,
+   "cy": -40.0
+  },
+  "remove": {
+   "label": "Remove",
+   "group": "TWEAK",
+   "body": "Icon_remove",
+   "cx": 5.0,
+   "cy": -40.0
+  },
+  "remedy": {
+   "label": "Remedy",
+   "group": "TWEAK",
+   "body": "Icon_remedy",
+   "cx": 10.0,
+   "cy": -40.0
+  },
+  "fix": {
+   "label": "Fix mesh",
+   "group": "TWEAK",
+   "body": "Icon_fix",
+   "cx": 15.0,
+   "cy": -40.0
+  },
+  "measure": {
+   "label": "Measure",
+   "group": "CHECK",
+   "body": "Icon_measure",
+   "cx": 0.0,
+   "cy": -45.0
+  },
+  "distance": {
+   "label": "Distance",
+   "group": "CHECK",
+   "body": "Icon_distance",
+   "cx": 5.0,
+   "cy": -45.0
+  },
+  "symmetry": {
+   "label": "Symmetry",
+   "group": "CHECK",
+   "body": "Icon_symmetry",
+   "cx": 10.0,
+   "cy": -45.0
+  },
+  "clearance": {
+   "label": "Clearance",
+   "group": "CHECK",
+   "body": "Icon_clearance",
+   "cx": 15.0,
+   "cy": -45.0
+  },
+  "topology": {
+   "label": "Topology",
+   "group": "CHECK",
+   "body": "Icon_topology",
+   "cx": 20.0,
+   "cy": -45.0
+  },
+  "section": {
+   "label": "Section",
+   "group": "CHECK",
+   "body": "Icon_section",
+   "cx": 25.0,
+   "cy": -45.0
+  },
+  "flex": {
+   "label": "Flex",
+   "group": "CHECK",
+   "body": "Icon_flex",
+   "cx": 30.0,
+   "cy": -45.0
+  },
+  "match": {
+   "label": "Match",
+   "group": "CHECK",
+   "body": "Icon_match",
+   "cx": 35.0,
+   "cy": -45.0
+  },
+  "describe": {
+   "label": "Describe",
+   "group": "CHECK",
+   "body": "Icon_describe",
+   "cx": 40.0,
+   "cy": -45.0
+  },
+  "render": {
+   "label": "Render",
+   "group": "OUTPUT",
+   "body": "Icon_render",
+   "cx": 0.0,
+   "cy": -50.0
+  },
+  "turnaround": {
+   "label": "Turnaround",
+   "group": "OUTPUT",
+   "body": "Icon_turnaround",
+   "cx": 5.0,
+   "cy": -50.0
+  },
+  "save": {
+   "label": "Save",
+   "group": "OUTPUT",
+   "body": "Icon_save",
+   "cx": 10.0,
+   "cy": -50.0
+  },
+  "export": {
+   "label": "Export",
+   "group": "OUTPUT",
+   "body": "Icon_export",
+   "cx": 15.0,
+   "cy": -50.0
+  },
+  "bake": {
+   "label": "Bake",
+   "group": "OUTPUT",
+   "body": "Icon_bake",
+   "cx": 20.0,
+   "cy": -50.0
+  },
+  "paintmaps": {
+   "label": "Paint maps",
+   "group": "OUTPUT",
+   "body": "Icon_paintmaps",
+   "cx": 25.0,
+   "cy": -50.0
+  },
+  "pivot": {
+   "label": "Pivot",
+   "group": "OUTPUT",
+   "body": "Icon_pivot",
+   "cx": 30.0,
+   "cy": -50.0
+  },
+  "rebuild": {
+   "label": "Rebuild",
+   "group": "OUTPUT",
+   "body": "Icon_rebuild",
+   "cx": 35.0,
+   "cy": -50.0
+  }
+ }
+}

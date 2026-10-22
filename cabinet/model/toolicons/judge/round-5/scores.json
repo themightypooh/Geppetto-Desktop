@@ -1,0 +1,82 @@
+{
+ "skin": {
+  "score": 5.0,
+  "pass": false,
+  "notes": [
+   "represents 4: A pink slab with dark blotches and a gold ring on top reads as a handbag or purse, not skin detail. The spots are too big and dark to read as pores or freckles. -> Remove the gold ring. Make it a gently curved pink skin patch (like a cheek) with a scatter of small brown freckles and a few tiny darker pore dots, plus a red highlight dot or two for spots.",
+   "distinct 6: Pink like Flesh next to it. The ring separates it, but for the wrong reason. -> Keep a skin-tone patch but make it curved and freckled, versus Flesh's cut block with red interior.",
+   "legibility 5: At 1x the gold ring dominates and the skin detail is lost to a few dark pixels. -> With the ring gone, make the patch fill the cell and freckles 1-2 px warm brown in a clear scattered pattern.",
+   "craft 6: Clean outline, but the large navy blotches look like dirt or a camo print and the ring is unrelated clutter. -> Replace the navy blotches with warm brown freckles and soft pink shading."
+  ]
+ },
+ "topology": {
+  "score": 5.125,
+  "pass": false,
+  "notes": [
+   "represents 5: A flat cream plate with a grey crackled grid and a red mark reads as a map or tile, not mesh polygons. Quads, poles and bad faces aren't visible. -> Make it a grey cube or sphere with a dark quad wireframe and highlight the problems: one red 5-edge pole vertex where edges converge and one red-filled triangle face.",
+   "distinct 6: Different from the other Check icons, but the cream flat plate resembles Paint maps and Save in Output and isn't clearly a mesh tool. -> Use the grey mesh material shared by the mesh icons, with a visible wire grid, so it reads as mesh analysis.",
+   "legibility 4: At 1x it is a small pale diamond. The grid lines and red mark are lone pixels. -> Make the object fill the cell, use 2 px dark grid lines with only 3x3 quads, and make the red pole and triangle big enough to read.",
+   "craft 6: The outline is OK, but the irregular cracked grid lines look noisy and dithered rather than clean quads. -> Use straight, regular grid lines and clean flat face tones."
+  ]
+ },
+ "edit:dissolve": {
+  "score": 5.25,
+  "pass": false,
+  "notes": [
+   "represents 5: A grey cube whose top face has a cream border and tiny red crosses or marks. It does not show edges going away while the surface stays closed. It looks like a lid or a labelled box. -> Give the top face a visible 2x2 dark edge grid, render the middle cross edges as fading red dashed lines with small red vertex dots popping off, and keep the face itself solid, so it reads as edges removed and the face merged.",
+   "distinct 6: Similar to the other grey-cube Mesh icons (Inset, Loop cut, Mesh edit). The cream rim is the only thing that sets it apart. -> Use the dashed red vanishing edge lines as the signature, and drop the cream rim, which reads like Inset.",
+   "legibility 4: At 1x the red marks are 1-2 lone pixels on the top face. The action is invisible, leaving only a cube. -> Make the dissolving edges 2 px thick and span the whole top face, and make the vertex dots at least 2x2 px.",
+   "craft 7: Solid outline and clean cube shading, but the top-face details are muddy specks. -> Replace the specks with the clean dashed-line edges described above."
+  ]
+ },
+ "set": {
+  "score": 5.5,
+  "pass": false,
+  "notes": [
+   "represents 5: A dark grey round disc with a red mark on top and dots around the rim reads as a bowler hat or a puck, not a parameter control. -> Make it an unmistakable dial knob: a taller knurled knob on a base plate with tick marks around it and a long red pointer line on the top, or replace it with a slider track and red handle.",
+   "distinct 6: Dark grey round object like Remove (grey bin) next to it. The silhouettes are similar round grey drums. -> Use a lighter steel or brass colour for the knob and a flat square base plate with ticks so it isn't another grey drum.",
+   "legibility 5: At 1x the red mark is 1-2 px and the rim dots are lone pixels, so it reads as a dark blob. -> Make the red pointer a 2 px line from the centre to the edge and the ticks 2 px each in a light colour.",
+   "craft 7: Clean outline, but the dark-on-dark shading is muddy and the rim dots look like stray pixels. -> Raise the value contrast on the knob's top and drop the rim dots in favour of ticks on the base."
+  ]
+ },
+ "curvedeform": {
+  "score": 6.125,
+  "pass": false,
+  "notes": [
+   "represents 6: A grey tube with an S-wave and a red underline, with a loose cream bar floating above it. The idea of 'follow a curve' is hinted at, but the guide curve and the body are fused, and the cream bar reads as a random stick. -> Make the red guide curve a separate thin red S-spline with end dots (like Spline) and have the grey bar bent to sit on it. Replace the floating cream bar with a pale ghost of the same bar, straight, at upper left, to show before and after.",
+   "distinct 6: Close to Bend (grey bent tube with red arrow) next to it, and to Sweep in Build (grey curved tube with red ends). -> Use a square-section bar (not a round tube) and make the visible red guide spline with yellow end handles the hero, so it differs from Bend's arch and Sweep's tube.",
+   "legibility 6: At 1x it is a thin grey squiggle with a cream dash. The red under the tube is a 1-2 px line and the S shape is hard to make out. -> Thicken the body by about 50%, enlarge the S amplitude to fill the cell height, and make the red guide 2 px wide.",
+   "craft 7: Clean outline, but the floating cream bar looks like a stray piece and the composition is bottom-heavy with empty space above. -> Remove the stray cream bar (or turn it into the ghost described above) and centre the curve in the frame."
+  ]
+ },
+ "pocket": {
+  "score": 6.5,
+  "pass": false,
+  "notes": [
+   "represents 7: A blue denim patch with a darker pocket piece, a flap, red stitch dots along the edges and a small cream button. A pocket is recognisable at 2x. -> Shape the pocket as a clear lighter-blue rectangle on darker cloth, with a triangular or pointed flap overlapping its top and a brass button at the flap tip.",
+   "distinct 7: Blue cloth like Fabric, Padding and Wear. The flap and button differ, but at 1x it blends with Fabric and Wear. -> Make the pocket stand proud of the cloth (raised, with a shadow) and use a contrasting stitch colour so it isn't another flat blue sheet.",
+   "legibility 5: At 1x it is a blue slab with a dark blob. The flap is a dark muddy mass and the red stitches are lone pixels. -> Lighten the flap to mid-blue with a black outline, enlarge the pocket to cover most of the patch, and run a continuous 1 px red stitch line around three sides.",
+   "craft 7: Outline is solid, but the flap area is dark and muddy and the button is a tiny smudge. -> Use two clean blue tones on the flap and make the button a 2x2 brass disc."
+  ]
+ },
+ "shapekey": {
+  "score": 6.875,
+  "pass": false,
+  "notes": [
+   "represents 7: A grey cube on the left and a pink sphere on the right joined by a cream bar with a red knob: cube-to-sphere with a slider between. The blend idea is there. -> Show a clear slider: a dark track with a red knob mid-way, and above or beside it a middle shape that is half cube, half sphere (a rounded cube), so the blending reads.",
+   "distinct 7: Different from Bind (bone with pin), Key end (magnifier/key) and Corrective (bent limb), but the horizontal bar shape is similar to Bind's bone. -> Make the slider track dark (not cream like a bone) so it doesn't echo Bind.",
+   "legibility 6: At 1x it is a small horizontal strip. The cube and sphere are only a few pixels and the red knob is a tiny sliver. -> Scale the cube and sphere up to roughly 40% of cell height each and make the red knob a chunky 3x4 px block.",
+   "craft 8: Clean outline and shading, neatly framed, but it sits low and thin in the cell. -> Centre vertically and use more of the cell height."
+  ]
+ },
+ "profile": {
+  "score": 7.625,
+  "pass": false,
+  "notes": [
+   "represents 7: A thick red closed L-shaped outline lying flat. It reads as a 2D outline, but nothing says it becomes a solid, so it could be any closed shape. -> Put a faint grey ghost of the extruded L solid rising behind or above the red outline (same L footprint) so the outline reads as the cross-section of a solid.",
+   "distinct 8: No other Form icon is a bare red outline. Sketch (paper and pencil) and Spline (open red wave) are the closest, but the closed L shape sets it apart. -> Keep it a closed polygon. The ghost solid behind it also separates it further from Spline and Sketch.",
+   "legibility 8: At 1x the L outline is bold and clear and the stroke survives. The hollow interior is small but readable. -> Thin the L's legs slightly or widen the overall L so the inner hole is a few pixels bigger at 1x.",
+   "craft 8: Clean black outline, solid red with light dither, well framed. The dither on the red stroke is slightly noisy. -> Flatten the red stroke to two tones (lit top, darker side) and drop the dither speckle."
+  ]
+ }
+}

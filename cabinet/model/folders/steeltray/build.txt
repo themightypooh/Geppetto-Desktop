@@ -1,0 +1,18 @@
+echo the back plate of a steel file tray, its top edge rolled over
+add Blob name=Back voxel=0.022 blend=0.02 shapes="box 0,0,0 6.3,4.8,0.06 r=0.02 mat=0; cylinder -3.15,2.4,0.04 3.15,2.4,0.04 0.09 mat=1; cylinder -3.05,-2.35,0.05 -3.05,2.35,0.05 0.07 mat=1; cylinder 3.05,-2.35,0.05 3.05,2.35,0.05 0.07 mat=1"
+echo the front of the tray, lower than the back, with a pressed rib and a pull
+add Blob name=Front voxel=0.022 blend=0.02 shapes="box 0,1.5,0 6.3,3.0,0.08 r=0.03 mat=5; cylinder -3.15,3.0,0.06 3.15,3.0,0.06 0.1 mat=6; -box 0,2.35,0.07 5.4,0.08,0.05; -box 0,0.35,0.07 5.4,0.08,0.05; box 0,0.9,0.12 1.6,0.18,0.12 r=0.05 mat=6"
+echo a brass card holder with a paper label, riveted on
+add Blob name=Holder voxel=0.016 blend=0.01 shapes="box 0,1.75,0.11 2.6,0.85,0.04 r=0.02 mat=2; -box 0,1.82,0.13 2.3,0.7,0.04; paint box 0,1.76,0.12 2.3,0.62,0.02 mat=3; sphere -1.2,1.75,0.14 0.07 mat=2; sphere 1.2,1.75,0.14 0.07 mat=2"
+echo now the colours, slot by slot
+material 0 color=#5d646e rough=0.45 metal=1
+material 1 color=#3a3f47 rough=0.5 metal=1
+material 2 color=#b58a3a rough=0.35 metal=1
+material 3 color=#efe6cc rough=0.9
+material 5 color=#6b737e rough=0.45 metal=1
+material 6 color=#2a2e34 rough=0.5 metal=1
+add Transform name=Cover bodies=Front,Holder translate=0,-2.4,0.1
+describe
+turnaround out shade=material size=512 name=steeltray
+save steeltray.effigy
+export out name=steeltray

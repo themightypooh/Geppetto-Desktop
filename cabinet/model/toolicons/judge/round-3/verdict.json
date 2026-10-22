@@ -1,0 +1,177 @@
+{"icons": [
+{"n": 1, "scores": {
+ "represents": {"score": 6, "evidence": "Three separate grey spheres clustered with a tiny red seam; they touch but don't visibly melt into one body.", "fix": "Fuse the spheres with smooth thick necks/webbing so it reads as one organic mass; recolour to clay/flesh tone."},
+ "distinct": {"score": 5, "evidence": "Grey spheres look like Primitive's grey spheres right next to it.", "fix": "Change material from primitive grey to warm clay and drop hard sphere edges so it differs from Primitive."},
+ "legibility": {"score": 6, "evidence": "At 1x it's a grey lump; the red seam is a couple of pixels.", "fix": "Widen the red blend band along the merge seam to a clear stroke."},
+ "craft": {"score": 8, "evidence": "Clean outline and shading, well framed.", "fix": "Remove the dark interior outline between spheres so the merge reads continuous."}}},
+{"n": 2, "scores": {
+ "represents": {"score": 8, "evidence": "Paper sheet with a drawn curve and a pencil: drawing on paper reads.", "fix": "Draw a clear closed shape (rectangle + arc) on the paper instead of a scribble."},
+ "distinct": {"score": 8, "evidence": "Only paper+pencil icon on the sheet.", "fix": "Make the pencil tip red to separate it from Paint's brush elsewhere."},
+ "legibility": {"score": 6, "evidence": "At 1x the pencil and line are thin, a few pixels.", "fix": "Thicken the pencil and the drawn line; enlarge the paper to fill the frame."},
+ "craft": {"score": 7, "evidence": "Clean, but small in frame with empty space.", "fix": "Scale the whole object up ~30%."}}},
+{"n": 3, "scores": {
+ "represents": {"score": 6, "evidence": "A red closed outline standing upright; reads as an outline but nothing says cross-section of a solid.", "fix": "Lay the red outline on a pale sketch plane tile and add a faint grey solid rising from it."},
+ "distinct": {"score": 7, "evidence": "Unlike other form icons, but close to Spline's red line style.", "fix": "Give it a pale plane backing so it isn't just another red line."},
+ "legibility": {"score": 7, "evidence": "Red outline is visible at 1x but very narrow and tall.", "fix": "Tilt to isometric and widen the shape so it fills the cell."},
+ "craft": {"score": 7, "evidence": "Clean but awkward upright framing, lots of empty space.", "fix": "Reframe into the standard iso view."}}},
+{"n": 4, "scores": {
+ "represents": {"score": 8, "evidence": "Red curve with cream control-point dots: spline with points.", "fix": "Make the curve smooth (it reads as straight segments) and add a tangent handle at one point."},
+ "distinct": {"score": 6, "evidence": "Red segmented line with dots resembles Sweep's red path and Curve deform.", "fix": "Add tangent handle bars on the control points, unique to Spline."},
+ "legibility": {"score": 7, "evidence": "Reads at 1x as a red zigzag with dots.", "fix": "Thicken the curve one pixel."},
+ "craft": {"score": 8, "evidence": "Clean outline and dots.", "fix": "Smooth the kinks into a continuous S curve."}}},
+{"n": 5, "scores": {
+ "represents": {"score": 7, "evidence": "File card, red ball, grey cube: something from a file to a cube, but no direction.", "fix": "Add a red arrow pointing from the file into the cube."},
+ "distinct": {"score": 4, "evidence": "Nearly identical to Export #34 (cube + red ball + file card).", "fix": "Put the file on the left with an inward arrow; Export goes the other way with an outward arrow."},
+ "legibility": {"score": 6, "evidence": "At 1x the file card is a small beige smudge.", "fix": "Enlarge the file card and give it a clear folded corner."},
+ "craft": {"score": 7, "evidence": "Clean but cluttered three-object composition.", "fix": "Replace the red ball with the arrow to reduce parts."}}},
+{"n": 6, "scores": {
+ "represents": {"score": 7, "evidence": "Bone with pink flesh wrapped around the middle, red bands.", "fix": "Show bone knobs clearly protruding at both ends and flesh as a muscle shape over the shaft."},
+ "distinct": {"score": 8, "evidence": "Only bone+flesh icon here.", "fix": "Keep; differ from Bind's bone by the flesh mass."},
+ "legibility": {"score": 7, "evidence": "Reads as a pink candy/bone at 1x.", "fix": "Larger bone knobs in cream so the bone reads."},
+ "craft": {"score": 7, "evidence": "Red bands look like wrapper ties, candy-like.", "fix": "Remove the red bands; use a red outline arrow of flesh growing outward instead."}}},
+{"n": 7, "scores": {
+ "represents": {"score": 6, "evidence": "Red disc on top of a grey square slab with a waist between; blend is unclear.", "fix": "Show square section at bottom, circle at top, both outlined red, with a smooth grey transition solid between."},
+ "distinct": {"score": 6, "evidence": "Slab with a thing on top resembles Extrude.", "fix": "Remove the thick base slab; make it a standalone lofted solid."},
+ "legibility": {"score": 6, "evidence": "At 1x it's a red blob over a slab.", "fix": "Make the two sections larger and the neck readable."},
+ "craft": {"score": 7, "evidence": "Clean.", "fix": "Tighten framing."}}},
+{"n": 8, "scores": {
+ "represents": {"score": 6, "evidence": "Small grey bent tube with a thin red path tail.", "fix": "Add a red ring profile at the start and a longer curved red rail the tube follows."},
+ "distinct": {"score": 7, "evidence": "Different from other build icons.", "fix": "Make the path curve more strongly so it doesn't look like a stretched Revolve."},
+ "legibility": {"score": 4, "evidence": "At 1x it's a tiny grey squiggle, much smaller than neighbours.", "fix": "Scale up to fill the cell; thicken the red path."},
+ "craft": {"score": 6, "evidence": "Underfilled frame, thin trailing line.", "fix": "Reframe to fill the cell."}}},
+{"n": 9, "scores": {
+ "represents": {"score": 8, "evidence": "Ring of grey pegs around a centre with a red circle.", "fix": "Add a red rotation arrowhead on the ring."},
+ "distinct": {"score": 8, "evidence": "Clearly different from Row pattern.", "fix": "Keep."},
+ "legibility": {"score": 7, "evidence": "Pegs are small at 1x; the cream centre post is odd.", "fix": "Use fewer (6) bigger pegs; recolour the centre post grey or remove it."},
+ "craft": {"score": 7, "evidence": "Slightly busy.", "fix": "Remove the yellow centre post."}}},
+{"n": 10, "scores": {
+ "represents": {"score": 8, "evidence": "Grey cube with one red rounded edge.", "fix": "Increase the fillet radius so the curvature is obvious."},
+ "distinct": {"score": 7, "evidence": "Distinct from Chamfer's triangle, but close to Draft and Bevel cubes.", "fix": "Keep a single curved edge; no other red."},
+ "legibility": {"score": 7, "evidence": "Red edge readable at 1x but roundness subtle.", "fix": "Bigger radius."},
+ "craft": {"score": 8, "evidence": "Clean.", "fix": "Remove the stray grey dots on the top face."}}},
+{"n": 11, "scores": {
+ "represents": {"score": 5, "evidence": "Grey block with red upper band; taper barely visible.", "fix": "Exaggerate the wall taper into a clear frustum, add a red angle arc and a vertical pull arrow."},
+ "distinct": {"score": 5, "evidence": "Looks like Fillet/Chamfer: red-marked cube.", "fix": "Change silhouette to a tapered frustum on a parting line."},
+ "legibility": {"score": 6, "evidence": "At 1x it's a red-and-grey cube.", "fix": "Make the slanted walls red only, top grey."},
+ "craft": {"score": 7, "evidence": "Clean; stray red pixel near bottom.", "fix": "Remove stray red pixel."}}},
+{"n": 12, "scores": {
+ "represents": {"score": 5, "evidence": "Cream block resting on a red slab; no visible cut.", "fix": "Grey body sliced by a red plane, with the cut-off half lifted away and faded."},
+ "distinct": {"score": 7, "evidence": "Unlike other refine icons.", "fix": "Keep the cream colour out; use body grey."},
+ "legibility": {"score": 6, "evidence": "At 1x reads as a sandwich/cake.", "fix": "Show a clear gap between kept and removed halves."},
+ "craft": {"score": 6, "evidence": "Red slab edges are ragged.", "fix": "Clean the plane edges into a crisp rectangle."}}},
+{"n": 13, "scores": {
+ "represents": {"score": 6, "evidence": "Pink donut-like blob with a tiny tool; looks like a bagel.", "fix": "Enlarge a sculpting loop tool pressing a visible dent into the surface, red tool tip."},
+ "distinct": {"score": 7, "evidence": "Distinct from other deform icons.", "fix": "Keep the soft pink material."},
+ "legibility": {"score": 6, "evidence": "Tool is a couple of pixels at 1x.", "fix": "Make the tool a third of the icon height."},
+ "craft": {"score": 7, "evidence": "Clean.", "fix": "Remove the donut hole; make a pushed dent with a raised rim."}}},
+{"n": 14, "scores": {
+ "represents": {"score": 4, "evidence": "Blue joystick on a grey base, yellow ball, red blob; reads as a joystick, not a gizmo.", "fix": "Replace with a grey cube with three axis arrows (red/green/blue) from one corner."},
+ "distinct": {"score": 7, "evidence": "Different from others.", "fix": "Keep axis-gizmo concept unique to Move."},
+ "legibility": {"score": 5, "evidence": "At 1x a jumble of blue, yellow and red bits.", "fix": "Fewer, larger parts: three thick arrows."},
+ "craft": {"score": 6, "evidence": "Cluttered, mixed colours.", "fix": "Drop the yellow ball and joystick knob."}}},
+{"n": 15, "scores": {
+ "represents": {"score": 7, "evidence": "Grey bar bent into an arch with red ends on a cream strip.", "fix": "Add a red curved bend arrow over the arch; drop the cream base."},
+ "distinct": {"score": 7, "evidence": "Distinct, though close to Curve.", "fix": "Keep a single arch."},
+ "legibility": {"score": 7, "evidence": "Arch reads at 1x.", "fix": "Thicken the bar."},
+ "craft": {"score": 7, "evidence": "Cream base strip looks like a stray part.", "fix": "Remove the cream strip."}}},
+{"n": 16, "scores": {
+ "represents": {"score": 5, "evidence": "Grey zigzag bar with red bits below; following a curve isn't clear.", "fix": "Show a smooth red S spline with a segmented grey body lying along it."},
+ "distinct": {"score": 5, "evidence": "Confusable with Bend and Spline.", "fix": "Make the curve a visible separate red path under the body."},
+ "legibility": {"score": 5, "evidence": "At 1x a broken squiggle.", "fix": "Larger, smoother shapes."},
+ "craft": {"score": 6, "evidence": "Fragmented red pieces.", "fix": "Make the red curve one continuous stroke."}}},
+{"n": 17, "scores": {
+ "represents": {"score": 7, "evidence": "Cube with red slanted strip along the top edge.", "fix": "Split the strip into 2-3 narrow facets with edge lines and vertex dots (mesh style)."},
+ "distinct": {"score": 5, "evidence": "Near-identical to Fillet #10 and Chamfer.", "fix": "Add mesh wire edges so it reads as a mesh-mode bevel, distinct from fillet/chamfer."},
+ "legibility": {"score": 7, "evidence": "Red edge reads at 1x.", "fix": "Make facet lines contrasting."},
+ "craft": {"score": 8, "evidence": "Clean.", "fix": "Remove stray dots on faces."}}},
+{"n": 18, "scores": {
+ "represents": {"score": 4, "evidence": "Cream sack with a red knot and a grey half; reads as a bag.", "fix": "Grey blob split by a red mirror plane, one half matching the other with an arrow across."},
+ "distinct": {"score": 7, "evidence": "Unlike other mesh icons.", "fix": "Keep a centred mirror plane."},
+ "legibility": {"score": 5, "evidence": "At 1x a cream bag.", "fix": "Make the red plane a clear vertical sheet."},
+ "craft": {"score": 6, "evidence": "Off-palette cream for mesh category.", "fix": "Use mesh grey."}}},
+{"n": 19, "scores": {
+ "represents": {"score": 5, "evidence": "Slab with faint lines and a dashed red line; dissolve not obvious.", "fix": "Quad grid on top with one red dotted fading edge between two merged faces."},
+ "distinct": {"score": 6, "evidence": "Close to Loop cut's red line.", "fix": "Make the edge dotted/fading, not solid."},
+ "legibility": {"score": 4, "evidence": "At 1x the lines vanish.", "fix": "Higher-contrast grid edges, bigger slab."},
+ "craft": {"score": 6, "evidence": "Muddy faint lines.", "fix": "Crisp dark edge lines."}}},
+{"n": 20, "scores": {
+ "represents": {"score": 8, "evidence": "Grey cube with a big red X.", "fix": "Show a missing corner/verts behind the X so it's mesh elements, not the object."},
+ "distinct": {"score": 6, "evidence": "Close to Delete face concept.", "fix": "Show vertex/edge selection dots being deleted."},
+ "legibility": {"score": 8, "evidence": "Red X reads at 1x.", "fix": "Keep."},
+ "craft": {"score": 7, "evidence": "Dark hole blob behind X is muddy.", "fix": "Remove the dark hole artefact."}}},
+{"n": 21, "scores": {
+ "represents": {"score": 7, "evidence": "Blue denim patch with flap and red stitch along the bottom.", "fix": "Make the flap a distinct lighter overlapping piece with a button; stitch all around."},
+ "distinct": {"score": 7, "evidence": "Different from Garment/Fabric.", "fix": "Keep pocket shape."},
+ "legibility": {"score": 6, "evidence": "Upright card is narrow at 1x; flap hard to see.", "fix": "Tilt to iso like the other cloth icons and enlarge the flap."},
+ "craft": {"score": 7, "evidence": "Clean.", "fix": "Thicker stitch line."}}},
+{"n": 22, "scores": {
+ "represents": {"score": 7, "evidence": "Blue fabric with two holes and red frays.", "fix": "One large ragged hole with frayed thread ends."},
+ "distinct": {"score": 7, "evidence": "Holes resemble a mask; distinct from Fabric otherwise.", "fix": "Make holes irregular, not eye-shaped."},
+ "legibility": {"score": 6, "evidence": "At 1x reads as a mask.", "fix": "Single bigger hole with red frayed edge."},
+ "craft": {"score": 7, "evidence": "Clean.", "fix": "Remove symmetric hole placement."}}},
+{"n": 23, "scores": {
+ "represents": {"score": 8, "evidence": "Pink tile with golden strands standing up.", "fix": "Denser, slightly curved strands."},
+ "distinct": {"score": 8, "evidence": "Unique.", "fix": "Keep."},
+ "legibility": {"score": 7, "evidence": "Strands are thin pixels at 1x.", "fix": "Thicker tufts, darker brown colour."},
+ "craft": {"score": 7, "evidence": "Strands slightly noisy.", "fix": "Group strands into clumps."}}},
+{"n": 24, "scores": {
+ "represents": {"score": 6, "evidence": "Pink sphere with red opening; reads as a mouth/wound orb.", "fix": "Cut-away slab: pink skin layer over red flesh and fat layers."},
+ "distinct": {"score": 6, "evidence": "Sphere shape echoes Material's sphere.", "fix": "Use a slab/cross-section instead of a sphere."},
+ "legibility": {"score": 7, "evidence": "Readable at 1x.", "fix": "Keep strong red."},
+ "craft": {"score": 7, "evidence": "Clean.", "fix": "Tighten outline."}}},
+{"n": 25, "scores": {
+ "represents": {"score": 6, "evidence": "Pink bar with red spots; looks like an eraser/sponge.", "fix": "Bumpy skin patch with pores and brown freckles of varied size."},
+ "distinct": {"score": 6, "evidence": "Same pink as Flesh.", "fix": "Lighter skin tone and brown freckles to differ from Flesh."},
+ "legibility": {"score": 6, "evidence": "Spots are single pixels at 1x.", "fix": "Bigger spots."},
+ "craft": {"score": 7, "evidence": "Clean.", "fix": "Curve the patch surface."}}},
+{"n": 26, "scores": {
+ "represents": {"score": 6, "evidence": "Grey rock on a dark rod with yellow knob and pink ball; slider idea weak.", "fix": "Horizontal slider track with knob mid-way, cube at left end, sphere at right end."},
+ "distinct": {"score": 5, "evidence": "Same dark rod as Key end.", "fix": "Make Shape key show the full track; Key end only the end stop."},
+ "legibility": {"score": 5, "evidence": "Small parts at 1x, rod thin.", "fix": "Thicker track and larger end shapes."},
+ "craft": {"score": 6, "evidence": "Diagonal composition scattered.", "fix": "Straight horizontal layout."}}},
+{"n": 27, "scores": {
+ "represents": {"score": 5, "evidence": "Dark rod with red flag and pink ball; looks like a mallet.", "fix": "Slider knob pushed against a red end cap with the target sphere highlighted."},
+ "distinct": {"score": 5, "evidence": "Shares rod with Shape key.", "fix": "Show end cap clearly, differ in layout."},
+ "legibility": {"score": 6, "evidence": "Reads as a hammer at 1x.", "fix": "Shorter rod, larger red stop."},
+ "craft": {"score": 6, "evidence": "Clean but odd.", "fix": "Align along the slider axis."}}},
+{"n": 28, "scores": {
+ "represents": {"score": 5, "evidence": "Grey dome on a cream ring with red tick; reads as a hat.", "fix": "A knob dial with tick marks around and a red pointer."},
+ "distinct": {"score": 7, "evidence": "Different from Remove/Remedy.", "fix": "Keep dial concept."},
+ "legibility": {"score": 6, "evidence": "Red tick small at 1x.", "fix": "Larger red pointer line."},
+ "craft": {"score": 6, "evidence": "Hat-like brim.", "fix": "Replace brim with a tick-marked plate."}}},
+{"n": 29, "scores": {
+ "represents": {"score": 4, "evidence": "Grey cube with a red round patch; reads as a button/speaker.", "fix": "Cube with a hole being patched by a red plaster or a wrench."},
+ "distinct": {"score": 6, "evidence": "Grey cube like many others.", "fix": "Add a wrench silhouette."},
+ "legibility": {"score": 6, "evidence": "Red dot reads at 1x but meaning doesn't.", "fix": "Bigger repair tool."},
+ "craft": {"score": 7, "evidence": "Clean.", "fix": "Remove the button look."}}},
+{"n": 30, "scores": {
+ "represents": {"score": 8, "evidence": "Blue butterfly with a red centre line.", "fix": "Thicker red mirror line."},
+ "distinct": {"score": 7, "evidence": "Distinct; blue colour odd for check.", "fix": "Keep shape."},
+ "legibility": {"score": 6, "evidence": "Red line is thin at 1x.", "fix": "Widen red line."},
+ "craft": {"score": 7, "evidence": "Clean.", "fix": "Sharpen wing outline."}}},
+{"n": 31, "scores": {
+ "represents": {"score": 7, "evidence": "Dark grid tile with a red dot cell.", "fix": "Larger quad grid with a highlighted red pole/triangle face."},
+ "distinct": {"score": 7, "evidence": "Distinct.", "fix": "Keep."},
+ "legibility": {"score": 5, "evidence": "At 1x a tiny dark tile.", "fix": "Scale up, lighter grid lines."},
+ "craft": {"score": 7, "evidence": "Clean.", "fix": "Fill frame."}}},
+{"n": 32, "scores": {
+ "represents": {"score": 6, "evidence": "Pink bent limb shape with red line; reads ambiguously.", "fix": "Clear two-segment arm with joint ball and red bend arc."},
+ "distinct": {"score": 7, "evidence": "Distinct.", "fix": "Keep pink."},
+ "legibility": {"score": 6, "evidence": "At 1x a pink squiggle.", "fix": "Bigger joint."},
+ "craft": {"score": 6, "evidence": "Blobby shape.", "fix": "Define segments."}}},
+{"n": 33, "scores": {
+ "represents": {"score": 8, "evidence": "Speech bubble with text lines.", "fix": "Add a small grey model at the corner to tie the report to the model."},
+ "distinct": {"score": 9, "evidence": "Unique.", "fix": "Keep."},
+ "legibility": {"score": 8, "evidence": "Reads at 1x.", "fix": "Keep."},
+ "craft": {"score": 8, "evidence": "Clean.", "fix": "Tidy the text lines."}}},
+{"n": 34, "scores": {
+ "represents": {"score": 6, "evidence": "Cube, red ball and file card; no outward direction.", "fix": "Add a red arrow leaving the cube into the file."},
+ "distinct": {"score": 4, "evidence": "Nearly identical to Import #5.", "fix": "Arrow direction and layout opposite to Import."},
+ "legibility": {"score": 6, "evidence": "File card small at 1x.", "fix": "Larger file card."},
+ "craft": {"score": 7, "evidence": "Clean.", "fix": "Replace red ball with the arrow."}}},
+{"n": 35, "scores": {
+ "represents": {"score": 5, "evidence": "Cube on a dark tray with cream squares and a red ball; unclear.", "fix": "Cube above a red heat glow with output texture map tiles beside it."},
+ "distinct": {"score": 6, "evidence": "Tray resembles Save and Paint maps.", "fix": "Use oven/heat motif."},
+ "legibility": {"score": 5, "evidence": "Small parts at 1x.", "fix": "Larger elements."},
+ "craft": {"score": 6, "evidence": "Cluttered.", "fix": "Simplify to two parts."}}}
+]}

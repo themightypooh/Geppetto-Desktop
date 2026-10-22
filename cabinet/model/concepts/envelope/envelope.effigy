@@ -1,0 +1,51 @@
+effigy 1
+rollback 2147483647
+materiallook 0 color=#e8dcc0 rough=0.85 metal=0
+materiallook 1 color=#d4c4a0 rough=0.85 metal=0
+materiallook 2 color=#8e1a1a rough=0.3 metal=0
+materiallook 3 color=#b8892e rough=0.35 metal=1
+feature BlobFeature
+	id a503d418
+	name Body
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 0,0,0.12 4.2,6.4,0.24 r=0.06 mat=0; paint box 0,0,0.25 4.0,0.05,0.04 rot=0,0,33 mat=1; paint box 0,0,0.25 4.0,0.05,0.04 rot=0,0,-33 mat=1
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 3f2667d4
+	name Flap
+	suppressed 0
+	visible 1
+	param Blend 0.02
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 0,0,0.27 3.0,3.0,0.05 rot=0,0,45 r=0.02 mat=1; -box -2.2,0,0.27 4.4,8,1; -box 0,-3.3,0.27 8,0.2,1; -box 0,3.3,0.27 8,0.2,1
+	param Smooth 2
+	param Voxel 0.02
+end
+feature BlobFeature
+	id 9a6ce91a
+	name Seal
+	suppressed 0
+	visible 1
+	param Blend 0.05
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes cylinder 0.05,0,0.27 0.05,0,0.42 0.55 r=0.08 mat=2; sphere 0.35,0.45,0.3 0.12 mat=2; sphere -0.3,-0.48,0.3 0.1 mat=2; sphere 0.5,-0.3,0.3 0.09 mat=2; -torus 0.05,0,0.45 0.36 0.035; -sphere 0.05,0,0.5 0.14
+	param Smooth 2
+	param Voxel 0.015
+end

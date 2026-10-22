@@ -1,0 +1,35 @@
+# The MODELING drawer: one oak library card-catalog drawer pulled out, packed with catalog cards.
+# Shape from the Library of Congress drawer photo (long open tray, taller solid front, tabbed dividers),
+# front and hardware from the National Library of Israel photo (brass label holder with its thumb pull
+# hanging below it, round rod-lock knob under that). Inches, Z up, the front faces -Y.
+# Slots: 0 cards, 1 oak tray, 2 divider tabs, 3 label paper, 4 ink, 5 brass, 6 oak front (the cover layer).
+refimage front /home/poo/.local/share/geppetto/research/20261022-125443-808846-single-wooden-library-card-catal/refs/03-card-catalog-drawer-national-library-of.png height=6.4 offset=9,1.6 depth=0 opacity=0.9
+echo the tray: two oak sides, back and bottom, open on top, 5.1 in inside so a 5 in card stands across it
+add Blob name=Tray voxel=0.03 blend=0.02 cutblend=0.01 shapes="box 0,6.5,1.4 5.9,13,2.8 r=0.08 mat=1; -box 0,6.5,1.8 5.1,12.2,2.8"
+material 1 color=#b97d3c rough=0.45
+echo the drawer front: thicker solid oak, taller and wider than the tray, edges eased
+add Blob name=Front voxel=0.03 blend=0.02 shapes="box 0,-0.4,1.9 6.3,0.8,4.2 r=0.16 mat=6"
+material 6 color=#c08744 rough=0.4
+echo the brass label holder: a flat frame screwed on, the paper card behind its window, the inked call number
+add Blob name=Holder voxel=0.015 blend=0.01 shapes="box 0,-0.83,3.15 3.1,0.07,1.25 r=0.03 mat=5; sphere -1.33,-0.87,3.6 0.09 mat=5; sphere 1.33,-0.87,3.6 0.09 mat=5; sphere -1.33,-0.87,2.7 0.09 mat=5; sphere 1.33,-0.87,2.7 0.09 mat=5; paint box 0,-0.9,3.33 2.3,0.1,0.55 mat=3; paint box 0.1,-0.9,3.42 1.6,0.1,0.07 mat=4; paint box 0.1,-0.9,3.22 1.3,0.1,0.07 mat=4"
+material 5 color=#b19454 rough=0.35 metal=1
+material 3 color=#efe4c4 rough=0.8
+material 4 color=#2a2420 rough=0.6
+echo the thumb pull: a brass tongue hanging from the holder's lower edge, bulging out into a rounded cup
+add Blob name=Pull voxel=0.015 blend=0.08 shapes="box 0,-0.86,2.4 0.75,0.1,0.6 r=0.04 mat=5; ellipsoid 0,-1.0,1.95 0.42,0.28,0.48 mat=5"
+echo the rod-lock knob near the bottom of the front: the end of the rod that holds the cards in
+add Blob name=Knob voxel=0.015 blend=0.03 shapes="cylinder 0,-0.8,0.85 0,-1.05,0.85 0.3 r=0.05 mat=5; cylinder 0,-1.05,0.85 0,-1.18,0.85 0.24 r=0.06 mat=5"
+echo the rod running back through the bottom of the card pack
+add Blob name=Rod voxel=0.02 blend=0.01 shapes="cylinder 0,0,0.75 0,11.2,0.75 0.08 mat=5"
+echo the catalog cards: three packs standing across the drawer, tops a little proud of the sides, gaps between
+add Blob name=Cards voxel=0.025 blend=0.01 shapes="box 0,2.6,1.95 5.0,2.6,3.0 r=0.04 mat=0; box 0,5.6,1.95 5.0,3.1,3.0 r=0.04 mat=0; box 0,8.95,1.95 5.0,3.2,3.0 r=0.04 mat=0; paint box 0,2.6,3.47 5.2,0.03,0.1 mat=4; paint box 0,4.9,3.47 5.2,0.03,0.1 mat=4; paint box 0,6.6,3.47 5.2,0.03,0.1 mat=4; paint box 0,8.1,3.47 5.2,0.03,0.1 mat=4; paint box 0,9.9,3.47 5.2,0.03,0.1 mat=4"
+material 0 color=#dccb98 rough=0.7
+echo the tabbed dividers at the front of each pack, tabs standing up off-centre, the last one leaning back
+add Blob name=Dividers voxel=0.02 blend=0.01 shapes="box 0,1.28,1.95 5.0,0.05,3.0 mat=0; box -1.2,1.28,3.65 1.3,0.05,0.4 r=0.06 mat=2; box 0,4.03,1.95 5.0,0.05,3.0 mat=0; box 0.4,4.03,3.65 1.3,0.05,0.4 r=0.06 mat=2; box 0,7.33,1.95 5.0,0.05,3.0 mat=0; box 1.4,7.33,3.65 1.3,0.05,0.4 r=0.06 mat=2"
+material 2 color=#8e2a22 rough=0.6
+echo the follower block behind the last pack, holding the cards upright
+add Blob name=Follower voxel=0.02 blend=0.02 shapes="box 0,10.85,1.6 4.9,0.35,2.3 r=0.06 rot=-12,0,0 mat=1"
+describe
+turnaround out shade=material size=512 name=drawer
+export out name=carddrawer
+save carddrawer.effigy

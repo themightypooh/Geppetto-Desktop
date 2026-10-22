@@ -1,0 +1,657 @@
+PASS baseline/bind palette is identity
+PASS baseline/missing explicit clip reports an error
+PASS baseline/scrubbing a paused clip updates the pose
+PASS baseline/loading a new clip resets the playhead
+PASS baseline/bone clip matches kernel at fractional frames
+PASS baseline/clip playback allocates zero bytes after warmup
+PASS baseline/over-capacity skeleton is rejected instead of clamping bone IDs
+PASS baseline/singular bind transform is rejected
+PASS baseline/OpenGL projection maps near plane to -1
+PASS baseline/screen centre ray follows camera forward
+PASS baseline/green lamps are green, not orange
+PASS baseline/one-shot clip stops on the final pose
+PASS baseline/paused scrubbing can reach the exact last frame
+PASS baseline/negative/NaN frame deltas are rejected
+PASS baseline/live IK matches kernel, including fractional frames
+PASS baseline/limits match kernel and allocate zero bytes
+PASS baseline/unsupported part tracks fail explicitly
+PASS baseline/GPU palette agrees with kernel skinning maths
+PASS baseline/body picking ignores empty space inside an AABB
+PASS baseline/body picking follows animated geometry
+PASS baseline/FBX missing weights do not silently rebind
+PASS baseline/CLI rejects unknown flags, missing values and invalid sizes
+PASS baseline/headless/exposure options parse without enabling animation
+PASS survey/Survey assembly uses authored head and collar, not placeholder
+PASS survey/background loader publishes a complete result
+PASS baseline/background load errors are published and recoverable
+PASS ai/rubric rejects missing evidence and invalid scores
+PASS ai/rubric rejects duplicates and invalid weights
+PASS ai/plateau uses best score and retains earlier checkpoint
+PASS ai/run paths reject escapes and links
+PASS ai/native feature tool creates editable checkpoint
+PASS ai/invalid edits roll back and frozen features reject changes
+PASS ai/references reject private and transition addresses
+PASS ai/configuration rejects unknown flags and unsafe providers
+AI: openai/fixture; output /tmp/opencode/geppetto-desktop-tests-5b8110189a8e44c6ba1a5c21cdbceb20/ai-whole. Calls <= 10, time <= 15 minutes.
+AI tool: add_feature
+Built the editable test block.
+built-unjudged: /tmp/opencode/geppetto-desktop-tests-5b8110189a8e44c6ba1a5c21cdbceb20/ai-whole/task-00-best.effigy
+PASS ai/whole native creation uses provider loop and writes result
+AI: openai/fixture; output /tmp/opencode/geppetto-desktop-tests-5b8110189a8e44c6ba1a5c21cdbceb20/ai-budget. Calls <= 1, time <= 15 minutes.
+AI tool: add_feature
+PASS ai/budget stop preserves generated editable checkpoint
+SKIP ai/actual EGL build judge revise reaches target: Set AI_REQUIRE_EGL=1 for real windowless rendering + mocked provider integration.
+SKIP ai/actual EGL plateau returns below target and best not latest: Set AI_REQUIRE_EGL=1 for real windowless plateau regression.
+SKIP ai/actual EGL budget stop records earlier best selection: Set AI_REQUIRE_EGL=1 for checkpoint stop regression.
+PASS ai/openai request and tool response round trip
+PASS ai/anthropic request and tool response round trip
+PASS ai/google request and tool response round trip
+PASS harness/registered failing assertions return nonzero
+PASS harness/missing optional fixture is skipped, not passed
+PASS harness/missing required fixture fails without running body
+PASS harness/duplicate registration and empty selections cannot pass
+PASS asset-paths/relative roots and implicit external references are rejected
+PASS asset-paths/relative assets normalize without changing cwd or source
+PASS asset-paths/changing cwd does not change explicit-root resolution
+PASS asset-paths/two same basenames retain separate canonical identities
+PASS asset-paths/traversal and sibling-prefix escape are rejected
+PASS asset-paths/external reads are opt-in and always read-only
+PASS asset-paths/missing reads and new outputs never create directories
+PASS asset-paths/directories and file ancestors are not valid asset paths
+PASS asset-paths/Unicode and spaces survive resolution and a project move
+PASS asset-paths/Save As relocation preserves logical ID and source without copying
+PASS asset-paths/relocation cannot silently turn an external source into a writable project asset
+PASS asset-paths/case mismatch is diagnosed on Linux
+PASS asset-paths/symlink escapes and nonexistent output ancestors are rejected
+PASS asset-paths/in-root symlink aliases share canonical identity
+PASS asset-paths/symlink cycles fail and link-dotdot follows filesystem semantics
+PASS document-session/open two documents
+PASS document-session/failed second load retains the first
+PASS document-session/source exists after GPU upload
+PASS document-session/stale build completion is rejected
+PASS document-session/editing a session does not mutate a detached snapshot
+PASS document-session/Effigy session retains PartStudio and FBX does not masquerade as feature tree
+PASS document-session/retains original clip JSON alongside parsed RigAnimFile
+PASS document-session/revision and saved-state tracking
+PASS document-session/loader reset clears session and snapshot cleanly
+PASS document-session/snapshot promote through DocumentLoader updates mesh and player
+PASS edit-history/execute undo redo exact equality
+PASS edit-history/100 preview updates produce one entry
+PASS edit-history/cancel restores pre-transaction state without recording history
+PASS edit-history/no-op edits create no entry
+PASS edit-history/failed execution leaves state and history unchanged
+PASS edit-history/new committed edit after undo discards redo branch
+PASS edit-history/saved state tracking and branching at same depth
+PASS edit-history/bounded history eviction policy
+PASS edit-history/two sessions isolated
+PASS edit-history/actual feature tree fixture goes through history service
+PASS clip-edit/first last only key insertion and deletion
+PASS clip-edit/every ease mode is preserved
+PASS clip-edit/tangents round trip cleanly
+PASS clip-edit/occupied frame move replaces target and undo restores both
+PASS clip-edit/end frame cache update and playhead preservation
+PASS clip-edit/paused last frame scrub
+PASS clip-edit/negative and NaN coordinates are rejected
+PASS clip-edit/unlike track kinds with the same target name remain distinct
+PASS clip-edit/clip length policy on deletion preserves intentionally held duration
+PASS clip-edit/IK goals service integrates with history and updates tracks
+PASS save/save_effigy_atomic_roundtrip
+PASS save/unknown_metadata_sentinel_survives
+PASS save/save_as_relocation
+PASS save/write_flush_failure_preserves_destination
+PASS save/rename_failure_preserves_destination
+PASS save/save_cancellation_preserves_target
+PASS save/edits_during_save_do_not_mark_clean
+PASS save/unsupported_fbx_authoring_refused
+PASS save/staged_recovery_can_be_parsed
+PASS save/readonly_directory_fails_safely
+PASS gizmo-math/every axis hit and miss
+PASS gizmo-math/ray behind camera pointing away
+PASS gizmo-math/orthographic and perspective reference projections
+PASS gizmo-math/parallel ray returns false
+PASS gizmo-math/camera looking straight down an axis
+PASS gizmo-math/near and far zoom handle sizing
+PASS gizmo-math/pi crossing and signed angle unwrapping
+PASS gizmo-math/positive and negative translation snapping
+PASS gizmo-math/invalid and nonfinite snap rejection
+PASS gizmo-math/finite output for degenerate boundary fixtures
+PASS gizmo-math/scale clamping no accidental negative scale
+PASS gizmo-math/plane handles hit and miss
+PASS gizmo-math/rotation ring handles hit and miss
+PASS gizmo-math/composite hit test and typed handle ids
+PASS gizmo-math/reference frame transformations
+PASS materials/two same-named materials in different roots do not collide
+PASS materials/renamed or relocated project directory resolves correctly via AssetPathResolver
+PASS materials/missing PNG file reported with clear diagnostic and neutral fallback
+PASS materials/corrupt PNG reported with clear diagnostic
+PASS materials/unsupported paletted or invalid PNG rejected with diagnostic
+PASS materials/explicit relative override mapped correctly to slot
+PASS materials/unknown shader and unsupported vmat syntax diagnosed
+PASS materials/albedo sRGB vs data Linear color space metadata tagged correctly
+PASS materials/no source file writes (resolver is strictly read-only)
+PASS materials/missing required override fails resolution
+PASS materials/valid PNG decodes correctly to expected RGBA dimensions and bytes
+PASS materials/distinguish no map authored from authored map missing
+PASS materials/one-time diagnostic does not duplicate on repeated slot resolution
+PASS pose-edit/rotated/scaled parent: child transforms correctly
+PASS pose-edit/root bone edit
+PASS pose-edit/child bones follow parent edit
+PASS pose-edit/bind pose and inverse-bind matrices remain untouched
+PASS pose-edit/100 preview updates produce exactly one undo entry
+PASS pose-edit/cancel restores exact pre-drag pose
+PASS pose-edit/undo and redo restore exact poses
+PASS pose-edit/deleted/missing selection handled safely
+PASS pose-edit/invalid/NaN transform leaves state intact
+PASS pose-edit/no-op edit creates no history entry and leaves dirty state intact
+PASS project-manifest/project manifest serialization and deserialization round-trip
+PASS project-manifest/two-source assembly definition
+PASS project-manifest/moving/relocating project root via AssetPathResolver
+PASS project-manifest/duplicate ID rejection
+PASS project-manifest/cyclic parent hierarchy rejection
+PASS project-manifest/unknown future schema version failure
+PASS project-manifest/unknown optional JSON fields preserved on save
+PASS project-manifest/material override identity persistence
+PASS project-manifest/Camhead authoring-frame adapter coordinate transformation
+PASS project-manifest/atomic save and load from disk
+PASS parametric-edit/add feature -> parameter edit -> undo -> redo
+PASS parametric-edit/remove feature and undo restoration
+PASS parametric-edit/reorder features and undo
+PASS parametric-edit/parameter edit with transaction coalescing
+PASS parametric-edit/feature error / invalid parameter reports failure and retains previous valid state
+PASS parametric-edit/stale async rebuild discarded
+PASS parametric-edit/save via E4 and reload reproduces identical feature order and geometry
+PASS parametric-edit/two sessions' parametric edits remain isolated
+PASS clip-capability/valid compatible clip passes audit
+PASS clip-capability/completely incompatible clip zero target matches rejected
+PASS clip-capability/partial target match produces warnings and identifies unmapped bones
+PASS clip-capability/morph event without morph tracks diagnosed
+PASS clip-capability/missing referenced control rig reported clearly
+PASS clip-capability/rejected clip leaves session player state unchanged
+PASS clip-capability/unknown track kind corrupted data diagnosed
+PASS clip-capability/root motion configuration validated
+PASS clip-capability/morph drivers validated
+PASS clip-capability/file path validation and loading
+PASS export/static OBJ export produces valid vertices, normals, and faces
+PASS export/posed vs bind pose OBJ export produce distinct geometry
+PASS export/OBJ export capability report accurately flags lost skeletal animation
+PASS export/refused overwrite when destination exists and Overwrite is false
+PASS export/path traversal in material name sanitized / blocked
+PASS export/native effigy export round-trip via ExportService
+PASS export/native riganim export preserves unknown JSON sentinels
+PASS export/cancellation cleans up temporary files and preserves destination
+PASS export/source session and source files remain completely untouched
+PASS ik-target/two-bone IK target drag
+PASS ik-target/FABRIK / chain IK target drag
+PASS ik-target/pole vector influence
+PASS ik-target/zero IK weight leaves FK pose intact
+PASS ik-target/reachable target reaches goal within tolerance
+PASS ik-target/unreachable target clamps cleanly without NaNs
+PASS ik-target/commit creates 1 undo entry; cancel restores pose
+PASS ik-target/missing constraint produces explicit diagnostic / safe return
+PASS ik-target/object moving under an anchored target
+PASS ik-target/limits constrain joint rotation
+PASS ik-target/tentative solve does not mutate bind data or stored constraint
+PASS ik-target/coordinate conversions between Model, World, and Object space
+PASS advanced-ik/foot plants on ground plane
+PASS advanced-ik/look-at direction and yaw/pitch
+PASS advanced-ik/angle clamp
+PASS advanced-ik/cone clamp keeps within cone
+PASS advanced-ik/fabrik reaches target
+PASS advanced-ik/fabrik stretch when unreachable
+PASS advanced-ik/leg solve keeps ankle at target
+PASS advanced-ik/blend targets weighted
+PASS advanced-ik/twist rotates vector
+PASS advanced-ik/invalid fabrik throws
+PASS euphoria/com of weighted points
+PASS euphoria/balanced com inside support
+PASS euphoria/unbalanced com outside support
+PASS euphoria/foot placement shifts toward com
+PASS euphoria/reach within arm length returns target
+PASS euphoria/reach beyond arm length clamps and leans
+PASS euphoria/stumble impulse scales with stiffness
+PASS euphoria/recover step moves com toward support
+PASS euphoria/stiffness interpolation
+PASS euphoria/pose blend endpoints
+PASS euphoria/determinism
+PASS dependency-watcher/debounce: 20 rapid events produce 1 rebuild
+PASS dependency-watcher/out-of-order job completion: newer generation wins, older discarded
+PASS dependency-watcher/dirty conflict: dirty local edits preserved
+PASS dependency-watcher/own-save echo suppressed
+PASS dependency-watcher/delete and recreate file handled
+PASS dependency-watcher/partial write retry
+PASS dependency-watcher/watcher cancellation and disposal during active job
+PASS dependency-watcher/clean reload updates snapshot
+PASS dependency-watcher/bad replacement retains old snapshot
+PASS dependency-watcher/watch project dependencies resolves all referenced assets
+PASS preferences-autosave/preferences atomic save and load round-trip
+PASS preferences-autosave/XDG environment variable overrides respected
+PASS preferences-autosave/corrupt preferences file restores safe defaults gracefully
+PASS preferences-autosave/bad values in preferences are sanitized
+PASS preferences-autosave/missing or readonly preferences file handled safely
+PASS preferences-autosave/recent projects portable path and bounded ordering
+PASS preferences-autosave/autosave scheduler triggers on dirty session
+PASS preferences-autosave/autosave scheduler skips clean session
+PASS preferences-autosave/autosave never clears session dirty state
+PASS preferences-autosave/recovery discovery finds staged recoveries
+PASS preferences-autosave/recovery retention policy deletes only expired snapshots
+PASS preferences-autosave/bounded scheduling prevents overlapping save storms
+PASS preferences-autosave/recovery snapshot reconstructs session source state without altering original source
+PASS fbx-dmx/rigged binary FBX export creates valid non-empty file
+PASS fbx-dmx/FBX round-trip through FbxImport verifies skeleton hierarchy and bones
+PASS fbx-dmx/1 kernel inch preserved
+PASS fbx-dmx/>4 weights normalized to top 4
+PASS fbx-dmx/static mesh export without rig
+PASS fbx-dmx/optional DMX model write
+PASS fbx-dmx/optional DMX animation clip export with sampled poses
+PASS fbx-dmx/overwrite policy respected
+PASS fbx-dmx/export does not cull bones exceeding 220 display limit
+PASS clip-blend/weight 0 returns exact base pose
+PASS clip-blend/weight 1 returns exact target pose
+PASS clip-blend/weight 0.5 interpolates linearly in translation and slerp in rotation
+PASS clip-blend/antipodal quaternions blend smoothly along shortest arc
+PASS clip-blend/additive delta from reference pose
+PASS clip-blend/bone masking: masked bones blend, unmasked stay base
+PASS clip-blend/unkeyed tracks fallback to reference/bind pose
+PASS clip-blend/looping vs one-shot crossfade evaluation
+PASS clip-blend/scale additive identity
+PASS clip-blend/different frame rates and crossfade duration 0
+PASS clip-blend/underlying clips and tracks are not mutated
+PASS clip-blend/allocation measurement zero alloc in warm evaluator loop
+PASS timeline_event/events dispatched when frame crosses interval (prev, curr]
+PASS timeline_event/events on exact boundary fired
+PASS timeline_event/two events on same frame fire in stable order
+PASS timeline_event/skipped frames over multiple events fires all intermediate events
+PASS timeline_event/loop wrap fires events before wrap and after wrap
+PASS timeline_event/seeking backward emits no forward play events
+PASS timeline_event/pause and resume at same time does not re-fire
+PASS timeline_event/consumer exception does not crash dispatcher
+PASS timeline_event/multiple loop wraps in one huge delta step
+PASS timeline_event/clip replacement resets playhead and emits no spurious events
+PASS timeline_event/explicit replay mode on forward seek
+PASS timeline_event/json and rig anim file morph events and marks parsed
+PASS distribution-inventory/inventory reports all required runtime native libraries (EGL, GL, SDL)
+PASS distribution-inventory/package license audit validates MIT / project-owned licenses
+PASS distribution-inventory/kernel build-time vs runtime independence verified
+PASS distribution-inventory/system compatibility check (Linux x64 + GL 4.6 capability)
+PASS distribution-inventory/portable project path resolution verified without relying on machine-specific roots
+PASS distribution-inventory/packaging inventory markdown exists and contains documented sections
+PASS distribution-inventory/no unapproved proprietary asset dependencies found in manifest inventory
+PASS distribution-inventory/diagnostic output when a required system library is missing
+PASS deformation-invariant/hierarchical rig with rotated nonuniformly scaled parents and unkeyed bones matches kernel at fractional frames
+PASS deformation-invariant/antipodal quaternion sign equivalence min(|q1-q2|, |q1+q2|) < eps
+PASS deformation-invariant/multiple roots and disconnected hierarchies evaluate identically to kernel forward kinematics
+PASS deformation-invariant/boundary clips: zero-frame and one-frame clips evaluate without NaN or out-of-bounds
+PASS deformation-invariant/singular bind transform rejection for zero-scale, non-invertible axis, and inherited singular parent
+PASS deformation-invariant/over-capacity skeleton (>220 bones) is rejected with NotSupportedException without clamping bone IDs
+PASS deformation-invariant/skinning palette agreement between CPU Linear Blend Skinning and GPU matrix palette across animated frames
+PASS deformation-invariant/top-four skin weight pruning and normalization guarantees partition of unity and detects invalid weights
+PASS deformation-invariant/animated triangle picking follows deformed mesh across time and rejects missed rays
+PASS deformation-invariant/bind pose and original source data remain completely immutable across animation scrub, posing, and IK
+PASS deformation-invariant/seeded deterministic randomness: randomized multi-bone poses emit failing seed and input on discrepancy
+PASS morph-eval/weights 0, 0.5, 1.0 produce exact linear delta scaling
+PASS morph-eval/two concurrent morph targets sum deltas correctly
+PASS morph-eval/UV duplicate vertices receive identical morph offsets
+PASS morph-eval/keyed vs event vs driver precedence order
+PASS morph-eval/pose-space corrective activates at bent joint angle
+PASS morph-eval/base geometry remains immutable after evaluation
+PASS morph-eval/reset / zero weights restores base mesh exactly
+PASS morph-eval/missing morph target handled safely without NaNs
+PASS morph-eval/weight bounds clamp vs overdrive policy
+PASS morph-eval/active target limit and overflow rejection
+PASS morph-eval/bind space morph before skinning order
+PASS morph-edit/move stroke writes deltas and preview applies them at weight
+PASS morph-edit/falloff, strength and move-from-stroke-start
+PASS morph-edit/inflate pushes along the vertex normal
+PASS morph-edit/smooth relaxes a spike toward neighbours
+PASS morph-edit/combined influence sums linearly and bake matches the mix
+PASS morph-edit/x-mirror stroke is exactly symmetric
+PASS morph-edit/erase restores neutral exactly
+PASS morph-edit/each stroke and op is one exact undo/redo entry
+PASS morph-edit/rename keeps the active target and stroke undo by object
+PASS morph-edit/seam corners and split vertices stay consistent
+PASS morph-edit/export: sculpted morph reaches FBX and DMX through the adapters
+PASS morph-edit/invalid inputs are rejected
+PASS part_track/nested part composition (child part follows parent part)
+PASS part_track/follow-bone part follows animated bone
+PASS part_track/duplicate part names on different objects remain distinct
+PASS part_track/circular dependency detection returns safe diagnostic
+PASS part_track/object-space IK goal aligns with evaluated part transform
+PASS part_track/camera pose and FOV interpolation
+PASS part_track/camera track playback does not modify orbit camera state
+PASS part_track/missing bone or part target handled safely
+PASS part_track/camera hermite cubic FOV curve and default fallback
+PASS part_track/json camera definition parsing and opt-in orbit application
+PASS constraint-parity/constraint audit correctly categorizes look-at, copy transform, IK, and springs
+PASS constraint-parity/secondary spring simulation advances with deterministic fixed time steps
+PASS constraint-parity/spring simulation resets cleanly on seek or clip reload
+PASS constraint-parity/look-at constraint points bone towards target position
+PASS constraint-parity/copy rotation constraint transfers orientation with weight scaling
+PASS constraint-parity/unsupported constraint in rig reports clear diagnostic rather than crashing
+PASS constraint-parity/constraints documentation markdown file exists and has required sections
+PASS constraint-parity/spring stiffness and damping parameters alter settling response deterministically
+PASS fbx_anim_feasibility/feasibility audit accurately reports supported subset vs unsupported features
+PASS fbx_anim_feasibility/golden reference fixture verifies parent-child rotation composition
+PASS fbx_anim_feasibility/time conversion between FBX time and kernel frames
+PASS fbx_anim_feasibility/Euler rotation order conversion to Quat
+PASS fbx_anim_feasibility/unsupported layered animation produces structured error
+PASS fbx_anim_feasibility/unit scale conversion (e.g. cm to inch) preserves physical dimensions
+PASS fbx_anim_feasibility/missing target bone diagnosed cleanly
+PASS fbx_anim_feasibility/conversion produces valid RigAnimFile data
+PASS fbx_anim_feasibility/raw FBX node tree audit detects unbaked pivots and custom rotation orders
+PASS retopo/null input throws
+PASS retopo/empty mesh stays empty
+PASS retopo/single triangle stays triangle
+PASS retopo/2x2 grid pairs into quads
+PASS retopo/uv seam prevents pairing
+PASS retopo/input unchanged
+PASS retopo/materials respected
+PASS retopo/deterministic repeat
+PASS retopo/metrics: paired quad is manifold with no boundary
+PASS retopo/metrics: single triangle has boundary edges
+PASS retopo/n-gon input is triangulated not thrown
+cyl 15936 triangles -> 2030 faces, 100.0 % quads, 35 poles (1.7 %), edge cv 0.095 in 1.27 s valid, closed
+tube 11520 triangles -> 1930 faces, 100.0 % quads, 12 poles (0.6 %), edge cv 0.057 in 0.98 s valid, 128 boundary edges worst border offset 0.028624773
+sphere tris 307200
+decimate 300k->4000 1781 ms
+kernel quadremesh 300k 307200 triangles -> 3642 faces, 100.0 % quads, 214 poles (5.9 %), edge cv 0.317 in 2.55 s 2558 ms
+PASS remesh/probe kernel quadremesh
+PASS cloth-sim/null mesh throws
+PASS cloth-sim/gravity moves unpinned vertex
+PASS cloth-sim/floor collision
+PASS cloth-sim/pinned vertex stays
+PASS cloth-sim/floor constrains
+PASS cloth-sim/impulse moves vertex
+PASS cloth-sim/reset restores
+PASS cloth-sim/toMesh preserves count
+PASS cloth-sim/self-collision separates overlapping vertices
+PASS cloth-sim/pressure inflates closed-ish mesh
+PASS texture-paint/null image throws
+PASS texture-paint/null brush throws
+PASS texture-paint/nonpositive radius throws
+PASS texture-paint/paints center pixel
+PASS texture-paint/out of bounds safe
+PASS texture-paint/default white
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+PASS gpu-cloth/gpu step matches cpu solver
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+PASS gpu-cloth/upload download roundtrip
+PASS knife/null input throws
+PASS knife/degenerate normal throws
+PASS knife/non-crossing face kept
+PASS knife/crossing face counted
+PASS shrinkwrap/null source throws
+PASS shrinkwrap/null target throws
+PASS shrinkwrap/moves vertices to target
+PASS shrinkwrap/max distance respected
+PASS shrinkwrap/input unchanged
+PASS shrinkwrap/wrap-to-surface moves to closest point
+PASS shrinkwrap/offset pushes along surface normal
+PASS shrinkwrap/normal projection hits target
+PASS shrinkwrap/null source throws wrap-to-surface
+PASS data-transfer/null source throws
+PASS data-transfer/null target throws
+PASS data-transfer/transfers skin weights by nearest vertex
+PASS data-transfer/max distance skips
+PASS data-transfer/input target unchanged
+PASS data-transfer/transfers UVs by nearest vertex
+PASS polypaint/null source throws
+PASS polypaint/null brush throws
+PASS polypaint/non-positive radius throws
+PASS polypaint/paints vertex within radius
+PASS polypaint/vertex outside radius unchanged
+PASS polypaint/input unchanged
+PASS uv-edit/null throws
+PASS uv-edit/negative iterations throws
+PASS uv-edit/pinned vertex unchanged
+PASS uv-edit/zero iterations no change
+PASS uv-seam/null source throws
+PASS uv-seam/null edges throws
+PASS uv-seam/seam duplicates vertex
+PASS uv-seam/no seam no change
+PASS uv-seam/input unchanged
+PASS dyntopo/null throws
+PASS dyntopo/null options throws
+PASS dyntopo/nonpositive radius throws
+PASS dyntopo/subdivides long edge within brush
+PASS dyntopo/inflate moves vertices
+PASS dyntopo/flatten adjusts y
+PASS dyntopo/sculpt null throws
+PASS dyntopo/input unchanged
+PASS packaging/packaging script exists and is executable
+PASS packaging/packaging script successfully stages files to a custom path (with spaces supported)
+PASS packaging/staged directory contains main executable, runtime DLLs, and launcher script
+PASS packaging/build-info.json manifest contains version, timestamp, and target architecture
+PASS packaging/archive creation produces valid tar.gz and matching SHA256 checksum
+PASS packaging/bundled sample project is present and valid
+PASS packaging/launcher script does not require dotnet SDK on path
+PASS packaging/sensitive files, caches, and developer paths excluded from package
+PASS packaging/documentation and capability list present in distribution package
+PASS installed-artifact/smoke script exists and installed archive renders
+PASS installed-artifact/native clip and bad input have recorded diagnostics
+PASS installed-artifact/repeat capture is identical and installation stays untouched
+PASS material-gpu/corner UVs preserve a shared-position seam and layout offsets
+PASS material-gpu/same filename in separate roots resolves independent pixels
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+PASS material-gpu/windowless renderer samples asymmetric sRGB albedo and releases textures
+PASS performance-lifecycle/same-thread warmed allocation counter and raw samples
+PASS performance-lifecycle/guardrail refuses unlike workloads and distinguishes restore from rebuild
+PASS performance-lifecycle/real source parse rebuild extraction and animation stages persist raw report
+PASS performance-lifecycle/repeated snapshot swap, stale rejection, dispose and failed loader recovery
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+PASS performance-lifecycle/hardware EGL upload, completion and resource release
+live IK 1-bone CCD/two-bone: 0 B / 2000 samples, 4.315 ms
+live IK 2-bone CCD/two-bone: 0 B / 2000 samples, 6.532 ms
+live IK 3-bone CCD/two-bone: 0 B / 2000 samples, 26.403 ms
+live IK 4-bone FABRIK: 0 B / 2000 samples, 14.207 ms
+PASS live-ik/kernel parity and warmed allocations
+PASS live-ik/unsupported solver fallback
+kernel stacked CCD/FABRIK: 896896 B / 200 samples, 3.556 ms
+PASS live-ik/stacked constraints and kernel baseline
+PASS live-ik/invalid frame and empty goals
+player two-bone: 0 B / 2000 warm Step calls
+player FABRIK: 0 B / 2000 warm Step calls
+PASS live-ik/player Step warm fast path and fallback
+PASS hair/gravity pulls strand down
+PASS hair/collision keeps outside body
+PASS hair/deterministic repeated step
+PASS hair/cut truncates strand
+PASS hair/clump aligns roots
+PASS hair/wind moves strand
+PASS hair/export curves
+PASS hair/substeps runs
+PASS hair/turbulence moves strand
+PASS hair/vortex moves strand
+PASS hdr/fragment writes linear hdr (no in-shader tone map)
+PASS hdr/no in-shader bloom approximation remains
+PASS hdr/the lit pass stays linear: no encode, no white balance, no view transform
+PASS hdr/exactly one display encode, and it is the real sRGB transfer function
+PASS hdr/white balance is neutral at D65 and separates warm from cool
+PASS hdr/CLI colour settings preserve defaults and validate ranges
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+  AgX 0.05 -> 0.2275 (Blender 0.2272)
+  AgX 0.18 -> 0.4627 (Blender 0.4613)
+  AgX 1 -> 0.7686 (Blender 0.7710)
+  AgX 4 -> 0.9137 (Blender 0.9137)
+PASS hdr/hardware EGL: AgX maps a linear ramp monotonically and matches Blender's grey
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+  halo radius 60px (no bloom 2px), bloom energy 81.8 vs emitter 800, 6 levels
+PASS hdr/hardware EGL: emitter above 1.0 blooms with a measurable, finite halo
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+  clipped columns over 0..8: AgX 0, LDR 224
+PASS hdr/hardware EGL: bright gradient clips less than the LDR encode
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+  3000 K: R 83.0 B 196.0; 12000 K: R 130.0 B 96.0
+  linear luma: neutral 0.1812, 3000 K 0.1809, 12000 K 0.1808
+PASS hdr/hardware EGL: white balance reaches the display stage and keeps exposure
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+  neutral RGB 128/130/135, 3000 K RGB 91/127/224
+PASS hdr/hardware EGL: the shared renderer applies the view transform and white balance
+PASS render-architecture/pass order is declared once and validated
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+PASS render-architecture/hardware EGL: render targets resize and dispose cleanly; Draw runs the declared order
+PASS two-sided/shader has no viewer-facing normal flip and uses rasterised facing
+PASS two-sided/vmat F_RENDER_BACKFACES selects double-sided; default stays single-sided
+  140984/141098 triangles wound with their normals (99.92 %)
+PASS two-sided/Survey winding agrees with authored normals (gl_FrontFacing is meaningful)
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+  luma room 206.0, single-sided interior 80.2, double-sided interior 205.3, exterior 152.7; double-vs-room diff 0.76
+PASS two-sided/hardware EGL: closed mesh seen from inside is not lit as its exterior
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+  yaw 0: twin diff 0.00, tilt effect 3.76
+  yaw 180: twin diff 0.00, tilt effect 6.53
+PASS two-sided/hardware EGL: mirrored-UV twin keeps the normal-map response, front and back
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+  skinned vs baked 0.00; skewed-normal control 1.25
+PASS two-sided/hardware EGL: nonuniformly scaled bone does not skew the normal
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+PASS ibl-gpu/gradient diffuse, rough metal broadening and dielectric Fresnel
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+PASS ibl-gpu/HDR file publication, invalid replacement and GL texture lifecycle
+PASS ibl/specular cube has explicit roughness mip chain and GL face axes
+PASS ibl/HDR flat and RLE preserve linear radiance
+PASS ibl/HDR truncation invalid runs and orientation rejected
+PASS ibl/equirect sampler wraps seam and clamps poles
+PASS ibl/GGX prefilter conserves constant sky and broadens bright patch
+PASS ibl/BRDF mirror limit Fresnel and LUT finite energy
+PASS ibl/constant HDR sky integrates to pi radiance
+PASS ibl/gradient agrees with independent Monte Carlo reference
+PASS ibl/invalid bake preserves previous environment
+PASS ibl/baker starts without environment
+PASS ibl/procedural fallback marks environment
+PASS ibl/cosine weight clamps negative
+PASS ss/ssao pass toggles
+PASS ss/ssr pass toggles
+PASS aa/taa pass toggles
+PASS fbx_clip_conversion/golden local and world frames and fractional pose
+PASS fbx_clip_conversion/source rate and asymmetric unit axis conversion
+PASS fbx_clip_conversion/explicit take selection and missing target
+PASS fbx_clip_conversion/reject layers pivots unsupported cubic and duplicate targets
+PASS fbx_clip_conversion/stepped channel and off-grid resampling report
+PASS fbx_clip_conversion/save reopen refuses overwrite and does not alter input
+PASS fbx_clip_conversion/raw node tree cannot fabricate animation clip
+PASS fbx_clip_conversion/owned binary FBX curves play through headless desktop and retain source
+PASS fbx_clip_conversion/raw binary explicit takes missing bone and centimetre axes
+PASS fbx_clip_conversion/binary FBX rejects cubic curves and unsupported offsets
+PASS material-channel/bake tangents split mirrored UVs and survive degenerate UVs
+PASS material-channel/reject unsupported UV set and wrong channel color space before GPU upload
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+PASS material-channel/hardware EGL probes all maps, fallbacks, convention and reload
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+PASS material-channel/nonuniform bone palette transforms mapped tangent frame
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+PASS material-channel/UV tiling and offset change rendered pixels
+PASS vmdl/ModelDoc reader finds the mesh and the material bindings
+PASS vmdl/ModelDoc reader survives a file it cannot read
+PASS vmdl/material name spellings cover the importer's own rules
+PASS vmdl/the ModelDoc that draws a mesh is found by path, not by file name
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+PASS gpu-particle/compute shader updates positions and keeps particles in bounds
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+PASS gpu-particle/zero particles does not crash
+PASS volume/density falls off from a sphere volume's centre and multiplicative media clear it
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+  centre lit 0.611 shadowed 0.023 edge 0.165
+PASS volume/hardware EGL: a fog sphere scatters the key light, shadowed fog is darker, empty grid draws nothing
+PASS survey-material-map/head and suit aliases remain source-scoped
+PASS survey-material-map/read-only relative references survive project move and diagnose effects
+PASS survey-material-map/non-Survey Effigy slot retains ordinary fallback
+PASS survey-material-map/source ModelDoc remaps and texture paths inventory
+PASS viewport-handle/draw geometry and hit share typed dimensions
+PASS viewport-handle/overlay emits only typed selectable shape vertices
+PASS viewport-handle/priority over orbit, one undo entry and palette undo
+PASS viewport-handle/logical viewport offset and framebuffer DPI independence
+PASS viewport-handle/escape focus loss reload and close cancel exact state
+PASS viewport-handle/auto-key off is an unkeyed override and on writes keys atomically
+PASS viewport-handle/IK target ray drag solves end effector and undoes
+PASS viewport-handle/rotation ring angle unwrap and degree snapping
+PASS viewport-handle/source revision invalidation and unstable ray leave clean capture
+PASS viewport-handle/disabled snap continuous, invalid snap rejected before capture
+PASS resource-budget/budget records decoded bytes, batch count and stage timings
+PASS resource-budget/shared images count once and unique maps are not double-counted
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+PASS resource-budget/hardware upload records GPU storage and reload returns to baseline
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+PASS pose-agreement/skinning picking and shadow share one posed mesh after the layout change
+PASS cross-field/null mesh throws
+PASS cross-field/compute produces frames
+PASS cross-field/smooth keeps unit normals
+PASS cross-field/vertex curvature positive on sphere
+PASS cross-field/optimize MIQ sets rotations
+PASS cross-field/trace streamlines returns paths
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+PASS egl-image/flat-material-lighting-and-shadow
+  Heat bind; 338 vertices by heat; max 2 influences; 29.8 ms
+PASS auto-weight/two-bone cylinder: each bone dominant near itself
+  joint weight 0.5, max ring-to-ring step 0.186
+PASS auto-weight/two-bone cylinder: smooth monotone transition at joint
+PASS auto-weight/weights sum to 1 and validate
+PASS auto-weight/max-influence cap respected and renormalised
+  Heat bind; 338 vertices by heat; 8 by voxel distance; 8 vertices in 1 separate piece(s) cannot see any bone (closed inside another part, or floating), so heat has no source there; they were weighted by voxel distance; 8 vertices were in solid no bone reaches and took their nearest bone; voxel grid 47x18x69, 9882 solid cells; max 2 influences; 38.6 ms
+PASS auto-weight/disconnected island falls back and is reported
+PASS auto-weight/refine prunes min weight and renormalises
+PASS auto-weight/apply is one undoable command restoring exact prior skin
+  FBX max weight error 4.81E-07; 10.4 ms solve
+PASS auto-weight/export: FBX round trip and DMX carry the auto weights
+PASS auto-weight/invalid inputs are rejected
+  1314 verts, 4 bones: 49.9 ms (Heat bind; 1314 vertices by heat; max 3 influences; 49.8 ms)
+PASS auto-weight/timing: 4-bone 32-segment cylinder solve
+PASS weight-paint/paint sets weight on vertex
+PASS weight-paint/add/subtract with smooth falloff
+PASS weight-paint/subtract on single-influence vertex is reported, not a command
+PASS weight-paint/normalize sums to 1 with locked bone preserved
+PASS weight-paint/blur smooths a hard edge and keeps sums
+PASS weight-paint/mirror X paints the L/R counterpart
+PASS weight-paint/undo/redo restores exact weights; cancel leaves no entry
+PASS weight-paint/fill and linear gradient set values; colours follow the ramp
+PASS weight-paint/paint on auto-weighted cylinder; history interleaves with auto-weight
+PASS weight-paint/invalid inputs are rejected
+542 passed, 0 failed, 3 skipped; 545/545 selected/registered
+report: /tmp/opencode/geppetto-verify-6ow0uoa8/cpu-results.json

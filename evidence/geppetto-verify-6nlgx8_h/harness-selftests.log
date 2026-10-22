@@ -1,0 +1,25 @@
+test_cpu_mode_has_no_gpu_calls_or_gpu_pass_claim (test_verification.VerificationTests.test_cpu_mode_has_no_gpu_calls_or_gpu_pass_claim) ... PASS cpu: /tmp/opencode/geppetto-harness-selftest-z6t24myx/run/verification.json
+ok
+test_failed_build_never_executes_preexisting_dll (test_verification.VerificationTests.test_failed_build_never_executes_preexisting_dll) ... FAIL cpu: /tmp/opencode/geppetto-harness-selftest-2vwz3tyb/run/verification.json
+build failed (exit 1); see /tmp/opencode/geppetto-harness-selftest-2vwz3tyb/run/build.log
+ok
+test_incomplete_cpu_inventory_cannot_be_green (test_verification.VerificationTests.test_incomplete_cpu_inventory_cannot_be_green) ... ok
+test_required_egl_failure_never_falls_back (test_verification.VerificationTests.test_required_egl_failure_never_falls_back) ... FAIL required-egl: /tmp/opencode/geppetto-harness-selftest-jz4cazeu/run/verification.json
+bind-a failed (exit 1); see /tmp/opencode/geppetto-harness-selftest-jz4cazeu/run/bind-a.log
+ok
+test_required_gpu_missing_fixture_is_not_skipped (test_verification.VerificationTests.test_required_gpu_missing_fixture_is_not_skipped) ... FAIL required-egl: /tmp/opencode/geppetto-harness-selftest-6qa_hs2y/run/verification.json
+Required GPU fixture missing: /tmp/opencode/geppetto-harness-selftest-6qa_hs2y/fixture/player_head.fbx
+ok
+test_software_renderer_cannot_pass_hardware_gate (test_verification.VerificationTests.test_software_renderer_cannot_pass_hardware_gate) ... FAIL required-egl: /tmp/opencode/geppetto-harness-selftest-if12mi_l/run/verification.json
+Required hardware EGL renderer was unavailable
+ok
+test_successful_hardware_flow_records_each_capture (test_verification.VerificationTests.test_successful_hardware_flow_records_each_capture) ... PASS required-egl: /tmp/opencode/geppetto-harness-selftest-nowgb8s5/run/verification.json
+ok
+test_wrong_build_output_is_rejected_before_execution (test_verification.VerificationTests.test_wrong_build_output_is_rejected_before_execution) ... FAIL cpu: /tmp/opencode/geppetto-harness-selftest-1jbhkn22/run/verification.json
+[Errno 2] No such file or directory: '/tmp/opencode/geppetto-harness-selftest-1jbhkn22/run/build/bin/Desktop.Tests/release/Desktop.Tests.dll'
+ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.010s
+
+OK

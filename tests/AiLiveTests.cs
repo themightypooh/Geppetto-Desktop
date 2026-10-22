@@ -65,6 +65,17 @@ internal static class AiLiveTests
             Check(!blocked.IsCompleted && AiLiveRun.ReadLatest(root)!["state"]!.GetValue<string>() == "paused", "pause did not hold the boundary");
             Acknowledged(root, Command(root, id, "resume"));
             Check(blocked.Wait(1000), "resume did not release the boundary");
+            // STEP is refused unless paused; while paused it lets exactly one change through.
+            Check(Outcome(Command(root, id, "step")) == "step-only-while-paused", "step accepted while running");
+            Acknowledged(root, Command(root, id, "pause"));
+            session.BoundaryAsync(default).Wait(100);
+            Check(Outcome(Command(root, id, "step")) == "accepted", "step rejected while paused");
+            Check(session.BoundaryAsync(default).Wait(1000), "step did not let the run reach its next change");
+            Check(session.BoundaryAsync(default, mutation: true).Wait(1000), "step did not let one change through");
+            var afterStep = session.BoundaryAsync(default, mutation: true);
+            Thread.Sleep(300); Check(!afterStep.IsCompleted, "step let a second change through");
+            Acknowledged(root, Command(root, id, "resume"));
+            Check(afterStep.Wait(1000), "resume after step did not release");
             Acknowledged(root, Command(root, id, "pause"));
             using var paused = new CancellationTokenSource();
             var held = session.BoundaryAsync(paused.Token);

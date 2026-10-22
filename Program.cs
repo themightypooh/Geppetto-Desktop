@@ -33,6 +33,8 @@ public static class Program
 		{
 			if ( raw.Length == 2 && raw[0] == "--ai-worker" ) return AiToolWorker.Run( raw[1] );
 			if ( raw.Length > 0 && raw[0] == "--ai" ) return AiCli.Run( raw[1..] );
+			if ( raw.Length > 0 && raw[0] == "--script" ) return ScriptLive.Run( raw[1..] );
+			if ( raw.Length > 0 && raw[0] == "--bench" ) return Bench.Run( raw[1..] );
 			return Run( DesktopOptions.Parse( raw ) );
 		}
 		catch ( Exception ex )

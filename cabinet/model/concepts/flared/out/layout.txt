@@ -1,0 +1,2 @@
+# part	model	pivot x	y	z	size x	y	z
+flared	out/flared.vmdl	0	-0	-1.35	2.7	10.1	2.7

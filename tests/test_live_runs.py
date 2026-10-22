@@ -1,6 +1,8 @@
 """Headless checks for the cabinet's AI-run protocol; no Qt application or window."""
 import importlib.util
 import json
+import os
+import time
 from pathlib import Path
 import tempfile
 import unittest
@@ -73,6 +75,42 @@ class LiveRunsTests(unittest.TestCase):
             (Path(root) / ".live/latest.json").write_text(json.dumps({"schemaVersion": 1, "ev": "ai-live", "snapshot": []}))
             self.assertEqual(live.read_state(root), {})
             self.assertRaises(ValueError, live.request_cancel, root)
+
+    def test_close_open_puts_a_close_in_the_inbox_in_ticks_order(self):
+        with tempfile.TemporaryDirectory() as root:
+            live.close_open(root)
+            [name] = os.listdir(Path(root) / ".live/inbox")
+            self.assertTrue(name.endswith(".close") and name[:19].isdigit())
+            # the same clock as ScriptLive.Inbox.Put (DateTime ticks), so it sorts after lines sent before it
+            self.assertAlmostEqual(int(name[:19]) / 1e7, time.time() + 62135596800, delta=5)
+            self.assertEqual(live.activity({"state": "held"}), "held at a bad line")
+
+    def test_notes_reach_the_modeller_once_with_the_step_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = os.path.join(tmp, "script-x")
+            os.makedirs(os.path.join(root, ".live"))
+            Path(root + ".json").write_text(json.dumps({"script": "/x/build.txt", "pid": 1}))
+            Path(root, "script.txt").write_text("refimage top a.png\nadd Blob name=Eraser voxel=0.01\n")
+            (Path(root) / ".live/latest.json").write_text(json.dumps({"schemaVersion": 1, "ev": "ai-live", "state": "open",
+                                                                       "runId": "r", "sequence": 1}))
+            live.add_note(root, 2, "line 2: add Blob name=Eraser", "the ends are too steep")
+            text = live.wait_notes(root, sleep=lambda s: self.fail("a note was waiting"))
+            self.assertIn("NOTE from po on step 2 (line 2): the ends are too steep", text)
+            self.assertIn("that step: add Blob name=Eraser voxel=0.01", text)
+            self.assertIn("geppetto-live more %s fix.txt" % root, text)
+            self.assertEqual(live.take_notes(root), [])        # handed over once
+            # nothing comes and the run closes: wait ends with None
+            ticks = []
+            def tick(_):
+                ticks.append(1)
+                (Path(root) / ".live/latest.json").write_text(json.dumps({"schemaVersion": 1, "ev": "ai-live", "state": "completed",
+                                                                           "runId": "r", "sequence": 1}))
+            self.assertIsNone(live.wait_notes(root, sleep=tick))
+            self.assertEqual(len(ticks), 1)
+            # a dead process ends the wait too
+            (Path(root) / ".live/latest.json").write_text(json.dumps({"schemaVersion": 1, "ev": "ai-live", "state": "open",
+                                                                       "runId": "r", "sequence": 1}))
+            self.assertIsNone(live.wait_notes(root, sleep=lambda s: None, alive=lambda: False))
 
 
 class HostBindingTests(unittest.TestCase):

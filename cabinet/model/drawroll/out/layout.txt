@@ -1,0 +1,2 @@
+# part	model	pivot x	y	z	size x	y	z
+drawroll	out/drawroll.vmdl	0.08	-0	-0.513	1.134	5.201	1

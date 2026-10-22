@@ -133,6 +133,27 @@ public static class ModelMeasure
 			sb.AppendLine( $"Rig: {rig.Count} bones — " + string.Join( ", ", rig.Bones.Select( b => b.Name ) ) + "." );
 		}
 
+		// Slot numbers are what `material N` takes; an FBX import names its slots after the file's
+		// materials, so list both, with the bodies that use each.
+		var importNames = studio.Features.OfType<ImportFeature>().SelectMany( i => i.SourceMaterialNames )
+			.GroupBy( kv => kv.Key ).ToDictionary( g => g.Key, g => g.First().Value );
+		var slotUse = studio.Bodies.Where( b => b?.Mesh is not null )
+			.SelectMany( b => b.Mesh.Faces.Select( f => (f.Material, b.Name) ) )
+			.GroupBy( t => t.Material ).OrderBy( g => g.Key ).ToList();
+
+		if ( slotUse.Count > 0 )
+		{
+			sb.AppendLine();
+			sb.AppendLine( "Slots:" );
+			foreach ( var g in slotUse )
+			{
+				var name = studio.MaterialNames.ContainsKey( g.Key ) ? studio.NameForSlot( g.Key )
+					: importNames.TryGetValue( g.Key, out var n ) ? n : studio.NameForSlot( g.Key );
+				var on = g.Select( t => t.Name ).Distinct().ToList();
+				sb.AppendLine( $"- {g.Key} {name}: {g.Count():N0} face(s) on " + string.Join( ", ", on.Take( 4 ) ) + (on.Count > 4 ? $" and {on.Count - 4} more" : "") + "." );
+			}
+		}
+
 		var failed = studio.Features.Where( f => f.Error is not null ).ToList();
 		var warned = studio.Features.Where( f => f.Error is null && f.Warning is not null ).ToList();
 

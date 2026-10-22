@@ -1,0 +1,2 @@
+# part	model	pivot x	y	z	size x	y	z
+charter	out/charter.vmdl	0.036	-0	-0.908	1.888	7.201	1.816

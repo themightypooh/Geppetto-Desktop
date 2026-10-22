@@ -1,0 +1,7188 @@
+{
+  "schemaVersion": 1,
+  "mode": "cpu",
+  "createdUtc": "2026-10-20T15:45:18.3511811+00:00",
+  "selected": 550,
+  "registered": 550,
+  "passed": 547,
+  "failed": 0,
+  "skipped": 3,
+  "filter": null,
+  "RequireLocalFixtures": false,
+  "SurveyPath": "/home/poo/games/projects/deep_sentance/Assets/models/player/player_suit.fbx",
+  "artifacts": "/tmp/opencode/geppetto-desktop-tests-28c9654a0ac34c7cb5702ea2a5df5e82",
+  "assemblies": [
+    {
+      "name": "Desktop.Tests",
+      "path": "/tmp/opencode/geppetto-verify-z42b2l9o/build/bin/Desktop.Tests/release/Desktop.Tests.dll",
+      "mvid": "b4aa817a-d9dd-4b79-8e12-fd187ebb2fa3",
+      "sha256": "9AA9C979110FD558136908D76A46869FB78A24876944FA2174FDADAC0C534E22"
+    },
+    {
+      "name": "marionette-desktop",
+      "path": "/tmp/opencode/geppetto-verify-z42b2l9o/build/bin/Desktop.Tests/release/marionette-desktop.dll",
+      "mvid": "a876a059-8970-4ea2-8a6a-8b5f3abf0895",
+      "sha256": "205C15677D18A50CD5F73D348C4033CCFF99312559B2F0457FB9B23A0A75D13D"
+    },
+    {
+      "name": "Effigy.Kernel",
+      "path": "/tmp/opencode/geppetto-verify-z42b2l9o/build/bin/Desktop.Tests/release/Effigy.Kernel.dll",
+      "mvid": "26d9abb4-a27d-4811-bbd5-944032df7efa",
+      "sha256": "0AF200FC0E6EF75BC446185CE1EEBF20ACE535001FAA988BA6C593760DEF9825"
+    }
+  ],
+  "inventory": [
+    {
+      "Group": "baseline",
+      "Name": "bind palette is identity",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "baseline",
+      "Name": "missing explicit clip reports an error",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "baseline",
+      "Name": "scrubbing a paused clip updates the pose",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "baseline",
+      "Name": "loading a new clip resets the playhead",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "baseline",
+      "Name": "bone clip matches kernel at fractional frames",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "baseline",
+      "Name": "clip playback allocates zero bytes after warmup",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "baseline",
+      "Name": "over-capacity skeleton is rejected instead of clamping bone IDs",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "baseline",
+      "Name": "singular bind transform is rejected",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "baseline",
+      "Name": "OpenGL projection maps near plane to -1",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "baseline",
+      "Name": "screen centre ray follows camera forward",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "baseline",
+      "Name": "green lamps are green, not orange",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "baseline",
+      "Name": "one-shot clip stops on the final pose",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "baseline",
+      "Name": "paused scrubbing can reach the exact last frame",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "baseline",
+      "Name": "negative/NaN frame deltas are rejected",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "baseline",
+      "Name": "live IK matches kernel, including fractional frames",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "baseline",
+      "Name": "limits match kernel and allocate zero bytes",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "baseline",
+      "Name": "unsupported part tracks fail explicitly",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "baseline",
+      "Name": "GPU palette agrees with kernel skinning maths",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "baseline",
+      "Name": "body picking ignores empty space inside an AABB",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "baseline",
+      "Name": "body picking follows animated geometry",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "baseline",
+      "Name": "FBX missing weights do not silently rebind",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "baseline",
+      "Name": "CLI rejects unknown flags, missing values and invalid sizes",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "baseline",
+      "Name": "headless/exposure options parse without enabling animation",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "survey",
+      "Name": "Survey assembly uses authored head and collar, not placeholder",
+      "Required": false,
+      "fixture": "/home/poo/games/projects/deep_sentance/Assets/models/player/player_suit.fbx"
+    },
+    {
+      "Group": "survey",
+      "Name": "background loader publishes a complete result",
+      "Required": false,
+      "fixture": "/home/poo/games/projects/deep_sentance/Assets/models/player/player_suit.fbx"
+    },
+    {
+      "Group": "baseline",
+      "Name": "background load errors are published and recoverable",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-space",
+      "Name": "foreign mismatched bones retain bind translation on both sampling paths",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-space",
+      "Name": "foreign twist offsets and animated incompatible chains cannot stretch the mesh",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-space",
+      "Name": "foreign root and intentionally animated translations are scaled and preserved",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-space",
+      "Name": "same-unit and unknown-unit clips keep authored translations",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-space",
+      "Name": "prop mesh scaling leaves placement translation intact",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ai",
+      "Name": "rubric rejects missing evidence and invalid scores",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ai",
+      "Name": "rubric rejects duplicates and invalid weights",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ai",
+      "Name": "plateau uses best score and retains earlier checkpoint",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ai",
+      "Name": "run paths reject escapes and links",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ai",
+      "Name": "native feature tool creates editable checkpoint",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ai",
+      "Name": "invalid edits roll back and frozen features reject changes",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ai",
+      "Name": "references reject private and transition addresses",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ai",
+      "Name": "configuration rejects unknown flags and unsafe providers",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ai",
+      "Name": "whole native creation uses provider loop and writes result",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ai",
+      "Name": "budget stop preserves generated editable checkpoint",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ai",
+      "Name": "actual EGL build judge revise reaches target",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ai",
+      "Name": "actual EGL plateau returns below target and best not latest",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ai",
+      "Name": "actual EGL budget stop records earlier best selection",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ai",
+      "Name": "openai request and tool response round trip",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ai",
+      "Name": "anthropic request and tool response round trip",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ai",
+      "Name": "google request and tool response round trip",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "harness",
+      "Name": "registered failing assertions return nonzero",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "harness",
+      "Name": "missing optional fixture is skipped, not passed",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "harness",
+      "Name": "missing required fixture fails without running body",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "harness",
+      "Name": "duplicate registration and empty selections cannot pass",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "asset-paths",
+      "Name": "relative roots and implicit external references are rejected",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "asset-paths",
+      "Name": "relative assets normalize without changing cwd or source",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "asset-paths",
+      "Name": "changing cwd does not change explicit-root resolution",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "asset-paths",
+      "Name": "two same basenames retain separate canonical identities",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "asset-paths",
+      "Name": "traversal and sibling-prefix escape are rejected",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "asset-paths",
+      "Name": "external reads are opt-in and always read-only",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "asset-paths",
+      "Name": "missing reads and new outputs never create directories",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "asset-paths",
+      "Name": "directories and file ancestors are not valid asset paths",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "asset-paths",
+      "Name": "Unicode and spaces survive resolution and a project move",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "asset-paths",
+      "Name": "Save As relocation preserves logical ID and source without copying",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "asset-paths",
+      "Name": "relocation cannot silently turn an external source into a writable project asset",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "asset-paths",
+      "Name": "case mismatch is diagnosed on Linux",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "asset-paths",
+      "Name": "symlink escapes and nonexistent output ancestors are rejected",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "asset-paths",
+      "Name": "in-root symlink aliases share canonical identity",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "asset-paths",
+      "Name": "symlink cycles fail and link-dotdot follows filesystem semantics",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "document-session",
+      "Name": "open two documents",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "document-session",
+      "Name": "failed second load retains the first",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "document-session",
+      "Name": "source exists after GPU upload",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "document-session",
+      "Name": "stale build completion is rejected",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "document-session",
+      "Name": "editing a session does not mutate a detached snapshot",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "document-session",
+      "Name": "Effigy session retains PartStudio and FBX does not masquerade as feature tree",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "document-session",
+      "Name": "retains original clip JSON alongside parsed RigAnimFile",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "document-session",
+      "Name": "revision and saved-state tracking",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "document-session",
+      "Name": "loader reset clears session and snapshot cleanly",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "document-session",
+      "Name": "snapshot promote through DocumentLoader updates mesh and player",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "edit-history",
+      "Name": "execute undo redo exact equality",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "edit-history",
+      "Name": "100 preview updates produce one entry",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "edit-history",
+      "Name": "cancel restores pre-transaction state without recording history",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "edit-history",
+      "Name": "no-op edits create no entry",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "edit-history",
+      "Name": "failed execution leaves state and history unchanged",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "edit-history",
+      "Name": "new committed edit after undo discards redo branch",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "edit-history",
+      "Name": "saved state tracking and branching at same depth",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "edit-history",
+      "Name": "bounded history eviction policy",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "edit-history",
+      "Name": "two sessions isolated",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "edit-history",
+      "Name": "actual feature tree fixture goes through history service",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-edit",
+      "Name": "first last only key insertion and deletion",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-edit",
+      "Name": "every ease mode is preserved",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-edit",
+      "Name": "tangents round trip cleanly",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-edit",
+      "Name": "occupied frame move replaces target and undo restores both",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-edit",
+      "Name": "end frame cache update and playhead preservation",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-edit",
+      "Name": "paused last frame scrub",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-edit",
+      "Name": "negative and NaN coordinates are rejected",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-edit",
+      "Name": "unlike track kinds with the same target name remain distinct",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-edit",
+      "Name": "clip length policy on deletion preserves intentionally held duration",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-edit",
+      "Name": "IK goals service integrates with history and updates tracks",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "save",
+      "Name": "save_effigy_atomic_roundtrip",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "save",
+      "Name": "unknown_metadata_sentinel_survives",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "save",
+      "Name": "save_as_relocation",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "save",
+      "Name": "write_flush_failure_preserves_destination",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "save",
+      "Name": "rename_failure_preserves_destination",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "save",
+      "Name": "save_cancellation_preserves_target",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "save",
+      "Name": "edits_during_save_do_not_mark_clean",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "save",
+      "Name": "unsupported_fbx_authoring_refused",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "save",
+      "Name": "staged_recovery_can_be_parsed",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "save",
+      "Name": "readonly_directory_fails_safely",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "gizmo-math",
+      "Name": "every axis hit and miss",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "gizmo-math",
+      "Name": "ray behind camera pointing away",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "gizmo-math",
+      "Name": "orthographic and perspective reference projections",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "gizmo-math",
+      "Name": "parallel ray returns false",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "gizmo-math",
+      "Name": "camera looking straight down an axis",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "gizmo-math",
+      "Name": "near and far zoom handle sizing",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "gizmo-math",
+      "Name": "pi crossing and signed angle unwrapping",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "gizmo-math",
+      "Name": "positive and negative translation snapping",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "gizmo-math",
+      "Name": "invalid and nonfinite snap rejection",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "gizmo-math",
+      "Name": "finite output for degenerate boundary fixtures",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "gizmo-math",
+      "Name": "scale clamping no accidental negative scale",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "gizmo-math",
+      "Name": "plane handles hit and miss",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "gizmo-math",
+      "Name": "rotation ring handles hit and miss",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "gizmo-math",
+      "Name": "composite hit test and typed handle ids",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "gizmo-math",
+      "Name": "reference frame transformations",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "materials",
+      "Name": "two same-named materials in different roots do not collide",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "materials",
+      "Name": "renamed or relocated project directory resolves correctly via AssetPathResolver",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "materials",
+      "Name": "missing PNG file reported with clear diagnostic and neutral fallback",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "materials",
+      "Name": "corrupt PNG reported with clear diagnostic",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "materials",
+      "Name": "unsupported paletted or invalid PNG rejected with diagnostic",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "materials",
+      "Name": "explicit relative override mapped correctly to slot",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "materials",
+      "Name": "unknown shader and unsupported vmat syntax diagnosed",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "materials",
+      "Name": "albedo sRGB vs data Linear color space metadata tagged correctly",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "materials",
+      "Name": "no source file writes (resolver is strictly read-only)",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "materials",
+      "Name": "missing required override fails resolution",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "materials",
+      "Name": "valid PNG decodes correctly to expected RGBA dimensions and bytes",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "materials",
+      "Name": "distinguish no map authored from authored map missing",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "materials",
+      "Name": "one-time diagnostic does not duplicate on repeated slot resolution",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "pose-edit",
+      "Name": "rotated/scaled parent: child transforms correctly",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "pose-edit",
+      "Name": "root bone edit",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "pose-edit",
+      "Name": "child bones follow parent edit",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "pose-edit",
+      "Name": "bind pose and inverse-bind matrices remain untouched",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "pose-edit",
+      "Name": "100 preview updates produce exactly one undo entry",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "pose-edit",
+      "Name": "cancel restores exact pre-drag pose",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "pose-edit",
+      "Name": "undo and redo restore exact poses",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "pose-edit",
+      "Name": "deleted/missing selection handled safely",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "pose-edit",
+      "Name": "invalid/NaN transform leaves state intact",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "pose-edit",
+      "Name": "no-op edit creates no history entry and leaves dirty state intact",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "project-manifest",
+      "Name": "project manifest serialization and deserialization round-trip",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "project-manifest",
+      "Name": "two-source assembly definition",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "project-manifest",
+      "Name": "moving/relocating project root via AssetPathResolver",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "project-manifest",
+      "Name": "duplicate ID rejection",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "project-manifest",
+      "Name": "cyclic parent hierarchy rejection",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "project-manifest",
+      "Name": "unknown future schema version failure",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "project-manifest",
+      "Name": "unknown optional JSON fields preserved on save",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "project-manifest",
+      "Name": "material override identity persistence",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "project-manifest",
+      "Name": "Camhead authoring-frame adapter coordinate transformation",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "project-manifest",
+      "Name": "atomic save and load from disk",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "parametric-edit",
+      "Name": "add feature -\u003E parameter edit -\u003E undo -\u003E redo",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "parametric-edit",
+      "Name": "remove feature and undo restoration",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "parametric-edit",
+      "Name": "reorder features and undo",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "parametric-edit",
+      "Name": "parameter edit with transaction coalescing",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "parametric-edit",
+      "Name": "feature error / invalid parameter reports failure and retains previous valid state",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "parametric-edit",
+      "Name": "stale async rebuild discarded",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "parametric-edit",
+      "Name": "save via E4 and reload reproduces identical feature order and geometry",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "parametric-edit",
+      "Name": "two sessions\u0027 parametric edits remain isolated",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-capability",
+      "Name": "valid compatible clip passes audit",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-capability",
+      "Name": "completely incompatible clip zero target matches rejected",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-capability",
+      "Name": "partial target match produces warnings and identifies unmapped bones",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-capability",
+      "Name": "morph event without morph tracks diagnosed",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-capability",
+      "Name": "missing referenced control rig reported clearly",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-capability",
+      "Name": "rejected clip leaves session player state unchanged",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-capability",
+      "Name": "unknown track kind corrupted data diagnosed",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-capability",
+      "Name": "root motion configuration validated",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-capability",
+      "Name": "morph drivers validated",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-capability",
+      "Name": "file path validation and loading",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "export",
+      "Name": "static OBJ export produces valid vertices, normals, and faces",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "export",
+      "Name": "posed vs bind pose OBJ export produce distinct geometry",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "export",
+      "Name": "OBJ export capability report accurately flags lost skeletal animation",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "export",
+      "Name": "refused overwrite when destination exists and Overwrite is false",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "export",
+      "Name": "path traversal in material name sanitized / blocked",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "export",
+      "Name": "native effigy export round-trip via ExportService",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "export",
+      "Name": "native riganim export preserves unknown JSON sentinels",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "export",
+      "Name": "cancellation cleans up temporary files and preserves destination",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "export",
+      "Name": "source session and source files remain completely untouched",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ik-target",
+      "Name": "two-bone IK target drag",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ik-target",
+      "Name": "FABRIK / chain IK target drag",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ik-target",
+      "Name": "pole vector influence",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ik-target",
+      "Name": "zero IK weight leaves FK pose intact",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ik-target",
+      "Name": "reachable target reaches goal within tolerance",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ik-target",
+      "Name": "unreachable target clamps cleanly without NaNs",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ik-target",
+      "Name": "commit creates 1 undo entry; cancel restores pose",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ik-target",
+      "Name": "missing constraint produces explicit diagnostic / safe return",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ik-target",
+      "Name": "object moving under an anchored target",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ik-target",
+      "Name": "limits constrain joint rotation",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ik-target",
+      "Name": "tentative solve does not mutate bind data or stored constraint",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ik-target",
+      "Name": "coordinate conversions between Model, World, and Object space",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "advanced-ik",
+      "Name": "foot plants on ground plane",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "advanced-ik",
+      "Name": "look-at direction and yaw/pitch",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "advanced-ik",
+      "Name": "angle clamp",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "advanced-ik",
+      "Name": "cone clamp keeps within cone",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "advanced-ik",
+      "Name": "fabrik reaches target",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "advanced-ik",
+      "Name": "fabrik stretch when unreachable",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "advanced-ik",
+      "Name": "leg solve keeps ankle at target",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "advanced-ik",
+      "Name": "blend targets weighted",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "advanced-ik",
+      "Name": "twist rotates vector",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "advanced-ik",
+      "Name": "invalid fabrik throws",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "euphoria",
+      "Name": "com of weighted points",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "euphoria",
+      "Name": "balanced com inside support",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "euphoria",
+      "Name": "unbalanced com outside support",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "euphoria",
+      "Name": "foot placement shifts toward com",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "euphoria",
+      "Name": "reach within arm length returns target",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "euphoria",
+      "Name": "reach beyond arm length clamps and leans",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "euphoria",
+      "Name": "stumble impulse scales with stiffness",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "euphoria",
+      "Name": "recover step moves com toward support",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "euphoria",
+      "Name": "stiffness interpolation",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "euphoria",
+      "Name": "pose blend endpoints",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "euphoria",
+      "Name": "determinism",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "dependency-watcher",
+      "Name": "debounce: 20 rapid events produce 1 rebuild",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "dependency-watcher",
+      "Name": "out-of-order job completion: newer generation wins, older discarded",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "dependency-watcher",
+      "Name": "dirty conflict: dirty local edits preserved",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "dependency-watcher",
+      "Name": "own-save echo suppressed",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "dependency-watcher",
+      "Name": "delete and recreate file handled",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "dependency-watcher",
+      "Name": "partial write retry",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "dependency-watcher",
+      "Name": "watcher cancellation and disposal during active job",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "dependency-watcher",
+      "Name": "clean reload updates snapshot",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "dependency-watcher",
+      "Name": "bad replacement retains old snapshot",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "dependency-watcher",
+      "Name": "watch project dependencies resolves all referenced assets",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "preferences-autosave",
+      "Name": "preferences atomic save and load round-trip",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "preferences-autosave",
+      "Name": "XDG environment variable overrides respected",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "preferences-autosave",
+      "Name": "corrupt preferences file restores safe defaults gracefully",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "preferences-autosave",
+      "Name": "bad values in preferences are sanitized",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "preferences-autosave",
+      "Name": "missing or readonly preferences file handled safely",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "preferences-autosave",
+      "Name": "recent projects portable path and bounded ordering",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "preferences-autosave",
+      "Name": "autosave scheduler triggers on dirty session",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "preferences-autosave",
+      "Name": "autosave scheduler skips clean session",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "preferences-autosave",
+      "Name": "autosave never clears session dirty state",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "preferences-autosave",
+      "Name": "recovery discovery finds staged recoveries",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "preferences-autosave",
+      "Name": "recovery retention policy deletes only expired snapshots",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "preferences-autosave",
+      "Name": "bounded scheduling prevents overlapping save storms",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "preferences-autosave",
+      "Name": "recovery snapshot reconstructs session source state without altering original source",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "fbx-dmx",
+      "Name": "rigged binary FBX export creates valid non-empty file",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "fbx-dmx",
+      "Name": "FBX round-trip through FbxImport verifies skeleton hierarchy and bones",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "fbx-dmx",
+      "Name": "1 kernel inch preserved",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "fbx-dmx",
+      "Name": "\u003E4 weights normalized to top 4",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "fbx-dmx",
+      "Name": "static mesh export without rig",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "fbx-dmx",
+      "Name": "optional DMX model write",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "fbx-dmx",
+      "Name": "optional DMX animation clip export with sampled poses",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "fbx-dmx",
+      "Name": "overwrite policy respected",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "fbx-dmx",
+      "Name": "export does not cull bones exceeding 220 display limit",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-blend",
+      "Name": "weight 0 returns exact base pose",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-blend",
+      "Name": "weight 1 returns exact target pose",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-blend",
+      "Name": "weight 0.5 interpolates linearly in translation and slerp in rotation",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-blend",
+      "Name": "antipodal quaternions blend smoothly along shortest arc",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-blend",
+      "Name": "additive delta from reference pose",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-blend",
+      "Name": "bone masking: masked bones blend, unmasked stay base",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-blend",
+      "Name": "unkeyed tracks fallback to reference/bind pose",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-blend",
+      "Name": "looping vs one-shot crossfade evaluation",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-blend",
+      "Name": "scale additive identity",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-blend",
+      "Name": "different frame rates and crossfade duration 0",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-blend",
+      "Name": "underlying clips and tracks are not mutated",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "clip-blend",
+      "Name": "allocation measurement zero alloc in warm evaluator loop",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "timeline_event",
+      "Name": "events dispatched when frame crosses interval (prev, curr]",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "timeline_event",
+      "Name": "events on exact boundary fired",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "timeline_event",
+      "Name": "two events on same frame fire in stable order",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "timeline_event",
+      "Name": "skipped frames over multiple events fires all intermediate events",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "timeline_event",
+      "Name": "loop wrap fires events before wrap and after wrap",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "timeline_event",
+      "Name": "seeking backward emits no forward play events",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "timeline_event",
+      "Name": "pause and resume at same time does not re-fire",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "timeline_event",
+      "Name": "consumer exception does not crash dispatcher",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "timeline_event",
+      "Name": "multiple loop wraps in one huge delta step",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "timeline_event",
+      "Name": "clip replacement resets playhead and emits no spurious events",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "timeline_event",
+      "Name": "explicit replay mode on forward seek",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "timeline_event",
+      "Name": "json and rig anim file morph events and marks parsed",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "distribution-inventory",
+      "Name": "inventory reports all required runtime native libraries (EGL, GL, SDL)",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "distribution-inventory",
+      "Name": "package license audit validates MIT / project-owned licenses",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "distribution-inventory",
+      "Name": "kernel build-time vs runtime independence verified",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "distribution-inventory",
+      "Name": "system compatibility check (Linux x64 \u002B GL 4.6 capability)",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "distribution-inventory",
+      "Name": "portable project path resolution verified without relying on machine-specific roots",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "distribution-inventory",
+      "Name": "packaging inventory markdown exists and contains documented sections",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "distribution-inventory",
+      "Name": "no unapproved proprietary asset dependencies found in manifest inventory",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "distribution-inventory",
+      "Name": "diagnostic output when a required system library is missing",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "deformation-invariant",
+      "Name": "hierarchical rig with rotated nonuniformly scaled parents and unkeyed bones matches kernel at fractional frames",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "deformation-invariant",
+      "Name": "antipodal quaternion sign equivalence min(|q1-q2|, |q1\u002Bq2|) \u003C eps",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "deformation-invariant",
+      "Name": "multiple roots and disconnected hierarchies evaluate identically to kernel forward kinematics",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "deformation-invariant",
+      "Name": "boundary clips: zero-frame and one-frame clips evaluate without NaN or out-of-bounds",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "deformation-invariant",
+      "Name": "singular bind transform rejection for zero-scale, non-invertible axis, and inherited singular parent",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "deformation-invariant",
+      "Name": "over-capacity skeleton (\u003E220 bones) is rejected with NotSupportedException without clamping bone IDs",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "deformation-invariant",
+      "Name": "skinning palette agreement between CPU Linear Blend Skinning and GPU matrix palette across animated frames",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "deformation-invariant",
+      "Name": "top-four skin weight pruning and normalization guarantees partition of unity and detects invalid weights",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "deformation-invariant",
+      "Name": "animated triangle picking follows deformed mesh across time and rejects missed rays",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "deformation-invariant",
+      "Name": "bind pose and original source data remain completely immutable across animation scrub, posing, and IK",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "deformation-invariant",
+      "Name": "seeded deterministic randomness: randomized multi-bone poses emit failing seed and input on discrepancy",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "morph-eval",
+      "Name": "weights 0, 0.5, 1.0 produce exact linear delta scaling",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "morph-eval",
+      "Name": "two concurrent morph targets sum deltas correctly",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "morph-eval",
+      "Name": "UV duplicate vertices receive identical morph offsets",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "morph-eval",
+      "Name": "keyed vs event vs driver precedence order",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "morph-eval",
+      "Name": "pose-space corrective activates at bent joint angle",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "morph-eval",
+      "Name": "base geometry remains immutable after evaluation",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "morph-eval",
+      "Name": "reset / zero weights restores base mesh exactly",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "morph-eval",
+      "Name": "missing morph target handled safely without NaNs",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "morph-eval",
+      "Name": "weight bounds clamp vs overdrive policy",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "morph-eval",
+      "Name": "active target limit and overflow rejection",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "morph-eval",
+      "Name": "bind space morph before skinning order",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "morph-edit",
+      "Name": "move stroke writes deltas and preview applies them at weight",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "morph-edit",
+      "Name": "falloff, strength and move-from-stroke-start",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "morph-edit",
+      "Name": "inflate pushes along the vertex normal",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "morph-edit",
+      "Name": "smooth relaxes a spike toward neighbours",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "morph-edit",
+      "Name": "combined influence sums linearly and bake matches the mix",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "morph-edit",
+      "Name": "x-mirror stroke is exactly symmetric",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "morph-edit",
+      "Name": "erase restores neutral exactly",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "morph-edit",
+      "Name": "each stroke and op is one exact undo/redo entry",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "morph-edit",
+      "Name": "rename keeps the active target and stroke undo by object",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "morph-edit",
+      "Name": "seam corners and split vertices stay consistent",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "morph-edit",
+      "Name": "export: sculpted morph reaches FBX and DMX through the adapters",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "morph-edit",
+      "Name": "invalid inputs are rejected",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "part_track",
+      "Name": "nested part composition (child part follows parent part)",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "part_track",
+      "Name": "follow-bone part follows animated bone",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "part_track",
+      "Name": "duplicate part names on different objects remain distinct",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "part_track",
+      "Name": "circular dependency detection returns safe diagnostic",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "part_track",
+      "Name": "object-space IK goal aligns with evaluated part transform",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "part_track",
+      "Name": "camera pose and FOV interpolation",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "part_track",
+      "Name": "camera track playback does not modify orbit camera state",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "part_track",
+      "Name": "missing bone or part target handled safely",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "part_track",
+      "Name": "camera hermite cubic FOV curve and default fallback",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "part_track",
+      "Name": "json camera definition parsing and opt-in orbit application",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "constraint-parity",
+      "Name": "constraint audit correctly categorizes look-at, copy transform, IK, and springs",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "constraint-parity",
+      "Name": "secondary spring simulation advances with deterministic fixed time steps",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "constraint-parity",
+      "Name": "spring simulation resets cleanly on seek or clip reload",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "constraint-parity",
+      "Name": "look-at constraint points bone towards target position",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "constraint-parity",
+      "Name": "copy rotation constraint transfers orientation with weight scaling",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "constraint-parity",
+      "Name": "unsupported constraint in rig reports clear diagnostic rather than crashing",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "constraint-parity",
+      "Name": "constraints documentation markdown file exists and has required sections",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "constraint-parity",
+      "Name": "spring stiffness and damping parameters alter settling response deterministically",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "fbx_anim_feasibility",
+      "Name": "feasibility audit accurately reports supported subset vs unsupported features",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "fbx_anim_feasibility",
+      "Name": "golden reference fixture verifies parent-child rotation composition",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "fbx_anim_feasibility",
+      "Name": "time conversion between FBX time and kernel frames",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "fbx_anim_feasibility",
+      "Name": "Euler rotation order conversion to Quat",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "fbx_anim_feasibility",
+      "Name": "unsupported layered animation produces structured error",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "fbx_anim_feasibility",
+      "Name": "unit scale conversion (e.g. cm to inch) preserves physical dimensions",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "fbx_anim_feasibility",
+      "Name": "missing target bone diagnosed cleanly",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "fbx_anim_feasibility",
+      "Name": "conversion produces valid RigAnimFile data",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "fbx_anim_feasibility",
+      "Name": "raw FBX node tree audit detects unbaked pivots and custom rotation orders",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "retopo",
+      "Name": "null input throws",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "retopo",
+      "Name": "empty mesh stays empty",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "retopo",
+      "Name": "single triangle stays triangle",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "retopo",
+      "Name": "2x2 grid pairs into quads",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "retopo",
+      "Name": "uv seam prevents pairing",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "retopo",
+      "Name": "input unchanged",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "retopo",
+      "Name": "materials respected",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "retopo",
+      "Name": "deterministic repeat",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "retopo",
+      "Name": "metrics: paired quad is manifold with no boundary",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "retopo",
+      "Name": "metrics: single triangle has boundary edges",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "retopo",
+      "Name": "n-gon input is triangulated not thrown",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "remesh",
+      "Name": "probe kernel quadremesh",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "cloth-sim",
+      "Name": "null mesh throws",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "cloth-sim",
+      "Name": "gravity moves unpinned vertex",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "cloth-sim",
+      "Name": "floor collision",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "cloth-sim",
+      "Name": "pinned vertex stays",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "cloth-sim",
+      "Name": "floor constrains",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "cloth-sim",
+      "Name": "impulse moves vertex",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "cloth-sim",
+      "Name": "reset restores",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "cloth-sim",
+      "Name": "toMesh preserves count",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "cloth-sim",
+      "Name": "self-collision separates overlapping vertices",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "cloth-sim",
+      "Name": "pressure inflates closed-ish mesh",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "texture-paint",
+      "Name": "null image throws",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "texture-paint",
+      "Name": "null brush throws",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "texture-paint",
+      "Name": "nonpositive radius throws",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "texture-paint",
+      "Name": "paints center pixel",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "texture-paint",
+      "Name": "out of bounds safe",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "texture-paint",
+      "Name": "default white",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "gpu-cloth",
+      "Name": "gpu step matches cpu solver",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "gpu-cloth",
+      "Name": "upload download roundtrip",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "knife",
+      "Name": "null input throws",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "knife",
+      "Name": "degenerate normal throws",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "knife",
+      "Name": "non-crossing face kept",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "knife",
+      "Name": "crossing face counted",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "shrinkwrap",
+      "Name": "null source throws",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "shrinkwrap",
+      "Name": "null target throws",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "shrinkwrap",
+      "Name": "moves vertices to target",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "shrinkwrap",
+      "Name": "max distance respected",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "shrinkwrap",
+      "Name": "input unchanged",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "shrinkwrap",
+      "Name": "wrap-to-surface moves to closest point",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "shrinkwrap",
+      "Name": "offset pushes along surface normal",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "shrinkwrap",
+      "Name": "normal projection hits target",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "shrinkwrap",
+      "Name": "null source throws wrap-to-surface",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "data-transfer",
+      "Name": "null source throws",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "data-transfer",
+      "Name": "null target throws",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "data-transfer",
+      "Name": "transfers skin weights by nearest vertex",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "data-transfer",
+      "Name": "max distance skips",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "data-transfer",
+      "Name": "input target unchanged",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "data-transfer",
+      "Name": "transfers UVs by nearest vertex",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "polypaint",
+      "Name": "null source throws",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "polypaint",
+      "Name": "null brush throws",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "polypaint",
+      "Name": "non-positive radius throws",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "polypaint",
+      "Name": "paints vertex within radius",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "polypaint",
+      "Name": "vertex outside radius unchanged",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "polypaint",
+      "Name": "input unchanged",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "uv-edit",
+      "Name": "null throws",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "uv-edit",
+      "Name": "negative iterations throws",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "uv-edit",
+      "Name": "pinned vertex unchanged",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "uv-edit",
+      "Name": "zero iterations no change",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "uv-seam",
+      "Name": "null source throws",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "uv-seam",
+      "Name": "null edges throws",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "uv-seam",
+      "Name": "seam duplicates vertex",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "uv-seam",
+      "Name": "no seam no change",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "uv-seam",
+      "Name": "input unchanged",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "dyntopo",
+      "Name": "null throws",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "dyntopo",
+      "Name": "null options throws",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "dyntopo",
+      "Name": "nonpositive radius throws",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "dyntopo",
+      "Name": "subdivides long edge within brush",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "dyntopo",
+      "Name": "inflate moves vertices",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "dyntopo",
+      "Name": "flatten adjusts y",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "dyntopo",
+      "Name": "sculpt null throws",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "dyntopo",
+      "Name": "input unchanged",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "packaging",
+      "Name": "packaging script exists and is executable",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "packaging",
+      "Name": "packaging script successfully stages files to a custom path (with spaces supported)",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "packaging",
+      "Name": "staged directory contains main executable, runtime DLLs, and launcher script",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "packaging",
+      "Name": "build-info.json manifest contains version, timestamp, and target architecture",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "packaging",
+      "Name": "archive creation produces valid tar.gz and matching SHA256 checksum",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "packaging",
+      "Name": "bundled sample project is present and valid",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "packaging",
+      "Name": "launcher script does not require dotnet SDK on path",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "packaging",
+      "Name": "sensitive files, caches, and developer paths excluded from package",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "packaging",
+      "Name": "documentation and capability list present in distribution package",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "installed-artifact",
+      "Name": "smoke script exists and installed archive renders",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "installed-artifact",
+      "Name": "native clip and bad input have recorded diagnostics",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "installed-artifact",
+      "Name": "repeat capture is identical and installation stays untouched",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "material-gpu",
+      "Name": "corner UVs preserve a shared-position seam and layout offsets",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "material-gpu",
+      "Name": "same filename in separate roots resolves independent pixels",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "material-gpu",
+      "Name": "windowless renderer samples asymmetric sRGB albedo and releases textures",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "performance-lifecycle",
+      "Name": "same-thread warmed allocation counter and raw samples",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "performance-lifecycle",
+      "Name": "guardrail refuses unlike workloads and distinguishes restore from rebuild",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "performance-lifecycle",
+      "Name": "real source parse rebuild extraction and animation stages persist raw report",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "performance-lifecycle",
+      "Name": "repeated snapshot swap, stale rejection, dispose and failed loader recovery",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "performance-lifecycle",
+      "Name": "hardware EGL upload, completion and resource release",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "live-ik",
+      "Name": "kernel parity and warmed allocations",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "live-ik",
+      "Name": "unsupported solver fallback",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "live-ik",
+      "Name": "stacked constraints and kernel baseline",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "live-ik",
+      "Name": "invalid frame and empty goals",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "live-ik",
+      "Name": "player Step warm fast path and fallback",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "hair",
+      "Name": "gravity pulls strand down",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "hair",
+      "Name": "collision keeps outside body",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "hair",
+      "Name": "deterministic repeated step",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "hair",
+      "Name": "cut truncates strand",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "hair",
+      "Name": "clump aligns roots",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "hair",
+      "Name": "wind moves strand",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "hair",
+      "Name": "export curves",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "hair",
+      "Name": "substeps runs",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "hair",
+      "Name": "turbulence moves strand",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "hair",
+      "Name": "vortex moves strand",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "hdr",
+      "Name": "fragment writes linear hdr (no in-shader tone map)",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "hdr",
+      "Name": "no in-shader bloom approximation remains",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "hdr",
+      "Name": "the lit pass stays linear: no encode, no white balance, no view transform",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "hdr",
+      "Name": "exactly one display encode, and it is the real sRGB transfer function",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "hdr",
+      "Name": "white balance is neutral at D65 and separates warm from cool",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "hdr",
+      "Name": "CLI colour settings preserve defaults and validate ranges",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "hdr",
+      "Name": "hardware EGL: AgX maps a linear ramp monotonically and matches Blender\u0027s grey",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "hdr",
+      "Name": "hardware EGL: emitter above 1.0 blooms with a measurable, finite halo",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "hdr",
+      "Name": "hardware EGL: bright gradient clips less than the LDR encode",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "hdr",
+      "Name": "hardware EGL: white balance reaches the display stage and keeps exposure",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "hdr",
+      "Name": "hardware EGL: the shared renderer applies the view transform and white balance",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "render-architecture",
+      "Name": "pass order is declared once and validated",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "render-architecture",
+      "Name": "hardware EGL: render targets resize and dispose cleanly; Draw runs the declared order",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "two-sided",
+      "Name": "shader has no viewer-facing normal flip and uses rasterised facing",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "two-sided",
+      "Name": "vmat F_RENDER_BACKFACES selects double-sided; default stays single-sided",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "two-sided",
+      "Name": "Survey winding agrees with authored normals (gl_FrontFacing is meaningful)",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "two-sided",
+      "Name": "hardware EGL: closed mesh seen from inside is not lit as its exterior",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "two-sided",
+      "Name": "hardware EGL: mirrored-UV twin keeps the normal-map response, front and back",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "two-sided",
+      "Name": "hardware EGL: nonuniformly scaled bone does not skew the normal",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ibl-gpu",
+      "Name": "gradient diffuse, rough metal broadening and dielectric Fresnel",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ibl-gpu",
+      "Name": "HDR file publication, invalid replacement and GL texture lifecycle",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ibl",
+      "Name": "specular cube has explicit roughness mip chain and GL face axes",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ibl",
+      "Name": "HDR flat and RLE preserve linear radiance",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ibl",
+      "Name": "HDR truncation invalid runs and orientation rejected",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ibl",
+      "Name": "equirect sampler wraps seam and clamps poles",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ibl",
+      "Name": "GGX prefilter conserves constant sky and broadens bright patch",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ibl",
+      "Name": "BRDF mirror limit Fresnel and LUT finite energy",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ibl",
+      "Name": "constant HDR sky integrates to pi radiance",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ibl",
+      "Name": "gradient agrees with independent Monte Carlo reference",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ibl",
+      "Name": "invalid bake preserves previous environment",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ibl",
+      "Name": "baker starts without environment",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ibl",
+      "Name": "procedural fallback marks environment",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ibl",
+      "Name": "cosine weight clamps negative",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ss",
+      "Name": "ssao pass toggles",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "ss",
+      "Name": "ssr pass toggles",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "aa",
+      "Name": "taa pass toggles",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "fbx_clip_conversion",
+      "Name": "golden local and world frames and fractional pose",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "fbx_clip_conversion",
+      "Name": "source rate and asymmetric unit axis conversion",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "fbx_clip_conversion",
+      "Name": "explicit take selection and missing target",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "fbx_clip_conversion",
+      "Name": "reject layers pivots unsupported cubic and duplicate targets",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "fbx_clip_conversion",
+      "Name": "stepped channel and off-grid resampling report",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "fbx_clip_conversion",
+      "Name": "save reopen refuses overwrite and does not alter input",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "fbx_clip_conversion",
+      "Name": "raw node tree cannot fabricate animation clip",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "fbx_clip_conversion",
+      "Name": "owned binary FBX curves play through headless desktop and retain source",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "fbx_clip_conversion",
+      "Name": "raw binary explicit takes missing bone and centimetre axes",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "fbx_clip_conversion",
+      "Name": "binary FBX rejects cubic curves and unsupported offsets",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "material-channel",
+      "Name": "bake tangents split mirrored UVs and survive degenerate UVs",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "material-channel",
+      "Name": "reject unsupported UV set and wrong channel color space before GPU upload",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "material-channel",
+      "Name": "hardware EGL probes all maps, fallbacks, convention and reload",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "material-channel",
+      "Name": "nonuniform bone palette transforms mapped tangent frame",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "material-channel",
+      "Name": "UV tiling and offset change rendered pixels",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "vmdl",
+      "Name": "ModelDoc reader finds the mesh and the material bindings",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "vmdl",
+      "Name": "ModelDoc reader survives a file it cannot read",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "vmdl",
+      "Name": "material name spellings cover the importer\u0027s own rules",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "vmdl",
+      "Name": "the ModelDoc that draws a mesh is found by path, not by file name",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "gpu-particle",
+      "Name": "compute shader updates positions and keeps particles in bounds",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "gpu-particle",
+      "Name": "zero particles does not crash",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "volume",
+      "Name": "density falls off from a sphere volume\u0027s centre and multiplicative media clear it",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "volume",
+      "Name": "hardware EGL: a fog sphere scatters the key light, shadowed fog is darker, empty grid draws nothing",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "survey-material-map",
+      "Name": "head and suit aliases remain source-scoped",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "survey-material-map",
+      "Name": "read-only relative references survive project move and diagnose effects",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "survey-material-map",
+      "Name": "non-Survey Effigy slot retains ordinary fallback",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "survey-material-map",
+      "Name": "source ModelDoc remaps and texture paths inventory",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "viewport-handle",
+      "Name": "draw geometry and hit share typed dimensions",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "viewport-handle",
+      "Name": "overlay emits only typed selectable shape vertices",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "viewport-handle",
+      "Name": "priority over orbit, one undo entry and palette undo",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "viewport-handle",
+      "Name": "logical viewport offset and framebuffer DPI independence",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "viewport-handle",
+      "Name": "escape focus loss reload and close cancel exact state",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "viewport-handle",
+      "Name": "auto-key off is an unkeyed override and on writes keys atomically",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "viewport-handle",
+      "Name": "IK target ray drag solves end effector and undoes",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "viewport-handle",
+      "Name": "rotation ring angle unwrap and degree snapping",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "viewport-handle",
+      "Name": "source revision invalidation and unstable ray leave clean capture",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "viewport-handle",
+      "Name": "disabled snap continuous, invalid snap rejected before capture",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "resource-budget",
+      "Name": "budget records decoded bytes, batch count and stage timings",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "resource-budget",
+      "Name": "shared images count once and unique maps are not double-counted",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "resource-budget",
+      "Name": "hardware upload records GPU storage and reload returns to baseline",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "pose-agreement",
+      "Name": "skinning picking and shadow share one posed mesh after the layout change",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "cross-field",
+      "Name": "null mesh throws",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "cross-field",
+      "Name": "compute produces frames",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "cross-field",
+      "Name": "smooth keeps unit normals",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "cross-field",
+      "Name": "vertex curvature positive on sphere",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "cross-field",
+      "Name": "optimize MIQ sets rotations",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "cross-field",
+      "Name": "trace streamlines returns paths",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "egl-image",
+      "Name": "flat-material-lighting-and-shadow",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "auto-weight",
+      "Name": "two-bone cylinder: each bone dominant near itself",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "auto-weight",
+      "Name": "two-bone cylinder: smooth monotone transition at joint",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "auto-weight",
+      "Name": "weights sum to 1 and validate",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "auto-weight",
+      "Name": "max-influence cap respected and renormalised",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "auto-weight",
+      "Name": "disconnected island falls back and is reported",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "auto-weight",
+      "Name": "refine prunes min weight and renormalises",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "auto-weight",
+      "Name": "apply is one undoable command restoring exact prior skin",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "auto-weight",
+      "Name": "export: FBX round trip and DMX carry the auto weights",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "auto-weight",
+      "Name": "invalid inputs are rejected",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "auto-weight",
+      "Name": "timing: 4-bone 32-segment cylinder solve",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "weight-paint",
+      "Name": "paint sets weight on vertex",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "weight-paint",
+      "Name": "add/subtract with smooth falloff",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "weight-paint",
+      "Name": "subtract on single-influence vertex is reported, not a command",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "weight-paint",
+      "Name": "normalize sums to 1 with locked bone preserved",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "weight-paint",
+      "Name": "blur smooths a hard edge and keeps sums",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "weight-paint",
+      "Name": "mirror X paints the L/R counterpart",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "weight-paint",
+      "Name": "undo/redo restores exact weights; cancel leaves no entry",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "weight-paint",
+      "Name": "fill and linear gradient set values; colours follow the ramp",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "weight-paint",
+      "Name": "paint on auto-weighted cylinder; history interleaves with auto-weight",
+      "Required": false,
+      "fixture": "synthetic"
+    },
+    {
+      "Group": "weight-paint",
+      "Name": "invalid inputs are rejected",
+      "Required": false,
+      "fixture": "synthetic"
+    }
+  ],
+  "results": [
+    {
+      "Group": "baseline",
+      "Name": "bind palette is identity",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 2.5746
+    },
+    {
+      "Group": "baseline",
+      "Name": "missing explicit clip reports an error",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 2.4288
+    },
+    {
+      "Group": "baseline",
+      "Name": "scrubbing a paused clip updates the pose",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 49.6511
+    },
+    {
+      "Group": "baseline",
+      "Name": "loading a new clip resets the playhead",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.4734
+    },
+    {
+      "Group": "baseline",
+      "Name": "bone clip matches kernel at fractional frames",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.3458
+    },
+    {
+      "Group": "baseline",
+      "Name": "clip playback allocates zero bytes after warmup",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 5.8715
+    },
+    {
+      "Group": "baseline",
+      "Name": "over-capacity skeleton is rejected instead of clamping bone IDs",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.5254
+    },
+    {
+      "Group": "baseline",
+      "Name": "singular bind transform is rejected",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1972
+    },
+    {
+      "Group": "baseline",
+      "Name": "OpenGL projection maps near plane to -1",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.7055
+    },
+    {
+      "Group": "baseline",
+      "Name": "screen centre ray follows camera forward",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.5029
+    },
+    {
+      "Group": "baseline",
+      "Name": "green lamps are green, not orange",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.7964
+    },
+    {
+      "Group": "baseline",
+      "Name": "one-shot clip stops on the final pose",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2804
+    },
+    {
+      "Group": "baseline",
+      "Name": "paused scrubbing can reach the exact last frame",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1947
+    },
+    {
+      "Group": "baseline",
+      "Name": "negative/NaN frame deltas are rejected",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2201
+    },
+    {
+      "Group": "baseline",
+      "Name": "live IK matches kernel, including fractional frames",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 5.6918
+    },
+    {
+      "Group": "baseline",
+      "Name": "limits match kernel and allocate zero bytes",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 9.2993
+    },
+    {
+      "Group": "baseline",
+      "Name": "unsupported part tracks fail explicitly",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.0979
+    },
+    {
+      "Group": "baseline",
+      "Name": "GPU palette agrees with kernel skinning maths",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.7896
+    },
+    {
+      "Group": "baseline",
+      "Name": "body picking ignores empty space inside an AABB",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 2.2338
+    },
+    {
+      "Group": "baseline",
+      "Name": "body picking follows animated geometry",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2477
+    },
+    {
+      "Group": "baseline",
+      "Name": "FBX missing weights do not silently rebind",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 2.559
+    },
+    {
+      "Group": "baseline",
+      "Name": "CLI rejects unknown flags, missing values and invalid sizes",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.95
+    },
+    {
+      "Group": "baseline",
+      "Name": "headless/exposure options parse without enabling animation",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1656
+    },
+    {
+      "Group": "survey",
+      "Name": "Survey assembly uses authored head and collar, not placeholder",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1050.8822
+    },
+    {
+      "Group": "survey",
+      "Name": "background loader publishes a complete result",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1556.4251
+    },
+    {
+      "Group": "baseline",
+      "Name": "background load errors are published and recoverable",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 18.3026
+    },
+    {
+      "Group": "clip-space",
+      "Name": "foreign mismatched bones retain bind translation on both sampling paths",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 2.9495
+    },
+    {
+      "Group": "clip-space",
+      "Name": "foreign twist offsets and animated incompatible chains cannot stretch the mesh",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1404
+    },
+    {
+      "Group": "clip-space",
+      "Name": "foreign root and intentionally animated translations are scaled and preserved",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1116
+    },
+    {
+      "Group": "clip-space",
+      "Name": "same-unit and unknown-unit clips keep authored translations",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.1742
+    },
+    {
+      "Group": "clip-space",
+      "Name": "prop mesh scaling leaves placement translation intact",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.3765
+    },
+    {
+      "Group": "ai",
+      "Name": "rubric rejects missing evidence and invalid scores",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 5.5221
+    },
+    {
+      "Group": "ai",
+      "Name": "rubric rejects duplicates and invalid weights",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3424
+    },
+    {
+      "Group": "ai",
+      "Name": "plateau uses best score and retains earlier checkpoint",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1677
+    },
+    {
+      "Group": "ai",
+      "Name": "run paths reject escapes and links",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.4561
+    },
+    {
+      "Group": "ai",
+      "Name": "native feature tool creates editable checkpoint",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 30.1114
+    },
+    {
+      "Group": "ai",
+      "Name": "invalid edits roll back and frozen features reject changes",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 2.4313
+    },
+    {
+      "Group": "ai",
+      "Name": "references reject private and transition addresses",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 3.0039
+    },
+    {
+      "Group": "ai",
+      "Name": "configuration rejects unknown flags and unsafe providers",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 4.9489
+    },
+    {
+      "Group": "ai",
+      "Name": "whole native creation uses provider loop and writes result",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 160.1188
+    },
+    {
+      "Group": "ai",
+      "Name": "budget stop preserves generated editable checkpoint",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 155.8731
+    },
+    {
+      "Group": "ai",
+      "Name": "actual EGL build judge revise reaches target",
+      "Status": "SKIP",
+      "Reason": "Set AI_REQUIRE_EGL=1 for real windowless rendering \u002B mocked provider integration.",
+      "Milliseconds": 0.0677
+    },
+    {
+      "Group": "ai",
+      "Name": "actual EGL plateau returns below target and best not latest",
+      "Status": "SKIP",
+      "Reason": "Set AI_REQUIRE_EGL=1 for real windowless plateau regression.",
+      "Milliseconds": 0.0453
+    },
+    {
+      "Group": "ai",
+      "Name": "actual EGL budget stop records earlier best selection",
+      "Status": "SKIP",
+      "Reason": "Set AI_REQUIRE_EGL=1 for checkpoint stop regression.",
+      "Milliseconds": 0.0275
+    },
+    {
+      "Group": "ai",
+      "Name": "openai request and tool response round trip",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.0715
+    },
+    {
+      "Group": "ai",
+      "Name": "anthropic request and tool response round trip",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.5352
+    },
+    {
+      "Group": "ai",
+      "Name": "google request and tool response round trip",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.4057
+    },
+    {
+      "Group": "harness",
+      "Name": "registered failing assertions return nonzero",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.8842
+    },
+    {
+      "Group": "harness",
+      "Name": "missing optional fixture is skipped, not passed",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1102
+    },
+    {
+      "Group": "harness",
+      "Name": "missing required fixture fails without running body",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0981
+    },
+    {
+      "Group": "harness",
+      "Name": "duplicate registration and empty selections cannot pass",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1184
+    },
+    {
+      "Group": "asset-paths",
+      "Name": "relative roots and implicit external references are rejected",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.6985
+    },
+    {
+      "Group": "asset-paths",
+      "Name": "relative assets normalize without changing cwd or source",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3033
+    },
+    {
+      "Group": "asset-paths",
+      "Name": "changing cwd does not change explicit-root resolution",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1769
+    },
+    {
+      "Group": "asset-paths",
+      "Name": "two same basenames retain separate canonical identities",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1894
+    },
+    {
+      "Group": "asset-paths",
+      "Name": "traversal and sibling-prefix escape are rejected",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.265
+    },
+    {
+      "Group": "asset-paths",
+      "Name": "external reads are opt-in and always read-only",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2475
+    },
+    {
+      "Group": "asset-paths",
+      "Name": "missing reads and new outputs never create directories",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3153
+    },
+    {
+      "Group": "asset-paths",
+      "Name": "directories and file ancestors are not valid asset paths",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3038
+    },
+    {
+      "Group": "asset-paths",
+      "Name": "Unicode and spaces survive resolution and a project move",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2703
+    },
+    {
+      "Group": "asset-paths",
+      "Name": "Save As relocation preserves logical ID and source without copying",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.5258
+    },
+    {
+      "Group": "asset-paths",
+      "Name": "relocation cannot silently turn an external source into a writable project asset",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3138
+    },
+    {
+      "Group": "asset-paths",
+      "Name": "case mismatch is diagnosed on Linux",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2328
+    },
+    {
+      "Group": "asset-paths",
+      "Name": "symlink escapes and nonexistent output ancestors are rejected",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.4748
+    },
+    {
+      "Group": "asset-paths",
+      "Name": "in-root symlink aliases share canonical identity",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2061
+    },
+    {
+      "Group": "asset-paths",
+      "Name": "symlink cycles fail and link-dotdot follows filesystem semantics",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.4599
+    },
+    {
+      "Group": "document-session",
+      "Name": "open two documents",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 2.7662
+    },
+    {
+      "Group": "document-session",
+      "Name": "failed second load retains the first",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 8.6471
+    },
+    {
+      "Group": "document-session",
+      "Name": "source exists after GPU upload",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 67.6638
+    },
+    {
+      "Group": "document-session",
+      "Name": "stale build completion is rejected",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.4566
+    },
+    {
+      "Group": "document-session",
+      "Name": "editing a session does not mutate a detached snapshot",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.378
+    },
+    {
+      "Group": "document-session",
+      "Name": "Effigy session retains PartStudio and FBX does not masquerade as feature tree",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1207
+    },
+    {
+      "Group": "document-session",
+      "Name": "retains original clip JSON alongside parsed RigAnimFile",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.6452
+    },
+    {
+      "Group": "document-session",
+      "Name": "revision and saved-state tracking",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.199
+    },
+    {
+      "Group": "document-session",
+      "Name": "loader reset clears session and snapshot cleanly",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0837
+    },
+    {
+      "Group": "document-session",
+      "Name": "snapshot promote through DocumentLoader updates mesh and player",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.9796
+    },
+    {
+      "Group": "edit-history",
+      "Name": "execute undo redo exact equality",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.3101
+    },
+    {
+      "Group": "edit-history",
+      "Name": "100 preview updates produce one entry",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.4359
+    },
+    {
+      "Group": "edit-history",
+      "Name": "cancel restores pre-transaction state without recording history",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3144
+    },
+    {
+      "Group": "edit-history",
+      "Name": "no-op edits create no entry",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.5498
+    },
+    {
+      "Group": "edit-history",
+      "Name": "failed execution leaves state and history unchanged",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3933
+    },
+    {
+      "Group": "edit-history",
+      "Name": "new committed edit after undo discards redo branch",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3413
+    },
+    {
+      "Group": "edit-history",
+      "Name": "saved state tracking and branching at same depth",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2791
+    },
+    {
+      "Group": "edit-history",
+      "Name": "bounded history eviction policy",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.6702
+    },
+    {
+      "Group": "edit-history",
+      "Name": "two sessions isolated",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3176
+    },
+    {
+      "Group": "edit-history",
+      "Name": "actual feature tree fixture goes through history service",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.8439
+    },
+    {
+      "Group": "clip-edit",
+      "Name": "first last only key insertion and deletion",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 2.3045
+    },
+    {
+      "Group": "clip-edit",
+      "Name": "every ease mode is preserved",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.8515
+    },
+    {
+      "Group": "clip-edit",
+      "Name": "tangents round trip cleanly",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 2.0176
+    },
+    {
+      "Group": "clip-edit",
+      "Name": "occupied frame move replaces target and undo restores both",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.9234
+    },
+    {
+      "Group": "clip-edit",
+      "Name": "end frame cache update and playhead preservation",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2299
+    },
+    {
+      "Group": "clip-edit",
+      "Name": "paused last frame scrub",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2115
+    },
+    {
+      "Group": "clip-edit",
+      "Name": "negative and NaN coordinates are rejected",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.5593
+    },
+    {
+      "Group": "clip-edit",
+      "Name": "unlike track kinds with the same target name remain distinct",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3755
+    },
+    {
+      "Group": "clip-edit",
+      "Name": "clip length policy on deletion preserves intentionally held duration",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0998
+    },
+    {
+      "Group": "clip-edit",
+      "Name": "IK goals service integrates with history and updates tracks",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 2.2001
+    },
+    {
+      "Group": "save",
+      "Name": "save_effigy_atomic_roundtrip",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 3.8059
+    },
+    {
+      "Group": "save",
+      "Name": "unknown_metadata_sentinel_survives",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.1214
+    },
+    {
+      "Group": "save",
+      "Name": "save_as_relocation",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.9712
+    },
+    {
+      "Group": "save",
+      "Name": "write_flush_failure_preserves_destination",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 3.2786
+    },
+    {
+      "Group": "save",
+      "Name": "rename_failure_preserves_destination",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.598
+    },
+    {
+      "Group": "save",
+      "Name": "save_cancellation_preserves_target",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1455
+    },
+    {
+      "Group": "save",
+      "Name": "edits_during_save_do_not_mark_clean",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.5459
+    },
+    {
+      "Group": "save",
+      "Name": "unsupported_fbx_authoring_refused",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.4916
+    },
+    {
+      "Group": "save",
+      "Name": "staged_recovery_can_be_parsed",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 22.341
+    },
+    {
+      "Group": "save",
+      "Name": "readonly_directory_fails_safely",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2199
+    },
+    {
+      "Group": "gizmo-math",
+      "Name": "every axis hit and miss",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.0037
+    },
+    {
+      "Group": "gizmo-math",
+      "Name": "ray behind camera pointing away",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.4683
+    },
+    {
+      "Group": "gizmo-math",
+      "Name": "orthographic and perspective reference projections",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2774
+    },
+    {
+      "Group": "gizmo-math",
+      "Name": "parallel ray returns false",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.129
+    },
+    {
+      "Group": "gizmo-math",
+      "Name": "camera looking straight down an axis",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0742
+    },
+    {
+      "Group": "gizmo-math",
+      "Name": "near and far zoom handle sizing",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0521
+    },
+    {
+      "Group": "gizmo-math",
+      "Name": "pi crossing and signed angle unwrapping",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2734
+    },
+    {
+      "Group": "gizmo-math",
+      "Name": "positive and negative translation snapping",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.4147
+    },
+    {
+      "Group": "gizmo-math",
+      "Name": "invalid and nonfinite snap rejection",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.6374
+    },
+    {
+      "Group": "gizmo-math",
+      "Name": "finite output for degenerate boundary fixtures",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1986
+    },
+    {
+      "Group": "gizmo-math",
+      "Name": "scale clamping no accidental negative scale",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.155
+    },
+    {
+      "Group": "gizmo-math",
+      "Name": "plane handles hit and miss",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1567
+    },
+    {
+      "Group": "gizmo-math",
+      "Name": "rotation ring handles hit and miss",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1429
+    },
+    {
+      "Group": "gizmo-math",
+      "Name": "composite hit test and typed handle ids",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.8664
+    },
+    {
+      "Group": "gizmo-math",
+      "Name": "reference frame transformations",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2714
+    },
+    {
+      "Group": "materials",
+      "Name": "two same-named materials in different roots do not collide",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.4179
+    },
+    {
+      "Group": "materials",
+      "Name": "renamed or relocated project directory resolves correctly via AssetPathResolver",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.2296
+    },
+    {
+      "Group": "materials",
+      "Name": "missing PNG file reported with clear diagnostic and neutral fallback",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.8621
+    },
+    {
+      "Group": "materials",
+      "Name": "corrupt PNG reported with clear diagnostic",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.285
+    },
+    {
+      "Group": "materials",
+      "Name": "unsupported paletted or invalid PNG rejected with diagnostic",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2403
+    },
+    {
+      "Group": "materials",
+      "Name": "explicit relative override mapped correctly to slot",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1699
+    },
+    {
+      "Group": "materials",
+      "Name": "unknown shader and unsupported vmat syntax diagnosed",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.364
+    },
+    {
+      "Group": "materials",
+      "Name": "albedo sRGB vs data Linear color space metadata tagged correctly",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1161
+    },
+    {
+      "Group": "materials",
+      "Name": "no source file writes (resolver is strictly read-only)",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.5738
+    },
+    {
+      "Group": "materials",
+      "Name": "missing required override fails resolution",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2633
+    },
+    {
+      "Group": "materials",
+      "Name": "valid PNG decodes correctly to expected RGBA dimensions and bytes",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1787
+    },
+    {
+      "Group": "materials",
+      "Name": "distinguish no map authored from authored map missing",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2107
+    },
+    {
+      "Group": "materials",
+      "Name": "one-time diagnostic does not duplicate on repeated slot resolution",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3287
+    },
+    {
+      "Group": "pose-edit",
+      "Name": "rotated/scaled parent: child transforms correctly",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 2.4974
+    },
+    {
+      "Group": "pose-edit",
+      "Name": "root bone edit",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2551
+    },
+    {
+      "Group": "pose-edit",
+      "Name": "child bones follow parent edit",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.4251
+    },
+    {
+      "Group": "pose-edit",
+      "Name": "bind pose and inverse-bind matrices remain untouched",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.5948
+    },
+    {
+      "Group": "pose-edit",
+      "Name": "100 preview updates produce exactly one undo entry",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3149
+    },
+    {
+      "Group": "pose-edit",
+      "Name": "cancel restores exact pre-drag pose",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2953
+    },
+    {
+      "Group": "pose-edit",
+      "Name": "undo and redo restore exact poses",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2543
+    },
+    {
+      "Group": "pose-edit",
+      "Name": "deleted/missing selection handled safely",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2401
+    },
+    {
+      "Group": "pose-edit",
+      "Name": "invalid/NaN transform leaves state intact",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2607
+    },
+    {
+      "Group": "pose-edit",
+      "Name": "no-op edit creates no history entry and leaves dirty state intact",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.253
+    },
+    {
+      "Group": "project-manifest",
+      "Name": "project manifest serialization and deserialization round-trip",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 79.3717
+    },
+    {
+      "Group": "project-manifest",
+      "Name": "two-source assembly definition",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.4115
+    },
+    {
+      "Group": "project-manifest",
+      "Name": "moving/relocating project root via AssetPathResolver",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.4329
+    },
+    {
+      "Group": "project-manifest",
+      "Name": "duplicate ID rejection",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.4402
+    },
+    {
+      "Group": "project-manifest",
+      "Name": "cyclic parent hierarchy rejection",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3506
+    },
+    {
+      "Group": "project-manifest",
+      "Name": "unknown future schema version failure",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1562
+    },
+    {
+      "Group": "project-manifest",
+      "Name": "unknown optional JSON fields preserved on save",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 3.3637
+    },
+    {
+      "Group": "project-manifest",
+      "Name": "material override identity persistence",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.0283
+    },
+    {
+      "Group": "project-manifest",
+      "Name": "Camhead authoring-frame adapter coordinate transformation",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1197
+    },
+    {
+      "Group": "project-manifest",
+      "Name": "atomic save and load from disk",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.5126
+    },
+    {
+      "Group": "parametric-edit",
+      "Name": "add feature -\u003E parameter edit -\u003E undo -\u003E redo",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 2.6101
+    },
+    {
+      "Group": "parametric-edit",
+      "Name": "remove feature and undo restoration",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.8562
+    },
+    {
+      "Group": "parametric-edit",
+      "Name": "reorder features and undo",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.4484
+    },
+    {
+      "Group": "parametric-edit",
+      "Name": "parameter edit with transaction coalescing",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 8.3143
+    },
+    {
+      "Group": "parametric-edit",
+      "Name": "feature error / invalid parameter reports failure and retains previous valid state",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 2.94
+    },
+    {
+      "Group": "parametric-edit",
+      "Name": "stale async rebuild discarded",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 21.9033
+    },
+    {
+      "Group": "parametric-edit",
+      "Name": "save via E4 and reload reproduces identical feature order and geometry",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.9889
+    },
+    {
+      "Group": "parametric-edit",
+      "Name": "two sessions\u0027 parametric edits remain isolated",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3547
+    },
+    {
+      "Group": "clip-capability",
+      "Name": "valid compatible clip passes audit",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 3.3047
+    },
+    {
+      "Group": "clip-capability",
+      "Name": "completely incompatible clip zero target matches rejected",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2648
+    },
+    {
+      "Group": "clip-capability",
+      "Name": "partial target match produces warnings and identifies unmapped bones",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3226
+    },
+    {
+      "Group": "clip-capability",
+      "Name": "morph event without morph tracks diagnosed",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.2531
+    },
+    {
+      "Group": "clip-capability",
+      "Name": "missing referenced control rig reported clearly",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 2.5404
+    },
+    {
+      "Group": "clip-capability",
+      "Name": "rejected clip leaves session player state unchanged",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.9328
+    },
+    {
+      "Group": "clip-capability",
+      "Name": "unknown track kind corrupted data diagnosed",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.1633
+    },
+    {
+      "Group": "clip-capability",
+      "Name": "root motion configuration validated",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3372
+    },
+    {
+      "Group": "clip-capability",
+      "Name": "morph drivers validated",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.8937
+    },
+    {
+      "Group": "clip-capability",
+      "Name": "file path validation and loading",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.7169
+    },
+    {
+      "Group": "export",
+      "Name": "static OBJ export produces valid vertices, normals, and faces",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 10.0859
+    },
+    {
+      "Group": "export",
+      "Name": "posed vs bind pose OBJ export produce distinct geometry",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.1384
+    },
+    {
+      "Group": "export",
+      "Name": "OBJ export capability report accurately flags lost skeletal animation",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.332
+    },
+    {
+      "Group": "export",
+      "Name": "refused overwrite when destination exists and Overwrite is false",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.47
+    },
+    {
+      "Group": "export",
+      "Name": "path traversal in material name sanitized / blocked",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.4209
+    },
+    {
+      "Group": "export",
+      "Name": "native effigy export round-trip via ExportService",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.5133
+    },
+    {
+      "Group": "export",
+      "Name": "native riganim export preserves unknown JSON sentinels",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.4551
+    },
+    {
+      "Group": "export",
+      "Name": "cancellation cleans up temporary files and preserves destination",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3455
+    },
+    {
+      "Group": "export",
+      "Name": "source session and source files remain completely untouched",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.5525
+    },
+    {
+      "Group": "ik-target",
+      "Name": "two-bone IK target drag",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 3.1876
+    },
+    {
+      "Group": "ik-target",
+      "Name": "FABRIK / chain IK target drag",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.7018
+    },
+    {
+      "Group": "ik-target",
+      "Name": "pole vector influence",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.24
+    },
+    {
+      "Group": "ik-target",
+      "Name": "zero IK weight leaves FK pose intact",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3339
+    },
+    {
+      "Group": "ik-target",
+      "Name": "reachable target reaches goal within tolerance",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2325
+    },
+    {
+      "Group": "ik-target",
+      "Name": "unreachable target clamps cleanly without NaNs",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2359
+    },
+    {
+      "Group": "ik-target",
+      "Name": "commit creates 1 undo entry; cancel restores pose",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.8223
+    },
+    {
+      "Group": "ik-target",
+      "Name": "missing constraint produces explicit diagnostic / safe return",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.4524
+    },
+    {
+      "Group": "ik-target",
+      "Name": "object moving under an anchored target",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.0294
+    },
+    {
+      "Group": "ik-target",
+      "Name": "limits constrain joint rotation",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 2.1237
+    },
+    {
+      "Group": "ik-target",
+      "Name": "tentative solve does not mutate bind data or stored constraint",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.5618
+    },
+    {
+      "Group": "ik-target",
+      "Name": "coordinate conversions between Model, World, and Object space",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.164
+    },
+    {
+      "Group": "advanced-ik",
+      "Name": "foot plants on ground plane",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1674
+    },
+    {
+      "Group": "advanced-ik",
+      "Name": "look-at direction and yaw/pitch",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1481
+    },
+    {
+      "Group": "advanced-ik",
+      "Name": "angle clamp",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0557
+    },
+    {
+      "Group": "advanced-ik",
+      "Name": "cone clamp keeps within cone",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1291
+    },
+    {
+      "Group": "advanced-ik",
+      "Name": "fabrik reaches target",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.4388
+    },
+    {
+      "Group": "advanced-ik",
+      "Name": "fabrik stretch when unreachable",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0746
+    },
+    {
+      "Group": "advanced-ik",
+      "Name": "leg solve keeps ankle at target",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1988
+    },
+    {
+      "Group": "advanced-ik",
+      "Name": "blend targets weighted",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.5189
+    },
+    {
+      "Group": "advanced-ik",
+      "Name": "twist rotates vector",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1209
+    },
+    {
+      "Group": "advanced-ik",
+      "Name": "invalid fabrik throws",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1005
+    },
+    {
+      "Group": "euphoria",
+      "Name": "com of weighted points",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2589
+    },
+    {
+      "Group": "euphoria",
+      "Name": "balanced com inside support",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.4581
+    },
+    {
+      "Group": "euphoria",
+      "Name": "unbalanced com outside support",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0622
+    },
+    {
+      "Group": "euphoria",
+      "Name": "foot placement shifts toward com",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0744
+    },
+    {
+      "Group": "euphoria",
+      "Name": "reach within arm length returns target",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1274
+    },
+    {
+      "Group": "euphoria",
+      "Name": "reach beyond arm length clamps and leans",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0508
+    },
+    {
+      "Group": "euphoria",
+      "Name": "stumble impulse scales with stiffness",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0673
+    },
+    {
+      "Group": "euphoria",
+      "Name": "recover step moves com toward support",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0628
+    },
+    {
+      "Group": "euphoria",
+      "Name": "stiffness interpolation",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.044
+    },
+    {
+      "Group": "euphoria",
+      "Name": "pose blend endpoints",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0823
+    },
+    {
+      "Group": "euphoria",
+      "Name": "determinism",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0378
+    },
+    {
+      "Group": "dependency-watcher",
+      "Name": "debounce: 20 rapid events produce 1 rebuild",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 5.1968
+    },
+    {
+      "Group": "dependency-watcher",
+      "Name": "out-of-order job completion: newer generation wins, older discarded",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 5001.3665
+    },
+    {
+      "Group": "dependency-watcher",
+      "Name": "dirty conflict: dirty local edits preserved",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.9756
+    },
+    {
+      "Group": "dependency-watcher",
+      "Name": "own-save echo suppressed",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 2.6938
+    },
+    {
+      "Group": "dependency-watcher",
+      "Name": "delete and recreate file handled",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 41.6368
+    },
+    {
+      "Group": "dependency-watcher",
+      "Name": "partial write retry",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.6351
+    },
+    {
+      "Group": "dependency-watcher",
+      "Name": "watcher cancellation and disposal during active job",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.0404
+    },
+    {
+      "Group": "dependency-watcher",
+      "Name": "clean reload updates snapshot",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.8489
+    },
+    {
+      "Group": "dependency-watcher",
+      "Name": "bad replacement retains old snapshot",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.5527
+    },
+    {
+      "Group": "dependency-watcher",
+      "Name": "watch project dependencies resolves all referenced assets",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.164
+    },
+    {
+      "Group": "preferences-autosave",
+      "Name": "preferences atomic save and load round-trip",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 12.8167
+    },
+    {
+      "Group": "preferences-autosave",
+      "Name": "XDG environment variable overrides respected",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.4843
+    },
+    {
+      "Group": "preferences-autosave",
+      "Name": "corrupt preferences file restores safe defaults gracefully",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 2.1165
+    },
+    {
+      "Group": "preferences-autosave",
+      "Name": "bad values in preferences are sanitized",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2085
+    },
+    {
+      "Group": "preferences-autosave",
+      "Name": "missing or readonly preferences file handled safely",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3691
+    },
+    {
+      "Group": "preferences-autosave",
+      "Name": "recent projects portable path and bounded ordering",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2474
+    },
+    {
+      "Group": "preferences-autosave",
+      "Name": "autosave scheduler triggers on dirty session",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 5.503
+    },
+    {
+      "Group": "preferences-autosave",
+      "Name": "autosave scheduler skips clean session",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1818
+    },
+    {
+      "Group": "preferences-autosave",
+      "Name": "autosave never clears session dirty state",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.6361
+    },
+    {
+      "Group": "preferences-autosave",
+      "Name": "recovery discovery finds staged recoveries",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.0526
+    },
+    {
+      "Group": "preferences-autosave",
+      "Name": "recovery retention policy deletes only expired snapshots",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.8966
+    },
+    {
+      "Group": "preferences-autosave",
+      "Name": "bounded scheduling prevents overlapping save storms",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 402.1389
+    },
+    {
+      "Group": "preferences-autosave",
+      "Name": "recovery snapshot reconstructs session source state without altering original source",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.2498
+    },
+    {
+      "Group": "fbx-dmx",
+      "Name": "rigged binary FBX export creates valid non-empty file",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 9.7757
+    },
+    {
+      "Group": "fbx-dmx",
+      "Name": "FBX round-trip through FbxImport verifies skeleton hierarchy and bones",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.3593
+    },
+    {
+      "Group": "fbx-dmx",
+      "Name": "1 kernel inch preserved",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.9287
+    },
+    {
+      "Group": "fbx-dmx",
+      "Name": "\u003E4 weights normalized to top 4",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 4.7122
+    },
+    {
+      "Group": "fbx-dmx",
+      "Name": "static mesh export without rig",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 5.614
+    },
+    {
+      "Group": "fbx-dmx",
+      "Name": "optional DMX model write",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3475
+    },
+    {
+      "Group": "fbx-dmx",
+      "Name": "optional DMX animation clip export with sampled poses",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 4.5434
+    },
+    {
+      "Group": "fbx-dmx",
+      "Name": "overwrite policy respected",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.6621
+    },
+    {
+      "Group": "fbx-dmx",
+      "Name": "export does not cull bones exceeding 220 display limit",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 34.0495
+    },
+    {
+      "Group": "clip-blend",
+      "Name": "weight 0 returns exact base pose",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.6812
+    },
+    {
+      "Group": "clip-blend",
+      "Name": "weight 1 returns exact target pose",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1098
+    },
+    {
+      "Group": "clip-blend",
+      "Name": "weight 0.5 interpolates linearly in translation and slerp in rotation",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3806
+    },
+    {
+      "Group": "clip-blend",
+      "Name": "antipodal quaternions blend smoothly along shortest arc",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2821
+    },
+    {
+      "Group": "clip-blend",
+      "Name": "additive delta from reference pose",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2858
+    },
+    {
+      "Group": "clip-blend",
+      "Name": "bone masking: masked bones blend, unmasked stay base",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 3.2065
+    },
+    {
+      "Group": "clip-blend",
+      "Name": "unkeyed tracks fallback to reference/bind pose",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.5635
+    },
+    {
+      "Group": "clip-blend",
+      "Name": "looping vs one-shot crossfade evaluation",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.5326
+    },
+    {
+      "Group": "clip-blend",
+      "Name": "scale additive identity",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1333
+    },
+    {
+      "Group": "clip-blend",
+      "Name": "different frame rates and crossfade duration 0",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2621
+    },
+    {
+      "Group": "clip-blend",
+      "Name": "underlying clips and tracks are not mutated",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3211
+    },
+    {
+      "Group": "clip-blend",
+      "Name": "allocation measurement zero alloc in warm evaluator loop",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 10.1111
+    },
+    {
+      "Group": "timeline_event",
+      "Name": "events dispatched when frame crosses interval (prev, curr]",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 3.4467
+    },
+    {
+      "Group": "timeline_event",
+      "Name": "events on exact boundary fired",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2404
+    },
+    {
+      "Group": "timeline_event",
+      "Name": "two events on same frame fire in stable order",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.4503
+    },
+    {
+      "Group": "timeline_event",
+      "Name": "skipped frames over multiple events fires all intermediate events",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1644
+    },
+    {
+      "Group": "timeline_event",
+      "Name": "loop wrap fires events before wrap and after wrap",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2129
+    },
+    {
+      "Group": "timeline_event",
+      "Name": "seeking backward emits no forward play events",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1192
+    },
+    {
+      "Group": "timeline_event",
+      "Name": "pause and resume at same time does not re-fire",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1588
+    },
+    {
+      "Group": "timeline_event",
+      "Name": "consumer exception does not crash dispatcher",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.5782
+    },
+    {
+      "Group": "timeline_event",
+      "Name": "multiple loop wraps in one huge delta step",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.167
+    },
+    {
+      "Group": "timeline_event",
+      "Name": "clip replacement resets playhead and emits no spurious events",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.9556
+    },
+    {
+      "Group": "timeline_event",
+      "Name": "explicit replay mode on forward seek",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1246
+    },
+    {
+      "Group": "timeline_event",
+      "Name": "json and rig anim file morph events and marks parsed",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.9762
+    },
+    {
+      "Group": "distribution-inventory",
+      "Name": "inventory reports all required runtime native libraries (EGL, GL, SDL)",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.5877
+    },
+    {
+      "Group": "distribution-inventory",
+      "Name": "package license audit validates MIT / project-owned licenses",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.3542
+    },
+    {
+      "Group": "distribution-inventory",
+      "Name": "kernel build-time vs runtime independence verified",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.5423
+    },
+    {
+      "Group": "distribution-inventory",
+      "Name": "system compatibility check (Linux x64 \u002B GL 4.6 capability)",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 2.214
+    },
+    {
+      "Group": "distribution-inventory",
+      "Name": "portable project path resolution verified without relying on machine-specific roots",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.8959
+    },
+    {
+      "Group": "distribution-inventory",
+      "Name": "packaging inventory markdown exists and contains documented sections",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2393
+    },
+    {
+      "Group": "distribution-inventory",
+      "Name": "no unapproved proprietary asset dependencies found in manifest inventory",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.5703
+    },
+    {
+      "Group": "distribution-inventory",
+      "Name": "diagnostic output when a required system library is missing",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2224
+    },
+    {
+      "Group": "deformation-invariant",
+      "Name": "hierarchical rig with rotated nonuniformly scaled parents and unkeyed bones matches kernel at fractional frames",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.0699
+    },
+    {
+      "Group": "deformation-invariant",
+      "Name": "antipodal quaternion sign equivalence min(|q1-q2|, |q1\u002Bq2|) \u003C eps",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3676
+    },
+    {
+      "Group": "deformation-invariant",
+      "Name": "multiple roots and disconnected hierarchies evaluate identically to kernel forward kinematics",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3062
+    },
+    {
+      "Group": "deformation-invariant",
+      "Name": "boundary clips: zero-frame and one-frame clips evaluate without NaN or out-of-bounds",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3797
+    },
+    {
+      "Group": "deformation-invariant",
+      "Name": "singular bind transform rejection for zero-scale, non-invertible axis, and inherited singular parent",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.4476
+    },
+    {
+      "Group": "deformation-invariant",
+      "Name": "over-capacity skeleton (\u003E220 bones) is rejected with NotSupportedException without clamping bone IDs",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.337
+    },
+    {
+      "Group": "deformation-invariant",
+      "Name": "skinning palette agreement between CPU Linear Blend Skinning and GPU matrix palette across animated frames",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.0336
+    },
+    {
+      "Group": "deformation-invariant",
+      "Name": "top-four skin weight pruning and normalization guarantees partition of unity and detects invalid weights",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 3.5562
+    },
+    {
+      "Group": "deformation-invariant",
+      "Name": "animated triangle picking follows deformed mesh across time and rejects missed rays",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3647
+    },
+    {
+      "Group": "deformation-invariant",
+      "Name": "bind pose and original source data remain completely immutable across animation scrub, posing, and IK",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 2.3122
+    },
+    {
+      "Group": "deformation-invariant",
+      "Name": "seeded deterministic randomness: randomized multi-bone poses emit failing seed and input on discrepancy",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.8896
+    },
+    {
+      "Group": "morph-eval",
+      "Name": "weights 0, 0.5, 1.0 produce exact linear delta scaling",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.6457
+    },
+    {
+      "Group": "morph-eval",
+      "Name": "two concurrent morph targets sum deltas correctly",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1818
+    },
+    {
+      "Group": "morph-eval",
+      "Name": "UV duplicate vertices receive identical morph offsets",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.7476
+    },
+    {
+      "Group": "morph-eval",
+      "Name": "keyed vs event vs driver precedence order",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.3341
+    },
+    {
+      "Group": "morph-eval",
+      "Name": "pose-space corrective activates at bent joint angle",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.418
+    },
+    {
+      "Group": "morph-eval",
+      "Name": "base geometry remains immutable after evaluation",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2125
+    },
+    {
+      "Group": "morph-eval",
+      "Name": "reset / zero weights restores base mesh exactly",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2517
+    },
+    {
+      "Group": "morph-eval",
+      "Name": "missing morph target handled safely without NaNs",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2501
+    },
+    {
+      "Group": "morph-eval",
+      "Name": "weight bounds clamp vs overdrive policy",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0937
+    },
+    {
+      "Group": "morph-eval",
+      "Name": "active target limit and overflow rejection",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1491
+    },
+    {
+      "Group": "morph-eval",
+      "Name": "bind space morph before skinning order",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2865
+    },
+    {
+      "Group": "morph-edit",
+      "Name": "move stroke writes deltas and preview applies them at weight",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 8.6367
+    },
+    {
+      "Group": "morph-edit",
+      "Name": "falloff, strength and move-from-stroke-start",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.6035
+    },
+    {
+      "Group": "morph-edit",
+      "Name": "inflate pushes along the vertex normal",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3985
+    },
+    {
+      "Group": "morph-edit",
+      "Name": "smooth relaxes a spike toward neighbours",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.4495
+    },
+    {
+      "Group": "morph-edit",
+      "Name": "combined influence sums linearly and bake matches the mix",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.3091
+    },
+    {
+      "Group": "morph-edit",
+      "Name": "x-mirror stroke is exactly symmetric",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 4.3555
+    },
+    {
+      "Group": "morph-edit",
+      "Name": "erase restores neutral exactly",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.8278
+    },
+    {
+      "Group": "morph-edit",
+      "Name": "each stroke and op is one exact undo/redo entry",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.6959
+    },
+    {
+      "Group": "morph-edit",
+      "Name": "rename keeps the active target and stroke undo by object",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3246
+    },
+    {
+      "Group": "morph-edit",
+      "Name": "seam corners and split vertices stay consistent",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 4.7426
+    },
+    {
+      "Group": "morph-edit",
+      "Name": "export: sculpted morph reaches FBX and DMX through the adapters",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 27.2257
+    },
+    {
+      "Group": "morph-edit",
+      "Name": "invalid inputs are rejected",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 3.3156
+    },
+    {
+      "Group": "part_track",
+      "Name": "nested part composition (child part follows parent part)",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 10.4647
+    },
+    {
+      "Group": "part_track",
+      "Name": "follow-bone part follows animated bone",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3541
+    },
+    {
+      "Group": "part_track",
+      "Name": "duplicate part names on different objects remain distinct",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3506
+    },
+    {
+      "Group": "part_track",
+      "Name": "circular dependency detection returns safe diagnostic",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2627
+    },
+    {
+      "Group": "part_track",
+      "Name": "object-space IK goal aligns with evaluated part transform",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.4454
+    },
+    {
+      "Group": "part_track",
+      "Name": "camera pose and FOV interpolation",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.501
+    },
+    {
+      "Group": "part_track",
+      "Name": "camera track playback does not modify orbit camera state",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2993
+    },
+    {
+      "Group": "part_track",
+      "Name": "missing bone or part target handled safely",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.4183
+    },
+    {
+      "Group": "part_track",
+      "Name": "camera hermite cubic FOV curve and default fallback",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 2.381
+    },
+    {
+      "Group": "part_track",
+      "Name": "json camera definition parsing and opt-in orbit application",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.9665
+    },
+    {
+      "Group": "constraint-parity",
+      "Name": "constraint audit correctly categorizes look-at, copy transform, IK, and springs",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 5.1632
+    },
+    {
+      "Group": "constraint-parity",
+      "Name": "secondary spring simulation advances with deterministic fixed time steps",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 3.2519
+    },
+    {
+      "Group": "constraint-parity",
+      "Name": "spring simulation resets cleanly on seek or clip reload",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.713
+    },
+    {
+      "Group": "constraint-parity",
+      "Name": "look-at constraint points bone towards target position",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.7158
+    },
+    {
+      "Group": "constraint-parity",
+      "Name": "copy rotation constraint transfers orientation with weight scaling",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2563
+    },
+    {
+      "Group": "constraint-parity",
+      "Name": "unsupported constraint in rig reports clear diagnostic rather than crashing",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 4.6323
+    },
+    {
+      "Group": "constraint-parity",
+      "Name": "constraints documentation markdown file exists and has required sections",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3274
+    },
+    {
+      "Group": "constraint-parity",
+      "Name": "spring stiffness and damping parameters alter settling response deterministically",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 9.3741
+    },
+    {
+      "Group": "fbx_anim_feasibility",
+      "Name": "feasibility audit accurately reports supported subset vs unsupported features",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 5.3424
+    },
+    {
+      "Group": "fbx_anim_feasibility",
+      "Name": "golden reference fixture verifies parent-child rotation composition",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.4372
+    },
+    {
+      "Group": "fbx_anim_feasibility",
+      "Name": "time conversion between FBX time and kernel frames",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.8566
+    },
+    {
+      "Group": "fbx_anim_feasibility",
+      "Name": "Euler rotation order conversion to Quat",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.141
+    },
+    {
+      "Group": "fbx_anim_feasibility",
+      "Name": "unsupported layered animation produces structured error",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 2.511
+    },
+    {
+      "Group": "fbx_anim_feasibility",
+      "Name": "unit scale conversion (e.g. cm to inch) preserves physical dimensions",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.9023
+    },
+    {
+      "Group": "fbx_anim_feasibility",
+      "Name": "missing target bone diagnosed cleanly",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2788
+    },
+    {
+      "Group": "fbx_anim_feasibility",
+      "Name": "conversion produces valid RigAnimFile data",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3862
+    },
+    {
+      "Group": "fbx_anim_feasibility",
+      "Name": "raw FBX node tree audit detects unbaked pivots and custom rotation orders",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.6008
+    },
+    {
+      "Group": "retopo",
+      "Name": "null input throws",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 3.0891
+    },
+    {
+      "Group": "retopo",
+      "Name": "empty mesh stays empty",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.1676
+    },
+    {
+      "Group": "retopo",
+      "Name": "single triangle stays triangle",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.8661
+    },
+    {
+      "Group": "retopo",
+      "Name": "2x2 grid pairs into quads",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.0008
+    },
+    {
+      "Group": "retopo",
+      "Name": "uv seam prevents pairing",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1852
+    },
+    {
+      "Group": "retopo",
+      "Name": "input unchanged",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1273
+    },
+    {
+      "Group": "retopo",
+      "Name": "materials respected",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1165
+    },
+    {
+      "Group": "retopo",
+      "Name": "deterministic repeat",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1326
+    },
+    {
+      "Group": "retopo",
+      "Name": "metrics: paired quad is manifold with no boundary",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1511
+    },
+    {
+      "Group": "retopo",
+      "Name": "metrics: single triangle has boundary edges",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1132
+    },
+    {
+      "Group": "retopo",
+      "Name": "n-gon input is triangulated not thrown",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1311
+    },
+    {
+      "Group": "remesh",
+      "Name": "probe kernel quadremesh",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 5945.541
+    },
+    {
+      "Group": "cloth-sim",
+      "Name": "null mesh throws",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.4054
+    },
+    {
+      "Group": "cloth-sim",
+      "Name": "gravity moves unpinned vertex",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 4.2264
+    },
+    {
+      "Group": "cloth-sim",
+      "Name": "floor collision",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1462
+    },
+    {
+      "Group": "cloth-sim",
+      "Name": "pinned vertex stays",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0661
+    },
+    {
+      "Group": "cloth-sim",
+      "Name": "floor constrains",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.089
+    },
+    {
+      "Group": "cloth-sim",
+      "Name": "impulse moves vertex",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1196
+    },
+    {
+      "Group": "cloth-sim",
+      "Name": "reset restores",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1405
+    },
+    {
+      "Group": "cloth-sim",
+      "Name": "toMesh preserves count",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2149
+    },
+    {
+      "Group": "cloth-sim",
+      "Name": "self-collision separates overlapping vertices",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.3213
+    },
+    {
+      "Group": "cloth-sim",
+      "Name": "pressure inflates closed-ish mesh",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3944
+    },
+    {
+      "Group": "texture-paint",
+      "Name": "null image throws",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.4214
+    },
+    {
+      "Group": "texture-paint",
+      "Name": "null brush throws",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1707
+    },
+    {
+      "Group": "texture-paint",
+      "Name": "nonpositive radius throws",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0855
+    },
+    {
+      "Group": "texture-paint",
+      "Name": "paints center pixel",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0707
+    },
+    {
+      "Group": "texture-paint",
+      "Name": "out of bounds safe",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0323
+    },
+    {
+      "Group": "texture-paint",
+      "Name": "default white",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0244
+    },
+    {
+      "Group": "gpu-cloth",
+      "Name": "gpu step matches cpu solver",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 102.6143
+    },
+    {
+      "Group": "gpu-cloth",
+      "Name": "upload download roundtrip",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 3.7733
+    },
+    {
+      "Group": "knife",
+      "Name": "null input throws",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.3169
+    },
+    {
+      "Group": "knife",
+      "Name": "degenerate normal throws",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1581
+    },
+    {
+      "Group": "knife",
+      "Name": "non-crossing face kept",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2263
+    },
+    {
+      "Group": "knife",
+      "Name": "crossing face counted",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.398
+    },
+    {
+      "Group": "shrinkwrap",
+      "Name": "null source throws",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.4632
+    },
+    {
+      "Group": "shrinkwrap",
+      "Name": "null target throws",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0765
+    },
+    {
+      "Group": "shrinkwrap",
+      "Name": "moves vertices to target",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1721
+    },
+    {
+      "Group": "shrinkwrap",
+      "Name": "max distance respected",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0943
+    },
+    {
+      "Group": "shrinkwrap",
+      "Name": "input unchanged",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0607
+    },
+    {
+      "Group": "shrinkwrap",
+      "Name": "wrap-to-surface moves to closest point",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.898
+    },
+    {
+      "Group": "shrinkwrap",
+      "Name": "offset pushes along surface normal",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1465
+    },
+    {
+      "Group": "shrinkwrap",
+      "Name": "normal projection hits target",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2872
+    },
+    {
+      "Group": "shrinkwrap",
+      "Name": "null source throws wrap-to-surface",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0806
+    },
+    {
+      "Group": "data-transfer",
+      "Name": "null source throws",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.7724
+    },
+    {
+      "Group": "data-transfer",
+      "Name": "null target throws",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0772
+    },
+    {
+      "Group": "data-transfer",
+      "Name": "transfers skin weights by nearest vertex",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3817
+    },
+    {
+      "Group": "data-transfer",
+      "Name": "max distance skips",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.137
+    },
+    {
+      "Group": "data-transfer",
+      "Name": "input target unchanged",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0779
+    },
+    {
+      "Group": "data-transfer",
+      "Name": "transfers UVs by nearest vertex",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.8527
+    },
+    {
+      "Group": "polypaint",
+      "Name": "null source throws",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.4565
+    },
+    {
+      "Group": "polypaint",
+      "Name": "null brush throws",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0766
+    },
+    {
+      "Group": "polypaint",
+      "Name": "non-positive radius throws",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0984
+    },
+    {
+      "Group": "polypaint",
+      "Name": "paints vertex within radius",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1828
+    },
+    {
+      "Group": "polypaint",
+      "Name": "vertex outside radius unchanged",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.078
+    },
+    {
+      "Group": "polypaint",
+      "Name": "input unchanged",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0556
+    },
+    {
+      "Group": "uv-edit",
+      "Name": "null throws",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.5747
+    },
+    {
+      "Group": "uv-edit",
+      "Name": "negative iterations throws",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1317
+    },
+    {
+      "Group": "uv-edit",
+      "Name": "pinned vertex unchanged",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2068
+    },
+    {
+      "Group": "uv-edit",
+      "Name": "zero iterations no change",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1138
+    },
+    {
+      "Group": "uv-seam",
+      "Name": "null source throws",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.745
+    },
+    {
+      "Group": "uv-seam",
+      "Name": "null edges throws",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1112
+    },
+    {
+      "Group": "uv-seam",
+      "Name": "seam duplicates vertex",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2825
+    },
+    {
+      "Group": "uv-seam",
+      "Name": "no seam no change",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.145
+    },
+    {
+      "Group": "uv-seam",
+      "Name": "input unchanged",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1232
+    },
+    {
+      "Group": "dyntopo",
+      "Name": "null throws",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.5924
+    },
+    {
+      "Group": "dyntopo",
+      "Name": "null options throws",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0779
+    },
+    {
+      "Group": "dyntopo",
+      "Name": "nonpositive radius throws",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1145
+    },
+    {
+      "Group": "dyntopo",
+      "Name": "subdivides long edge within brush",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2171
+    },
+    {
+      "Group": "dyntopo",
+      "Name": "inflate moves vertices",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.5404
+    },
+    {
+      "Group": "dyntopo",
+      "Name": "flatten adjusts y",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0638
+    },
+    {
+      "Group": "dyntopo",
+      "Name": "sculpt null throws",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0862
+    },
+    {
+      "Group": "dyntopo",
+      "Name": "input unchanged",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1109
+    },
+    {
+      "Group": "packaging",
+      "Name": "packaging script exists and is executable",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3727
+    },
+    {
+      "Group": "packaging",
+      "Name": "packaging script successfully stages files to a custom path (with spaces supported)",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 7233.4533
+    },
+    {
+      "Group": "packaging",
+      "Name": "staged directory contains main executable, runtime DLLs, and launcher script",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2406
+    },
+    {
+      "Group": "packaging",
+      "Name": "build-info.json manifest contains version, timestamp, and target architecture",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 6.9078
+    },
+    {
+      "Group": "packaging",
+      "Name": "archive creation produces valid tar.gz and matching SHA256 checksum",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 201.4637
+    },
+    {
+      "Group": "packaging",
+      "Name": "bundled sample project is present and valid",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.9198
+    },
+    {
+      "Group": "packaging",
+      "Name": "launcher script does not require dotnet SDK on path",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 51.2391
+    },
+    {
+      "Group": "packaging",
+      "Name": "sensitive files, caches, and developer paths excluded from package",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.8474
+    },
+    {
+      "Group": "packaging",
+      "Name": "documentation and capability list present in distribution package",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1171
+    },
+    {
+      "Group": "installed-artifact",
+      "Name": "smoke script exists and installed archive renders",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 10895.8866
+    },
+    {
+      "Group": "installed-artifact",
+      "Name": "native clip and bad input have recorded diagnostics",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.182
+    },
+    {
+      "Group": "installed-artifact",
+      "Name": "repeat capture is identical and installation stays untouched",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1674
+    },
+    {
+      "Group": "material-gpu",
+      "Name": "corner UVs preserve a shared-position seam and layout offsets",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.4983
+    },
+    {
+      "Group": "material-gpu",
+      "Name": "same filename in separate roots resolves independent pixels",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.7096
+    },
+    {
+      "Group": "material-gpu",
+      "Name": "windowless renderer samples asymmetric sRGB albedo and releases textures",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 671.0935
+    },
+    {
+      "Group": "performance-lifecycle",
+      "Name": "same-thread warmed allocation counter and raw samples",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.1665
+    },
+    {
+      "Group": "performance-lifecycle",
+      "Name": "guardrail refuses unlike workloads and distinguishes restore from rebuild",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 2.7395
+    },
+    {
+      "Group": "performance-lifecycle",
+      "Name": "real source parse rebuild extraction and animation stages persist raw report",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 10.3148
+    },
+    {
+      "Group": "performance-lifecycle",
+      "Name": "repeated snapshot swap, stale rejection, dispose and failed loader recovery",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 4.0705
+    },
+    {
+      "Group": "performance-lifecycle",
+      "Name": "hardware EGL upload, completion and resource release",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 5.6923
+    },
+    {
+      "Group": "live-ik",
+      "Name": "kernel parity and warmed allocations",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 62.0495
+    },
+    {
+      "Group": "live-ik",
+      "Name": "unsupported solver fallback",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 2.4441
+    },
+    {
+      "Group": "live-ik",
+      "Name": "stacked constraints and kernel baseline",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 6.5397
+    },
+    {
+      "Group": "live-ik",
+      "Name": "invalid frame and empty goals",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3415
+    },
+    {
+      "Group": "live-ik",
+      "Name": "player Step warm fast path and fallback",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 24.5325
+    },
+    {
+      "Group": "hair",
+      "Name": "gravity pulls strand down",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.745
+    },
+    {
+      "Group": "hair",
+      "Name": "collision keeps outside body",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2048
+    },
+    {
+      "Group": "hair",
+      "Name": "deterministic repeated step",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1652
+    },
+    {
+      "Group": "hair",
+      "Name": "cut truncates strand",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2408
+    },
+    {
+      "Group": "hair",
+      "Name": "clump aligns roots",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2784
+    },
+    {
+      "Group": "hair",
+      "Name": "wind moves strand",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1073
+    },
+    {
+      "Group": "hair",
+      "Name": "export curves",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.5152
+    },
+    {
+      "Group": "hair",
+      "Name": "substeps runs",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.099
+    },
+    {
+      "Group": "hair",
+      "Name": "turbulence moves strand",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1292
+    },
+    {
+      "Group": "hair",
+      "Name": "vortex moves strand",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1177
+    },
+    {
+      "Group": "hdr",
+      "Name": "fragment writes linear hdr (no in-shader tone map)",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1184
+    },
+    {
+      "Group": "hdr",
+      "Name": "no in-shader bloom approximation remains",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.062
+    },
+    {
+      "Group": "hdr",
+      "Name": "the lit pass stays linear: no encode, no white balance, no view transform",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0729
+    },
+    {
+      "Group": "hdr",
+      "Name": "exactly one display encode, and it is the real sRGB transfer function",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1327
+    },
+    {
+      "Group": "hdr",
+      "Name": "white balance is neutral at D65 and separates warm from cool",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2492
+    },
+    {
+      "Group": "hdr",
+      "Name": "CLI colour settings preserve defaults and validate ranges",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.006
+    },
+    {
+      "Group": "hdr",
+      "Name": "hardware EGL: AgX maps a linear ramp monotonically and matches Blender\u0027s grey",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 10.3415
+    },
+    {
+      "Group": "hdr",
+      "Name": "hardware EGL: emitter above 1.0 blooms with a measurable, finite halo",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 13.8045
+    },
+    {
+      "Group": "hdr",
+      "Name": "hardware EGL: bright gradient clips less than the LDR encode",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 5.3055
+    },
+    {
+      "Group": "hdr",
+      "Name": "hardware EGL: white balance reaches the display stage and keeps exposure",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 6.3217
+    },
+    {
+      "Group": "hdr",
+      "Name": "hardware EGL: the shared renderer applies the view transform and white balance",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 19.4377
+    },
+    {
+      "Group": "render-architecture",
+      "Name": "pass order is declared once and validated",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 2.5084
+    },
+    {
+      "Group": "render-architecture",
+      "Name": "hardware EGL: render targets resize and dispose cleanly; Draw runs the declared order",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 37.6656
+    },
+    {
+      "Group": "two-sided",
+      "Name": "shader has no viewer-facing normal flip and uses rasterised facing",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1066
+    },
+    {
+      "Group": "two-sided",
+      "Name": "vmat F_RENDER_BACKFACES selects double-sided; default stays single-sided",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.8564
+    },
+    {
+      "Group": "two-sided",
+      "Name": "Survey winding agrees with authored normals (gl_FrontFacing is meaningful)",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 674.0577
+    },
+    {
+      "Group": "two-sided",
+      "Name": "hardware EGL: closed mesh seen from inside is not lit as its exterior",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 18.6969
+    },
+    {
+      "Group": "two-sided",
+      "Name": "hardware EGL: mirrored-UV twin keeps the normal-map response, front and back",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 18.9348
+    },
+    {
+      "Group": "two-sided",
+      "Name": "hardware EGL: nonuniformly scaled bone does not skew the normal",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 19.3195
+    },
+    {
+      "Group": "ibl-gpu",
+      "Name": "gradient diffuse, rough metal broadening and dielectric Fresnel",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 897.593
+    },
+    {
+      "Group": "ibl-gpu",
+      "Name": "HDR file publication, invalid replacement and GL texture lifecycle",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1515.3125
+    },
+    {
+      "Group": "ibl",
+      "Name": "specular cube has explicit roughness mip chain and GL face axes",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.377
+    },
+    {
+      "Group": "ibl",
+      "Name": "HDR flat and RLE preserve linear radiance",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2336
+    },
+    {
+      "Group": "ibl",
+      "Name": "HDR truncation invalid runs and orientation rejected",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2632
+    },
+    {
+      "Group": "ibl",
+      "Name": "equirect sampler wraps seam and clamps poles",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 4.0862
+    },
+    {
+      "Group": "ibl",
+      "Name": "GGX prefilter conserves constant sky and broadens bright patch",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.7405
+    },
+    {
+      "Group": "ibl",
+      "Name": "BRDF mirror limit Fresnel and LUT finite energy",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 13.9769
+    },
+    {
+      "Group": "ibl",
+      "Name": "constant HDR sky integrates to pi radiance",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.9586
+    },
+    {
+      "Group": "ibl",
+      "Name": "gradient agrees with independent Monte Carlo reference",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 22.3338
+    },
+    {
+      "Group": "ibl",
+      "Name": "invalid bake preserves previous environment",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 2.5226
+    },
+    {
+      "Group": "ibl",
+      "Name": "baker starts without environment",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0484
+    },
+    {
+      "Group": "ibl",
+      "Name": "procedural fallback marks environment",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 2.3011
+    },
+    {
+      "Group": "ibl",
+      "Name": "cosine weight clamps negative",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.052
+    },
+    {
+      "Group": "ss",
+      "Name": "ssao pass toggles",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0375
+    },
+    {
+      "Group": "ss",
+      "Name": "ssr pass toggles",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.0664
+    },
+    {
+      "Group": "aa",
+      "Name": "taa pass toggles",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.029
+    },
+    {
+      "Group": "fbx_clip_conversion",
+      "Name": "golden local and world frames and fractional pose",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 3.4474
+    },
+    {
+      "Group": "fbx_clip_conversion",
+      "Name": "source rate and asymmetric unit axis conversion",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2212
+    },
+    {
+      "Group": "fbx_clip_conversion",
+      "Name": "explicit take selection and missing target",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.4358
+    },
+    {
+      "Group": "fbx_clip_conversion",
+      "Name": "reject layers pivots unsupported cubic and duplicate targets",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2714
+    },
+    {
+      "Group": "fbx_clip_conversion",
+      "Name": "stepped channel and off-grid resampling report",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2555
+    },
+    {
+      "Group": "fbx_clip_conversion",
+      "Name": "save reopen refuses overwrite and does not alter input",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.0291
+    },
+    {
+      "Group": "fbx_clip_conversion",
+      "Name": "raw node tree cannot fabricate animation clip",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 4.6627
+    },
+    {
+      "Group": "fbx_clip_conversion",
+      "Name": "owned binary FBX curves play through headless desktop and retain source",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 14.0186
+    },
+    {
+      "Group": "fbx_clip_conversion",
+      "Name": "raw binary explicit takes missing bone and centimetre axes",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.894
+    },
+    {
+      "Group": "fbx_clip_conversion",
+      "Name": "binary FBX rejects cubic curves and unsupported offsets",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.2017
+    },
+    {
+      "Group": "material-channel",
+      "Name": "bake tangents split mirrored UVs and survive degenerate UVs",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.5644
+    },
+    {
+      "Group": "material-channel",
+      "Name": "reject unsupported UV set and wrong channel color space before GPU upload",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.9056
+    },
+    {
+      "Group": "material-channel",
+      "Name": "hardware EGL probes all maps, fallbacks, convention and reload",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 23.4867
+    },
+    {
+      "Group": "material-channel",
+      "Name": "nonuniform bone palette transforms mapped tangent frame",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 17.5381
+    },
+    {
+      "Group": "material-channel",
+      "Name": "UV tiling and offset change rendered pixels",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 29.6829
+    },
+    {
+      "Group": "vmdl",
+      "Name": "ModelDoc reader finds the mesh and the material bindings",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 9.3694
+    },
+    {
+      "Group": "vmdl",
+      "Name": "ModelDoc reader survives a file it cannot read",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2033
+    },
+    {
+      "Group": "vmdl",
+      "Name": "material name spellings cover the importer\u0027s own rules",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.5757
+    },
+    {
+      "Group": "vmdl",
+      "Name": "the ModelDoc that draws a mesh is found by path, not by file name",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3404
+    },
+    {
+      "Group": "gpu-particle",
+      "Name": "compute shader updates positions and keeps particles in bounds",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 4.4898
+    },
+    {
+      "Group": "gpu-particle",
+      "Name": "zero particles does not crash",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 2.6963
+    },
+    {
+      "Group": "volume",
+      "Name": "density falls off from a sphere volume\u0027s centre and multiplicative media clear it",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.7799
+    },
+    {
+      "Group": "volume",
+      "Name": "hardware EGL: a fog sphere scatters the key light, shadowed fog is darker, empty grid draws nothing",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 8.4355
+    },
+    {
+      "Group": "survey-material-map",
+      "Name": "head and suit aliases remain source-scoped",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 2.1893
+    },
+    {
+      "Group": "survey-material-map",
+      "Name": "read-only relative references survive project move and diagnose effects",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.8471
+    },
+    {
+      "Group": "survey-material-map",
+      "Name": "non-Survey Effigy slot retains ordinary fallback",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1314
+    },
+    {
+      "Group": "survey-material-map",
+      "Name": "source ModelDoc remaps and texture paths inventory",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 606.4339
+    },
+    {
+      "Group": "viewport-handle",
+      "Name": "draw geometry and hit share typed dimensions",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 3.4831
+    },
+    {
+      "Group": "viewport-handle",
+      "Name": "overlay emits only typed selectable shape vertices",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 3.7362
+    },
+    {
+      "Group": "viewport-handle",
+      "Name": "priority over orbit, one undo entry and palette undo",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.4431
+    },
+    {
+      "Group": "viewport-handle",
+      "Name": "logical viewport offset and framebuffer DPI independence",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2449
+    },
+    {
+      "Group": "viewport-handle",
+      "Name": "escape focus loss reload and close cancel exact state",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2687
+    },
+    {
+      "Group": "viewport-handle",
+      "Name": "auto-key off is an unkeyed override and on writes keys atomically",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.5986
+    },
+    {
+      "Group": "viewport-handle",
+      "Name": "IK target ray drag solves end effector and undoes",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.2104
+    },
+    {
+      "Group": "viewport-handle",
+      "Name": "rotation ring angle unwrap and degree snapping",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3364
+    },
+    {
+      "Group": "viewport-handle",
+      "Name": "source revision invalidation and unstable ray leave clean capture",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1879
+    },
+    {
+      "Group": "viewport-handle",
+      "Name": "disabled snap continuous, invalid snap rejected before capture",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1967
+    },
+    {
+      "Group": "resource-budget",
+      "Name": "budget records decoded bytes, batch count and stage timings",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 2.747
+    },
+    {
+      "Group": "resource-budget",
+      "Name": "shared images count once and unique maps are not double-counted",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1669
+    },
+    {
+      "Group": "resource-budget",
+      "Name": "hardware upload records GPU storage and reload returns to baseline",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 23.2626
+    },
+    {
+      "Group": "pose-agreement",
+      "Name": "skinning picking and shadow share one posed mesh after the layout change",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 16.6678
+    },
+    {
+      "Group": "cross-field",
+      "Name": "null mesh throws",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.5486
+    },
+    {
+      "Group": "cross-field",
+      "Name": "compute produces frames",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.418
+    },
+    {
+      "Group": "cross-field",
+      "Name": "smooth keeps unit normals",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.464
+    },
+    {
+      "Group": "cross-field",
+      "Name": "vertex curvature positive on sphere",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.3676
+    },
+    {
+      "Group": "cross-field",
+      "Name": "optimize MIQ sets rotations",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.5923
+    },
+    {
+      "Group": "cross-field",
+      "Name": "trace streamlines returns paths",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.3416
+    },
+    {
+      "Group": "egl-image",
+      "Name": "flat-material-lighting-and-shadow",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 44.0221
+    },
+    {
+      "Group": "auto-weight",
+      "Name": "two-bone cylinder: each bone dominant near itself",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 33.6588
+    },
+    {
+      "Group": "auto-weight",
+      "Name": "two-bone cylinder: smooth monotone transition at joint",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 19.249
+    },
+    {
+      "Group": "auto-weight",
+      "Name": "weights sum to 1 and validate",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 10.7262
+    },
+    {
+      "Group": "auto-weight",
+      "Name": "max-influence cap respected and renormalised",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 81.5858
+    },
+    {
+      "Group": "auto-weight",
+      "Name": "disconnected island falls back and is reported",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 50.0572
+    },
+    {
+      "Group": "auto-weight",
+      "Name": "refine prunes min weight and renormalises",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.5125
+    },
+    {
+      "Group": "auto-weight",
+      "Name": "apply is one undoable command restoring exact prior skin",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 20.7975
+    },
+    {
+      "Group": "auto-weight",
+      "Name": "export: FBX round trip and DMX carry the auto weights",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 24.896
+    },
+    {
+      "Group": "auto-weight",
+      "Name": "invalid inputs are rejected",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.9579
+    },
+    {
+      "Group": "auto-weight",
+      "Name": "timing: 4-bone 32-segment cylinder solve",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 53.6976
+    },
+    {
+      "Group": "weight-paint",
+      "Name": "paint sets weight on vertex",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 6.1418
+    },
+    {
+      "Group": "weight-paint",
+      "Name": "add/subtract with smooth falloff",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.5296
+    },
+    {
+      "Group": "weight-paint",
+      "Name": "subtract on single-influence vertex is reported, not a command",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.1944
+    },
+    {
+      "Group": "weight-paint",
+      "Name": "normalize sums to 1 with locked bone preserved",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.7647
+    },
+    {
+      "Group": "weight-paint",
+      "Name": "blur smooths a hard edge and keeps sums",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.8818
+    },
+    {
+      "Group": "weight-paint",
+      "Name": "mirror X paints the L/R counterpart",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 2.6152
+    },
+    {
+      "Group": "weight-paint",
+      "Name": "undo/redo restores exact weights; cancel leaves no entry",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.5645
+    },
+    {
+      "Group": "weight-paint",
+      "Name": "fill and linear gradient set values; colours follow the ramp",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 0.9271
+    },
+    {
+      "Group": "weight-paint",
+      "Name": "paint on auto-weighted cylinder; history interleaves with auto-weight",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 10.0887
+    },
+    {
+      "Group": "weight-paint",
+      "Name": "invalid inputs are rejected",
+      "Status": "PASS",
+      "Reason": null,
+      "Milliseconds": 1.627
+    }
+  ]
+}

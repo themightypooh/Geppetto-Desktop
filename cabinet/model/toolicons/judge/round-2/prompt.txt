@@ -1,0 +1,137 @@
+You are judging icons for a 3D modelling app's tool wheel. Each icon is pixel art baked from a small
+3D model. They sit on a dark steel wheel at 1x (the top row of each sheet); the 2x row below is the same
+icon enlarged so you can see it. Each icon is numbered and labelled with its tool; below is what each
+tool does. Judge how well each icon represents its tool.
+
+For every numbered icon, score each rubric category 0-10 with the evidence you actually see in the
+picture, and a concrete fix (what to change in the 3D object: add/remove/move/recolour a part). Empty
+fix only for a 10.
+
+Be strict. 9 means a modeller would get it instantly and nothing needs changing; 7 means it works but
+something is weak; 5 or less means wrong or unreadable. Do not be generous to be nice.
+
+Rubric:
+- represents (weight 3): The icon shows what this tool does: its own idea (object or action), so a modeller seeing it next to the name gets it instantly. Not a generic shape that could be any tool.
+- distinct (weight 2): It can't be confused with any other icon in the same category (shape, colour and action differ).
+- legibility (weight 2): At wheel size (the 1x row) the silhouette and the key part read clearly: nothing important is a lone pixel, thin parts survive, the red accent marks the action.
+- craft (weight 1): Clean pixel art in the chest's style: solid outline, no muddy dithering, no stray bits, well framed.
+
+## FORM
+Sheet: /home/poo/Desktop/geppetto-desktop/cabinet/model/toolicons/judge/round-2/form.png
+- #1 Primitive: adds a basic solid: box, sphere, cylinder, cone
+- #2 Blob: adds smooth shapes that melt together into one organic body
+- #3 Part: adds a ready-made mechanical part (pegs, brackets) as a body
+- #4 Sketch: draws 2D lines and shapes on paper, to build solids from later
+- #5 Profile: draws the 2D cross-section outline a solid is made from
+- #6 Spline: a smooth curve through control points
+- #7 Plane: a flat construction plane to sketch on or cut with
+- #8 Import: brings in a mesh from a file
+- #9 Body from bones: grows a body's flesh around a skeleton's bones
+
+## BUILD
+Sheet: /home/poo/Desktop/geppetto-desktop/cabinet/model/toolicons/judge/round-2/build.png
+- #10 Extrude: pulls a flat sketch straight up into a solid
+- #11 Revolve: spins a profile around an axis into a round solid (vase, bottle)
+- #12 Loft: makes a solid that blends between two or more different cross-sections
+- #13 Sweep: drags a cross-section along a path to make a tube or rail
+- #14 Boolean: subtracts / unions / intersects one solid with another
+- #15 Mirror: copies a body to the other side of a mirror plane
+- #16 Row pattern: repeats a feature in a straight row
+- #17 Circle pattern: repeats a feature around a circle
+- #18 Shell: hollows a solid out, leaving thin walls and an open face
+- #19 Hole: drills a round hole through a body
+
+## REFINE
+Sheet: /home/poo/Desktop/geppetto-desktop/cabinet/model/toolicons/judge/round-2/refine.png
+- #20 Fillet: rounds a body's sharp edges
+- #21 Chamfer: cuts a sharp edge or corner off flat at an angle
+- #22 Draft: tapers a body's walls at an angle (as for moulding)
+- #23 Trim: cuts a body along a plane and keeps one side
+- #24 Subdivide: smooths a blocky mesh by splitting its faces, sharp to smooth
+- #25 Remesh: rebuilds the surface into a fresh even mesh of polygons
+- #26 Detail: adds small surface details: rivets, panel lines, screws
+- #27 Stroke: adds a raised or carved line along the surface, like a brush stroke of clay
+
+## DEFORM
+Sheet: /home/poo/Desktop/geppetto-desktop/cabinet/model/toolicons/judge/round-2/deform.png
+- #28 Sculpt: pushes and pulls a soft surface by hand with sculpting tools
+- #29 Move: moves, rotates or scales a body (gizmo with axis arrows)
+- #30 Lattice: deforms a body by moving the points of a cage around it
+- #31 Bend: bends, twists or tapers a whole body
+- #32 Curve: makes a body follow along a curve
+- #33 Push face: pushes or pulls one face of a solid along its normal
+
+## MESH
+Sheet: /home/poo/Desktop/geppetto-desktop/cabinet/model/toolicons/judge/round-2/mesh.png
+- #34 Extrude faces: pulls selected mesh faces out into new geometry
+- #35 Inset: makes a smaller face inside a face, with a border ring
+- #36 Bevel: bevels selected mesh edges into narrow slanted faces
+- #37 Loop cut: cuts a new edge loop all the way round a mesh
+- #38 Bridge: joins two open edges / faces with new faces spanning the gap
+- #39 Symmetrize: makes one half of a mesh match the other half across the middle
+- #40 Dissolve: removes edges/vertices while keeping the surface closed
+- #41 Delete: deletes the selected mesh elements
+- #42 Mesh edit: direct mesh editing: select and move vertices, edges, faces
+- #43 Delete face: deletes one face, leaving an open hole in the mesh
+
+## CLOTH
+Sheet: /home/poo/Desktop/geppetto-desktop/cabinet/model/toolicons/judge/round-2/cloth.png
+- #44 Garment: makes clothing (a shirt etc.) that fits a body
+- #45 Fabric: turns a surface into soft draping cloth
+- #46 Padding: adds quilted padding / stuffing to clothing
+- #47 Pocket: sews a pocket with a flap onto clothing
+- #48 Hardware: adds clothing hardware: buckles, rings, rivets
+- #49 Wear: adds wear and tear to clothing: holes, frays, scuffs
+- #50 Wearer: sets the body (mannequin) that clothing is fitted on
+- #51 Fur: grows fur / hair strands over a surface
+
+## SURFACE
+Sheet: /home/poo/Desktop/geppetto-desktop/cabinet/model/toolicons/judge/round-2/surface.png
+- #52 Material: assigns a material (colour, roughness, metal) to a body
+- #53 Paint: paints colour onto a surface with a brush
+- #54 Face material: gives one face of a body its own material
+- #55 Flesh: a skin-and-flesh material for characters
+- #56 Skin: skin surface details: pores, freckles, spots
+- #57 Glow: makes part of a body emit light
+- #58 UV project: unwraps a body's surface flat into a UV map for textures
+
+## RIG
+Sheet: /home/poo/Desktop/geppetto-desktop/cabinet/model/toolicons/judge/round-2/rig.png
+- #59 Bind: binds a body's mesh to a skeleton's bones
+- #60 Shape key: a morph target: a slider that blends a body between two shapes
+- #61 Key end: ends a shape key: the slider's far stop, the target shape
+- #62 Corrective: a shape key that fixes bad bending where a joint bends (elbow, knee)
+
+## TWEAK
+Sheet: /home/poo/Desktop/geppetto-desktop/cabinet/model/toolicons/judge/round-2/tweak.png
+- #63 Set: changes a setting/parameter on an existing feature
+- #64 Remove: removes a feature from the model
+- #65 Remedy: repairs a broken mesh (holes, bad faces)
+- #66 Fix mesh: repairs a mesh: closes holes, removes loose bits, fixes normals
+
+## CHECK
+Sheet: /home/poo/Desktop/geppetto-desktop/cabinet/model/toolicons/judge/round-2/check.png
+- #67 Measure: measures a body: its size, or a point's position
+- #68 Distance: measures the distance between two points or bodies
+- #69 Symmetry: checks whether a body is the same on both sides
+- #70 Clearance: checks the gap (or overlap) between two bodies
+- #71 Topology: reports on the mesh's polygons: quads, poles, bad faces
+- #72 Section: cuts the model open on a plane to show its cross-section
+- #73 Flex: bends the model's joints to check how it deforms
+- #74 Match: compares the model with a reference picture
+- #75 Describe: writes a text description / report of the model
+
+## OUTPUT
+Sheet: /home/poo/Desktop/geppetto-desktop/cabinet/model/toolicons/judge/round-2/output.png
+- #76 Render: renders a picture of the model (a camera shot)
+- #77 Turnaround: renders the model from all round, as on a turntable
+- #78 Save: saves the model document
+- #79 Export: writes the model out to a mesh file
+- #80 Bake: bakes the model into game-ready files and texture maps
+- #81 Paint maps: writes the painted textures out as image maps
+- #82 Pivot: sets the point a part turns about (its origin)
+- #83 Rebuild: recomputes the whole model from its feature history
+
+Look at every sheet with the Read tool. Reply with ONLY this JSON (no prose), every icon number once:
+{"icons": [{"n": 1, "scores": {"represents": {"score": 0, "evidence": "", "fix": ""},
+ "distinct": {...}, "legibility": {...}, "craft": {...}}}, ...]}

@@ -1,0 +1,2 @@
+# part	model	pivot x	y	z	size x	y	z
+unfold_15	poses/unfold_15.vmdl	0	0	-0.044	5.238	4.637	0.141

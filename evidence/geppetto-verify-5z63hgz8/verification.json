@@ -1,0 +1,196 @@
+{
+  "schemaVersion": 1,
+  "mode": "required-egl",
+  "status": "PASS",
+  "createdUtc": "2026-10-20T15:59:34.999421+00:00",
+  "project": "/home/poo/Desktop/geppetto-desktop",
+  "artifacts": "/tmp/opencode/geppetto-verify-5z63hgz8",
+  "platform": "Linux-7.2.11-1-cachyos-x86_64-with-glibc2.44",
+  "python": "3.14.8 (main, Oct 13 2026, 10:33:10) [GCC 16.2.1 20260810]",
+  "fixture": "/home/poo/games/projects/deep_sentance/Assets/models/player/player_suit.fbx",
+  "requireLocalFixtures": false,
+  "stages": [
+    {
+      "name": "build",
+      "command": [
+        "dotnet",
+        "build",
+        "tests/Desktop.Tests.csproj",
+        "-c",
+        "Release",
+        "--artifacts-path",
+        "/tmp/opencode/geppetto-verify-5z63hgz8/build"
+      ],
+      "cwd": "/home/poo/Desktop/geppetto-desktop",
+      "status": "PASS",
+      "log": "/tmp/opencode/geppetto-verify-5z63hgz8/build.log",
+      "exitCode": 0,
+      "wallSeconds": 5.082789808999223
+    },
+    {
+      "name": "harness-selftests",
+      "command": [
+        "/usr/bin/python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_verification.py",
+        "-v"
+      ],
+      "cwd": "/home/poo/Desktop/geppetto-desktop",
+      "status": "PASS",
+      "log": "/tmp/opencode/geppetto-verify-5z63hgz8/harness-selftests.log",
+      "exitCode": 0,
+      "wallSeconds": 0.114051621996623
+    },
+    {
+      "name": "inventory",
+      "command": [
+        "dotnet",
+        "/tmp/opencode/geppetto-verify-5z63hgz8/build/bin/Desktop.Tests/release/Desktop.Tests.dll",
+        "--list",
+        "--survey",
+        "/home/poo/games/projects/deep_sentance/Assets/models/player/player_suit.fbx"
+      ],
+      "cwd": "/home/poo/Desktop/geppetto-desktop",
+      "status": "PASS",
+      "log": "/tmp/opencode/geppetto-verify-5z63hgz8/inventory.log",
+      "exitCode": 0,
+      "wallSeconds": 0.0639433789983741
+    },
+    {
+      "name": "cpu",
+      "command": [
+        "dotnet",
+        "/tmp/opencode/geppetto-verify-5z63hgz8/build/bin/Desktop.Tests/release/Desktop.Tests.dll",
+        "--survey",
+        "/home/poo/games/projects/deep_sentance/Assets/models/player/player_suit.fbx",
+        "--report",
+        "/tmp/opencode/geppetto-verify-5z63hgz8/cpu-results.json"
+      ],
+      "cwd": "/home/poo/Desktop/geppetto-desktop",
+      "status": "PASS",
+      "log": "/tmp/opencode/geppetto-verify-5z63hgz8/cpu.log",
+      "exitCode": 0,
+      "wallSeconds": 42.55624788499699
+    },
+    {
+      "name": "bind-a",
+      "command": [
+        "dotnet",
+        "/tmp/opencode/geppetto-verify-5z63hgz8/build/bin/Marionette.Desktop/release/marionette-desktop.dll",
+        "--headless",
+        "--model",
+        "/home/poo/games/projects/deep_sentance/Assets/models/player/player_suit.fbx",
+        "--frames",
+        "120",
+        "--size",
+        "1024x1024",
+        "--screenshot",
+        "/tmp/opencode/geppetto-verify-5z63hgz8/bind-a.png"
+      ],
+      "cwd": "/home/poo/Desktop/geppetto-desktop",
+      "status": "PASS",
+      "log": "/tmp/opencode/geppetto-verify-5z63hgz8/bind-a.log",
+      "exitCode": 0,
+      "wallSeconds": 2.8685687229990435
+    },
+    {
+      "name": "bind-b",
+      "command": [
+        "dotnet",
+        "/tmp/opencode/geppetto-verify-5z63hgz8/build/bin/Marionette.Desktop/release/marionette-desktop.dll",
+        "--headless",
+        "--model",
+        "/home/poo/games/projects/deep_sentance/Assets/models/player/player_suit.fbx",
+        "--frames",
+        "120",
+        "--size",
+        "1024x1024",
+        "--screenshot",
+        "/tmp/opencode/geppetto-verify-5z63hgz8/bind-b.png"
+      ],
+      "cwd": "/home/poo/Desktop/geppetto-desktop",
+      "status": "PASS",
+      "log": "/tmp/opencode/geppetto-verify-5z63hgz8/bind-b.log",
+      "exitCode": 0,
+      "wallSeconds": 2.918584811999608
+    },
+    {
+      "name": "animated",
+      "command": [
+        "dotnet",
+        "/tmp/opencode/geppetto-verify-5z63hgz8/build/bin/Marionette.Desktop/release/marionette-desktop.dll",
+        "--headless",
+        "--model",
+        "/home/poo/games/projects/deep_sentance/Assets/models/player/player_suit.fbx",
+        "--frames",
+        "120",
+        "--size",
+        "1024x1024",
+        "--screenshot",
+        "/tmp/opencode/geppetto-verify-5z63hgz8/animated.png",
+        "--animate",
+        "--time",
+        "0.5"
+      ],
+      "cwd": "/home/poo/Desktop/geppetto-desktop",
+      "status": "PASS",
+      "log": "/tmp/opencode/geppetto-verify-5z63hgz8/animated.log",
+      "exitCode": 0,
+      "wallSeconds": 3.3794213750006747
+    }
+  ],
+  "assemblies": [
+    {
+      "path": "/tmp/opencode/geppetto-verify-5z63hgz8/build/bin/Desktop.Tests/release/Desktop.Tests.dll",
+      "sha256": "ea6f2e7fc70ecee5391ef992bc919e19789ee5e5502dc1ad0a369f48ecd8a48d"
+    },
+    {
+      "path": "/tmp/opencode/geppetto-verify-5z63hgz8/build/bin/Marionette.Desktop/release/marionette-desktop.dll",
+      "sha256": "49391eb6d9636632aae05520a4b267248b3ff6068d982666a6e0d22d432a7c28"
+    },
+    {
+      "path": "/tmp/opencode/geppetto-verify-5z63hgz8/build/bin/Effigy.Kernel/release/Effigy.Kernel.dll",
+      "sha256": "efcc972094108066c1ee4496eabee56c7aed2c5b566e59f0a4d4022da380403d"
+    }
+  ],
+  "gpu": {
+    "status": "PASS",
+    "checks": [
+      {
+        "name": "bind-a",
+        "shot": "/tmp/opencode/geppetto-verify-5z63hgz8/bind-a.png",
+        "sha256": "f6cf292f05c9099b753ca903e1b00c03e5af46abdf3ed1266f63c51b531ff7a4",
+        "renderer": "renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2",
+        "status": "PASS"
+      },
+      {
+        "name": "bind-b",
+        "shot": "/tmp/opencode/geppetto-verify-5z63hgz8/bind-b.png",
+        "sha256": "f6cf292f05c9099b753ca903e1b00c03e5af46abdf3ed1266f63c51b531ff7a4",
+        "renderer": "renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2",
+        "status": "PASS"
+      },
+      {
+        "name": "animated",
+        "shot": "/tmp/opencode/geppetto-verify-5z63hgz8/animated.png",
+        "sha256": "0de53c096d325ec47fe22190980f6e515db888280d4fd7e792a2acca77ea9bea",
+        "renderer": "renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2",
+        "status": "PASS"
+      }
+    ],
+    "fixture": "/home/poo/games/projects/deep_sentance/Assets/models/player/player_suit.fbx"
+  },
+  "cpuReport": "/tmp/opencode/geppetto-verify-5z63hgz8/cpu-results.json",
+  "cpu": {
+    "report": "/tmp/opencode/geppetto-verify-5z63hgz8/cpu-results.json",
+    "passed": 556,
+    "failed": 0,
+    "skipped": 3,
+    "registered": 559
+  }
+}

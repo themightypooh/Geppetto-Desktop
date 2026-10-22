@@ -118,9 +118,12 @@ public sealed class CurveDeformFeature : Feature
 
 	public readonly ChoiceParam Axis = new( "Along the body's", new[] { "X", "Y", "Z" } );
 	public readonly BoolParam Stretch = new( "Fit the length to the curve", true );
+	/// <summary>Bend every picked body in one shared box, so parts of one thing (a fish and its fins)
+	/// keep their places on the curve instead of each being stretched over all of it.</summary>
+	public readonly BoolParam Together = new( "Bend as one", false );
 	public readonly IntParam Resolution = new( "Points per segment", 8, 1, 64 );
 
-	public override IReadOnlyList<IParam> Parameters => new IParam[] { Bodies, Axis, Stretch, Resolution };
+	public override IReadOnlyList<IParam> Parameters => new IParam[] { Bodies, Axis, Stretch, Together, Resolution };
 
 	public override IReadOnlyList<IParam> AdvancedParameters => new IParam[] { Resolution };
 
@@ -137,8 +140,16 @@ public sealed class CurveDeformFeature : Feature
 				"Click more points on the spline above this" );
 		}
 
-		foreach ( var body in RequireBodies( ctx, Bodies ) )
-			CurveDeform.Apply( body.Mesh, path, spline.Closed, Axis.Index, Stretch.Value );
+		var bodies = RequireBodies( ctx, Bodies ).ToList();
+		if ( Together.Value )
+		{
+			var (lo, hi) = CurveDeform.Bounds( bodies.Select( b => b.Mesh ) );
+			foreach ( var body in bodies )
+				CurveDeform.Apply( body.Mesh, path, spline.Closed, Axis.Index, Stretch.Value, lo, hi );
+		}
+		else
+			foreach ( var body in bodies )
+				CurveDeform.Apply( body.Mesh, path, spline.Closed, Axis.Index, Stretch.Value );
 	}
 
 	Spline3 ResolveSpline( FeatureContext ctx )

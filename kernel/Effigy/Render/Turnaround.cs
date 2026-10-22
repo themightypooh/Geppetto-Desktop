@@ -36,6 +36,10 @@ public sealed class TurnaroundOptions
 	/// <summary>Draw only what is on the kept side of this plane, to see inside. Null draws everything.</summary>
 	public ClipPlane? Clip;
 
+	/// <summary>A flat backdrop colour (linear RGB) with no floor, shadow or reflection under the model, to key
+	/// the renders out into sprites. Null keeps the studio gradient and floor.</summary>
+	public Vec3? Backdrop;
+
 	/// <summary>The views, by name: front, quarter, side, back (the default four), left, top.</summary>
 	public IReadOnlyList<string> Views = Turnaround.DefaultViews;
 }
@@ -226,6 +230,11 @@ public static class Turnaround
 		var scene = Scene( studio, options.Clay, options.FocusBodyId, options.Fallback, result.Log );
 		scene.Clip = options.Clip;
 		scene.Coverage = options.Coverage;
+		if ( options.Backdrop is { } flat )
+		{
+			scene.Floor = false;
+			scene.BackgroundBottom = scene.BackgroundTop = flat;
+		}
 
 		if ( scene.Items.Count == 0 )
 			return Fail( result, focus is null

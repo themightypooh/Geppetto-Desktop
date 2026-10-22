@@ -1,0 +1,2 @@
+# part	model	pivot x	y	z	size x	y	z
+chisel	out/chisel.vmdl	0	0.08	-0.37	0.739	7.241	0.739

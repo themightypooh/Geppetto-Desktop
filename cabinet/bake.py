@@ -827,6 +827,335 @@ def bake_pencil3d(name="pencil3d"):
     return meta
 
 
+# ---- models from Effigy: rendered there, repainted here ----------------------------------
+# model/<name>/build.txt is the model (run through geppetto-live); model/render_frames.py renders
+# its exported mesh top down in flat ID colours. Here each frame is shrunk to art pixels and every
+# part is repainted from the rendered light in a chest ramp with the same Bayer dither as the rest.
+MODEL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model")
+PARCH = hexes("#4a3a1c", "#6e5a30", "#93804f", "#b4a26e", "#cfbf8c", "#e3d6a8", "#f2e9c8", "#fbf6e2")
+WALNUT = hexes("#1e1006", "#33200d", "#4d3216", "#6a4720", "#8a5f2d", "#a87a40", "#c79a5c")
+INK = hexes("#0c0a10", "#1d1a2a", "#2e2a3e", "#45405a")
+BRASS = hexes("#2a1a06", "#4a3210", "#6e4c16", "#94681e", "#b8892e", "#d6ad4e", "#f0d68a", "#fff4c8")
+WAX = hexes("#1a0204", "#33060a", "#520b10", "#741218", "#961d22", "#b8383a")
+# ID class -> (ramp, base, gain): flat light v in 0..1 lands at base + v * gain on the ramp
+SCROLL_PARTS = {1: (PARCH, 1.4, 6.0), 2: (WALNUT, 0.6, 6.0), 3: (RED, 2.0, 7.6), 4: (PARCH, 0.6, 4.2),
+                5: (INK, 0.2, 2.4), 6: (BRASS, 1.0, 6.9), 7: (WAX, 0.4, 5.4)}
+# ID class -> the hue it is rendered in (render_frames.py IDS): paper, wood, ribbon, aged paper, ink, brass, wax
+ID_HUES = {1: 120, 2: 240, 3: 0, 4: 180, 5: 60, 6: 300, 7: 30}
+# thin details win a shrunk pixel with less cover, so a line of ink or a brass ring survives
+ID_WEIGHT = {5: 2.2, 6: 1.6, 7: 1.6, 3: 1.2}
+
+
+def id_classes(rgb):
+    """flat ID render -> class per pixel (0 backdrop, else the nearest ID hue) and the light on it
+    (its brightest channel)"""
+    f = rgb.astype(np.float32) / 255
+    r, g, b = f[..., 0], f[..., 1], f[..., 2]
+    v = f.max(-1)
+    sat = v - f.min(-1)
+    hue = np.degrees(np.arctan2(np.sqrt(3) * (g - b), 2 * r - g - b)) % 360
+    k = np.zeros(r.shape, np.int32)
+    best = np.full(r.shape, 999.0)
+    for c, h in ID_HUES.items():
+        d = np.abs((hue - h + 180) % 360 - 180)
+        win = d < best
+        best = np.where(win, d, best)
+        k = np.where(win, c, k)
+    k[(sat < 0.12) | (sat < v * 0.35)] = 0
+    return k, v
+
+
+def shrink_ids(k, v, tw, th):
+    """area-average each class to tw x th: the class with most cover wins, with its mean light"""
+    best = np.zeros((th, tw), np.float32)
+    cls = np.zeros((th, tw), np.int32)
+    lit = np.zeros((th, tw), np.float32)
+    cover = np.zeros((th, tw), np.float32)
+    for c in ID_HUES:
+        w = (k == c).astype(np.float32)
+        ws = np.asarray(Image.fromarray(w, "F").resize((tw, th), Image.BOX))
+        vs = np.asarray(Image.fromarray(w * v, "F").resize((tw, th), Image.BOX))
+        cover += ws
+        win = ws * ID_WEIGHT.get(c, 1.0) > best
+        ws = ws * ID_WEIGHT.get(c, 1.0)
+        best = np.where(win, ws, best)
+        cls = np.where(win, c, cls)
+        lit = np.where(win, vs * ID_WEIGHT.get(c, 1.0) / np.maximum(ws, 1e-6), lit)
+    cls[cover < 0.5] = 0
+    return cls, lit
+
+
+def light_range(ids):
+    """per class, the light from its darkest to its brightest (2nd..99.5th percentile, all frames):
+    the render lights a part from above, so its own range is narrow; stretch it to the whole ramp"""
+    rng = {}
+    for c in ID_HUES:
+        vs = np.concatenate([v[k == c] for k, v in ids])
+        if len(vs):
+            lo, hi = np.percentile(vs, [2, 99.5])
+            rng[c] = (float(lo), float(max(hi, lo + 1e-3)))
+    return rng
+
+
+def paint_ids(cls, lit, parts, rng):
+    rgb = np.zeros(cls.shape + (3,), np.uint8)
+    for c, (ramp, base, gain) in parts.items():
+        sel = cls == c
+        if sel.any():
+            lo, hi = rng.get(c, (0.0, 1.0))
+            t = np.clip((lit - lo) / (hi - lo), 0, 1)
+            rgb[sel] = dither(base + t * gain, ramp)[sel]
+    return rgb
+
+
+def outlined(rgb, m, shadow=True):
+    """a 1 px dark ring and the chest's checker drop shadow, on a canvas with room for both"""
+    H, W = m.shape
+    CH, CW = H + 4, W + 4
+    out = np.zeros((CH, CW, 4), np.uint8)
+    cm = np.zeros((CH, CW), bool)
+    cm[1:H + 1, 1:W + 1] = m
+    if shadow:
+        out = over(out, checker_shadow(cm, 2, 2, 165))
+    grown = cm.copy()
+    grown[1:, :] |= cm[:-1, :]; grown[:-1, :] |= cm[1:, :]
+    grown[:, 1:] |= cm[:, :-1]; grown[:, :-1] |= cm[:, 1:]
+    out[grown & ~cm] = (14, 10, 6, 255)
+    body = np.zeros((CH, CW, 3), np.uint8)
+    body[1:H + 1, 1:W + 1] = rgb
+    out[cm] = np.dstack([body, np.full((CH, CW), 255, np.uint8)])[cm]
+    return out
+
+
+def model_frames(name, part):
+    d = os.path.join(MODEL, name, "frames", part)
+    fs = sorted(f for f in os.listdir(d) if f.endswith(".png")) if os.path.isdir(d) else []
+    # the long axis (Y) renders up the frame: it lies along the drawer's depth, like the pencil
+    return [np.asarray(Image.open(os.path.join(d, f)).convert("RGB")) for f in fs]
+
+
+def bake_scroll3d(name="scroll3d", L=84):
+    """The chat scroll (model/scroll), rolling about its long axis, L art px long (upright)."""
+    frames = model_frames("scroll", "roll")
+    if not frames:
+        return None
+    ids = [id_classes(f) for f in frames]
+    rng = light_range(ids)
+    on = np.zeros(ids[0][0].shape, bool)
+    for k, _ in ids:
+        on |= k > 0
+    ys, xs = np.where(on)
+    y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
+    H = L
+    W = max(1, int(round((x1 - x0) * L / (y1 - y0))))
+    meta = None
+    for i, (k, v) in enumerate(ids):
+        cls, lit = shrink_ids(k[y0:y1, x0:x1], v[y0:y1, x0:x1], W, H)
+        save("%s_%02d.png" % (name, i), outlined(paint_ids(cls, lit, SCROLL_PARTS, rng), cls > 0))
+        if meta is None:
+            cols = np.where((cls == 1).sum(0) > H * 0.3)[0]      # the paper roll's own width
+            meta = {"w": (W + 4) * S, "h": (H + 4) * S, "bodyW": W * S, "bodyH": H * S,
+                    "frames": len(frames), "radius": round(float((cols[-1] - cols[0] + 1) / 2 * S), 2)}
+    return meta
+
+
+# the chat note: a sheet of paper (model/paperball), slot 0 rendered green
+PAPER_PARTS = {1: (PARCH, 1.2, 6.6)}
+
+
+def bake_paperball(name="paperball", sheetH=180, ballL=34):
+    """The chat as a crumpled sheet of paper (model/paperball, poses unfold_NN from its build).
+    <name>.png: the ball lying in the drawer, ballL art px across. <name>_unfold_NN.png: the ball
+    opening out flat, every frame on one canvas at one scale, the flat sheet sheetH art px tall."""
+    frames = model_frames("paperball", "unfold")
+    if not frames:
+        return None
+    ids = [id_classes(f) for f in frames]
+    rng = light_range(ids)
+    on = np.zeros(ids[0][0].shape, bool)
+    for k, _ in ids:
+        on |= k > 0
+    ys, xs = np.where(on)
+    cy, cx = (ys.min() + ys.max() + 1) / 2, (xs.min() + xs.max() + 1) / 2
+    fy, fx = np.where(ids[-1][0] > 0)                       # the flat sheet sets the scale
+    sc = sheetH / (fy.max() + 1 - fy.min())
+    hh, hw = max(cy - ys.min(), ys.max() + 1 - cy), max(cx - xs.min(), xs.max() + 1 - cx)
+    H, W = int(np.ceil(2 * hh * sc / 2)) * 2, int(np.ceil(2 * hw * sc / 2)) * 2
+    box = (int(round(cy - H / sc / 2)), int(round(cy + H / sc / 2)), int(round(cx - W / sc / 2)), int(round(cx + W / sc / 2)))
+    meta = {"w": (W + 4) * S, "h": (H + 4) * S, "frames": len(frames)}
+    for i, (k, v) in enumerate(ids):
+        cls, lit = shrink_ids(k[box[0]:box[1], box[2]:box[3]], v[box[0]:box[1], box[2]:box[3]], W, H)
+        save("%s_unfold_%02d.png" % (name, i), outlined(paint_ids(cls, lit, PAPER_PARTS, rng), cls > 0))
+        if i == 0:                                          # how big the ball is on the canvas
+            meta["firstW"] = int((cls > 0).any(0).sum()) * S
+        if i == len(ids) - 1:                               # where the flat sheet lies on the canvas
+            ry, rx = np.where(cls > 0)
+            meta.update(sheetX=int(rx.min() + 1) * S, sheetY=int(ry.min() + 1) * S,
+                        sheetW=int(rx.max() + 1 - rx.min()) * S, sheetH=int(ry.max() + 1 - ry.min()) * S)
+    # the ball in the drawer: the first pose on its own, cropped tight
+    k, v = ids[0]
+    ys, xs = np.where(k > 0)
+    k, v = k[ys.min():ys.max() + 1, xs.min():xs.max() + 1], v[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
+    bw = max(1, int(round(k.shape[1] * ballL / k.shape[0])))
+    cls, lit = shrink_ids(k, v, bw, ballL)
+    save(name + ".png", outlined(paint_ids(cls, lit, PAPER_PARTS, rng), cls > 0))
+    meta["ball"] = {"w": (bw + 4) * S, "h": (ballL + 4) * S, "bodyW": bw * S, "bodyH": ballL * S,
+                    "radius": round(min(bw, ballL) / 2 * S, 2)}
+    return meta
+
+
+# the MODELING folder (model/modelfolder): kraft leaves, the fold, the label and its ink line; the
+# cover is slots 5/6 (classes 6, 7) so it bakes as its own layer over whatever is filed in it
+MANILA = hexes("#3e2a12", "#5f4220", "#80602f", "#a07e44", "#bd9c5e", "#d6b97e", "#ecd6a2", "#f7ead0")
+MFOLDER_PARTS = {1: (MANILA, 1.6, 5.4), 2: (MANILA, 0.6, 2.6), 4: (PARCH, 3.0, 4.6), 5: (INK, 0.2, 1.6),
+                 6: (MANILA, 1.6, 5.4), 7: (MANILA, 0.6, 2.6)}
+
+
+def bake_modelfolder(name="modelfolder", W=100):
+    """The MODELING folder lying shut in the tools drawer (model/modelfolder), W art px wide, in two
+    layers: <name>_back.png the back leaf with its tab, <name>_cover.png the front cover, so a finished
+    model's card can slide down between them and stay filed there, peeking out over the cover."""
+    frames = model_frames(name, "open")
+    if not frames:
+        return None
+    k, v = id_classes(frames[0])
+    rng = light_range([(k, v)])
+    ys, xs = np.where(k > 0)
+    k, v = k[ys.min():ys.max() + 1, xs.min():xs.max() + 1], v[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
+    H = max(1, int(round(k.shape[0] * W / k.shape[1])))
+    cls, lit = shrink_ids(k, v, W, H)
+    cover = (cls == 6) | (cls == 7)
+    back = (cls > 0) & ~cover
+    save(name + "_back.png", outlined(paint_ids(np.where(back, cls, 0), lit, MFOLDER_PARTS, rng), back))
+    save(name + "_cover.png", outlined(paint_ids(np.where(cover, cls, 0), lit, MFOLDER_PARTS, rng), cover, shadow=False))
+    ry, rx = np.where(cover)                        # the cover: cards tuck in behind its top edge
+    return {"w": (W + 4) * S, "h": (H + 4) * S, "bodyW": W * S, "bodyH": H * S,
+            "pocketX": int(rx.min() + 1) * S, "pocketY": int(ry.min() + 1) * S,
+            "pocketW": int(rx.max() + 1 - rx.min()) * S, "pocketH": int(ry.max() + 1 - ry.min()) * S}
+
+
+STEEL = hexes("#14161a", "#262a30", "#3a4048", "#535a64", "#6f7782", "#8e96a0", "#b3bac2", "#dde2e7")
+# the live build stopwatch: enamel dial, red sweep hand, ink track, brass case (slots 0, 2, 4, 5)
+WATCH_PARTS = {1: (PARCH, 3.0, 4.8), 3: (RED, 2.0, 7.6), 5: (INK, 0.2, 2.4), 6: (BRASS, 1.0, 6.9)}
+# the modeling chisel: walnut handle, steel blade, ink stamp, brass ferrule (slots 1, 3, 4, 5)
+CHISEL_PARTS = {2: (WALNUT, 0.6, 6.0), 4: (STEEL, 1.0, 6.9), 5: (INK, 0.2, 2.4), 6: (BRASS, 1.0, 6.9)}
+
+
+def bake_stopwatch(name="stopwatch.png", L=30):
+    """The live build stopwatch (model/stopwatch) seen from above, crown up, L art px tall."""
+    frames = model_frames("stopwatch", "face")
+    if not frames:
+        return None
+    k, v = id_classes(frames[0])
+    ys, xs = np.where(k > 0)
+    k, v = k[ys.min():ys.max() + 1, xs.min():xs.max() + 1], v[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
+    W = max(1, int(round(k.shape[1] * L / k.shape[0])))
+    cls, lit = shrink_ids(k, v, W, L)
+    save(name, outlined(paint_ids(cls, lit, WATCH_PARTS, light_range([(k, v)])), cls > 0))
+    return {"w": (W + 4) * S, "h": (L + 4) * S, "bodyW": W * S, "bodyH": L * S}
+
+
+# the rolled drawing: green engineering paper, its grid, red twine, blue ink (slots 0, 1, 2, 4)
+GRIDPAPER = hexes("#2e3a2a", "#4a5a44", "#6c7d63", "#90a286", "#b4c4a8", "#d2dec4", "#e9f0de", "#f7fbf0")
+GRIDLINE = hexes("#3a5a46", "#56806a", "#79a48c", "#9bc2a8")
+DRAWROLL_PARTS = {1: (GRIDPAPER, 2.0, 5.8), 2: (GRIDLINE, 0.6, 3.0), 3: (RED, 2.0, 7.6), 5: (INK, 0.4, 2.6)}
+
+
+def bake_chisel3d(name="chisel3d", L=60, model="chisel", parts=None, widthCls=2):
+    """A prop that rolls about its long axis (model/<model>), L art px long (upright): the modeling
+    chisel by default, and the rolled drawing."""
+    parts = parts or CHISEL_PARTS
+    frames = model_frames(model, "roll")
+    if not frames:
+        return None
+    ids = [id_classes(f) for f in frames]
+    rng = light_range(ids)
+    on = np.zeros(ids[0][0].shape, bool)
+    for k, _ in ids:
+        on |= k > 0
+    ys, xs = np.where(on)
+    y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
+    H = L
+    W = max(1, int(round((x1 - x0) * L / (y1 - y0))))
+    meta = None
+    for i, (k, v) in enumerate(ids):
+        cls, lit = shrink_ids(k[y0:y1, x0:x1], v[y0:y1, x0:x1], W, H)
+        save("%s_%02d.png" % (name, i), outlined(paint_ids(cls, lit, parts, rng), cls > 0))
+        if meta is None:
+            cols = np.where((cls == widthCls).sum(0) > 0)[0]    # the round part's width
+            meta = {"w": (W + 4) * S, "h": (H + 4) * S, "bodyW": W * S, "bodyH": H * S,
+                    "frames": len(frames), "radius": round(float((cols[-1] - cols[0] + 1) / 2 * S), 2) if len(cols) else 6}
+    return meta
+
+
+# the drawing pencil (model/pencil): lacquer, sharpened wood, eraser, ferrule, graphite, gold stamp
+PENCIL_PARTS = {1: (LACQUER, 1.2, 7.4), 2: (WOOD, 0.4, 5.2), 3: (ERASER, 1.0, 5.8), 4: (STEEL, 1.4, 6.4),
+                5: (GRAPHITE, 0.2, 3.4), 6: (BRASS, 1.6, 6.0)}
+
+
+def bake_turning(name, model, L, parts, widthCls):
+    """A rod-like prop (model/<model>) that lies any way in a drawer and rolls across itself: every
+    roll frame at every heading (render_frames.py turn=), so the light stays top left however it
+    lies. L art px long. Frames are <name>_HH_RR.png on one square canvas, the prop's middle at its
+    centre; QML picks HH from its heading and RR from how far it has rolled."""
+    d = os.path.join(MODEL, model, "frames", "turn")
+    names = sorted(f for f in os.listdir(d) if f.endswith(".png")) if os.path.isdir(d) else []
+    if not names:
+        return None
+    turns = len({f[:2] for f in names})
+    rolls = len(names) // turns
+    ids = {f[:5]: id_classes(np.asarray(Image.open(os.path.join(d, f)).convert("RGB"))) for f in names}
+    rng = light_range(list(ids.values()))
+    # its length at heading 0 (point up) sets the scale for every heading
+    on = np.zeros(ids["00_00"][0].shape, bool)
+    for r in range(rolls):
+        on |= ids["00_%02d" % r][0] > 0
+    ys, xs = np.where(on)
+    span = ys.max() + 1 - ys.min()
+    N = L + 2 + (L % 2)                         # square canvas: the prop turns inside it
+    side = span * N / L
+    cy, cx = on.shape[0] / 2, on.shape[1] / 2
+    box = (int(round(cy - side / 2)), int(round(cy + side / 2)), int(round(cx - side / 2)), int(round(cx + side / 2)))
+    meta = None
+    for tag, (k, v) in ids.items():
+        kk, vv = k[box[0]:box[1], box[2]:box[3]], v[box[0]:box[1], box[2]:box[3]]
+        cls, lit = shrink_ids(kk, vv, N, N)
+        save("%s_%s.png" % (name, tag), outlined(paint_ids(cls, lit, parts, rng), cls > 0))
+        if tag == "00_00":
+            cols = np.where((cls == widthCls).sum(0) > 0)[0]     # how thick its round part is
+            rad = (cols[-1] - cols[0] + 1) / 2 if len(cols) else 3
+            meta = {"w": (N + 4) * S, "h": (N + 4) * S, "bodyW": N * S, "bodyH": N * S, "frames": rolls,
+                    "turns": turns, "radius": round(float(rad * S), 2), "halfLen": round(float((L / 2 - rad) * S), 2)}
+    return meta
+
+
+def bake_scroll_rod(name="scroll_rod.png", L=272):
+    """The scroll's turned rod alone, upright, L art px long: the two sides of the open scroll."""
+    frames = model_frames("scroll", "rod")
+    if not frames:
+        return None
+    k, v = id_classes(frames[0])
+    ys, xs = np.where(k > 0)
+    k, v = k[ys.min():ys.max() + 1, xs.min():xs.max() + 1], v[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
+    W = max(1, int(round(k.shape[1] * L / k.shape[0])))
+    cls, lit = shrink_ids(k, v, W, L)
+    save(name, outlined(paint_ids(cls, lit, SCROLL_PARTS, light_range([(k, v)])), cls > 0))
+    # where the plain shaft runs between the collars, so QML can hang the paper on it
+    rows = np.where((cls > 0).sum(1) <= max(2, W * 0.6))[0]
+    mid = rows[(rows > L * 0.1) & (rows < L * 0.9)]
+    return {"w": (W + 4) * S, "h": (L + 4) * S, "shaftY": int(mid.min() + 1) * S if len(mid) else 0,
+            "shaftH": int(mid.max() - mid.min() + 1) * S if len(mid) else L * S}
+
+
+def bake_parchment(name="parchment.png", W=64, H=64):
+    """a tile of the scroll's paper: its colour with a faint fibre grain, to tile under the chat"""
+    yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+    sh = 5.2 + noise(H, W, 9, 91) * 0.35 + noise(H, W, 3, 92) * 0.18
+    sh += np.sin(yy * 0.9 + noise(H, W, 6, 93) * 3) * 0.08          # long fibres across the sheet
+    save(name, solid(dither(sh, PARCH)))
+    return {"w": W * S, "h": H * S}
+
+
 def bake_folder(name="folder.png", W=52, H=38):
     """a kraft file folder with a sheet sticking out of it: the button for the drawings folder"""
     out = np.zeros((H + 3, W + 3, 4), np.uint8)
@@ -869,6 +1198,82 @@ def bake_folder(name="folder.png", W=52, H=38):
 
 
 # ---- layout ----------------------------------------------------------------------------
+def tone_ramp(hexc, n=8, lo=0.22, hi=1.45):
+    """a leather ramp from one colour: deep shadow to a worn, warmer highlight"""
+    c = np.array([int(hexc[i:i + 2], 16) for i in (1, 3, 5)], np.float32)
+    out = []
+    for i in range(n):
+        f = lo + (hi - lo) * i / (n - 1)
+        rgb = c * f + (np.array([40, 26, 8], np.float32) * max(0.0, f - 1.0))   # highlights warm toward gilt
+        out.append(np.clip(rgb, 0, 255))
+    return np.array(out, np.uint8)
+
+
+# the run books (model/booknook), left to right as built: spine widths (in), leather and lettering piece
+BOOK_WIDTHS = [1.20, 1.55, 1.35, 1.70, 1.15, 1.45, 1.80, 1.30, 1.60]
+BOOK_COLOURS = [("#a8794a", "#8e1a1a"), ("#6e1c1c", "#1d2c44"), ("#1e2a44", "#8e1a1a"),
+                ("#1f3b2a", "#2a1a10"), ("#d6cdb6", "#8e1a1a"), ("#6b3f24", "#1f4a33"),
+                ("#2a211c", "#1d2c44"), ("#4a1a26", "#2a1a10"), ("#7a5a2a", "#8e1a1a")]
+
+
+BOOK_THICK = 1.6      # spines drawn thicker than built, so a run's title fits on two lines
+
+
+def bake_books(name="book", H=118):      # 118 + its outline fits the research drawer's 250 px scroll width
+    """The run books: each one lying flat spine out, H art px long, book_<i>.png, with where its
+    lettering piece is (the run's title is lettered over it live)"""
+    frames = model_frames("booknook", "spines")
+    if not frames:
+        return None
+    k, v = id_classes(frames[0])
+    rng = light_range([(k, v)])
+    ys, xs = np.where(k > 0)
+    y0, y1 = ys.min(), ys.max() + 1
+    # their bands touch, so cut at the gaps they were built with (spine widths, 0.06 in apart)
+    edges, at = [], 0.0
+    for w in BOOK_WIDTHS:
+        edges.append((at - 0.03, at + w + 0.03)); at += w + 0.06
+    span = at - 0.06
+    px_in = (xs.max() + 1 - xs.min()) / (span + 0.03)        # the bands stand 0.015 proud each side
+    runs = [(int(round(xs.min() + (a + 0.015) * px_in)), int(round(xs.min() + (b + 0.015) * px_in))) for a, b in edges]
+    runs = [(max(0, a), min(k.shape[1], b)) for a, b in runs]
+    books = []
+    for i, (x0, x1) in enumerate(runs[:len(BOOK_COLOURS)]):
+        bk, bv = k[y0:y1, x0:x1].copy(), v[y0:y1, x0:x1]
+        W = max(1, int(round((x1 - x0) * H / (y1 - y0) * BOOK_THICK)))
+        cls, lit = shrink_ids(bk, bv, W, H)
+        # laid flat in a pile, spine out: turned a quarter, head to the left (the light turns with it)
+        cls, lit = np.ascontiguousarray(np.rot90(cls)), np.ascontiguousarray(np.rot90(lit))
+        leather, label = BOOK_COLOURS[i]
+        # the drawer is dim: leather stays in its lower tones, the gilt is old and dull, not lamp-lit
+        parts = {1: (tone_ramp(leather, 8, 0.18, 1.15), 0.6, 5.2), 3: (tone_ramp(label, 6, 0.3, 1.1), 0.4, 3.8),
+                 6: (BRASS, 1.0, 4.4)}
+        save("%s_%d.png" % (name, i), outlined(paint_ids(cls, lit, parts, rng), cls > 0))
+        lys, lxs = np.where(cls == 3)
+        books.append({"w": (H + 4) * S, "h": (W + 4) * S, "bodyW": H * S, "bodyH": W * S,
+                      "labelX": int(lxs.min() + 1) * S, "labelY": int(lys.min() + 1) * S,
+                      "labelW": int(lxs.max() + 1 - lxs.min()) * S, "labelH": int(lys.max() + 1 - lys.min()) * S})
+    return books
+
+
+# the clear eraser (model/eraser): pink pencil rubber, blue ink rubber, a cream stripe on the pink slant
+def bake_eraser(name="eraser.png", L=18):     # small: it lies in the gap over the pile
+    """The research drawer's clear button: the two-tone eraser seen from above, lying long, L art px long."""
+    frames = model_frames("eraser", "top")
+    if not frames:
+        return None
+    k, v = id_classes(frames[0])
+    ys, xs = np.where(k > 0)
+    k, v = k[ys.min():ys.max() + 1, xs.min():xs.max() + 1], v[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
+    H = max(1, int(round(k.shape[0] * L / k.shape[1])))
+    cls, lit = shrink_ids(k, v, L, H)
+    # dim drawer: the rubber stays matte, no lamp-lit highlight
+    parts = {1: (tone_ramp("#c8695c", 8, 0.3, 1.1), 0.8, 5.6), 2: (tone_ramp("#5f86a8", 8, 0.3, 1.1), 0.8, 5.6),
+             4: (tone_ramp("#e6dcc4", 6, 0.4, 1.0), 0.6, 4.0)}
+    save(name, outlined(paint_ids(cls, lit, parts, light_range([(k, v)])), cls > 0))
+    return {"w": (L + 4) * S, "h": (H + 4) * S, "bodyW": L * S, "bodyH": H * S}
+
+
 def main():
     VIEW_W, VIEW_H = 512, 288             # art px: the viewport is 1024 x 576 on screen
     T = 20
@@ -893,8 +1298,17 @@ def main():
     geom["pencil"] = bake_pencil("pencil.png")
     geom["pencilShadow"] = bake_pencil_shadow("pencil_shadow.png")
     geom["toolTray"] = bake_tool_tray("tool_tray.png")
-    geom["pencil3d"] = bake_pencil3d("pencil3d")
+    geom["pencil3d"] = bake_turning("pencil3d", "pencil", 58, PENCIL_PARTS, 1)
     geom["folder"] = bake_folder("folder.png")
+    geom["scroll3d"] = bake_scroll3d("scroll3d")
+    geom["chisel3d"] = bake_turning("chisel3d", "chisel", 60, CHISEL_PARTS, 2)
+    geom["modelfolder"] = bake_modelfolder("modelfolder")
+    geom["books"] = bake_books()
+    geom["eraser"] = bake_eraser()
+    geom["scrollRod"] = bake_scroll_rod("scroll_rod.png")
+    geom["parchment"] = bake_parchment("parchment.png")
+    geom["paperball"] = bake_paperball("paperball")
+    geom["paperballRoll"] = bake_turning("paperball_roll", "paperball", 34, PAPER_PARTS, 1)
     geom["keyS"] = bake_key("key_s.png", 20, 16)
     bake_key("key_s_down.png", 20, 16, pressed=True)
     bake_tiles()

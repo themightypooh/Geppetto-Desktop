@@ -1,0 +1,2 @@
+# part	model	pivot x	y	z	size x	y	z
+loose	out/loose.vmdl	0	0	-1.11	2.199	7.601	2.173

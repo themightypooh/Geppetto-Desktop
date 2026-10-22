@@ -1,0 +1,21 @@
+effigy 1
+rollback 2147483647
+materiallook 1 color=#6e3f1d rough=0.45 metal=0
+materiallook 3 color=#9aa0a8 rough=0.3 metal=1
+materiallook 4 color=#1d1a2a rough=0.6 metal=0
+materiallook 5 color=#b8892e rough=0.35 metal=1
+feature BlobFeature
+	id b3fd9666
+	name Chisel
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.02
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes cylinder 0,-3.3,0 0,0.4,0 0.3 r=0.1 mat=1; ellipsoid 0,-1.5,0 0.37,1.7,0.37 mat=1; ellipsoid 0,-3.3,0 0.36,0.24,0.36 mat=1; cylinder 0,0.3,0 0,0.8,0 0.31 r=0.03 mat=5; torus 0,0.32,0 0.31 0.04 rot=90,0,0 mat=5; cylinder 0,0.8,0 0,1.1,0 0.13 mat=3; box 0,2.4,0 0.56,2.6,0.12 r=0.02 mat=3; -box 0,3.9,0.2 0.9,1.0,0.24 rot=-14,0,0; paint box 0,1.7,0.06 0.3,0.5,0.06 mat=4
+	param Smooth 2
+	param Voxel 0.02
+end

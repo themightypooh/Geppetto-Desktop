@@ -1,0 +1,352 @@
+{
+ "edit:dissolve": {
+  "score": 5.0,
+  "pass": false,
+  "notes": [
+   "represents 4: Dark tile with a light grid pattern: doesn't show removing edges. -> Show a 2x2 quad patch with the middle edges dashed/fading in red and the merged face lit.",
+   "distinct 6: Different from cube icons, close to Topology grid. -> Use a grey cube surface instead of a flat tile.",
+   "legibility 5: At 1x a dark speckled tile. -> Bold light edges, red dissolving edge.",
+   "craft 6: Noisy pattern. -> Clean grid lines."
+  ]
+ },
+ "set": {
+  "score": 5.625,
+  "pass": false,
+  "notes": [
+   "represents 5: Cream paper with a grey knob and red mark: setting a parameter is unclear. -> Replace with a large dial knob with tick marks and a red pointer, or a slider with a red handle.",
+   "distinct 7: Different from Remove bin and Remedy box. -> Keep away from cream paper used by Sketch/Topology.",
+   "legibility 5: At 1x it's a tiny cream square with specks. -> Fill the cell with the dial.",
+   "craft 6: Muddy small details on the paper. -> Remove the paper, one clean dial."
+  ]
+ },
+ "curvedeform": {
+  "score": 5.75,
+  "pass": false,
+  "notes": [
+   "represents 6: Lumpy grey chain over a thin red line: body following curve is weakly suggested. -> Make a thicker smooth grey bar clearly bent along a bold red S curve with yellow control dots at the ends.",
+   "distinct 6: Overlaps Spline and Sweep in idea and look. -> Show a straight ghost bar plus the bent bar on the curve.",
+   "legibility 5: At 1x it's a thin squiggle, segments merge. -> Double the body thickness and the red curve width.",
+   "craft 6: Lumpy segments look messy. -> One smooth continuous body."
+  ]
+ },
+ "pocket": {
+  "score": 5.875,
+  "pass": false,
+  "notes": [
+   "represents 6: Blue fabric patch with a thin yellow-edged strip at the top; the flap is barely visible and it reads as a label or plain patch. -> Sew a raised square pocket on the fabric with a clearly folded-over flap (darker blue, 3+ px tall) and a yellow button on the flap, red stitch line around the pocket edge.",
+   "distinct 6: Flat blue patch looks like Fabric and Wear on the same sheet. -> Give the pocket visible thickness and a shadow so it stands off the base cloth, unlike flat Fabric/Wear.",
+   "legibility 5: At 1x the flap is a 1-px yellow line and the pocket disappears into the patch. -> Enlarge the pocket to half the patch and make the flap edge a 2-px contrasting line.",
+   "craft 7: Clean outline, but the composition is mostly empty blue. -> Crop the base fabric smaller so the pocket fills the frame."
+  ]
+ },
+ "profile": {
+  "score": 5.875,
+  "pass": false,
+  "notes": [
+   "represents 6: Paper with a grey block on it and a red line along one edge; reads as a block on a sheet, not a 2D cross-section outline. -> Remove the grey block; draw a bold red closed L or T-shaped outline on the paper (flat 2D profile), optionally with a faint ghost extrusion above it.",
+   "distinct 5: Nearly the same paper composition as #2 Sketch. -> Drop the paper: stand the red profile outline upright on its own like a cutout, so it differs from Sketch.",
+   "legibility 6: At 1x it's a grey smudge on cream; the red outline is a thin sliver. -> Make the profile outline 2 px red and the shape large in the frame.",
+   "craft 7: Clean outline, some muddy red/grey overlap. -> Separate red outline from grey fill with clear spacing."
+  ]
+ },
+ "shapekey": {
+  "score": 5.875,
+  "pass": false,
+  "notes": [
+   "represents 6: Grey cube on one end, dark slider bar with yellow handle, pink sphere at the other: blend idea present but reads like a tool/rod. -> Make an obvious slider track (light rail) with a red handle mid-way, cube at the left stop and sphere at the right stop.",
+   "distinct 5: Same rod-and-sphere parts as Key end next to it. -> Keep shape key horizontal with handle centred; give Key end a different composition.",
+   "legibility 6: At 1x the handle is a few yellow px. -> Handle 3x4 px in red.",
+   "craft 7: Clean outlines. -> Lighten the track so it doesn't merge with the dark wheel."
+  ]
+ },
+ "skin": {
+  "score": 5.875,
+  "pass": false,
+  "notes": [
+   "represents 6: Pink oval with faint pale spots: details barely suggested. -> Add darker brown freckles (2x2 px), a few pore dots, and a small magnifying lens over part of the skin.",
+   "distinct 6: Pink oval resembles Blob and Sculpt pads. -> The lens and brown freckles make it unique; flatten to a square swatch.",
+   "legibility 5: At 1x the spots vanish, leaving a plain pink oval. -> High-contrast brown spots, at least 2x2 px each.",
+   "craft 7: Clean outline, spots look like smudges. -> Crisp-edged spots."
+  ]
+ },
+ "topology": {
+  "score": 5.875,
+  "pass": false,
+  "notes": [
+   "represents 6: Cream grid sheet with a red dot: looks like graph paper. -> Grey surface with a bold light quad wireframe and a red pole vertex/bad face highlighted.",
+   "distinct 6: Close to Dissolve tile and Paint maps sheet. -> Use grey mesh, not cream paper.",
+   "legibility 5: Grid lines vanish at 1x. -> 2-px grid lines, 3x3 cells.",
+   "craft 7: Clean. -> Stronger outline."
+  ]
+ },
+ "bake": {
+  "score": 6.0,
+  "pass": false,
+  "notes": [
+   "represents 5: Black top hat with a small texture card: reads as a magic hat. -> Replace with an oven box with heat glow emitting a texture-map tile.",
+   "distinct 7: Different from Render/Save. -> Keep away from Paint maps by colour.",
+   "legibility 6: Texture card tiny at 1x. -> Bigger card.",
+   "craft 7: Clean. -> Tidy the hat brim outline."
+  ]
+ },
+ "edit:bevel": {
+  "score": 6.0,
+  "pass": false,
+  "notes": [
+   "represents 6: Cube with a red slanted strip cut into the front: reads as a slot or mouth, not a bevelled edge. -> Replace the top-front edge with one narrow slanted red face running the full edge length; no notch.",
+   "distinct 6: Close to Loop cut (red line on cube) and Chamfer/Fillet. -> Make the bevel clearly on an edge, two-segment strip, so it differs from Loop cut.",
+   "legibility 6: Red is visible at 1x but the shape is ambiguous. -> Bigger bevel width (3+ px).",
+   "craft 6: Ragged dark gap under the red strip. -> Clean continuous faces."
+  ]
+ },
+ "loft": {
+  "score": 6.0,
+  "pass": false,
+  "notes": [
+   "represents 5: Stack of stepped grey tiers with a red disc on top: reads as a stepped pyramid/cake, no blend between different sections. -> Show a square red profile at the base and a round red profile at the top with one smooth skin blending square-to-round between them; remove the steps.",
+   "distinct 6: Close to Extrude (block on plate) and Draft (tapered). -> The square-to-circle smooth transition makes it unique; drop the base plate.",
+   "legibility 7: Silhouette clear at 1x, red top visible. -> Keep two red profiles strongly visible at each end.",
+   "craft 7: Clean outlines; steps look busy. -> Smooth single surface removes the clutter."
+  ]
+ },
+ "edit:symmetrize": {
+  "score": 6.125,
+  "pass": false,
+  "notes": [
+   "represents 7: Red mirror plane with a grey object on one side. -> Show one solid half and a matching red-outline copy on the other side with an arrow across the plane.",
+   "distinct 5: Red plane plus grey shape is the same idea as Mirror and close to Symmetry check. -> Use a mesh cube half with visible vertices/edges, so it's mesh-specific, not Mirror.",
+   "legibility 6: At 1x a muddle of red and grey. -> Plane edge-on vertical line, halves clearly separated.",
+   "craft 6: Grey shape is lumpy and unclear. -> Simple clean shape."
+  ]
+ },
+ "export": {
+  "score": 6.125,
+  "pass": false,
+  "notes": [
+   "represents 6: Grey cube, red dot, cream block: file not clear. -> Make the target a paper file with folded corner and a red arrow pointing outward from the cube.",
+   "distinct 5: Near mirror of Import. -> Arrow points out and right; Import should point in.",
+   "legibility 7: Arrow reads as a dot at 1x. -> 3-px arrowhead.",
+   "craft 7: Clean. -> Overlap parts slightly."
+  ]
+ },
+ "import": {
+  "score": 6.125,
+  "pass": false,
+  "notes": [
+   "represents 6: Cream block, red arrow, grey cube: cream block doesn't read as a file. -> Make the source a paper sheet with a folded corner (file), red arrow pointing INTO the grey cube.",
+   "distinct 5: Near mirror of #34 Export (cube, red dot, cream block). -> Change layout: file on top dropping down into an open box/tray, arrow pointing down, so it can't be confused with Export.",
+   "legibility 7: Three parts read at 1x but the arrow is a red dot, direction unclear. -> Make a proper red arrow with a 3-px head showing direction.",
+   "craft 7: Clean outlines, pieces floating loosely. -> Tighten the composition and overlap the parts slightly."
+  ]
+ },
+ "shapekeyend": {
+  "score": 6.125,
+  "pass": false,
+  "notes": [
+   "represents 6: Dark rod ending in a yellow collar and a red ring around a pink ball: reads as a magnifier/lollipop, not a slider end stop. -> Show the slider track ending in a red end-bracket with the handle docked against it and the target shape (sphere) beyond.",
+   "distinct 5: Shares rod + pink sphere with Shape key. -> Remove the rod-ball look; use the bracket stop as the dominant shape.",
+   "legibility 7: Ring reads at 1x. -> Make the stop bracket 3 px thick red.",
+   "craft 7: Clean. -> Shorten the thin dark rod that blends into the background."
+  ]
+ },
+ "trim": {
+  "score": 6.125,
+  "pass": false,
+  "notes": [
+   "represents 6: Grey slab sitting on a red plane: the cut and the kept side aren't clear. -> Show a block sliced by a red plane through its middle, top half kept, bottom half shown as a faint ghost or falling away.",
+   "distinct 6: Close to Plane (grey sheet) and Section (red cut face). -> Show the discarded half separated to distinguish from Section.",
+   "legibility 6: At 1x a grey lump on a red smear. -> Larger block, crisp red plane edge.",
+   "craft 7: Red plane is a bit muddy/dithered. -> Flat red plane with clean outline."
+  ]
+ },
+ "draft": {
+  "score": 6.375,
+  "pass": false,
+  "notes": [
+   "represents 6: Red truncated pyramid with a dark tip: reads as a pyramid/cone, not a draft angle on walls. -> Grey block body with only its side walls slanted in red, plus a vertical dashed reference line and a small angle arc next to one wall.",
+   "distinct 6: Similar to Push face's dark spike and Loft's tapered stack. -> Remove the dark spike; the angle arc and reference line make it unique.",
+   "legibility 7: Red shape reads at 1x; the meaning doesn't. -> Angle arc in yellow, 2 px.",
+   "craft 7: Clean, dark tip looks stray. -> Remove the dark tip."
+  ]
+ },
+ "sketch": {
+  "score": 6.5,
+  "pass": false,
+  "notes": [
+   "represents 7: Cream paper with dark scribble lines and a yellow pencil: drawing on paper reads. -> Draw one bold red closed shape (rectangle or circle) on the paper instead of thin scribbles, pencil tip touching it.",
+   "distinct 6: Same paper-on-table setup as #3 Profile next to it. -> Make the pencil much larger and diagonal across the sheet so pencil is the key part, unlike Profile.",
+   "legibility 6: At 1x the lines and pencil are 1-px thin and blur into the paper. -> Thicken the pencil to 3+ px and the drawn stroke to 2 px red.",
+   "craft 7: Clean outline, but small and lots of empty frame. -> Scale the paper up to fill the cell."
+  ]
+ },
+ "sweep": {
+  "score": 6.5,
+  "pass": false,
+  "notes": [
+   "represents 7: Curved grey tube with a red ring end and thin red path line: sweep along path reads. -> Make the red path a bold rail running the full length and extending ahead of the tube, with the red profile ring at the leading end.",
+   "distinct 6: Grey curved tube resembles Bend (#15) arc. -> Make the path S-shaped and visible beyond the tube end so it isn't just a bent bar.",
+   "legibility 6: At 1x the tube is small and the path is 1 px. -> Scale the tube up and thicken the red path to 2 px.",
+   "craft 7: Clean, slightly empty frame. -> Fill the cell more."
+  ]
+ },
+ "wear": {
+  "score": 6.75,
+  "pass": false,
+  "notes": [
+   "represents 7: Blue fabric with a dark heart-shaped hole and a tiny red dot: a hole reads, fray/scuff not. -> Make the hole ragged with 3-4 frayed thread ends sticking out, red rim on the torn edge, and a lighter scuff patch on the corner.",
+   "distinct 7: The hole separates it from Fabric/Pocket, though the base patch is the same. -> Tear a corner of the patch off too so the silhouette itself differs.",
+   "legibility 6: At 1x the hole is a small dark smudge; red dot is 1 px. -> Enlarge the hole to a third of the patch and make the red rim 2 px.",
+   "craft 7: Clean outline; heart-shaped hole looks cute rather than worn. -> Make the hole an irregular jagged shape."
+  ]
+ },
+ "fix": {
+  "score": 7.0,
+  "pass": false,
+  "notes": [
+   "represents 7: Grey cube with a red crack and a yellow wrench: repair reads. -> Make the wrench bigger, crossing the cube, and show the crack half-patched.",
+   "distinct 7: Differs from Remedy's first-aid box. -> Keep grey mesh cube.",
+   "legibility 7: Wrench thin at 1x. -> Wrench 3 px thick.",
+   "craft 7: Clean. -> Tidy the wrench outline."
+  ]
+ },
+ "fleshmaterial": {
+  "score": 7.0,
+  "pass": false,
+  "notes": [
+   "represents 7: Pink block with a bite cut showing red interior: flesh reads, layering weak. -> Show distinct layers in the cut: thin pink skin, yellow fat band, red muscle core.",
+   "distinct 7: Different from Material sphere and Face material cube; pink like Skin. -> Keep the block shape; the layered cut separates it from Skin's flat oval.",
+   "legibility 7: At 1x the red cut reads as a notch. -> Make the cut deeper and wider, a quarter wedge removed.",
+   "craft 7: Clean outline, red interior a bit muddy. -> Flat colour bands instead of dither in the cut."
+  ]
+ },
+ "sculpt": {
+  "score": 7.0,
+  "pass": false,
+  "notes": [
+   "represents 7: Pink soft pad with a small tool tip poking it. -> Larger sculpt brush/loop tool and a clear raised bump or dent under it.",
+   "distinct 8: Unique on the Deform sheet. -> Keep pink clay; add red accent on the dent.",
+   "legibility 6: At 1x the tool is a few pixels; looks like a pink dish. -> Tool at least a third of the icon height.",
+   "craft 7: Clean outline, flat pad lacks form. -> Add shading to show the surface deformation."
+  ]
+ },
+ "bodyfrombones": {
+  "score": 7.125,
+  "pass": false,
+  "notes": [
+   "represents 7: Bone with a pink flesh blob on its middle and a red up arrow: flesh around a bone reads. -> Wrap the flesh along most of the bone length as a capsule with bone ends sticking out, red arrows pointing outward from the bone.",
+   "distinct 7: Bone ends differ from Primitive/Part; close cousin of Bind on Rig sheet. -> Make flesh larger relative to bone so it reads as a body, not a bone with a marker.",
+   "legibility 7: Readable at 1x; the red arrow is small. -> Bigger red arrows (2) growing outward.",
+   "craft 8: Clean outline and shading. -> Minor: trim the single-px arrow shaft to 2 px."
+  ]
+ },
+ "flex": {
+  "score": 7.25,
+  "pass": false,
+  "notes": [
+   "represents 7: Pink limb bent at a joint: flexing reads. -> Add a red curved arrow around the joint.",
+   "distinct 8: Different from Corrective. -> Keep the thin limb.",
+   "legibility 7: Thin limb at 1x. -> Thicken the limb by 2 px.",
+   "craft 7: Clean. -> Smooth the elbow outline."
+  ]
+ },
+ "circularpattern": {
+  "score": 7.375,
+  "pass": false,
+  "notes": [
+   "represents 8: Ring of grey cylinders around a red circle: circular pattern reads. -> Add a red curved arrow around the ring to show repetition around the circle.",
+   "distinct 7: Uses the same cylinders as Row pattern next to it; layout differs. -> Use a different instance shape (small cubes) or make the red circle bolder.",
+   "legibility 7: At 1x eight cylinders crowd into a blob. -> Use 6 larger copies with gaps between.",
+   "craft 7: Busy overlapping outlines. -> Fewer copies, cleaner gaps."
+  ]
+ },
+ "edit:delete": {
+  "score": 7.375,
+  "pass": false,
+  "notes": [
+   "represents 8: Cube with a big red X over it. -> Show highlighted selected verts/edges with the X over them.",
+   "distinct 6: Close to Delete face (cube with red face). -> Show elements missing (a gap) with the X, distinct from the single red face.",
+   "legibility 8: X reads at 1x. -> Minor: bolder X.",
+   "craft 7: X overlaps the outline messily. -> Clean X over the cube."
+  ]
+ },
+ "symmetry": {
+  "score": 7.375,
+  "pass": false,
+  "notes": [
+   "represents 8: Blue butterfly with a red centre line: symmetric sides read. -> Add a small green/yellow check mark to show it's a check.",
+   "distinct 7: Red line across a shape echoes Clearance and Symmetrize. -> Make the red line a vertical dashed axis.",
+   "legibility 7: Wings blur slightly at 1x. -> Larger wings with a clear notch at the centre.",
+   "craft 7: Clean. -> Even out wing shapes exactly."
+  ]
+ },
+ "describe": {
+  "score": 7.625,
+  "pass": false,
+  "notes": [
+   "represents 8: Speech/note bubble with text lines next to a cube. -> Enlarge the bubble and add a tail pointing at the cube.",
+   "distinct 8: Different from Match. -> Keep bubble.",
+   "legibility 7: Text lines blur at 1x. -> Three 2-px lines.",
+   "craft 7: Clean. -> Tidy the bubble edge."
+  ]
+ },
+ "spline": {
+  "score": 7.625,
+  "pass": false,
+  "notes": [
+   "represents 8: Red S-curve with yellow end points and black tangent handles: a spline. -> Add a yellow control point in the middle of the curve with its handle, so 'through control points' reads.",
+   "distinct 8: Unique on the Form sheet; nearest is Curve (#16) on Deform. -> Keep the bare curve with no body attached to stay distinct from Curve.",
+   "legibility 7: Curve reads at 1x but the black handle lines vanish into the dark wheel. -> Make handles light grey 1-px lines with 2x2 yellow dots at their ends.",
+   "craft 7: Clean curve, handle lines look like stray black pixels. -> Recolour handles so they don't read as noise."
+  ]
+ },
+ "fillet": {
+  "score": 7.75,
+  "pass": false,
+  "notes": [
+   "represents 8: Grey box with a red rounded edge band: rounded edge reads. -> Show the round as a clear quarter-circle profile on the side face so the radius is obvious.",
+   "distinct 7: Box-with-red-edge setup similar to Chamfer, but rounded vs triangular. -> Make the rounded edge larger radius so it contrasts with Chamfer's flat cut.",
+   "legibility 8: Red rounded top reads at 1x. -> Minor: brighten the highlight on the round.",
+   "craft 8: Clean. -> Reduce dither on grey faces."
+  ]
+ },
+ "simpledeform": {
+  "score": 7.75,
+  "pass": false,
+  "notes": [
+   "represents 8: Grey bar bent into an arch with a red curved arrow above. -> Add a faint straight ghost bar to show before/after.",
+   "distinct 7: Arch resembles Sweep's curved tube. -> Make it a square-section bar to differ from Sweep's round tube.",
+   "legibility 8: Reads at 1x. -> Bigger arrowhead.",
+   "craft 8: Clean. -> Minor dither cleanup."
+  ]
+ },
+ "fur": {
+  "score": 7.875,
+  "pass": false,
+  "notes": [
+   "represents 8: Pink skin base with dense yellow strands growing up: fur reads. -> Use fewer, longer strands that curve and lean in one direction like groomed hair.",
+   "distinct 9: Nothing else on the Cloth sheet has strands. -> Keep the strands; recolour the base to blue fabric-free pink so it stays separate.",
+   "legibility 7: At 1x the strands merge into a yellow block like a brush. -> Thicken each strand to 2 px with 1-px gaps; 6-8 strands total.",
+   "craft 7: Busy jagged strand tops, slightly noisy. -> Taper each strand to a clean point."
+  ]
+ },
+ "blob": {
+  "score": 8.0,
+  "pass": false,
+  "notes": [
+   "represents 8: Two pink spheres overlapping into one organic lump; the melt is implied but the join is a hard crease, not a smooth neck. -> Add a visible smooth blend neck (filleted waist) between the two spheres so they clearly melt together, and add a third smaller sphere fused on.",
+   "distinct 8: Pink and organic, unlike the grey hard-edged Primitive; only other pink icons are on other sheets. -> Keep pink; add a small red highlight band at the blend neck to mark the melt action.",
+   "legibility 8: Silhouette reads at 1x as a double sphere; no red accent marks the action. -> Add a red accent on the blend seam so the action reads at 1x.",
+   "craft 8: Clean outline and shading, slight dithering on the shadow side. -> Reduce dither noise on the darker sphere and keep one clean shading ramp."
+  ]
+ },
+ "transform": {
+  "score": 8.375,
+  "pass": false,
+  "notes": [
+   "represents 9: Three-axis gizmo with red, yellow and blue arrows. -> Add a small rotation ring to cover rotate.",
+   "distinct 9: Nothing else on the sheet looks like a gizmo. -> Keep.",
+   "legibility 7: At 1x the blue arrow is dark against the wheel and the centre is tiny. -> Brighten blue arrow, bigger arrowheads and centre cube.",
+   "craft 8: Clean. -> Even out arrow lengths."
+  ]
+ }
+}

@@ -1,0 +1,2 @@
+# part	model	pivot x	y	z	size x	y	z
+horn	out/horn.vmdl	-0	1	-1.989	3.978	10.197	3.978

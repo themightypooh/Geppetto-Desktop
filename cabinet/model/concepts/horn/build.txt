@@ -1,0 +1,14 @@
+material 0 color=#c8962e metal=1 rough=0.3
+material 1 color=#2a1408 rough=0.5
+material 2 color=#e0b860 metal=1 rough=0.2
+echo a brass speaking horn: a wide bell narrowing to the tube
+add Blob name=Bell voxel=0.03 blend=0.25 shapes="cone 0,1.2,0 0.42 0,4.2,0 1.9 mat=0; -cone 0,1.4,0 0.3 0,4.25,0 1.8; torus 0,4.15,0 1.86 0.09 rot=90,0,0 mat=2"
+echo the tube curving back, rings where the sections join
+add Blob name=Tube voxel=0.025 blend=0.05 shapes="cylinder 0,-2.5,0 0,1.3,0 0.42 mat=0; torus 0,1.2,0 0.45 0.08 rot=90,0,0 mat=2; torus 0,-0.6,0 0.45 0.08 rot=90,0,0 mat=2; torus 0,-2.4,0 0.45 0.08 rot=90,0,0 mat=2"
+echo a leather grip and the mouthpiece
+add Blob name=Grip voxel=0.02 blend=0.03 shapes="cylinder 0,-2.3,0 0,-0.75,0 0.5 r=0.08 mat=1; torus 0,-2.00,0 0.5 0.04 rot=90,0,0 mat=1; torus 0,-1.70,0 0.5 0.04 rot=90,0,0 mat=1; torus 0,-1.40,0 0.5 0.04 rot=90,0,0 mat=1; torus 0,-1.10,0 0.5 0.04 rot=90,0,0 mat=1"
+add Blob name=Mouth voxel=0.02 blend=0.1 shapes="cone 0,-2.5,0 0.42 0,-3.5,0 0.6 mat=0; -cone 0,-2.9,0 0.15 0,-3.55,0 0.5; torus 0,-3.47,0 0.58 0.06 rot=90,0,0 mat=2"
+describe
+turnaround out shade=material size=512 name=horn
+save horn.effigy
+export out name=horn

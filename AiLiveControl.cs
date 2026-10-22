@@ -30,9 +30,14 @@ public static class AiLiveControl
         readonly Queue<Direction> directions = new();
         readonly Stopwatch clock = Stopwatch.StartNew();
         bool pauseRequested, paused, closed;
+        int steps;                      // STEP while paused: changes allowed through before holding again
         double pace, lastMutation = double.NegativeInfinity;
-        public Session(string root, AiLiveRun live, CancellationTokenSource run, bool allowDirections = true)
-        { this.root = root; this.live = live; this.run = run; this.allowDirections = allowDirections; }
+        public Session(string root, AiLiveRun live, CancellationTokenSource run, bool allowDirections = true, double pace = 0)
+        {
+            this.root = root; this.live = live; this.run = run; this.allowDirections = allowDirections; this.pace = pace;
+            // A starting pace is published, so the cabinet's pace control shows it before the first change.
+            if (pace > 0) Publish("pace-changed", null, "initial");
+        }
         public bool HasDirections { get { lock (gate) return directions.Count > 0; } }
 
         void Publish(string state, string? id = null, string? outcome = null)
@@ -45,6 +50,12 @@ public static class AiLiveControl
                 ct.ThrowIfCancellationRequested();
                 lock (gate)
                 {
+                    if (pauseRequested && steps > 0)
+                    {
+                        // a step lets the run go on to its next change, does that one, and holds again
+                        if (mutation) steps--;
+                        return;
+                    }
                     if (pauseRequested)
                     {
                         if (!paused) { paused = true; Publish("paused"); }
@@ -117,7 +128,10 @@ public static class AiLiveControl
                                 {
                                     case "cancel": Publish("cancelling", id, "accepted"); run.Cancel(); return;
                                     case "pause": pauseRequested = true; Publish("pausing", id, "accepted"); break;
-                                    case "resume": pauseRequested = paused = false; Publish("resumed", id, "accepted"); break;
+                                    case "resume": pauseRequested = paused = false; steps = 0; Publish("resumed", id, "accepted"); break;
+                                    case "step":
+                                        if (!pauseRequested) { Publish("control-rejected", id, "step-only-while-paused"); break; }
+                                        steps = Math.Min(steps + 1, 8); Publish("stepping", id, "accepted"); break;
                                     case "pace":
                                         double seconds = command["seconds"]?.GetValue<double>() ?? double.NaN;
                                         if (!double.IsFinite(seconds) || seconds < 0 || seconds > 30) { Publish("control-rejected", id, "pace-must-be-0-to-30-seconds"); break; }

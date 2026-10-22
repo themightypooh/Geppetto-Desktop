@@ -1,0 +1,2 @@
+# part	model	pivot x	y	z	size x	y	z
+pinched	out/pinched.vmdl	0	0	-1.15	2.3	7.401	2.3

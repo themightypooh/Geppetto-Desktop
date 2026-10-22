@@ -1,0 +1,66 @@
+effigy 1
+rollback 2147483647
+materiallook 0 color=#5a2a18 rough=0.6 metal=0
+materiallook 1 color=#efe4c8 rough=0.9 metal=0
+materiallook 2 color=#b8892e rough=0.35 metal=1
+materiallook 3 color=#3a1a0e rough=0.7 metal=0
+feature BlobFeature
+	id 33bb88fe
+	name Cover
+	suppressed 0
+	visible 1
+	param Blend 0.03
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 0,0,0.35 3.6,5.0,0.7 r=0.12 mat=0; -box 0.12,0,0.35 3.5,4.8,0.5; cylinder -1.8,-2.5,0.35 -1.8,2.5,0.35 0.38 mat=0
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id d8e3ecf0
+	name Pages
+	suppressed 0
+	visible 1
+	param Blend 0.02
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 0.1,0,0.35 3.4,4.76,0.5 r=0.03 mat=1; paint box 1.82,0,0.20 0.05,4.8,0.025 mat=0; paint box 1.82,0,0.28 0.05,4.8,0.025 mat=0; paint box 1.82,0,0.36 0.05,4.8,0.025 mat=0; paint box 1.82,0,0.44 0.05,4.8,0.025 mat=0; paint box 1.82,0,0.52 0.05,4.8,0.025 mat=0
+	param Smooth 2
+	param Voxel 0.02
+end
+feature BlobFeature
+	id af957409
+	name Trim
+	suppressed 0
+	visible 1
+	param Blend 0.02
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes torus -1.8,-1.70,0.35 0.39 0.05 rot=90,0,0 mat=3; torus -1.8,-0.60,0.35 0.39 0.05 rot=90,0,0 mat=3; torus -1.8,0.60,0.35 0.39 0.05 rot=90,0,0 mat=3; torus -1.8,1.70,0.35 0.39 0.05 rot=90,0,0 mat=3; box 1.58,-2.28,0.35 0.5,0.5,0.76 r=0.06 mat=2; box 1.58,2.28,0.35 0.5,0.5,0.76 r=0.06 mat=2; -box 1.2,-1.98,0.35 0.6,0.6,0.62; -box 1.2,1.98,0.35 0.6,0.6,0.62
+	param Smooth 2
+	param Voxel 0.02
+end
+feature BlobFeature
+	id caa3ef21
+	name Clasp
+	suppressed 0
+	visible 1
+	param Blend 0.02
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 1.86,0,0.35 0.14,0.7,0.8 r=0.05 mat=2; box 1.5,0,0.72 0.8,0.5,0.06 r=0.03 mat=2; sphere 1.86,0,0.35 0.13 mat=2
+	param Smooth 2
+	param Voxel 0.02
+end

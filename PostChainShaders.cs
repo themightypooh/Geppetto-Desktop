@@ -206,6 +206,7 @@ uniform vec3 uWhiteBalance;
 uniform float uGamma;
 uniform int uViewTransform; // 0 AgX, 1 Standard
 uniform int uLook;          // 0 None, 1 Punchy
+uniform int uWriteDepth;    // 1: the scene depth goes into the target with the colour, for overlays drawn after
 " + CocGlsl + @"
 const float kAgxNone[65] = float[]( 0.000000, 0.002006, 0.003338, 0.005200, 0.007322, 0.009628, 0.012177, 0.014816, 0.017746, 0.020813, 0.024178, 0.027859, 0.031683, 0.035994, 0.040497, 0.045490, 0.050808, 0.056587, 0.062933, 0.069599, 0.077199, 0.085174, 0.094092, 0.103761, 0.114190, 0.125961, 0.138279, 0.152604, 0.167749, 0.184681, 0.203332, 0.223353, 0.246247, 0.270254, 0.297748, 0.326879, 0.358704, 0.393059, 0.428989, 0.466786, 0.504722, 0.541486, 0.577209, 0.611481, 0.643631, 0.674954, 0.703241, 0.730778, 0.756074, 0.779986, 0.802581, 0.823211, 0.843214, 0.861090, 0.878373, 0.894293, 0.909218, 0.923443, 0.936353, 0.948884, 0.960250, 0.971169, 0.981391, 0.990707, 0.999572 );
 const float kAgxPunchy[65] = float[]( 0.015550, 0.015710, 0.015940, 0.016095, 0.016244, 0.016470, 0.016619, 0.016834, 0.016980, 0.017194, 0.017404, 0.017608, 0.017949, 0.018474, 0.019043, 0.019832, 0.020868, 0.022159, 0.023800, 0.025752, 0.028368, 0.031514, 0.035615, 0.040724, 0.047370, 0.055874, 0.066185, 0.078461, 0.092214, 0.107438, 0.124249, 0.142634, 0.162615, 0.185106, 0.209323, 0.234994, 0.262522, 0.292388, 0.322841, 0.355228, 0.389366, 0.425549, 0.463529, 0.502024, 0.539312, 0.575732, 0.610632, 0.643480, 0.675534, 0.704452, 0.732515, 0.758525, 0.782846, 0.806161, 0.827077, 0.847291, 0.865845, 0.883214, 0.899797, 0.914715, 0.929120, 0.942397, 0.954825, 0.966747, 0.977516 );
@@ -254,6 +255,10 @@ void main() {
 	vec3 encoded = srgbEncode(display);
 	if (uGamma != 1.0) encoded = pow(encoded, vec3(1.0 / uGamma));
 	FragColor = vec4(encoded, 1.0);
+	// Overlays (grid, bones, handles) are drawn into the same target afterwards and depth-test
+	// against this. A depth blit can't fill a multisampled target such as the window's
+	// default framebuffer, so the scene depth is written here, per sample, with the colour.
+	gl_FragDepth = uWriteDepth == 1 ? texture(uDepth, vUv).r : gl_FragCoord.z;
 }
 ";
 }

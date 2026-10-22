@@ -1,0 +1,871 @@
+PASS baseline/bind palette is identity
+PASS baseline/missing explicit clip reports an error
+PASS baseline/scrubbing a paused clip updates the pose
+PASS baseline/loading a new clip resets the playhead
+PASS baseline/bone clip matches kernel at fractional frames
+PASS baseline/clip playback allocates zero bytes after warmup
+PASS baseline/over-capacity skeleton is rejected instead of clamping bone IDs
+PASS baseline/singular bind transform is rejected
+PASS baseline/OpenGL projection maps near plane to -1
+PASS baseline/screen centre ray follows camera forward
+PASS baseline/green lamps are green, not orange
+PASS baseline/one-shot clip stops on the final pose
+PASS baseline/paused scrubbing can reach the exact last frame
+PASS baseline/negative/NaN frame deltas are rejected
+PASS baseline/live IK matches kernel, including fractional frames
+PASS baseline/limits match kernel and allocate zero bytes
+PASS baseline/unsupported part tracks fail explicitly
+PASS baseline/GPU palette agrees with kernel skinning maths
+PASS baseline/body picking ignores empty space inside an AABB
+PASS baseline/body picking follows animated geometry
+PASS baseline/FBX missing weights do not silently rebind
+PASS baseline/CLI rejects unknown flags, missing values and invalid sizes
+PASS baseline/headless/exposure options parse without enabling animation
+PASS survey/Survey assembly uses authored head and collar, not placeholder
+PASS survey/background loader publishes a complete result
+PASS baseline/background load errors are published and recoverable
+PASS clip-space/foreign mismatched bones retain bind translation on both sampling paths
+PASS clip-space/foreign twist offsets and animated incompatible chains cannot stretch the mesh
+PASS clip-space/foreign root and intentionally animated translations are scaled and preserved
+PASS clip-space/same-unit and unknown-unit clips keep authored translations
+PASS clip-space/clip authored on a weight-culled skeleton follows the clip's parents
+PASS clip-space/prop mesh scaling leaves placement translation intact
+PASS ai/rubric rejects missing evidence and invalid scores
+PASS ai/rubric rejects duplicates and invalid weights
+PASS ai/plateau uses best score and retains earlier checkpoint
+PASS ai/run paths reject escapes and links
+PASS ai/native feature tool creates editable checkpoint
+PASS ai/invalid edits roll back and frozen features reject changes
+PASS ai/references reject private and transition addresses
+PASS ai/configuration rejects unknown flags and unsafe providers
+@{"schemaVersion":1,"ev":"ai-live","runId":"a58027f682bf459e81d2caa2465307d8","documentId":"a5d442531997465d8d0b056ade43a5f5","sequence":1,"timestamp":"2026-10-20T16:41:37.850594+00:00","state":"starting","operationId":null,"operation":null,"outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":null}
+@{"schemaVersion":1,"ev":"ai-live","runId":"a58027f682bf459e81d2caa2465307d8","documentId":"a5d442531997465d8d0b056ade43a5f5","sequence":2,"timestamp":"2026-10-20T16:41:37.8551947+00:00","state":"revision","operationId":"5d5243d371d34543bdf16009bb4bc547","operation":"initial","outcome":"committed","control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:37.855023+00:00","revision":1,"path":".live/revisions/00000001-4a5ed3d5b53a46c79267154b81cda916.effigy","cached":false,"cacheNote":"an empty document has nothing worth caching","bytes":29,"checkpoint":null,"affectedFeatureIds":[],"featureIds":[]}}
+AI: openai/fixture; output /tmp/opencode/geppetto-desktop-tests-017b090a7ebd4549b99d91d634124189/ai-whole. Calls <= 10, time <= 15 minutes.
+@{"schemaVersion":1,"ev":"ai-live","runId":"a58027f682bf459e81d2caa2465307d8","documentId":"a5d442531997465d8d0b056ade43a5f5","sequence":3,"timestamp":"2026-10-20T16:41:37.8649398+00:00","state":"waiting","operationId":null,"operation":null,"outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:37.855023+00:00","revision":1,"path":".live/revisions/00000001-4a5ed3d5b53a46c79267154b81cda916.effigy","cached":false,"cacheNote":"an empty document has nothing worth caching","bytes":29,"checkpoint":null,"affectedFeatureIds":[],"featureIds":[]}}
+AI tool: add_feature
+@{"schemaVersion":1,"ev":"ai-live","runId":"a58027f682bf459e81d2caa2465307d8","documentId":"a5d442531997465d8d0b056ade43a5f5","sequence":4,"timestamp":"2026-10-20T16:41:37.8750177+00:00","state":"building","operationId":"79e4fc02a076412d92f57ed79dfb4067","operation":"add_feature","outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:37.855023+00:00","revision":1,"path":".live/revisions/00000001-4a5ed3d5b53a46c79267154b81cda916.effigy","cached":false,"cacheNote":"an empty document has nothing worth caching","bytes":29,"checkpoint":null,"affectedFeatureIds":[],"featureIds":[]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"a58027f682bf459e81d2caa2465307d8","documentId":"a5d442531997465d8d0b056ade43a5f5","sequence":5,"timestamp":"2026-10-20T16:41:37.999919+00:00","state":"revision","operationId":"79e4fc02a076412d92f57ed79dfb4067","operation":"add_feature","outcome":"committed","control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:37.9998339+00:00","revision":2,"path":".live/revisions/00000002-460dd2f4e7c24024aeae5ccc20c5c064.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":380,"checkpoint":null,"affectedFeatureIds":["f9a3ce3c6d18"],"featureIds":["f9a3ce3c6d18"]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"a58027f682bf459e81d2caa2465307d8","documentId":"a5d442531997465d8d0b056ade43a5f5","sequence":6,"timestamp":"2026-10-20T16:41:38.0007564+00:00","state":"waiting","operationId":null,"operation":null,"outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:37.9998339+00:00","revision":2,"path":".live/revisions/00000002-460dd2f4e7c24024aeae5ccc20c5c064.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":380,"checkpoint":null,"affectedFeatureIds":["f9a3ce3c6d18"],"featureIds":["f9a3ce3c6d18"]}}
+Built the editable test block.
+@{"schemaVersion":1,"ev":"ai-live","runId":"a58027f682bf459e81d2caa2465307d8","documentId":"a5d442531997465d8d0b056ade43a5f5","sequence":7,"timestamp":"2026-10-20T16:41:38.0030716+00:00","state":"revision","operationId":"ccf5d2bc2b554f1f9560d433aa2d187f","operation":"restore","outcome":"committed","control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:38.0030531+00:00","revision":3,"path":".live/revisions/00000003-476259bb0c8b444b8d718a1c977b9890.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":380,"checkpoint":"round-00.effigy","affectedFeatureIds":["f9a3ce3c6d18"],"featureIds":["f9a3ce3c6d18"]}}
+built-unjudged: /tmp/opencode/geppetto-desktop-tests-017b090a7ebd4549b99d91d634124189/ai-whole/task-00-best.effigy
+@{"schemaVersion":1,"ev":"ai-live","runId":"a58027f682bf459e81d2caa2465307d8","documentId":"a5d442531997465d8d0b056ade43a5f5","sequence":8,"timestamp":"2026-10-20T16:41:38.003482+00:00","state":"completed","operationId":null,"operation":null,"outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:38.0030531+00:00","revision":3,"path":".live/revisions/00000003-476259bb0c8b444b8d718a1c977b9890.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":380,"checkpoint":"round-00.effigy","affectedFeatureIds":["f9a3ce3c6d18"],"featureIds":["f9a3ce3c6d18"]}}
+PASS ai/whole native creation uses provider loop and writes result
+@{"schemaVersion":1,"ev":"ai-live","runId":"9c2d256242164392b12e1b66fbe70d59","documentId":"29abf9ee909e44e494b43b760f3dc431","sequence":1,"timestamp":"2026-10-20T16:41:38.0042877+00:00","state":"starting","operationId":null,"operation":null,"outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":null}
+@{"schemaVersion":1,"ev":"ai-live","runId":"9c2d256242164392b12e1b66fbe70d59","documentId":"29abf9ee909e44e494b43b760f3dc431","sequence":2,"timestamp":"2026-10-20T16:41:38.0045266+00:00","state":"revision","operationId":"e664864ada9847c381e175b8a9d77a98","operation":"initial","outcome":"committed","control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:38.004485+00:00","revision":1,"path":".live/revisions/00000001-57e97315225141c29951e1116db62c42.effigy","cached":false,"cacheNote":"an empty document has nothing worth caching","bytes":29,"checkpoint":null,"affectedFeatureIds":[],"featureIds":[]}}
+AI: openai/fixture; output /tmp/opencode/geppetto-desktop-tests-017b090a7ebd4549b99d91d634124189/ai-budget. Calls <= 1, time <= 15 minutes.
+@{"schemaVersion":1,"ev":"ai-live","runId":"9c2d256242164392b12e1b66fbe70d59","documentId":"29abf9ee909e44e494b43b760f3dc431","sequence":3,"timestamp":"2026-10-20T16:41:38.0047958+00:00","state":"waiting","operationId":null,"operation":null,"outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:38.004485+00:00","revision":1,"path":".live/revisions/00000001-57e97315225141c29951e1116db62c42.effigy","cached":false,"cacheNote":"an empty document has nothing worth caching","bytes":29,"checkpoint":null,"affectedFeatureIds":[],"featureIds":[]}}
+AI tool: add_feature
+@{"schemaVersion":1,"ev":"ai-live","runId":"9c2d256242164392b12e1b66fbe70d59","documentId":"29abf9ee909e44e494b43b760f3dc431","sequence":4,"timestamp":"2026-10-20T16:41:38.00519+00:00","state":"building","operationId":"a45ac9ec9f684c829b13bfdb9d03e03e","operation":"add_feature","outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:38.004485+00:00","revision":1,"path":".live/revisions/00000001-57e97315225141c29951e1116db62c42.effigy","cached":false,"cacheNote":"an empty document has nothing worth caching","bytes":29,"checkpoint":null,"affectedFeatureIds":[],"featureIds":[]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"9c2d256242164392b12e1b66fbe70d59","documentId":"29abf9ee909e44e494b43b760f3dc431","sequence":5,"timestamp":"2026-10-20T16:41:38.1183657+00:00","state":"revision","operationId":"a45ac9ec9f684c829b13bfdb9d03e03e","operation":"add_feature","outcome":"committed","control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:38.1183298+00:00","revision":2,"path":".live/revisions/00000002-2985c1aa56dd4d77b0bd713e97ee882a.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":380,"checkpoint":null,"affectedFeatureIds":["b6c3d1db372e"],"featureIds":["b6c3d1db372e"]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"9c2d256242164392b12e1b66fbe70d59","documentId":"29abf9ee909e44e494b43b760f3dc431","sequence":6,"timestamp":"2026-10-20T16:41:38.1188384+00:00","state":"failed","operationId":null,"operation":null,"outcome":"InvalidOperationException","control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:38.1183298+00:00","revision":2,"path":".live/revisions/00000002-2985c1aa56dd4d77b0bd713e97ee882a.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":380,"checkpoint":null,"affectedFeatureIds":["b6c3d1db372e"],"featureIds":["b6c3d1db372e"]}}
+PASS ai/budget stop preserves generated editable checkpoint
+SKIP ai/actual EGL build judge revise reaches target: Set AI_REQUIRE_EGL=1 for real windowless rendering + mocked provider integration.
+SKIP ai/actual EGL plateau returns below target and best not latest: Set AI_REQUIRE_EGL=1 for real windowless plateau regression.
+SKIP ai/actual EGL budget stop records earlier best selection: Set AI_REQUIRE_EGL=1 for checkpoint stop regression.
+PASS ai/openai request and tool response round trip
+PASS ai/anthropic request and tool response round trip
+PASS ai/google request and tool response round trip
+PASS ai-live/successful mutations, empty removal and restore publish immutable revisions
+PASS ai-live/pause, pace and command validation at operation boundaries
+@{"schemaVersion":1,"ev":"ai-live","runId":"c4cae14b751c4ef9938fbc5300018f96","documentId":"1e219d46a4c647149eecd7b5ef6ee4dd","sequence":1,"timestamp":"2026-10-20T16:41:39.5854462+00:00","state":"starting","operationId":null,"operation":null,"outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":null}
+@{"schemaVersion":1,"ev":"ai-live","runId":"c4cae14b751c4ef9938fbc5300018f96","documentId":"1e219d46a4c647149eecd7b5ef6ee4dd","sequence":2,"timestamp":"2026-10-20T16:41:39.5856767+00:00","state":"revision","operationId":"8359f2cfde4a4f21820681e84833ab5e","operation":"initial","outcome":"committed","control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:39.5856275+00:00","revision":1,"path":".live/revisions/00000001-96f7bfbf013145a2a2ed4e259144732a.effigy","cached":false,"cacheNote":"an empty document has nothing worth caching","bytes":29,"checkpoint":null,"affectedFeatureIds":[],"featureIds":[]}}
+AI: openai/fixture; output /tmp/opencode/geppetto-desktop-tests-017b090a7ebd4549b99d91d634124189/live-steer-direction. Calls <= 8, time <= 15 minutes.
+@{"schemaVersion":1,"ev":"ai-live","runId":"c4cae14b751c4ef9938fbc5300018f96","documentId":"1e219d46a4c647149eecd7b5ef6ee4dd","sequence":3,"timestamp":"2026-10-20T16:41:39.5859118+00:00","state":"waiting","operationId":null,"operation":null,"outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:39.5856275+00:00","revision":1,"path":".live/revisions/00000001-96f7bfbf013145a2a2ed4e259144732a.effigy","cached":false,"cacheNote":"an empty document has nothing worth caching","bytes":29,"checkpoint":null,"affectedFeatureIds":[],"featureIds":[]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"c4cae14b751c4ef9938fbc5300018f96","documentId":"1e219d46a4c647149eecd7b5ef6ee4dd","sequence":4,"timestamp":"2026-10-20T16:41:39.6362753+00:00","state":"direction-queued","operationId":null,"operation":null,"outcome":"accepted","control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":1,"commandId":"00639281112995870986-f981fa9b1e8b48638896d865b1178ed0","outcome":"accepted"},"snapshot":{"committedAt":"2026-10-20T16:41:39.5856275+00:00","revision":1,"path":".live/revisions/00000001-96f7bfbf013145a2a2ed4e259144732a.effigy","cached":false,"cacheNote":"an empty document has nothing worth caching","bytes":29,"checkpoint":null,"affectedFeatureIds":[],"featureIds":[]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"c4cae14b751c4ef9938fbc5300018f96","documentId":"1e219d46a4c647149eecd7b5ef6ee4dd","sequence":5,"timestamp":"2026-10-20T16:41:39.6391394+00:00","state":"direction-delivered","operationId":null,"operation":null,"outcome":"delivered-to-builder","control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0,"commandId":"00639281112995870986-f981fa9b1e8b48638896d865b1178ed0","outcome":"delivered-to-builder"},"snapshot":{"committedAt":"2026-10-20T16:41:39.5856275+00:00","revision":1,"path":".live/revisions/00000001-96f7bfbf013145a2a2ed4e259144732a.effigy","cached":false,"cacheNote":"an empty document has nothing worth caching","bytes":29,"checkpoint":null,"affectedFeatureIds":[],"featureIds":[]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"c4cae14b751c4ef9938fbc5300018f96","documentId":"1e219d46a4c647149eecd7b5ef6ee4dd","sequence":6,"timestamp":"2026-10-20T16:41:39.6394796+00:00","state":"waiting","operationId":null,"operation":null,"outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0,"commandId":"00639281112995870986-f981fa9b1e8b48638896d865b1178ed0","outcome":"delivered-to-builder"},"snapshot":{"committedAt":"2026-10-20T16:41:39.5856275+00:00","revision":1,"path":".live/revisions/00000001-96f7bfbf013145a2a2ed4e259144732a.effigy","cached":false,"cacheNote":"an empty document has nothing worth caching","bytes":29,"checkpoint":null,"affectedFeatureIds":[],"featureIds":[]}}
+AI tool: add_feature
+@{"schemaVersion":1,"ev":"ai-live","runId":"c4cae14b751c4ef9938fbc5300018f96","documentId":"1e219d46a4c647149eecd7b5ef6ee4dd","sequence":7,"timestamp":"2026-10-20T16:41:39.6398923+00:00","state":"building","operationId":"55a650aac186456193663926fa30bc1c","operation":"add_feature","outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0,"commandId":"00639281112995870986-f981fa9b1e8b48638896d865b1178ed0","outcome":"delivered-to-builder"},"snapshot":{"committedAt":"2026-10-20T16:41:39.5856275+00:00","revision":1,"path":".live/revisions/00000001-96f7bfbf013145a2a2ed4e259144732a.effigy","cached":false,"cacheNote":"an empty document has nothing worth caching","bytes":29,"checkpoint":null,"affectedFeatureIds":[],"featureIds":[]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"c4cae14b751c4ef9938fbc5300018f96","documentId":"1e219d46a4c647149eecd7b5ef6ee4dd","sequence":8,"timestamp":"2026-10-20T16:41:39.7459236+00:00","state":"revision","operationId":"55a650aac186456193663926fa30bc1c","operation":"add_feature","outcome":"committed","control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0,"commandId":"00639281112995870986-f981fa9b1e8b48638896d865b1178ed0","outcome":"delivered-to-builder"},"snapshot":{"committedAt":"2026-10-20T16:41:39.7458953+00:00","revision":2,"path":".live/revisions/00000002-a3be8538f790402cb4841fe0a78fbd72.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":379,"checkpoint":null,"affectedFeatureIds":["a4fe8a6b9796"],"featureIds":["a4fe8a6b9796"]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"c4cae14b751c4ef9938fbc5300018f96","documentId":"1e219d46a4c647149eecd7b5ef6ee4dd","sequence":9,"timestamp":"2026-10-20T16:41:39.7460992+00:00","state":"waiting","operationId":null,"operation":null,"outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0,"commandId":"00639281112995870986-f981fa9b1e8b48638896d865b1178ed0","outcome":"delivered-to-builder"},"snapshot":{"committedAt":"2026-10-20T16:41:39.7458953+00:00","revision":2,"path":".live/revisions/00000002-a3be8538f790402cb4841fe0a78fbd72.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":379,"checkpoint":null,"affectedFeatureIds":["a4fe8a6b9796"],"featureIds":["a4fe8a6b9796"]}}
+One 9-wide block built.
+@{"schemaVersion":1,"ev":"ai-live","runId":"c4cae14b751c4ef9938fbc5300018f96","documentId":"1e219d46a4c647149eecd7b5ef6ee4dd","sequence":10,"timestamp":"2026-10-20T16:41:39.7469421+00:00","state":"revision","operationId":"23c6e9122c1a4322b471f6d7e2599e67","operation":"restore","outcome":"committed","control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0,"commandId":"00639281112995870986-f981fa9b1e8b48638896d865b1178ed0","outcome":"delivered-to-builder"},"snapshot":{"committedAt":"2026-10-20T16:41:39.7469293+00:00","revision":3,"path":".live/revisions/00000003-4a379617d269457dbead009b599b23f3.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":379,"checkpoint":"round-00.effigy","affectedFeatureIds":["a4fe8a6b9796"],"featureIds":["a4fe8a6b9796"]}}
+built-unjudged: /tmp/opencode/geppetto-desktop-tests-017b090a7ebd4549b99d91d634124189/live-steer-direction/task-00-best.effigy
+@{"schemaVersion":1,"ev":"ai-live","runId":"c4cae14b751c4ef9938fbc5300018f96","documentId":"1e219d46a4c647149eecd7b5ef6ee4dd","sequence":11,"timestamp":"2026-10-20T16:41:39.7471094+00:00","state":"completed","operationId":null,"operation":null,"outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0,"commandId":"00639281112995870986-f981fa9b1e8b48638896d865b1178ed0","outcome":"delivered-to-builder"},"snapshot":{"committedAt":"2026-10-20T16:41:39.7469293+00:00","revision":3,"path":".live/revisions/00000003-4a379617d269457dbead009b599b23f3.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":379,"checkpoint":"round-00.effigy","affectedFeatureIds":["a4fe8a6b9796"],"featureIds":["a4fe8a6b9796"]}}
+PASS ai-live/direction during provider wait supersedes unstarted calls and steers the model
+@{"schemaVersion":1,"ev":"ai-live","runId":"9e62bbb946824758be6e2b2f9e513dcf","documentId":"9dd411dd8873431fbf4b26c75bd7bc4c","sequence":1,"timestamp":"2026-10-20T16:41:39.7510098+00:00","state":"starting","operationId":null,"operation":null,"outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":null}
+@{"schemaVersion":1,"ev":"ai-live","runId":"9e62bbb946824758be6e2b2f9e513dcf","documentId":"9dd411dd8873431fbf4b26c75bd7bc4c","sequence":2,"timestamp":"2026-10-20T16:41:39.7511705+00:00","state":"revision","operationId":"094ece84dcf4414d913962cbe02491a2","operation":"initial","outcome":"committed","control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:39.7511579+00:00","revision":1,"path":".live/revisions/00000001-332df34143b54cbb9c66aba9ca67eedc.effigy","cached":false,"cacheNote":"an empty document has nothing worth caching","bytes":29,"checkpoint":null,"affectedFeatureIds":[],"featureIds":[]}}
+AI: openai/fixture; output /tmp/opencode/geppetto-desktop-tests-017b090a7ebd4549b99d91d634124189/live-steer-final. Calls <= 8, time <= 15 minutes.
+@{"schemaVersion":1,"ev":"ai-live","runId":"9e62bbb946824758be6e2b2f9e513dcf","documentId":"9dd411dd8873431fbf4b26c75bd7bc4c","sequence":3,"timestamp":"2026-10-20T16:41:39.7513819+00:00","state":"waiting","operationId":null,"operation":null,"outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:39.7511579+00:00","revision":1,"path":".live/revisions/00000001-332df34143b54cbb9c66aba9ca67eedc.effigy","cached":false,"cacheNote":"an empty document has nothing worth caching","bytes":29,"checkpoint":null,"affectedFeatureIds":[],"featureIds":[]}}
+AI tool: add_feature
+@{"schemaVersion":1,"ev":"ai-live","runId":"9e62bbb946824758be6e2b2f9e513dcf","documentId":"9dd411dd8873431fbf4b26c75bd7bc4c","sequence":4,"timestamp":"2026-10-20T16:41:39.7519702+00:00","state":"building","operationId":"3e5fb26d6b2643f28f523f24af0a84b2","operation":"add_feature","outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:39.7511579+00:00","revision":1,"path":".live/revisions/00000001-332df34143b54cbb9c66aba9ca67eedc.effigy","cached":false,"cacheNote":"an empty document has nothing worth caching","bytes":29,"checkpoint":null,"affectedFeatureIds":[],"featureIds":[]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"9e62bbb946824758be6e2b2f9e513dcf","documentId":"9dd411dd8873431fbf4b26c75bd7bc4c","sequence":5,"timestamp":"2026-10-20T16:41:39.8608057+00:00","state":"revision","operationId":"3e5fb26d6b2643f28f523f24af0a84b2","operation":"add_feature","outcome":"committed","control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:39.8607775+00:00","revision":2,"path":".live/revisions/00000002-17ed023f78a647228ef7b17c20437b52.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":379,"checkpoint":null,"affectedFeatureIds":["624e3ee35949"],"featureIds":["624e3ee35949"]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"9e62bbb946824758be6e2b2f9e513dcf","documentId":"9dd411dd8873431fbf4b26c75bd7bc4c","sequence":6,"timestamp":"2026-10-20T16:41:39.8609964+00:00","state":"waiting","operationId":null,"operation":null,"outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:39.8607775+00:00","revision":2,"path":".live/revisions/00000002-17ed023f78a647228ef7b17c20437b52.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":379,"checkpoint":null,"affectedFeatureIds":["624e3ee35949"],"featureIds":["624e3ee35949"]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"9e62bbb946824758be6e2b2f9e513dcf","documentId":"9dd411dd8873431fbf4b26c75bd7bc4c","sequence":7,"timestamp":"2026-10-20T16:41:39.9015808+00:00","state":"direction-queued","operationId":null,"operation":null,"outcome":"accepted","control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":1,"commandId":"00639281112998614761-7e68ba1a48874ed38ddbd3d94ff376df","outcome":"accepted"},"snapshot":{"committedAt":"2026-10-20T16:41:39.8607775+00:00","revision":2,"path":".live/revisions/00000002-17ed023f78a647228ef7b17c20437b52.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":379,"checkpoint":null,"affectedFeatureIds":["624e3ee35949"],"featureIds":["624e3ee35949"]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"9e62bbb946824758be6e2b2f9e513dcf","documentId":"9dd411dd8873431fbf4b26c75bd7bc4c","sequence":8,"timestamp":"2026-10-20T16:41:39.9022617+00:00","state":"direction-delivered","operationId":null,"operation":null,"outcome":"delivered-to-builder","control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0,"commandId":"00639281112998614761-7e68ba1a48874ed38ddbd3d94ff376df","outcome":"delivered-to-builder"},"snapshot":{"committedAt":"2026-10-20T16:41:39.8607775+00:00","revision":2,"path":".live/revisions/00000002-17ed023f78a647228ef7b17c20437b52.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":379,"checkpoint":null,"affectedFeatureIds":["624e3ee35949"],"featureIds":["624e3ee35949"]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"9e62bbb946824758be6e2b2f9e513dcf","documentId":"9dd411dd8873431fbf4b26c75bd7bc4c","sequence":9,"timestamp":"2026-10-20T16:41:39.9024421+00:00","state":"waiting","operationId":null,"operation":null,"outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0,"commandId":"00639281112998614761-7e68ba1a48874ed38ddbd3d94ff376df","outcome":"delivered-to-builder"},"snapshot":{"committedAt":"2026-10-20T16:41:39.8607775+00:00","revision":2,"path":".live/revisions/00000002-17ed023f78a647228ef7b17c20437b52.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":379,"checkpoint":null,"affectedFeatureIds":["624e3ee35949"],"featureIds":["624e3ee35949"]}}
+AI tool: add_feature
+@{"schemaVersion":1,"ev":"ai-live","runId":"9e62bbb946824758be6e2b2f9e513dcf","documentId":"9dd411dd8873431fbf4b26c75bd7bc4c","sequence":10,"timestamp":"2026-10-20T16:41:39.9028584+00:00","state":"building","operationId":"3a22cbbe4417412f9ba5fbdc8120b9bd","operation":"add_feature","outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0,"commandId":"00639281112998614761-7e68ba1a48874ed38ddbd3d94ff376df","outcome":"delivered-to-builder"},"snapshot":{"committedAt":"2026-10-20T16:41:39.8607775+00:00","revision":2,"path":".live/revisions/00000002-17ed023f78a647228ef7b17c20437b52.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":379,"checkpoint":null,"affectedFeatureIds":["624e3ee35949"],"featureIds":["624e3ee35949"]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"9e62bbb946824758be6e2b2f9e513dcf","documentId":"9dd411dd8873431fbf4b26c75bd7bc4c","sequence":11,"timestamp":"2026-10-20T16:41:40.015099+00:00","state":"revision","operationId":"3a22cbbe4417412f9ba5fbdc8120b9bd","operation":"add_feature","outcome":"committed","control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0,"commandId":"00639281112998614761-7e68ba1a48874ed38ddbd3d94ff376df","outcome":"delivered-to-builder"},"snapshot":{"committedAt":"2026-10-20T16:41:40.0150768+00:00","revision":3,"path":".live/revisions/00000003-f09e4d3795aa493a905180727a3658c4.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":729,"checkpoint":null,"affectedFeatureIds":["49a246a62c17"],"featureIds":["624e3ee35949","49a246a62c17"]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"9e62bbb946824758be6e2b2f9e513dcf","documentId":"9dd411dd8873431fbf4b26c75bd7bc4c","sequence":12,"timestamp":"2026-10-20T16:41:40.0152639+00:00","state":"waiting","operationId":null,"operation":null,"outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0,"commandId":"00639281112998614761-7e68ba1a48874ed38ddbd3d94ff376df","outcome":"delivered-to-builder"},"snapshot":{"committedAt":"2026-10-20T16:41:40.0150768+00:00","revision":3,"path":".live/revisions/00000003-f09e4d3795aa493a905180727a3658c4.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":729,"checkpoint":null,"affectedFeatureIds":["49a246a62c17"],"featureIds":["624e3ee35949","49a246a62c17"]}}
+Second block added.
+@{"schemaVersion":1,"ev":"ai-live","runId":"9e62bbb946824758be6e2b2f9e513dcf","documentId":"9dd411dd8873431fbf4b26c75bd7bc4c","sequence":13,"timestamp":"2026-10-20T16:41:40.0162278+00:00","state":"revision","operationId":"7d2dbc4e4862428bad41d553df411749","operation":"restore","outcome":"committed","control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0,"commandId":"00639281112998614761-7e68ba1a48874ed38ddbd3d94ff376df","outcome":"delivered-to-builder"},"snapshot":{"committedAt":"2026-10-20T16:41:40.0162147+00:00","revision":4,"path":".live/revisions/00000004-06994d1f73234399a58aa808e4002816.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":729,"checkpoint":"round-00.effigy","affectedFeatureIds":["624e3ee35949","49a246a62c17"],"featureIds":["624e3ee35949","49a246a62c17"]}}
+built-unjudged: /tmp/opencode/geppetto-desktop-tests-017b090a7ebd4549b99d91d634124189/live-steer-final/task-00-best.effigy
+@{"schemaVersion":1,"ev":"ai-live","runId":"9e62bbb946824758be6e2b2f9e513dcf","documentId":"9dd411dd8873431fbf4b26c75bd7bc4c","sequence":14,"timestamp":"2026-10-20T16:41:40.0164248+00:00","state":"completed","operationId":null,"operation":null,"outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0,"commandId":"00639281112998614761-7e68ba1a48874ed38ddbd3d94ff376df","outcome":"delivered-to-builder"},"snapshot":{"committedAt":"2026-10-20T16:41:40.0162147+00:00","revision":4,"path":".live/revisions/00000004-06994d1f73234399a58aa808e4002816.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":729,"checkpoint":"round-00.effigy","affectedFeatureIds":["624e3ee35949","49a246a62c17"],"featureIds":["624e3ee35949","49a246a62c17"]}}
+PASS ai-live/direction racing the final answer is applied before completion
+@{"schemaVersion":1,"ev":"ai-live","runId":"7d90226931d84884b74d564cc8bb03ec","documentId":"989bfac2795746708693d9f88572936a","sequence":1,"timestamp":"2026-10-20T16:41:40.2182696+00:00","state":"starting","operationId":null,"operation":null,"outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":null}
+@{"schemaVersion":1,"ev":"ai-live","runId":"7d90226931d84884b74d564cc8bb03ec","documentId":"989bfac2795746708693d9f88572936a","sequence":2,"timestamp":"2026-10-20T16:41:40.2184964+00:00","state":"revision","operationId":"df6d4e7578b04436b52ccad714d12d81","operation":"initial","outcome":"committed","control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:40.2184802+00:00","revision":1,"path":".live/revisions/00000001-6d3d6948469d436886052ffec2b49e16.effigy","cached":false,"cacheNote":"an empty document has nothing worth caching","bytes":29,"checkpoint":null,"affectedFeatureIds":[],"featureIds":[]}}
+AI: openai/fixture; output /tmp/opencode/geppetto-desktop-tests-017b090a7ebd4549b99d91d634124189/live-provider. Calls <= 8, time <= 15 minutes.
+@{"schemaVersion":1,"ev":"ai-live","runId":"7d90226931d84884b74d564cc8bb03ec","documentId":"989bfac2795746708693d9f88572936a","sequence":3,"timestamp":"2026-10-20T16:41:40.2187134+00:00","state":"waiting","operationId":null,"operation":null,"outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:40.2184802+00:00","revision":1,"path":".live/revisions/00000001-6d3d6948469d436886052ffec2b49e16.effigy","cached":false,"cacheNote":"an empty document has nothing worth caching","bytes":29,"checkpoint":null,"affectedFeatureIds":[],"featureIds":[]}}
+AI tool: add_feature
+@{"schemaVersion":1,"ev":"ai-live","runId":"7d90226931d84884b74d564cc8bb03ec","documentId":"989bfac2795746708693d9f88572936a","sequence":4,"timestamp":"2026-10-20T16:41:40.2195159+00:00","state":"building","operationId":"ff9a0cf844194137889558eda0e6802f","operation":"add_feature","outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:40.2184802+00:00","revision":1,"path":".live/revisions/00000001-6d3d6948469d436886052ffec2b49e16.effigy","cached":false,"cacheNote":"an empty document has nothing worth caching","bytes":29,"checkpoint":null,"affectedFeatureIds":[],"featureIds":[]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"7d90226931d84884b74d564cc8bb03ec","documentId":"989bfac2795746708693d9f88572936a","sequence":5,"timestamp":"2026-10-20T16:41:40.3254778+00:00","state":"revision","operationId":"ff9a0cf844194137889558eda0e6802f","operation":"add_feature","outcome":"committed","control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:40.325457+00:00","revision":2,"path":".live/revisions/00000002-d148fc885fcf4741a78c4fc46c6e9ead.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":379,"checkpoint":null,"affectedFeatureIds":["4db398e85c9f"],"featureIds":["4db398e85c9f"]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"7d90226931d84884b74d564cc8bb03ec","documentId":"989bfac2795746708693d9f88572936a","sequence":6,"timestamp":"2026-10-20T16:41:40.3256117+00:00","state":"waiting","operationId":null,"operation":null,"outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:40.325457+00:00","revision":2,"path":".live/revisions/00000002-d148fc885fcf4741a78c4fc46c6e9ead.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":379,"checkpoint":null,"affectedFeatureIds":["4db398e85c9f"],"featureIds":["4db398e85c9f"]}}
+AI tool: add_feature
+@{"schemaVersion":1,"ev":"ai-live","runId":"7d90226931d84884b74d564cc8bb03ec","documentId":"989bfac2795746708693d9f88572936a","sequence":7,"timestamp":"2026-10-20T16:41:40.3259018+00:00","state":"building","operationId":"573053003ecc4bbc94a48ecc5a10d59b","operation":"add_feature","outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:40.325457+00:00","revision":2,"path":".live/revisions/00000002-d148fc885fcf4741a78c4fc46c6e9ead.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":379,"checkpoint":null,"affectedFeatureIds":["4db398e85c9f"],"featureIds":["4db398e85c9f"]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"7d90226931d84884b74d564cc8bb03ec","documentId":"989bfac2795746708693d9f88572936a","sequence":8,"timestamp":"2026-10-20T16:41:40.4413437+00:00","state":"revision","operationId":"573053003ecc4bbc94a48ecc5a10d59b","operation":"add_feature","outcome":"committed","control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:40.4413209+00:00","revision":3,"path":".live/revisions/00000003-501d3d34ce7e450eaf4e20ee7fff2b2b.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":729,"checkpoint":null,"affectedFeatureIds":["5c235a4338c3"],"featureIds":["4db398e85c9f","5c235a4338c3"]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"7d90226931d84884b74d564cc8bb03ec","documentId":"989bfac2795746708693d9f88572936a","sequence":9,"timestamp":"2026-10-20T16:41:40.4414907+00:00","state":"waiting","operationId":null,"operation":null,"outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:40.4413209+00:00","revision":3,"path":".live/revisions/00000003-501d3d34ce7e450eaf4e20ee7fff2b2b.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":729,"checkpoint":null,"affectedFeatureIds":["5c235a4338c3"],"featureIds":["4db398e85c9f","5c235a4338c3"]}}
+AI tool: add_feature
+@{"schemaVersion":1,"ev":"ai-live","runId":"7d90226931d84884b74d564cc8bb03ec","documentId":"989bfac2795746708693d9f88572936a","sequence":10,"timestamp":"2026-10-20T16:41:40.4418206+00:00","state":"building","operationId":"1a1f1675d23249b1bfac05278e148cfc","operation":"add_feature","outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:40.4413209+00:00","revision":3,"path":".live/revisions/00000003-501d3d34ce7e450eaf4e20ee7fff2b2b.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":729,"checkpoint":null,"affectedFeatureIds":["5c235a4338c3"],"featureIds":["4db398e85c9f","5c235a4338c3"]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"7d90226931d84884b74d564cc8bb03ec","documentId":"989bfac2795746708693d9f88572936a","sequence":11,"timestamp":"2026-10-20T16:41:40.5591184+00:00","state":"revision","operationId":"1a1f1675d23249b1bfac05278e148cfc","operation":"add_feature","outcome":"committed","control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:40.5590968+00:00","revision":4,"path":".live/revisions/00000004-16099758cb9441e8b70381ea81f4aadd.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":1079,"checkpoint":null,"affectedFeatureIds":["70f4a150958a"],"featureIds":["4db398e85c9f","5c235a4338c3","70f4a150958a"]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"7d90226931d84884b74d564cc8bb03ec","documentId":"989bfac2795746708693d9f88572936a","sequence":12,"timestamp":"2026-10-20T16:41:40.5592473+00:00","state":"waiting","operationId":null,"operation":null,"outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:40.5590968+00:00","revision":4,"path":".live/revisions/00000004-16099758cb9441e8b70381ea81f4aadd.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":1079,"checkpoint":null,"affectedFeatureIds":["70f4a150958a"],"featureIds":["4db398e85c9f","5c235a4338c3","70f4a150958a"]}}
+AI tool: add_feature
+@{"schemaVersion":1,"ev":"ai-live","runId":"7d90226931d84884b74d564cc8bb03ec","documentId":"989bfac2795746708693d9f88572936a","sequence":13,"timestamp":"2026-10-20T16:41:40.5595969+00:00","state":"building","operationId":"26bc9ca1b59a4f39b9808923a4ec2c67","operation":"add_feature","outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:40.5590968+00:00","revision":4,"path":".live/revisions/00000004-16099758cb9441e8b70381ea81f4aadd.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":1079,"checkpoint":null,"affectedFeatureIds":["70f4a150958a"],"featureIds":["4db398e85c9f","5c235a4338c3","70f4a150958a"]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"7d90226931d84884b74d564cc8bb03ec","documentId":"989bfac2795746708693d9f88572936a","sequence":14,"timestamp":"2026-10-20T16:41:40.6724036+00:00","state":"revision","operationId":"26bc9ca1b59a4f39b9808923a4ec2c67","operation":"add_feature","outcome":"committed","control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:40.6723811+00:00","revision":5,"path":".live/revisions/00000005-b1797d71319b4c4a94974a3b252ddb33.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":1430,"checkpoint":null,"affectedFeatureIds":["7507dc921401"],"featureIds":["4db398e85c9f","5c235a4338c3","70f4a150958a","7507dc921401"]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"7d90226931d84884b74d564cc8bb03ec","documentId":"989bfac2795746708693d9f88572936a","sequence":15,"timestamp":"2026-10-20T16:41:40.6725425+00:00","state":"waiting","operationId":null,"operation":null,"outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:40.6723811+00:00","revision":5,"path":".live/revisions/00000005-b1797d71319b4c4a94974a3b252ddb33.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":1430,"checkpoint":null,"affectedFeatureIds":["7507dc921401"],"featureIds":["4db398e85c9f","5c235a4338c3","70f4a150958a","7507dc921401"]}}
+AI tool: add_feature
+@{"schemaVersion":1,"ev":"ai-live","runId":"7d90226931d84884b74d564cc8bb03ec","documentId":"989bfac2795746708693d9f88572936a","sequence":16,"timestamp":"2026-10-20T16:41:40.6735248+00:00","state":"building","operationId":"2477ce1683444909bf82b3202eb9d2c2","operation":"add_feature","outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:40.6723811+00:00","revision":5,"path":".live/revisions/00000005-b1797d71319b4c4a94974a3b252ddb33.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":1430,"checkpoint":null,"affectedFeatureIds":["7507dc921401"],"featureIds":["4db398e85c9f","5c235a4338c3","70f4a150958a","7507dc921401"]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"7d90226931d84884b74d564cc8bb03ec","documentId":"989bfac2795746708693d9f88572936a","sequence":17,"timestamp":"2026-10-20T16:41:40.7946035+00:00","state":"revision","operationId":"2477ce1683444909bf82b3202eb9d2c2","operation":"add_feature","outcome":"committed","control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:40.7945744+00:00","revision":6,"path":".live/revisions/00000006-b170684143f54ffe88e0b01ad2d42047.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":1782,"checkpoint":null,"affectedFeatureIds":["b401d00ac6c2"],"featureIds":["4db398e85c9f","5c235a4338c3","70f4a150958a","7507dc921401","b401d00ac6c2"]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"7d90226931d84884b74d564cc8bb03ec","documentId":"989bfac2795746708693d9f88572936a","sequence":18,"timestamp":"2026-10-20T16:41:40.7947298+00:00","state":"waiting","operationId":null,"operation":null,"outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:40.7945744+00:00","revision":6,"path":".live/revisions/00000006-b170684143f54ffe88e0b01ad2d42047.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":1782,"checkpoint":null,"affectedFeatureIds":["b401d00ac6c2"],"featureIds":["4db398e85c9f","5c235a4338c3","70f4a150958a","7507dc921401","b401d00ac6c2"]}}
+Five editable blocks built.
+@{"schemaVersion":1,"ev":"ai-live","runId":"7d90226931d84884b74d564cc8bb03ec","documentId":"989bfac2795746708693d9f88572936a","sequence":19,"timestamp":"2026-10-20T16:41:40.7954592+00:00","state":"revision","operationId":"12b17fa2b97045778b714ae3b8b04d12","operation":"restore","outcome":"committed","control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:40.795448+00:00","revision":7,"path":".live/revisions/00000007-5f376cbe015449278ddcbd4ed987edaa.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":1782,"checkpoint":"round-00.effigy","affectedFeatureIds":["4db398e85c9f","5c235a4338c3","70f4a150958a","7507dc921401","b401d00ac6c2"],"featureIds":["4db398e85c9f","5c235a4338c3","70f4a150958a","7507dc921401","b401d00ac6c2"]}}
+built-unjudged: /tmp/opencode/geppetto-desktop-tests-017b090a7ebd4549b99d91d634124189/live-provider/task-00-best.effigy
+@{"schemaVersion":1,"ev":"ai-live","runId":"7d90226931d84884b74d564cc8bb03ec","documentId":"989bfac2795746708693d9f88572936a","sequence":20,"timestamp":"2026-10-20T16:41:40.7955947+00:00","state":"completed","operationId":null,"operation":null,"outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:40.795448+00:00","revision":7,"path":".live/revisions/00000007-5f376cbe015449278ddcbd4ed987edaa.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":1782,"checkpoint":"round-00.effigy","affectedFeatureIds":["4db398e85c9f","5c235a4338c3","70f4a150958a","7507dc921401","b401d00ac6c2"],"featureIds":["4db398e85c9f","5c235a4338c3","70f4a150958a","7507dc921401","b401d00ac6c2"]}}
+PASS ai-live/provider loop publishes five worker-built revisions and reusable caches
+PASS ai-live/cancel mailbox rejects foreign identity and blocks late commits
+@{"schemaVersion":1,"ev":"ai-live","runId":"bbd974f22ebc4c80965434a409d766db","documentId":"fd3319b83a9a4fc487cd8cc77217c671","sequence":1,"timestamp":"2026-10-20T16:41:41.0025252+00:00","state":"starting","operationId":null,"operation":null,"outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":null}
+@{"schemaVersion":1,"ev":"ai-live","runId":"bbd974f22ebc4c80965434a409d766db","documentId":"fd3319b83a9a4fc487cd8cc77217c671","sequence":2,"timestamp":"2026-10-20T16:41:41.0027101+00:00","state":"revision","operationId":"7b4f35c07ebe4942b2019a1ce43c1d61","operation":"initial","outcome":"committed","control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:41.002694+00:00","revision":1,"path":".live/revisions/00000001-b2d7f392b21c416fa5058e3df7baa956.effigy","cached":false,"cacheNote":"an empty document has nothing worth caching","bytes":29,"checkpoint":null,"affectedFeatureIds":[],"featureIds":[]}}
+AI: openai/fixture; output /tmp/opencode/geppetto-desktop-tests-017b090a7ebd4549b99d91d634124189/live-cancel-provider. Calls <= 60, time <= 15 minutes.
+@{"schemaVersion":1,"ev":"ai-live","runId":"bbd974f22ebc4c80965434a409d766db","documentId":"fd3319b83a9a4fc487cd8cc77217c671","sequence":3,"timestamp":"2026-10-20T16:41:41.0033047+00:00","state":"waiting","operationId":null,"operation":null,"outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:41.002694+00:00","revision":1,"path":".live/revisions/00000001-b2d7f392b21c416fa5058e3df7baa956.effigy","cached":false,"cacheNote":"an empty document has nothing worth caching","bytes":29,"checkpoint":null,"affectedFeatureIds":[],"featureIds":[]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"bbd974f22ebc4c80965434a409d766db","documentId":"fd3319b83a9a4fc487cd8cc77217c671","sequence":4,"timestamp":"2026-10-20T16:41:41.0533734+00:00","state":"cancelling","operationId":null,"operation":null,"outcome":"accepted","control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0,"commandId":"legacy-cancel","outcome":"accepted"},"snapshot":{"committedAt":"2026-10-20T16:41:41.002694+00:00","revision":1,"path":".live/revisions/00000001-b2d7f392b21c416fa5058e3df7baa956.effigy","cached":false,"cacheNote":"an empty document has nothing worth caching","bytes":29,"checkpoint":null,"affectedFeatureIds":[],"featureIds":[]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"bbd974f22ebc4c80965434a409d766db","documentId":"fd3319b83a9a4fc487cd8cc77217c671","sequence":5,"timestamp":"2026-10-20T16:41:41.0542417+00:00","state":"cancelled","operationId":null,"operation":null,"outcome":"TaskCanceledException","control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0,"commandId":"legacy-cancel","outcome":"accepted"},"snapshot":{"committedAt":"2026-10-20T16:41:41.002694+00:00","revision":1,"path":".live/revisions/00000001-b2d7f392b21c416fa5058e3df7baa956.effigy","cached":false,"cacheNote":"an empty document has nothing worth caching","bytes":29,"checkpoint":null,"affectedFeatureIds":[],"featureIds":[]}}
+PASS ai-live/cancel during provider wait preserves last committed revision
+PASS ai-live/cancelling in-flight native worker leaves no process or new revision
+PASS ai-live/incremental journal waits for complete records and recovers from malformed lines
+PASS ai-live/hardware EGL rapid revisions, invalid model, empty model and switching runs
+49k triangle live preview at 1024x576: commit-to-frame p50 216.7 ms, p95 301.4 ms
+PASS ai-live/hardware EGL cache-eligible 49k-triangle commit latency
+@{"schemaVersion":1,"ev":"ai-live","runId":"ef5cb7defe20471f85412b53fb073977","documentId":"338dcc282bfa48da9f595a1be2a26892","sequence":1,"timestamp":"2026-10-20T16:41:45.95944+00:00","state":"starting","operationId":null,"operation":null,"outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":null}
+@{"schemaVersion":1,"ev":"ai-live","runId":"ef5cb7defe20471f85412b53fb073977","documentId":"338dcc282bfa48da9f595a1be2a26892","sequence":2,"timestamp":"2026-10-20T16:41:45.9596132+00:00","state":"revision","operationId":"ca1f8a9ab7024ca2b14bac5e23074bf8","operation":"initial","outcome":"committed","control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:45.9595951+00:00","revision":1,"path":".live/revisions/00000001-5208e7c19476401ea0bb228c56622896.effigy","cached":false,"cacheNote":"an empty document has nothing worth caching","bytes":29,"checkpoint":null,"affectedFeatureIds":[],"featureIds":[]}}
+AI: openai/fixture; output /tmp/opencode/geppetto-desktop-tests-017b090a7ebd4549b99d91d634124189/live-viewer. Calls <= 8, time <= 15 minutes.
+@{"schemaVersion":1,"ev":"ai-live","runId":"ef5cb7defe20471f85412b53fb073977","documentId":"338dcc282bfa48da9f595a1be2a26892","sequence":3,"timestamp":"2026-10-20T16:41:45.9598059+00:00","state":"waiting","operationId":null,"operation":null,"outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:45.9595951+00:00","revision":1,"path":".live/revisions/00000001-5208e7c19476401ea0bb228c56622896.effigy","cached":false,"cacheNote":"an empty document has nothing worth caching","bytes":29,"checkpoint":null,"affectedFeatureIds":[],"featureIds":[]}}
+AI tool: add_feature
+@{"schemaVersion":1,"ev":"ai-live","runId":"ef5cb7defe20471f85412b53fb073977","documentId":"338dcc282bfa48da9f595a1be2a26892","sequence":4,"timestamp":"2026-10-20T16:41:46.3602761+00:00","state":"building","operationId":"52f68d5a3bdd467cbdaab83602a10089","operation":"add_feature","outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:45.9595951+00:00","revision":1,"path":".live/revisions/00000001-5208e7c19476401ea0bb228c56622896.effigy","cached":false,"cacheNote":"an empty document has nothing worth caching","bytes":29,"checkpoint":null,"affectedFeatureIds":[],"featureIds":[]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"ef5cb7defe20471f85412b53fb073977","documentId":"338dcc282bfa48da9f595a1be2a26892","sequence":5,"timestamp":"2026-10-20T16:41:46.4630664+00:00","state":"revision","operationId":"52f68d5a3bdd467cbdaab83602a10089","operation":"add_feature","outcome":"committed","control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:46.4630507+00:00","revision":2,"path":".live/revisions/00000002-80a6985503594624bc4a17f17b9dbaed.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":379,"checkpoint":null,"affectedFeatureIds":["f5f1bca07a96"],"featureIds":["f5f1bca07a96"]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"ef5cb7defe20471f85412b53fb073977","documentId":"338dcc282bfa48da9f595a1be2a26892","sequence":6,"timestamp":"2026-10-20T16:41:46.4631816+00:00","state":"waiting","operationId":null,"operation":null,"outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:46.4630507+00:00","revision":2,"path":".live/revisions/00000002-80a6985503594624bc4a17f17b9dbaed.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":379,"checkpoint":null,"affectedFeatureIds":["f5f1bca07a96"],"featureIds":["f5f1bca07a96"]}}
+AI tool: add_feature
+@{"schemaVersion":1,"ev":"ai-live","runId":"ef5cb7defe20471f85412b53fb073977","documentId":"338dcc282bfa48da9f595a1be2a26892","sequence":7,"timestamp":"2026-10-20T16:41:46.8629149+00:00","state":"building","operationId":"9d3e8e74fc304646ad2a9a0939b4839c","operation":"add_feature","outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:46.4630507+00:00","revision":2,"path":".live/revisions/00000002-80a6985503594624bc4a17f17b9dbaed.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":379,"checkpoint":null,"affectedFeatureIds":["f5f1bca07a96"],"featureIds":["f5f1bca07a96"]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"ef5cb7defe20471f85412b53fb073977","documentId":"338dcc282bfa48da9f595a1be2a26892","sequence":8,"timestamp":"2026-10-20T16:41:46.974091+00:00","state":"revision","operationId":"9d3e8e74fc304646ad2a9a0939b4839c","operation":"add_feature","outcome":"committed","control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:46.974074+00:00","revision":3,"path":".live/revisions/00000003-eb8c762326fc4d808e69262c02d644ae.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":729,"checkpoint":null,"affectedFeatureIds":["c1c4e4b61fa9"],"featureIds":["f5f1bca07a96","c1c4e4b61fa9"]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"ef5cb7defe20471f85412b53fb073977","documentId":"338dcc282bfa48da9f595a1be2a26892","sequence":9,"timestamp":"2026-10-20T16:41:46.9742157+00:00","state":"waiting","operationId":null,"operation":null,"outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:46.974074+00:00","revision":3,"path":".live/revisions/00000003-eb8c762326fc4d808e69262c02d644ae.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":729,"checkpoint":null,"affectedFeatureIds":["c1c4e4b61fa9"],"featureIds":["f5f1bca07a96","c1c4e4b61fa9"]}}
+AI tool: add_feature
+@{"schemaVersion":1,"ev":"ai-live","runId":"ef5cb7defe20471f85412b53fb073977","documentId":"338dcc282bfa48da9f595a1be2a26892","sequence":10,"timestamp":"2026-10-20T16:41:47.373677+00:00","state":"building","operationId":"f78861df9ebd4cbab4fa8af5c98f9baf","operation":"add_feature","outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:46.974074+00:00","revision":3,"path":".live/revisions/00000003-eb8c762326fc4d808e69262c02d644ae.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":729,"checkpoint":null,"affectedFeatureIds":["c1c4e4b61fa9"],"featureIds":["f5f1bca07a96","c1c4e4b61fa9"]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"ef5cb7defe20471f85412b53fb073977","documentId":"338dcc282bfa48da9f595a1be2a26892","sequence":11,"timestamp":"2026-10-20T16:41:47.4900487+00:00","state":"revision","operationId":"f78861df9ebd4cbab4fa8af5c98f9baf","operation":"add_feature","outcome":"committed","control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:47.4900326+00:00","revision":4,"path":".live/revisions/00000004-c91c9d692d074bcda9a9073721662604.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":1079,"checkpoint":null,"affectedFeatureIds":["c665883ecd30"],"featureIds":["f5f1bca07a96","c1c4e4b61fa9","c665883ecd30"]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"ef5cb7defe20471f85412b53fb073977","documentId":"338dcc282bfa48da9f595a1be2a26892","sequence":12,"timestamp":"2026-10-20T16:41:47.4901545+00:00","state":"waiting","operationId":null,"operation":null,"outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:47.4900326+00:00","revision":4,"path":".live/revisions/00000004-c91c9d692d074bcda9a9073721662604.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":1079,"checkpoint":null,"affectedFeatureIds":["c665883ecd30"],"featureIds":["f5f1bca07a96","c1c4e4b61fa9","c665883ecd30"]}}
+AI tool: add_feature
+@{"schemaVersion":1,"ev":"ai-live","runId":"ef5cb7defe20471f85412b53fb073977","documentId":"338dcc282bfa48da9f595a1be2a26892","sequence":13,"timestamp":"2026-10-20T16:41:47.8905841+00:00","state":"building","operationId":"3ad07a92bcbc4f12a8f01d02f9500e0e","operation":"add_feature","outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:47.4900326+00:00","revision":4,"path":".live/revisions/00000004-c91c9d692d074bcda9a9073721662604.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":1079,"checkpoint":null,"affectedFeatureIds":["c665883ecd30"],"featureIds":["f5f1bca07a96","c1c4e4b61fa9","c665883ecd30"]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"ef5cb7defe20471f85412b53fb073977","documentId":"338dcc282bfa48da9f595a1be2a26892","sequence":14,"timestamp":"2026-10-20T16:41:48.0052428+00:00","state":"revision","operationId":"3ad07a92bcbc4f12a8f01d02f9500e0e","operation":"add_feature","outcome":"committed","control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:48.0052241+00:00","revision":5,"path":".live/revisions/00000005-2983dba10a1a4a67b66ef8d6d6f92a43.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":1430,"checkpoint":null,"affectedFeatureIds":["e107232987f6"],"featureIds":["f5f1bca07a96","c1c4e4b61fa9","c665883ecd30","e107232987f6"]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"ef5cb7defe20471f85412b53fb073977","documentId":"338dcc282bfa48da9f595a1be2a26892","sequence":15,"timestamp":"2026-10-20T16:41:48.0053718+00:00","state":"waiting","operationId":null,"operation":null,"outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:48.0052241+00:00","revision":5,"path":".live/revisions/00000005-2983dba10a1a4a67b66ef8d6d6f92a43.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":1430,"checkpoint":null,"affectedFeatureIds":["e107232987f6"],"featureIds":["f5f1bca07a96","c1c4e4b61fa9","c665883ecd30","e107232987f6"]}}
+AI tool: add_feature
+@{"schemaVersion":1,"ev":"ai-live","runId":"ef5cb7defe20471f85412b53fb073977","documentId":"338dcc282bfa48da9f595a1be2a26892","sequence":16,"timestamp":"2026-10-20T16:41:48.4065221+00:00","state":"building","operationId":"f050f70f2816400dabf8f71dee00d108","operation":"add_feature","outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:48.0052241+00:00","revision":5,"path":".live/revisions/00000005-2983dba10a1a4a67b66ef8d6d6f92a43.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":1430,"checkpoint":null,"affectedFeatureIds":["e107232987f6"],"featureIds":["f5f1bca07a96","c1c4e4b61fa9","c665883ecd30","e107232987f6"]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"ef5cb7defe20471f85412b53fb073977","documentId":"338dcc282bfa48da9f595a1be2a26892","sequence":17,"timestamp":"2026-10-20T16:41:48.518702+00:00","state":"revision","operationId":"f050f70f2816400dabf8f71dee00d108","operation":"add_feature","outcome":"committed","control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:48.5186875+00:00","revision":6,"path":".live/revisions/00000006-9f47fce066f04f20b2f7ca732368021d.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":1782,"checkpoint":null,"affectedFeatureIds":["27be73cde68c"],"featureIds":["f5f1bca07a96","c1c4e4b61fa9","c665883ecd30","e107232987f6","27be73cde68c"]}}
+@{"schemaVersion":1,"ev":"ai-live","runId":"ef5cb7defe20471f85412b53fb073977","documentId":"338dcc282bfa48da9f595a1be2a26892","sequence":18,"timestamp":"2026-10-20T16:41:48.5187987+00:00","state":"waiting","operationId":null,"operation":null,"outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:48.5186875+00:00","revision":6,"path":".live/revisions/00000006-9f47fce066f04f20b2f7ca732368021d.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":1782,"checkpoint":null,"affectedFeatureIds":["27be73cde68c"],"featureIds":["f5f1bca07a96","c1c4e4b61fa9","c665883ecd30","e107232987f6","27be73cde68c"]}}
+Five editable blocks built.
+@{"schemaVersion":1,"ev":"ai-live","runId":"ef5cb7defe20471f85412b53fb073977","documentId":"338dcc282bfa48da9f595a1be2a26892","sequence":19,"timestamp":"2026-10-20T16:41:48.9200584+00:00","state":"revision","operationId":"5f8ecab15fa640bfa259a8f33abf0f24","operation":"restore","outcome":"committed","control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:48.9200425+00:00","revision":7,"path":".live/revisions/00000007-4897a1e4110842368ac2d11f33ba0835.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":1782,"checkpoint":"round-00.effigy","affectedFeatureIds":["f5f1bca07a96","c1c4e4b61fa9","c665883ecd30","e107232987f6","27be73cde68c"],"featureIds":["f5f1bca07a96","c1c4e4b61fa9","c665883ecd30","e107232987f6","27be73cde68c"]}}
+built-unjudged: /tmp/opencode/geppetto-desktop-tests-017b090a7ebd4549b99d91d634124189/live-viewer/task-00-best.effigy
+@{"schemaVersion":1,"ev":"ai-live","runId":"ef5cb7defe20471f85412b53fb073977","documentId":"338dcc282bfa48da9f595a1be2a26892","sequence":20,"timestamp":"2026-10-20T16:41:48.920224+00:00","state":"completed","operationId":null,"operation":null,"outcome":null,"control":{"pauseRequested":false,"paused":false,"paceSeconds":0,"pendingDirections":0},"snapshot":{"committedAt":"2026-10-20T16:41:48.9200425+00:00","revision":7,"path":".live/revisions/00000007-4897a1e4110842368ac2d11f33ba0835.effigy","cached":true,"cacheNote":"worker geometry cache copied","bytes":1782,"checkpoint":"round-00.effigy","affectedFeatureIds":["f5f1bca07a96","c1c4e4b61fa9","c665883ecd30","e107232987f6","27be73cde68c"],"featureIds":["f5f1bca07a96","c1c4e4b61fa9","c665883ecd30","e107232987f6","27be73cde68c"]}}
+live preview: 6 revisions, 5 image hashes, max commit-to-frame 114.7 ms
+PASS ai-live/hardware EGL persistent viewer follows provider operations and retains camera
+PASS harness/registered failing assertions return nonzero
+PASS harness/missing optional fixture is skipped, not passed
+PASS harness/missing required fixture fails without running body
+PASS harness/duplicate registration and empty selections cannot pass
+PASS asset-paths/relative roots and implicit external references are rejected
+PASS asset-paths/relative assets normalize without changing cwd or source
+PASS asset-paths/changing cwd does not change explicit-root resolution
+PASS asset-paths/two same basenames retain separate canonical identities
+PASS asset-paths/traversal and sibling-prefix escape are rejected
+PASS asset-paths/external reads are opt-in and always read-only
+PASS asset-paths/missing reads and new outputs never create directories
+PASS asset-paths/directories and file ancestors are not valid asset paths
+PASS asset-paths/Unicode and spaces survive resolution and a project move
+PASS asset-paths/Save As relocation preserves logical ID and source without copying
+PASS asset-paths/relocation cannot silently turn an external source into a writable project asset
+PASS asset-paths/case mismatch is diagnosed on Linux
+PASS asset-paths/symlink escapes and nonexistent output ancestors are rejected
+PASS asset-paths/in-root symlink aliases share canonical identity
+PASS asset-paths/symlink cycles fail and link-dotdot follows filesystem semantics
+PASS document-session/open two documents
+PASS document-session/failed second load retains the first
+PASS document-session/source exists after GPU upload
+PASS document-session/stale build completion is rejected
+PASS document-session/editing a session does not mutate a detached snapshot
+PASS document-session/Effigy session retains PartStudio and FBX does not masquerade as feature tree
+PASS document-session/retains original clip JSON alongside parsed RigAnimFile
+PASS document-session/revision and saved-state tracking
+PASS document-session/loader reset clears session and snapshot cleanly
+PASS document-session/snapshot promote through DocumentLoader updates mesh and player
+PASS edit-history/execute undo redo exact equality
+PASS edit-history/100 preview updates produce one entry
+PASS edit-history/cancel restores pre-transaction state without recording history
+PASS edit-history/no-op edits create no entry
+PASS edit-history/failed execution leaves state and history unchanged
+PASS edit-history/new committed edit after undo discards redo branch
+PASS edit-history/saved state tracking and branching at same depth
+PASS edit-history/bounded history eviction policy
+PASS edit-history/two sessions isolated
+PASS edit-history/actual feature tree fixture goes through history service
+PASS clip-edit/first last only key insertion and deletion
+PASS clip-edit/every ease mode is preserved
+PASS clip-edit/tangents round trip cleanly
+PASS clip-edit/occupied frame move replaces target and undo restores both
+PASS clip-edit/end frame cache update and playhead preservation
+PASS clip-edit/paused last frame scrub
+PASS clip-edit/negative and NaN coordinates are rejected
+PASS clip-edit/unlike track kinds with the same target name remain distinct
+PASS clip-edit/clip length policy on deletion preserves intentionally held duration
+PASS clip-edit/IK goals service integrates with history and updates tracks
+PASS save/save_effigy_atomic_roundtrip
+PASS save/unknown_metadata_sentinel_survives
+PASS save/save_as_relocation
+PASS save/write_flush_failure_preserves_destination
+PASS save/rename_failure_preserves_destination
+PASS save/save_cancellation_preserves_target
+PASS save/edits_during_save_do_not_mark_clean
+PASS save/unsupported_fbx_authoring_refused
+PASS save/staged_recovery_can_be_parsed
+PASS save/readonly_directory_fails_safely
+PASS gizmo-math/every axis hit and miss
+PASS gizmo-math/ray behind camera pointing away
+PASS gizmo-math/orthographic and perspective reference projections
+PASS gizmo-math/parallel ray returns false
+PASS gizmo-math/camera looking straight down an axis
+PASS gizmo-math/near and far zoom handle sizing
+PASS gizmo-math/pi crossing and signed angle unwrapping
+PASS gizmo-math/positive and negative translation snapping
+PASS gizmo-math/invalid and nonfinite snap rejection
+PASS gizmo-math/finite output for degenerate boundary fixtures
+PASS gizmo-math/scale clamping no accidental negative scale
+PASS gizmo-math/plane handles hit and miss
+PASS gizmo-math/rotation ring handles hit and miss
+PASS gizmo-math/composite hit test and typed handle ids
+PASS gizmo-math/reference frame transformations
+PASS material-feature/lobe parameters are finite, bounded and preserve zero defaults
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+Transmission thin=<3.609375, 3.7890625, 3.890625>, thick=<1.8105469, 3.0351562, 3.890625>, exposure2=<7.21875, 7.578125, 7.78125>, noBackdrop=<0.1381836, 0.15283203, 0.17834473>
+PASS material-feature/hardware EGL transmission obeys thickness, exposure and opaque backdrop
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+SSS delta=<0.063964844, 0.013916016, 0.0041503906>
+Sheen delta=<0.022277832, 0.055786133, 0.33673096>, coat delta=<36.92383, 36.945312, 36.945312>, anisotropic x=16.226685, y=-16.22107
+PASS material-feature/hardware EGL subsurface, sheen, clearcoat and anisotropy have independent responses
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+PASS material-feature/hardware EGL hashed alpha is order independent and modes are explicit
+PASS materials/two same-named materials in different roots do not collide
+PASS materials/renamed or relocated project directory resolves correctly via AssetPathResolver
+PASS materials/missing PNG file reported with clear diagnostic and neutral fallback
+PASS materials/corrupt PNG reported with clear diagnostic
+PASS materials/unsupported paletted or invalid PNG rejected with diagnostic
+PASS materials/explicit relative override mapped correctly to slot
+PASS materials/unknown shader and unsupported vmat syntax diagnosed
+PASS materials/albedo sRGB vs data Linear color space metadata tagged correctly
+PASS materials/no source file writes (resolver is strictly read-only)
+PASS materials/missing required override fails resolution
+PASS materials/valid PNG decodes correctly to expected RGBA dimensions and bytes
+PASS materials/distinguish no map authored from authored map missing
+PASS materials/one-time diagnostic does not duplicate on repeated slot resolution
+PASS pose-edit/rotated/scaled parent: child transforms correctly
+PASS pose-edit/root bone edit
+PASS pose-edit/child bones follow parent edit
+PASS pose-edit/bind pose and inverse-bind matrices remain untouched
+PASS pose-edit/100 preview updates produce exactly one undo entry
+PASS pose-edit/cancel restores exact pre-drag pose
+PASS pose-edit/undo and redo restore exact poses
+PASS pose-edit/deleted/missing selection handled safely
+PASS pose-edit/invalid/NaN transform leaves state intact
+PASS pose-edit/no-op edit creates no history entry and leaves dirty state intact
+PASS project-manifest/project manifest serialization and deserialization round-trip
+PASS project-manifest/two-source assembly definition
+PASS project-manifest/moving/relocating project root via AssetPathResolver
+PASS project-manifest/duplicate ID rejection
+PASS project-manifest/cyclic parent hierarchy rejection
+PASS project-manifest/unknown future schema version failure
+PASS project-manifest/unknown optional JSON fields preserved on save
+PASS project-manifest/material override identity persistence
+PASS project-manifest/Camhead authoring-frame adapter coordinate transformation
+PASS project-manifest/atomic save and load from disk
+PASS parametric-edit/add feature -> parameter edit -> undo -> redo
+PASS parametric-edit/remove feature and undo restoration
+PASS parametric-edit/reorder features and undo
+PASS parametric-edit/parameter edit with transaction coalescing
+PASS parametric-edit/feature error / invalid parameter reports failure and retains previous valid state
+PASS parametric-edit/stale async rebuild discarded
+PASS parametric-edit/save via E4 and reload reproduces identical feature order and geometry
+PASS parametric-edit/two sessions' parametric edits remain isolated
+PASS clip-capability/valid compatible clip passes audit
+PASS clip-capability/completely incompatible clip zero target matches rejected
+PASS clip-capability/partial target match produces warnings and identifies unmapped bones
+PASS clip-capability/morph event without morph tracks diagnosed
+PASS clip-capability/missing referenced control rig reported clearly
+PASS clip-capability/rejected clip leaves session player state unchanged
+PASS clip-capability/unknown track kind corrupted data diagnosed
+PASS clip-capability/root motion configuration validated
+PASS clip-capability/morph drivers validated
+PASS clip-capability/file path validation and loading
+PASS export/static OBJ export produces valid vertices, normals, and faces
+PASS export/posed vs bind pose OBJ export produce distinct geometry
+PASS export/OBJ export capability report accurately flags lost skeletal animation
+PASS export/refused overwrite when destination exists and Overwrite is false
+PASS export/path traversal in material name sanitized / blocked
+PASS export/native effigy export round-trip via ExportService
+PASS export/native riganim export preserves unknown JSON sentinels
+PASS export/cancellation cleans up temporary files and preserves destination
+PASS export/source session and source files remain completely untouched
+PASS ik-target/two-bone IK target drag
+PASS ik-target/FABRIK / chain IK target drag
+PASS ik-target/pole vector influence
+PASS ik-target/zero IK weight leaves FK pose intact
+PASS ik-target/reachable target reaches goal within tolerance
+PASS ik-target/unreachable target clamps cleanly without NaNs
+PASS ik-target/commit creates 1 undo entry; cancel restores pose
+PASS ik-target/missing constraint produces explicit diagnostic / safe return
+PASS ik-target/object moving under an anchored target
+PASS ik-target/limits constrain joint rotation
+PASS ik-target/tentative solve does not mutate bind data or stored constraint
+PASS ik-target/coordinate conversions between Model, World, and Object space
+PASS advanced-ik/foot plants on ground plane
+PASS advanced-ik/look-at direction and yaw/pitch
+PASS advanced-ik/angle clamp
+PASS advanced-ik/cone clamp keeps within cone
+PASS advanced-ik/fabrik reaches target
+PASS advanced-ik/fabrik stretch when unreachable
+PASS advanced-ik/leg solve keeps ankle at target
+PASS advanced-ik/blend targets weighted
+PASS advanced-ik/twist rotates vector
+PASS advanced-ik/invalid fabrik throws
+PASS euphoria/com of weighted points
+PASS euphoria/balanced com inside support
+PASS euphoria/unbalanced com outside support
+PASS euphoria/foot placement shifts toward com
+PASS euphoria/reach within arm length returns target
+PASS euphoria/reach beyond arm length clamps and leans
+PASS euphoria/stumble impulse scales with stiffness
+PASS euphoria/recover step moves com toward support
+PASS euphoria/stiffness interpolation
+PASS euphoria/pose blend endpoints
+PASS euphoria/determinism
+PASS dependency-watcher/debounce: 20 rapid events produce 1 rebuild
+PASS dependency-watcher/out-of-order job completion: newer generation wins, older discarded
+PASS dependency-watcher/dirty conflict: dirty local edits preserved
+PASS dependency-watcher/own-save echo suppressed
+PASS dependency-watcher/delete and recreate file handled
+PASS dependency-watcher/partial write retry
+PASS dependency-watcher/watcher cancellation and disposal during active job
+PASS dependency-watcher/clean reload updates snapshot
+PASS dependency-watcher/bad replacement retains old snapshot
+PASS dependency-watcher/watch project dependencies resolves all referenced assets
+PASS preferences-autosave/preferences atomic save and load round-trip
+PASS preferences-autosave/XDG environment variable overrides respected
+PASS preferences-autosave/corrupt preferences file restores safe defaults gracefully
+PASS preferences-autosave/bad values in preferences are sanitized
+PASS preferences-autosave/missing or readonly preferences file handled safely
+PASS preferences-autosave/recent projects portable path and bounded ordering
+PASS preferences-autosave/autosave scheduler triggers on dirty session
+PASS preferences-autosave/autosave scheduler skips clean session
+PASS preferences-autosave/autosave never clears session dirty state
+PASS preferences-autosave/recovery discovery finds staged recoveries
+PASS preferences-autosave/recovery retention policy deletes only expired snapshots
+PASS preferences-autosave/bounded scheduling prevents overlapping save storms
+PASS preferences-autosave/recovery snapshot reconstructs session source state without altering original source
+PASS fbx-dmx/rigged binary FBX export creates valid non-empty file
+PASS fbx-dmx/FBX round-trip through FbxImport verifies skeleton hierarchy and bones
+PASS fbx-dmx/1 kernel inch preserved
+PASS fbx-dmx/>4 weights normalized to top 4
+PASS fbx-dmx/static mesh export without rig
+PASS fbx-dmx/optional DMX model write
+PASS fbx-dmx/optional DMX animation clip export with sampled poses
+PASS fbx-dmx/overwrite policy respected
+PASS fbx-dmx/export does not cull bones exceeding 220 display limit
+PASS clip-blend/weight 0 returns exact base pose
+PASS clip-blend/weight 1 returns exact target pose
+PASS clip-blend/weight 0.5 interpolates linearly in translation and slerp in rotation
+PASS clip-blend/antipodal quaternions blend smoothly along shortest arc
+PASS clip-blend/additive delta from reference pose
+PASS clip-blend/bone masking: masked bones blend, unmasked stay base
+PASS clip-blend/unkeyed tracks fallback to reference/bind pose
+PASS clip-blend/looping vs one-shot crossfade evaluation
+PASS clip-blend/scale additive identity
+PASS clip-blend/different frame rates and crossfade duration 0
+PASS clip-blend/underlying clips and tracks are not mutated
+PASS clip-blend/allocation measurement zero alloc in warm evaluator loop
+PASS timeline_event/events dispatched when frame crosses interval (prev, curr]
+PASS timeline_event/events on exact boundary fired
+PASS timeline_event/two events on same frame fire in stable order
+PASS timeline_event/skipped frames over multiple events fires all intermediate events
+PASS timeline_event/loop wrap fires events before wrap and after wrap
+PASS timeline_event/seeking backward emits no forward play events
+PASS timeline_event/pause and resume at same time does not re-fire
+PASS timeline_event/consumer exception does not crash dispatcher
+PASS timeline_event/multiple loop wraps in one huge delta step
+PASS timeline_event/clip replacement resets playhead and emits no spurious events
+PASS timeline_event/explicit replay mode on forward seek
+PASS timeline_event/json and rig anim file morph events and marks parsed
+PASS distribution-inventory/inventory reports all required runtime native libraries (EGL, GL, SDL)
+PASS distribution-inventory/package license audit validates MIT / project-owned licenses
+PASS distribution-inventory/kernel build-time vs runtime independence verified
+PASS distribution-inventory/system compatibility check (Linux x64 + GL 4.6 capability)
+PASS distribution-inventory/portable project path resolution verified without relying on machine-specific roots
+PASS distribution-inventory/packaging inventory markdown exists and contains documented sections
+PASS distribution-inventory/no unapproved proprietary asset dependencies found in manifest inventory
+PASS distribution-inventory/diagnostic output when a required system library is missing
+PASS deformation-invariant/hierarchical rig with rotated nonuniformly scaled parents and unkeyed bones matches kernel at fractional frames
+PASS deformation-invariant/antipodal quaternion sign equivalence min(|q1-q2|, |q1+q2|) < eps
+PASS deformation-invariant/multiple roots and disconnected hierarchies evaluate identically to kernel forward kinematics
+PASS deformation-invariant/boundary clips: zero-frame and one-frame clips evaluate without NaN or out-of-bounds
+PASS deformation-invariant/singular bind transform rejection for zero-scale, non-invertible axis, and inherited singular parent
+PASS deformation-invariant/over-capacity skeleton (>220 bones) is rejected with NotSupportedException without clamping bone IDs
+PASS deformation-invariant/skinning palette agreement between CPU Linear Blend Skinning and GPU matrix palette across animated frames
+PASS deformation-invariant/top-four skin weight pruning and normalization guarantees partition of unity and detects invalid weights
+PASS deformation-invariant/animated triangle picking follows deformed mesh across time and rejects missed rays
+PASS deformation-invariant/bind pose and original source data remain completely immutable across animation scrub, posing, and IK
+PASS deformation-invariant/seeded deterministic randomness: randomized multi-bone poses emit failing seed and input on discrepancy
+PASS morph-eval/weights 0, 0.5, 1.0 produce exact linear delta scaling
+PASS morph-eval/two concurrent morph targets sum deltas correctly
+PASS morph-eval/UV duplicate vertices receive identical morph offsets
+PASS morph-eval/keyed vs event vs driver precedence order
+PASS morph-eval/pose-space corrective activates at bent joint angle
+PASS morph-eval/base geometry remains immutable after evaluation
+PASS morph-eval/reset / zero weights restores base mesh exactly
+PASS morph-eval/missing morph target handled safely without NaNs
+PASS morph-eval/weight bounds clamp vs overdrive policy
+PASS morph-eval/active target limit and overflow rejection
+PASS morph-eval/bind space morph before skinning order
+PASS morph-edit/move stroke writes deltas and preview applies them at weight
+PASS morph-edit/falloff, strength and move-from-stroke-start
+PASS morph-edit/inflate pushes along the vertex normal
+PASS morph-edit/smooth relaxes a spike toward neighbours
+PASS morph-edit/combined influence sums linearly and bake matches the mix
+PASS morph-edit/x-mirror stroke is exactly symmetric
+PASS morph-edit/erase restores neutral exactly
+PASS morph-edit/each stroke and op is one exact undo/redo entry
+PASS morph-edit/rename keeps the active target and stroke undo by object
+PASS morph-edit/seam corners and split vertices stay consistent
+PASS morph-edit/export: sculpted morph reaches FBX and DMX through the adapters
+PASS morph-edit/invalid inputs are rejected
+PASS part_track/nested part composition (child part follows parent part)
+PASS part_track/follow-bone part follows animated bone
+PASS part_track/duplicate part names on different objects remain distinct
+PASS part_track/circular dependency detection returns safe diagnostic
+PASS part_track/object-space IK goal aligns with evaluated part transform
+PASS part_track/camera pose and FOV interpolation
+PASS part_track/camera track playback does not modify orbit camera state
+PASS part_track/missing bone or part target handled safely
+PASS part_track/camera hermite cubic FOV curve and default fallback
+PASS part_track/json camera definition parsing and opt-in orbit application
+PASS constraint-parity/constraint audit correctly categorizes look-at, copy transform, IK, and springs
+PASS constraint-parity/secondary spring simulation advances with deterministic fixed time steps
+PASS constraint-parity/spring simulation resets cleanly on seek or clip reload
+PASS constraint-parity/look-at constraint points bone towards target position
+PASS constraint-parity/copy rotation constraint transfers orientation with weight scaling
+PASS constraint-parity/unsupported constraint in rig reports clear diagnostic rather than crashing
+PASS constraint-parity/constraints documentation markdown file exists and has required sections
+PASS constraint-parity/spring stiffness and damping parameters alter settling response deterministically
+PASS fbx_anim_feasibility/feasibility audit accurately reports supported subset vs unsupported features
+PASS fbx_anim_feasibility/golden reference fixture verifies parent-child rotation composition
+PASS fbx_anim_feasibility/time conversion between FBX time and kernel frames
+PASS fbx_anim_feasibility/Euler rotation order conversion to Quat
+PASS fbx_anim_feasibility/unsupported layered animation produces structured error
+PASS fbx_anim_feasibility/unit scale conversion (e.g. cm to inch) preserves physical dimensions
+PASS fbx_anim_feasibility/missing target bone diagnosed cleanly
+PASS fbx_anim_feasibility/conversion produces valid RigAnimFile data
+PASS fbx_anim_feasibility/raw FBX node tree audit detects unbaked pivots and custom rotation orders
+PASS retopo/null input throws
+PASS retopo/empty mesh stays empty
+PASS retopo/single triangle stays triangle
+PASS retopo/2x2 grid pairs into quads
+PASS retopo/uv seam prevents pairing
+PASS retopo/input unchanged
+PASS retopo/materials respected
+PASS retopo/deterministic repeat
+PASS retopo/metrics: paired quad is manifold with no boundary
+PASS retopo/metrics: single triangle has boundary edges
+PASS retopo/n-gon input is triangulated not thrown
+cyl 15936 triangles -> 2030 faces, 100.0% quads, 35 poles (1.7%), edge cv 0.095 in 0.92 s valid, closed
+tube 11520 triangles -> 1930 faces, 100.0% quads, 12 poles (0.6%), edge cv 0.057 in 0.35 s valid, 128 boundary edges worst border offset 0.028624773
+sphere tris 307200
+decimate 300k->4000 1452 ms
+kernel quadremesh 300k 307200 triangles -> 3642 faces, 100.0% quads, 214 poles (5.9%), edge cv 0.317 in 2.18 s 2177 ms
+PASS remesh/probe kernel quadremesh
+PASS cloth-sim/null mesh throws
+PASS cloth-sim/gravity moves unpinned vertex
+PASS cloth-sim/floor collision
+PASS cloth-sim/pinned vertex stays
+PASS cloth-sim/floor constrains
+PASS cloth-sim/impulse moves vertex
+PASS cloth-sim/reset restores
+PASS cloth-sim/toMesh preserves count
+PASS cloth-sim/self-collision separates overlapping vertices
+PASS cloth-sim/pressure inflates closed-ish mesh
+PASS texture-paint/null image throws
+PASS texture-paint/null brush throws
+PASS texture-paint/nonpositive radius throws
+PASS texture-paint/paints center pixel
+PASS texture-paint/out of bounds safe
+PASS texture-paint/default white
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+PASS gpu-cloth/gpu step matches cpu solver
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+PASS gpu-cloth/upload download roundtrip
+PASS knife/null input throws
+PASS knife/degenerate normal throws
+PASS knife/non-crossing face kept
+PASS knife/crossing face counted
+PASS shrinkwrap/null source throws
+PASS shrinkwrap/null target throws
+PASS shrinkwrap/moves vertices to target
+PASS shrinkwrap/max distance respected
+PASS shrinkwrap/input unchanged
+PASS shrinkwrap/wrap-to-surface moves to closest point
+PASS shrinkwrap/offset pushes along surface normal
+PASS shrinkwrap/normal projection hits target
+PASS shrinkwrap/null source throws wrap-to-surface
+PASS data-transfer/null source throws
+PASS data-transfer/null target throws
+PASS data-transfer/transfers skin weights by nearest vertex
+PASS data-transfer/max distance skips
+PASS data-transfer/input target unchanged
+PASS data-transfer/transfers UVs by nearest vertex
+PASS polypaint/null source throws
+PASS polypaint/null brush throws
+PASS polypaint/non-positive radius throws
+PASS polypaint/paints vertex within radius
+PASS polypaint/vertex outside radius unchanged
+PASS polypaint/input unchanged
+PASS uv-edit/null throws
+PASS uv-edit/negative iterations throws
+PASS uv-edit/pinned vertex unchanged
+PASS uv-edit/zero iterations no change
+PASS uv-seam/null source throws
+PASS uv-seam/null edges throws
+PASS uv-seam/seam duplicates vertex
+PASS uv-seam/no seam no change
+PASS uv-seam/input unchanged
+PASS dyntopo/null throws
+PASS dyntopo/null options throws
+PASS dyntopo/nonpositive radius throws
+PASS dyntopo/subdivides long edge within brush
+PASS dyntopo/inflate moves vertices
+PASS dyntopo/flatten adjusts y
+PASS dyntopo/sculpt null throws
+PASS dyntopo/input unchanged
+PASS packaging/packaging script exists and is executable
+PASS packaging/packaging script successfully stages files to a custom path (with spaces supported)
+PASS packaging/staged directory contains main executable, runtime DLLs, and launcher script
+PASS packaging/build-info.json manifest contains version, timestamp, and target architecture
+PASS packaging/archive creation produces valid tar.gz and matching SHA256 checksum
+PASS packaging/bundled sample project is present and valid
+PASS packaging/launcher script does not require dotnet SDK on path
+PASS packaging/sensitive files, caches, and developer paths excluded from package
+PASS packaging/documentation and capability list present in distribution package
+PASS installed-artifact/smoke script exists and installed archive renders
+PASS installed-artifact/native clip and bad input have recorded diagnostics
+PASS installed-artifact/repeat capture is identical and installation stays untouched
+PASS material-gpu/corner UVs preserve a shared-position seam and layout offsets
+PASS material-gpu/same filename in separate roots resolves independent pixels
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+PASS material-gpu/windowless renderer samples asymmetric sRGB albedo and releases textures
+PASS performance-lifecycle/same-thread warmed allocation counter and raw samples
+PASS performance-lifecycle/guardrail refuses unlike workloads and distinguishes restore from rebuild
+PASS performance-lifecycle/real source parse rebuild extraction and animation stages persist raw report
+PASS performance-lifecycle/repeated snapshot swap, stale rejection, dispose and failed loader recovery
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+PASS performance-lifecycle/hardware EGL upload, completion and resource release
+live IK 1-bone CCD/two-bone: 0 B / 2000 samples, 4.507 ms
+live IK 2-bone CCD/two-bone: 0 B / 2000 samples, 7.244 ms
+live IK 3-bone CCD/two-bone: 0 B / 2000 samples, 29.365 ms
+live IK 4-bone FABRIK: 0 B / 2000 samples, 15.361 ms
+PASS live-ik/kernel parity and warmed allocations
+PASS live-ik/unsupported solver fallback
+kernel stacked CCD/FABRIK: 896896 B / 200 samples, 4.034 ms
+PASS live-ik/stacked constraints and kernel baseline
+PASS live-ik/invalid frame and empty goals
+player two-bone: 0 B / 2000 warm Step calls
+player FABRIK: 0 B / 2000 warm Step calls
+PASS live-ik/player Step warm fast path and fallback
+PASS hair/gravity pulls strand down
+PASS hair/collision keeps outside body
+PASS hair/deterministic repeated step
+PASS hair/cut truncates strand
+PASS hair/clump aligns roots
+PASS hair/wind moves strand
+PASS hair/export curves
+PASS hair/substeps runs
+PASS hair/turbulence moves strand
+PASS hair/vortex moves strand
+PASS hdr/fragment writes linear hdr (no in-shader tone map)
+PASS hdr/no in-shader bloom approximation remains
+PASS hdr/the lit pass stays linear: no encode, no white balance, no view transform
+PASS hdr/exactly one display encode, and it is the real sRGB transfer function
+PASS hdr/white balance is neutral at D65 and separates warm from cool
+PASS hdr/CLI colour settings preserve defaults and validate ranges
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+  AgX 0.05 -> 0.2275 (Blender 0.2272)
+  AgX 0.18 -> 0.4627 (Blender 0.4613)
+  AgX 1 -> 0.7686 (Blender 0.7710)
+  AgX 4 -> 0.9137 (Blender 0.9137)
+PASS hdr/hardware EGL: AgX maps a linear ramp monotonically and matches Blender's grey
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+  halo radius 60px (no bloom 2px), bloom energy 81.8 vs emitter 800, 6 levels
+PASS hdr/hardware EGL: emitter above 1.0 blooms with a measurable, finite halo
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+  clipped columns over 0..8: AgX 0, LDR 224
+PASS hdr/hardware EGL: bright gradient clips less than the LDR encode
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+  3000 K: R 83.0 B 196.0; 12000 K: R 130.0 B 96.0
+  linear luma: neutral 0.1812, 3000 K 0.1809, 12000 K 0.1808
+PASS hdr/hardware EGL: white balance reaches the display stage and keeps exposure
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+  neutral RGB 128/130/135, 3000 K RGB 91/127/224
+PASS hdr/hardware EGL: the shared renderer applies the view transform and white balance
+PASS render-architecture/pass order is declared once and validated
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+PASS render-architecture/hardware EGL: render targets resize and dispose cleanly; Draw runs the declared order
+PASS two-sided/shader has no viewer-facing normal flip and uses rasterised facing
+PASS two-sided/vmat F_RENDER_BACKFACES selects double-sided; default stays single-sided
+  140984/141098 triangles wound with their normals (99.92%)
+PASS two-sided/Survey winding agrees with authored normals (gl_FrontFacing is meaningful)
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+PASS two-sided/hardware EGL: prop model transform places raster geometry and avoids character skinning
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+  luma room 212.2, single-sided interior 90.7, double-sided interior 211.5, exterior 153.0; double-vs-room diff 0.77
+PASS two-sided/hardware EGL: closed mesh seen from inside is not lit as its exterior
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+  yaw 0: twin diff 0.00, tilt effect 3.98
+  yaw 180: twin diff 0.00, tilt effect 6.34
+PASS two-sided/hardware EGL: mirrored-UV twin keeps the normal-map response, front and back
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+  skinned vs baked 0.00; skewed-normal control 1.25
+PASS two-sided/hardware EGL: nonuniformly scaled bone does not skew the normal
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+PASS ibl-gpu/gradient diffuse, rough metal broadening and dielectric Fresnel
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+PASS ibl-gpu/HDR file publication, invalid replacement and GL texture lifecycle
+PASS ibl/specular cube has explicit roughness mip chain and GL face axes
+PASS ibl/HDR flat and RLE preserve linear radiance
+PASS ibl/HDR truncation invalid runs and orientation rejected
+PASS ibl/equirect sampler wraps seam and clamps poles
+PASS ibl/GGX prefilter conserves constant sky and broadens bright patch
+PASS ibl/BRDF mirror limit Fresnel and LUT finite energy
+PASS ibl/constant HDR sky integrates to pi radiance
+PASS ibl/gradient agrees with independent Monte Carlo reference
+PASS ibl/invalid bake preserves previous environment
+PASS ibl/baker starts without environment
+PASS ibl/procedural fallback marks environment
+PASS ibl/cosine weight clamps negative
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+  corner 2.4486/2.5328 (on/off), open floor 2.7662/2.7662, wall-less floor 2.7662/2.7662 and at the corner position 2.5328/2.5328
+  AO term: corner 0.824, open floor 1.000; wall-less floor near 1.000, far 1.000
+PASS ss/hardware EGL: SSAO darkens the floor/wall corner and leaves an open flat floor unchanged
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+  red excess at mirror image: smooth 0.7613/-0.0318 (on/off), rough -0.0109/-0.0109; near-floor control -0.0350/-0.0350
+PASS ss/hardware EGL: SSR reflects an emissive wall in a smooth floor where the mirror image projects, and not in a rough one
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+  first-frame SSR red 0.1288 vs SSR-off 0.1288
+PASS ss/hardware EGL: with AO and SSR off the frame ignores history; SSR adds no colour on the first frame after a reset
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+  boundary x: outside 80, glass ior1.0 80, ior1.5 87, ior2.0 90
+PASS ss/hardware EGL: a tilted glass panel refracts the backdrop by its IOR and leaves pixels outside it unchanged
+PASS service-surface/every listed service/renderer file has a non-test caller or a test
+PASS service-surface/awaiting-decision allowlist is current and documented
+PASS service-surface/self-test: a synthetic uncalled, untested type is flagged
+PASS service-surface/self-test: the real tree is not flagged and the check is not vacuous
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+Shadow metrics acne=0.000000, contrast=0.7769, hard=0, soft=59, softContrast=0.7715
+Temporal shadow delta early=0.001523, late=0.001201
+PASS aa/sloped receiver is acne-free and shadow radius widens the penumbra
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+DoF CoC f8=2.350, f2=9.398, focused=2.3901463E-05; background contrast f8=13.89, f2=4.70; focus delta=0.000
+PASS post-effects/hardware EGL physical focus and aperture control background blur
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+Motion blur horizontal width=32, sharp=5, vertical=30
+PASS post-effects/hardware EGL skinned motion smears along velocity and rejects stale history
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+PASS aa/skinned motion disocclusion, camera cuts, resize and temporal resource disposal
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+AA metrics none=0.20231, msaa=0.07052, taa=0.13944, earlyDelta=0.001006, lateDelta=0.000631
+PASS aa/shared renderer analytic edge coverage, convergence, exact extent and repeatability
+PASS fbx_clip_conversion/golden local and world frames and fractional pose
+PASS fbx_clip_conversion/source rate and asymmetric unit axis conversion
+PASS fbx_clip_conversion/explicit take selection and missing target
+PASS fbx_clip_conversion/reject layers pivots unsupported cubic and duplicate targets
+PASS fbx_clip_conversion/stepped channel and off-grid resampling report
+PASS fbx_clip_conversion/save reopen refuses overwrite and does not alter input
+PASS fbx_clip_conversion/raw node tree cannot fabricate animation clip
+PASS fbx_clip_conversion/owned binary FBX curves play through headless desktop and retain source
+PASS fbx_clip_conversion/raw binary explicit takes missing bone and centimetre axes
+PASS fbx_clip_conversion/binary FBX rejects cubic curves and unsupported offsets
+PASS material-channel/bake tangents split mirrored UVs and survive degenerate UVs
+PASS material-channel/reject unsupported UV set and wrong channel color space before GPU upload
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+PASS material-channel/hardware EGL probes all maps, fallbacks, convention and reload
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+PASS material-channel/nonuniform bone palette transforms mapped tangent frame
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+PASS material-channel/UV tiling and offset change rendered pixels
+PASS vmdl/ModelDoc reader finds the mesh and the material bindings
+PASS vmdl/ModelDoc reader survives a file it cannot read
+PASS vmdl/material name spellings cover the importer's own rules
+PASS vmdl/the ModelDoc that draws a mesh is found by path, not by file name
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+PASS gpu-particle/compute shader updates positions and keeps particles in bounds
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+PASS gpu-particle/zero particles does not crash
+PASS volume/density falls off from a sphere volume's centre and multiplicative media clear it
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+  centre lit 0.611 shadowed 0.023 edge 0.165
+PASS volume/hardware EGL: a fog sphere scatters the key light, shadowed fog is darker, empty grid draws nothing
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+  none G 125.1 fog +20.7 emitG +118.0 emitR +52.6 texture-vs-fog True fallback-vs-none True
+PASS volume/hardware EGL through SceneRenderer: fog, emission, density texture and fallback change the frame; empty grid is identical
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+  subdivision x2 (6->96 faces) | displace 0.4 (96->96 faces); changed pixels inside bounds 5250, outside 0; probe (89,64) changed True
+PASS live-scene/hardware EGL: a live displace modifier grows the silhouette only inside the displaced bounds
+PASS live-scene/particles: all emitted particles draw and billboards are emitted back-to-front
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+  shadowed floor pixels 217, brightened 0
+  blur changed 1046 px over x 40..88, y 57..97; red row width 26 -> 32
+PASS live-scene/hardware EGL: an opaque live cube casts a key-light shadow on the mesh floor and blurs along its motion
+PASS survey-material-map/head and suit aliases remain source-scoped
+PASS survey-material-map/read-only relative references survive project move and diagnose effects
+PASS survey-material-map/non-Survey Effigy slot retains ordinary fallback
+PASS survey-material-map/source ModelDoc remaps and texture paths inventory
+PASS viewport-handle/draw geometry and hit share typed dimensions
+PASS viewport-handle/overlay emits only typed selectable shape vertices
+PASS viewport-handle/priority over orbit, one undo entry and palette undo
+PASS viewport-handle/logical viewport offset and framebuffer DPI independence
+PASS viewport-handle/escape focus loss reload and close cancel exact state
+PASS viewport-handle/auto-key off is an unkeyed override and on writes keys atomically
+PASS viewport-handle/IK target ray drag solves end effector and undoes
+PASS viewport-handle/rotation ring angle unwrap and degree snapping
+PASS viewport-handle/source revision invalidation and unstable ray leave clean capture
+PASS viewport-handle/disabled snap continuous, invalid snap rejected before capture
+PASS resource-budget/budget records decoded bytes, batch count and stage timings
+PASS resource-budget/shared images count once and unique maps are not double-counted
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+PASS resource-budget/hardware upload records GPU storage and reload returns to baseline
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+PASS pose-agreement/skinning picking and shadow share one posed mesh after the layout change
+PASS cross-field/null mesh throws
+PASS cross-field/compute produces frames
+PASS cross-field/smooth keeps unit normals
+PASS cross-field/vertex curvature positive on sphere
+PASS cross-field/optimize MIQ sets rotations
+PASS cross-field/trace streamlines returns paths
+headless : EGL device/pbuffer; no window or display-server connection
+renderer : NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2
+GL       : 4.6.0 NVIDIA 615.78.08
+PASS egl-image/flat-material-lighting-and-shadow
+  Heat bind; 338 vertices by heat; max 2 influences; 30 ms
+PASS auto-weight/two-bone cylinder: each bone dominant near itself
+  joint weight 0.5, max ring-to-ring step 0.186
+PASS auto-weight/two-bone cylinder: smooth monotone transition at joint
+PASS auto-weight/weights sum to 1 and validate
+PASS auto-weight/max-influence cap respected and renormalised
+  Heat bind; 338 vertices by heat; 8 by voxel distance; 8 vertices in 1 separate piece(s) cannot see any bone (closed inside another part, or floating), so heat has no source there; they were weighted by voxel distance; 8 vertices were in solid no bone reaches and took their nearest bone; voxel grid 47x18x69, 9882 solid cells; max 2 influences; 37 ms
+PASS auto-weight/disconnected island falls back and is reported
+PASS auto-weight/refine prunes min weight and renormalises
+PASS auto-weight/apply is one undoable command restoring exact prior skin
+  FBX max weight error 4.81E-07; 8.7 ms solve
+PASS auto-weight/export: FBX round trip and DMX carry the auto weights
+PASS auto-weight/invalid inputs are rejected
+  1314 verts, 4 bones: 50.7 ms (Heat bind; 1314 vertices by heat; max 3 influences; 50.6 ms)
+PASS auto-weight/timing: 4-bone 32-segment cylinder solve
+PASS weight-paint/paint sets weight on vertex
+PASS weight-paint/add/subtract with smooth falloff
+PASS weight-paint/subtract on single-influence vertex is reported, not a command
+PASS weight-paint/normalize sums to 1 with locked bone preserved
+PASS weight-paint/blur smooths a hard edge and keeps sums
+PASS weight-paint/mirror X paints the L/R counterpart
+PASS weight-paint/undo/redo restores exact weights; cancel leaves no entry
+PASS weight-paint/fill and linear gradient set values; colours follow the ramp
+PASS weight-paint/paint on auto-weighted cylinder; history interleaves with auto-weight
+PASS weight-paint/invalid inputs are rejected
+579 passed, 0 failed, 3 skipped; 582/582 selected/registered
+report: /tmp/opencode/geppetto-verify-egz1lvv_/cpu-results.json

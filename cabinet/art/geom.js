@@ -94,12 +94,14 @@ var G = {
   "h": 120
  },
  "pencil3d": {
-  "w": 36,
-  "h": 122,
-  "bodyW": 18,
-  "bodyH": 116,
-  "frames": 24,
-  "radius": 7.97
+  "w": 128,
+  "h": 128,
+  "bodyW": 120,
+  "bodyH": 120,
+  "frames": 16,
+  "turns": 16,
+  "radius": 8.0,
+  "halfLen": 50.0
  },
  "folder": {
   "w": 110,
@@ -107,6 +109,169 @@ var G = {
   "bodyW": 104,
   "bodyH": 76,
   "labelY": 32
+ },
+ "scroll3d": {
+  "w": 74,
+  "h": 176,
+  "bodyW": 66,
+  "bodyH": 168,
+  "frames": 24,
+  "radius": 15.0
+ },
+ "chisel3d": {
+  "w": 132,
+  "h": 132,
+  "bodyW": 124,
+  "bodyH": 124,
+  "frames": 16,
+  "turns": 16,
+  "radius": 6.0,
+  "halfLen": 54.0
+ },
+ "modelfolder": {
+  "w": 208,
+  "h": 184,
+  "bodyW": 200,
+  "bodyH": 176,
+  "pocketX": 2,
+  "pocketY": 38,
+  "pocketW": 200,
+  "pocketH": 138
+ },
+ "books": [
+  {
+   "w": 244,
+   "h": 60,
+   "bodyW": 236,
+   "bodyH": 52,
+   "labelX": 56,
+   "labelY": 8,
+   "labelW": 128,
+   "labelH": 38
+  },
+  {
+   "w": 244,
+   "h": 76,
+   "bodyW": 236,
+   "bodyH": 68,
+   "labelX": 56,
+   "labelY": 10,
+   "labelW": 128,
+   "labelH": 50
+  },
+  {
+   "w": 244,
+   "h": 68,
+   "bodyW": 236,
+   "bodyH": 60,
+   "labelX": 56,
+   "labelY": 8,
+   "labelW": 128,
+   "labelH": 46
+  },
+  {
+   "w": 244,
+   "h": 82,
+   "bodyW": 236,
+   "bodyH": 74,
+   "labelX": 58,
+   "labelY": 12,
+   "labelW": 126,
+   "labelH": 54
+  },
+  {
+   "w": 244,
+   "h": 58,
+   "bodyW": 236,
+   "bodyH": 50,
+   "labelX": 56,
+   "labelY": 8,
+   "labelW": 128,
+   "labelH": 38
+  },
+  {
+   "w": 244,
+   "h": 72,
+   "bodyW": 236,
+   "bodyH": 64,
+   "labelX": 56,
+   "labelY": 10,
+   "labelW": 128,
+   "labelH": 48
+  },
+  {
+   "w": 244,
+   "h": 86,
+   "bodyW": 236,
+   "bodyH": 78,
+   "labelX": 56,
+   "labelY": 12,
+   "labelW": 128,
+   "labelH": 58
+  },
+  {
+   "w": 244,
+   "h": 66,
+   "bodyW": 236,
+   "bodyH": 58,
+   "labelX": 56,
+   "labelY": 10,
+   "labelW": 128,
+   "labelH": 44
+  },
+  {
+   "w": 244,
+   "h": 78,
+   "bodyW": 236,
+   "bodyH": 70,
+   "labelX": 56,
+   "labelY": 12,
+   "labelW": 128,
+   "labelH": 52
+  }
+ ],
+ "eraser": {
+  "w": 44,
+  "h": 24,
+  "bodyW": 36,
+  "bodyH": 16
+ },
+ "scrollRod": {
+  "w": 60,
+  "h": 552,
+  "shaftY": 92,
+  "shaftH": 364
+ },
+ "parchment": {
+  "w": 128,
+  "h": 128
+ },
+ "paperball": {
+  "w": 416,
+  "h": 368,
+  "frames": 16,
+  "firstW": 132,
+  "sheetX": 2,
+  "sheetY": 2,
+  "sheetW": 408,
+  "sheetH": 360,
+  "ball": {
+   "w": 72,
+   "h": 76,
+   "bodyW": 64,
+   "bodyH": 68,
+   "radius": 32.0
+  }
+ },
+ "paperballRoll": {
+  "w": 80,
+  "h": 80,
+  "bodyW": 72,
+  "bodyH": 72,
+  "frames": 16,
+  "turns": 16,
+  "radius": 32.0,
+  "halfLen": 2.0
  },
  "keyS": {
   "w": 44,

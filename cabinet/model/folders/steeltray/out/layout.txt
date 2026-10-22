@@ -1,0 +1,2 @@
+# part	model	pivot x	y	z	size x	y	z
+steeltray	out/steeltray.vmdl	0	0.045	-0.049	6.31	4.889	0.358

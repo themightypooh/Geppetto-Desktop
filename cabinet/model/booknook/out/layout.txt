@@ -1,0 +1,2 @@
+# part	model	pivot x	y	z	size x	y	z
+booknook	out/booknook.vmdl	-0.11	4.5	0.193	13.613	9.015	1.067

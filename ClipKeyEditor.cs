@@ -111,6 +111,20 @@ public sealed class ClipKeyEditor
 		return picked.Count;
 	}
 
+	/// <summary>Keys one track at the frame with a given local pose, replacing a key already there:
+	/// how a script (or the AI) poses a clip from outside, since the cabinet has no gizmos.</summary>
+	public void Set( int track, int frame, RigPose pose )
+	{
+		if ( frame < 0 ) throw new ArgumentOutOfRangeException( nameof( frame ) );
+		if ( track < 0 || track >= Clip.Tracks.Count ) throw new ArgumentOutOfRangeException( nameof( track ) );
+		var ease = Clip.Tracks[track].Keys.FirstOrDefault( k => k.Frame == frame )?.Ease ?? EaseBefore( Clip.Tracks[track], frame );
+		Edit( $"Set key {track}:{frame}", new List<KeyRef> { new( track, frame ) }, ( _, _, keysOut ) =>
+		{
+			keysOut.RemoveAll( k => k.Frame == frame );
+			keysOut.Add( new RigKey { Frame = frame, Local = pose, Ease = ease } );
+		} );
+	}
+
 	static RigEase EaseBefore( RigTrack track, int frame )
 	{
 		RigEase ease = RigEase.Smooth;

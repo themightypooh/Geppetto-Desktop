@@ -1,0 +1,2 @@
+# part	model	pivot x	y	z	size x	y	z
+pencil	out/pencil.vmdl	-0	-0.052	-0.419	0.837	6.997	0.837

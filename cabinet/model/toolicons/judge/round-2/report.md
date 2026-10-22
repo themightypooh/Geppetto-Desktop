@@ -1,0 +1,419 @@
+# Tool icons, round 2
+
+0 / 83 pass (score >= 9, every category >= 8). Mean 6.22.
+
+- FAIL **Draft** 4.38
+  - represents 4: Grey egg/cone with red specks on side; taper angle not shown. -> A block with tapered walls plus red angle marker against a vertical reference line.
+  - distinct 5: Egg shape vague, resembles #12 Loft. -> Tapered block.
+  - legibility 4: Red bits are stray pixels at 1x. -> Solid red angle wedge.
+  - craft 5: Stray red pixels. -> Remove specks.
+- FAIL **Body from bones** 4.50
+  - represents 4: Pink fleshy lump; no bones visible. -> Show a bone (white) half-wrapped in pink flesh, bone ends sticking out.
+  - distinct 4: Pink lump confusable with #55 Flesh and #28 Sculpt. -> Bones visible makes it distinct.
+  - legibility 5: Pink oval reads, meaning doesn't. -> Add bone ends and red accent.
+  - craft 6: Muddy pink dither. -> Cleaner shading.
+- FAIL **Delete** 4.62
+  - represents 5: Cube with red marks; no X or removal. -> Big red X over a face/vertex.
+  - distinct 4: Like #40. -> Red X.
+  - legibility 4: Small red specks. -> Big X.
+  - craft 6: Stray specks. -> Clean.
+- FAIL **Dissolve** 4.62
+  - represents 5: Cube with red fragments floating away: looks like delete. -> Show an edge fading/dotted on a face while surface stays.
+  - distinct 4: Confusable with #41 Delete. -> Dotted line edge.
+  - legibility 4: Red bits single pixels. -> Bigger.
+  - craft 6: Stray bits. -> Remove.
+- FAIL **Set** 4.75
+  - represents 4: Grey spoon/wrench-like stick. -> Slider/knob or wrench.
+  - distinct 6: OK. -> Keep.
+  - legibility 4: Thin. -> Thicker.
+  - craft 6: Underfilled. -> Scale.
+- FAIL **Export** 5.00
+  - represents 5: Yellow box with red knob. -> Arrow out.
+  - distinct 3: Same as #8. -> Differ.
+  - legibility 6: Reads. -> Keep.
+  - craft 7: Clean. -> Keep.
+- FAIL **Import** 5.00
+  - represents 5: Yellow box tray with red handle/lever: looks like a box/joystick, not importing a file. -> Show a file/document with a red arrow pointing into a mesh/cube.
+  - distinct 3: Almost identical to #79 Export (yellow box with red knob). -> Make Import and Export clearly different: arrow in vs arrow out with a file sheet.
+  - legibility 6: Box silhouette clear; red lever small. -> Big red arrow.
+  - craft 7: Clean outline. -> Reduce dither.
+- FAIL **Skin** 5.00
+  - represents 5: Pink capsule with faint spots. -> Bigger freckles/pores.
+  - distinct 4: Like #55. -> Dots.
+  - legibility 5: Spots invisible. -> Bigger.
+  - craft 7: Clean. -> Keep.
+- FAIL **Curve** 5.12
+  - represents 5: Grey wavy bar, no curve path shown. -> Show a red curve line with the body following along it.
+  - distinct 5: Like #31 Bend and #13 Sweep. -> Visible red path.
+  - legibility 5: Small grey squiggle at 1x. -> Bigger.
+  - craft 6: Underfilled. -> Scale up.
+- FAIL **Sweep** 5.12
+  - represents 5: Grey bent tube; path and cross-section not shown. -> Show a red path curve with a red cross-section ring at the tube start.
+  - distinct 6: Grey tube like #32 Curve. -> Add red path and section.
+  - legibility 4: Tiny thin grey shape at 1x, no accent. -> Thicker tube, bigger, red accent.
+  - craft 6: Underfilled frame. -> Scale up.
+- FAIL **Move** 5.12
+  - represents 5: Cube with dark cone up, yellow and red blobs: not readable as axis arrows. -> Three thin colored axis arrows from one point (red, green, blue) on the cube.
+  - distinct 6: Differs, but dark cone also on #33. -> Standard gizmo.
+  - legibility 4: Arrows are blobs at 1x. -> Clear arrow shafts.
+  - craft 6: Messy blobs. -> Clean arrows.
+- FAIL **Fix mesh** 5.25
+  - represents 5: Hollow box with red rim. -> Patch closing hole.
+  - distinct 4: Like #18 Shell. -> Patch.
+  - legibility 6: Reads. -> Keep.
+  - craft 7: Clean. -> Keep.
+- FAIL **Flesh** 5.25
+  - represents 5: Pink bean with red dot. -> Skin layer cut to show red flesh.
+  - distinct 4: Like #9, #56. -> Cross-section.
+  - legibility 6: Reads as blob. -> Layers.
+  - craft 7: Clean. -> Keep.
+- FAIL **Pocket** 5.25
+  - represents 5: Blue square with button, pocket flap barely visible. -> Visible pocket with flap and stitch on fabric.
+  - distinct 5: Like #45/#49. -> Flap.
+  - legibility 5: Flat. -> Contrast.
+  - craft 7: Clean. -> Keep.
+- FAIL **Sketch** 5.25
+  - represents 6: Cream paper with a pencil and some dark marks: sketch on paper, but marks are illegible scribbles. -> Draw a clear rectangle or circle outline on the paper in dark line.
+  - distinct 5: Cream paper sheet similar to #5 Profile, #71 Topology, #75 Describe. -> Make the pencil larger and the drawn shape bold so it differs from Profile.
+  - legibility 4: At 1x the paper is a tiny flat diamond with a few specks. -> Tilt paper up toward camera and scale up; thicker lines.
+  - craft 6: Clean but small and underfilling its frame. -> Frame tighter.
+- FAIL **Key end** 5.50
+  - represents 5: Slider with red stop. -> Target shape at stop.
+  - distinct 5: Like #60. -> Differ.
+  - legibility 6: Reads. -> Keep.
+  - craft 7: Clean. -> Keep.
+- FAIL **Spline** 5.50
+  - represents 6: Red line with yellow end points: polyline, not a smooth curve; it bends at sharp angles. -> Make the red curve a smooth S-curve passing through 3-4 yellow control points.
+  - distinct 6: Similar to #68 Distance's red bar with nodes. -> Smooth curve with handles differentiates it.
+  - legibility 4: Thin lines at 1x, barely more than a few pixels. -> Thicken the curve and enlarge points.
+  - craft 6: Thin and underfilling frame. -> Fill more of the frame.
+- FAIL **Bevel** 5.62
+  - represents 6: Cube with red strip on one edge: bevel subtle. -> Make the beveled edge a wider slanted red face.
+  - distinct 5: Similar to #20 Fillet and #21 Chamfer. -> Multiple narrow bevel segments.
+  - legibility 5: Red edge thin at 1x. -> Wider.
+  - craft 7: Clean. -> Keep.
+- FAIL **Symmetrize** 5.62
+  - represents 6: Egg with red line and dark dots; halves not visibly matching. -> One half detailed, mirrored to other half with red centerline and arrow.
+  - distinct 4: Almost same as #69 Symmetry. -> Differentiate: arrow copying half.
+  - legibility 6: Red line visible. -> Thicker.
+  - craft 7: Clean. -> Keep.
+- FAIL **Profile** 5.62
+  - represents 6: Red L-shaped extruded strip standing on cream paper: suggests a profile, but looks 3D not a 2D outline. -> Make the profile a flat red outline drawn on the paper (closed L outline), not a raised wall.
+  - distinct 5: Same paper base as Sketch #4; red L could read as extrude. -> Differentiate base (e.g. no paper, use a grid) or make outline closed loop.
+  - legibility 5: Small at 1x; red L is visible but paper flat. -> Scale up and tilt paper.
+  - craft 7: Clean edges. -> Frame tighter.
+- FAIL **Sculpt** 5.62
+  - represents 6: Pink clay lump with a small yellow tool tip poking in: sculpt hinted. -> Bigger sculpting tool/loop and a visible dent where it pushes.
+  - distinct 5: Pink lump like #9 and #55. -> Make tool prominent.
+  - legibility 5: Tool barely visible at 1x. -> Larger tool.
+  - craft 7: Clean. -> Less dither.
+- FAIL **Shape key** 5.62
+  - represents 6: Dark slider with knob and two pink shapes. -> Clear end shapes differing.
+  - distinct 5: Like #61. -> Differ.
+  - legibility 5: Small. -> Bigger.
+  - craft 7: Clean. -> Keep.
+- FAIL **Topology** 5.62
+  - represents 6: Grid paper with red mark. -> Quad mesh with pole.
+  - distinct 5: Like #75. -> Differ.
+  - legibility 5: Small. -> Bigger.
+  - craft 7: Clean. -> Keep.
+- FAIL **Circle pattern** 5.75
+  - represents 6: Cylinders around a center but the circle arrangement is hard to see. -> Arrange 6 short pegs on a visible red ring, viewed more from above.
+  - distinct 6: Looks like #16 cluster of cylinders. -> Top-down view with ring.
+  - legibility 5: Cluttered grey sticks at 1x. -> Fewer, shorter pegs plus red circle.
+  - craft 6: Busy. -> Simplify.
+- FAIL **Bake** 5.88
+  - represents 6: Cube with link to map sheet. -> Oven/arrow.
+  - distinct 6: OK. -> Keep.
+  - legibility 5: Small. -> Bigger.
+  - craft 7: Clean. -> Keep.
+- FAIL **Blob** 5.88
+  - represents 6: Single grey bean-shaped lump; melted shapes not visible as multiple blobs merging. -> Show two or three spheres fusing with a visible neck between them.
+  - distinct 5: Grey round lump similar to #1 and to #55 Flesh's shape. -> Use metaball look with distinct sphere bulges and a red accent at the merge.
+  - legibility 6: Reads as a blob silhouette at 1x but no accent or key part. -> Add red highlight where shapes melt together.
+  - craft 7: Clean outline, noisy dithered surface. -> Smoother shading, less dither.
+- FAIL **Describe** 5.88
+  - represents 6: Paper with pencil. -> Text lines.
+  - distinct 5: Like #71, #4. -> Differ.
+  - legibility 6: Reads. -> Keep.
+  - craft 7: Clean. -> Keep.
+- FAIL **Fillet** 5.88
+  - represents 6: Rounded box with red band around the middle; rounded edges subtle; red band suggests a cut not a fillet. -> Make one edge visibly rounded with red highlight on that edge, others sharp.
+  - distinct 5: Red band like #23 Trim. -> Red on the rounded edge only.
+  - legibility 6: Readable box, meaning unclear. -> Bigger round on one edge.
+  - craft 7: Clean. -> Less dither.
+- FAIL **Flex** 5.88
+  - represents 6: Bent pink limb with red marker. -> Bend arrow.
+  - distinct 5: Like #62. -> Differ.
+  - legibility 6: Reads. -> Keep.
+  - craft 7: Clean. -> Keep.
+- FAIL **Fur** 5.88
+  - represents 5: Spiky gold star ball: looks like a mine/virus. -> Many thin hair strands on a surface patch.
+  - distinct 7: Unique. -> Keep.
+  - legibility 6: Reads as star. -> Strands.
+  - craft 6: Dither. -> Clean.
+- FAIL **Loft** 5.88
+  - represents 6: Cone with red rings at top and bottom: sections are both circles, so blend between different shapes not shown. -> Make bottom section a square and top a circle, red outlines, blended body.
+  - distinct 5: Similar to #11 Revolve (grey round solid with red rings). -> Square-to-circle cross-sections.
+  - legibility 6: Rings thin at 1x. -> Thicker section outlines.
+  - craft 7: Clean. -> Less dither.
+- FAIL **Bend** 5.88
+  - represents 6: Grey bar bent in an arch with red underside. -> Bend more sharply, show straight ghost and red bend arrow.
+  - distinct 5: Similar to #32 Curve. -> Strong U-bend.
+  - legibility 6: Reads as a lump at 1x. -> Thinner bar, clearer bend.
+  - craft 7: Clean. -> Keep.
+- FAIL **Symmetry** 5.88
+  - represents 6: Egg with red centerline. -> Check mark.
+  - distinct 4: Like #39. -> Differ.
+  - legibility 7: Reads. -> Keep.
+  - craft 7: Clean. -> Keep.
+- FAIL **Trim** 5.88
+  - represents 6: Cube with red plane around middle: cutting plane present but both halves kept. -> Show top half lifted/ghosted away above the red plane.
+  - distinct 5: Similar red band to #20 Fillet and #37 Loop cut. -> Separated halves.
+  - legibility 6: Red edge visible. -> Bigger gap.
+  - craft 7: Clean. -> Less dither.
+- FAIL **Wear** 5.88
+  - represents 6: Blue patch with holes. -> Frayed edges, tear.
+  - distinct 6: Like #47. -> Ragged.
+  - legibility 5: Holes small. -> Bigger.
+  - craft 7: Clean. -> Keep.
+- FAIL **UV project** 6.00
+  - represents 6: Cross-shaped unfolded cube net in black/cream. -> Cube unfolding with grid.
+  - distinct 7: Unique. -> Keep.
+  - legibility 5: Noisy. -> Cleaner.
+  - craft 6: Noisy. -> Clean.
+- FAIL **Hole** 6.12
+  - represents 6: Grey slab with a red spot on top: hole is shallow, looks like a red dot not a drilled through-hole. -> Make the hole dark and deep, red rim, maybe a drill bit above.
+  - distinct 6: Similar to #35 Inset and #26 Detail slabs. -> Add drill bit.
+  - legibility 6: Red dot visible at 1x. -> Bigger dark hole.
+  - craft 7: Clean. -> Less dither.
+- FAIL **Plane** 6.12
+  - represents 6: Grey flat square with a red pin/normal: reads as a plane, but grey solid slab rather than construction plane. -> Make plane semi-transparent/outlined with a grid and corner marks; keep red normal arrow.
+  - distinct 6: Similar to #10 Extrude's base with a red arrow. -> Use a dashed-edge construction plane look.
+  - legibility 6: Plane reads at 1x; red pin small. -> Make normal arrow bigger.
+  - craft 7: Clean. -> Thicker outline on plane edge.
+- FAIL **Subdivide** 6.12
+  - represents 7: Cube next to sphere: sharp to smooth idea. -> Add a red arrow from cube to sphere; show subdivided facets on sphere.
+  - distinct 5: Cube+sphere similar to #1 Primitive. -> Arrow and faceting.
+  - legibility 6: Tiny red bit at 1x stray. -> Proper red arrow.
+  - craft 6: Red speck looks stray. -> Replace with arrow.
+- FAIL **Detail** 6.25
+  - represents 7: Slab with yellow rivets and panel line. -> Bigger rivets and a screw head.
+  - distinct 6: Slab like #19 Hole and #27 Stroke. -> Raise the panel.
+  - legibility 5: Rivets are lone pixels at 1x. -> Enlarge rivets.
+  - craft 7: Clean. -> Less dither.
+- FAIL **Bind** 6.38
+  - represents 6: Bone with red pin. -> Mesh wrapping bone, link.
+  - distinct 7: OK. -> Keep.
+  - legibility 6: Thin. -> Thicker.
+  - craft 7: Clean. -> Keep.
+- FAIL **Fabric** 6.38
+  - represents 7: Wavy blue cloth. -> Draped over a sphere.
+  - distinct 6: Blue slab like #47. -> Drape.
+  - legibility 6: Small. -> Bigger.
+  - craft 6: Dither. -> Less.
+- FAIL **Match** 6.38
+  - represents 6: Picture frame and block. -> Side by side compare.
+  - distinct 7: OK. -> Keep.
+  - legibility 6: Small. -> Bigger.
+  - craft 7: Clean. -> Keep.
+- FAIL **Part** 6.38
+  - represents 6: Grey block with two yellow pegs: reads as a mechanical part/Lego-ish brick, bracket not shown. -> Make it a clear L-bracket with bolt holes or a peg plus a bracket.
+  - distinct 7: Yellow pegs on grey slab distinct from others in Form. -> Keep; strengthen with bracket silhouette.
+  - legibility 6: Pegs are tiny yellow dots at 1x; no red accent. -> Enlarge pegs and add red accent on the part.
+  - craft 7: Clean outline, decent framing. -> Reduce face dither.
+- FAIL **Pivot** 6.38
+  - represents 6: Bar balancing on sphere. -> Rotation arc.
+  - distinct 7: OK. -> Keep.
+  - legibility 6: Thin. -> Thicker.
+  - craft 7: Clean. -> Keep.
+- FAIL **Remedy** 6.38
+  - represents 6: First aid box. -> Patched mesh.
+  - distinct 6: Like #66. -> Differ.
+  - legibility 7: Reads. -> Keep.
+  - craft 7: Clean. -> Keep.
+- FAIL **Remove** 6.38
+  - represents 6: Trash can. -> Red X.
+  - distinct 7: OK. -> Keep.
+  - legibility 6: No red. -> Red.
+  - craft 7: Clean. -> Keep.
+- FAIL **Distance** 6.50
+  - represents 7: Two spheres with red line between. -> Arrows both ends.
+  - distinct 6: Like #6. -> Differ.
+  - legibility 6: Thin. -> Thicker.
+  - craft 7: Clean. -> Keep.
+- FAIL **Extrude faces** 6.50
+  - represents 7: Block with red face raised as a step. -> Add up arrow.
+  - distinct 5: Confusable with #33 Push face. -> Show multiple faces extruded with side walls.
+  - legibility 7: Red reads. -> Keep.
+  - craft 7: Clean. -> Less dither.
+- FAIL **Extrude** 6.50
+  - represents 7: Cream sketch base with grey block rising and red up arrow: extrude idea present. -> Show the outline on the base clearly and make the block taller with arrow above.
+  - distinct 6: Similar base+arrow to #7 Plane and #33 Push Face. -> Larger cream profile footprint visible around the block.
+  - legibility 6: Small at 1x; red arrow a few pixels. -> Bigger arrow, taller solid.
+  - craft 7: Clean. -> Reduce dither.
+- FAIL **Push face** 6.50
+  - represents 7: Block with red top face raised and an arrow on it. -> Arrow should be red and pointing up along normal, bigger.
+  - distinct 5: Close to #34 Extrude faces and #10 Extrude. -> Differentiate with offset ghost face.
+  - legibility 7: Red face reads. -> Keep.
+  - craft 7: Clean. -> Keep.
+- FAIL **Paint maps** 6.50
+  - represents 7: Paper with red painted texture. -> Brush.
+  - distinct 6: Like #71. -> Differ.
+  - legibility 6: Reads. -> Keep.
+  - craft 7: Clean. -> Keep.
+- FAIL **Primitive** 6.50
+  - represents 7: Grey cube, sphere and a cylinder/cone stack: reads as basic solids, but the cylinder is a blobby bottle merged with the cube. -> Separate the cylinder and add a clear cone; keep cube, sphere, cylinder, cone as four distinct solids.
+  - distinct 6: Grey round shapes overlap visually with #2 Blob next to it. -> Give hard edges/flat faces to all solids so it contrasts with Blob's melted form.
+  - legibility 6: At 1x the cluster is a grey lump; no red accent at all. -> Spread the solids apart and add a red accent (e.g. red + or red cone).
+  - craft 7: Clean outline, but heavy dither on grey faces. -> Reduce dithering on flat faces.
+- FAIL **Chamfer** 6.62
+  - represents 6: Cube with red triangular face on front: suggests a cut-off corner but reads as a triangle on a face. -> Cut one top corner off with a red slanted face clearly at the corner.
+  - distinct 7: Triangle differs from other refine icons. -> Keep.
+  - legibility 7: Red triangle reads at 1x. -> Keep.
+  - craft 7: Clean. -> Less dither.
+- FAIL **Garment** 6.62
+  - represents 7: Blue shirt shape. -> Clear T-shirt silhouette with collar.
+  - distinct 7: Unique. -> Keep.
+  - legibility 6: Lumpy at 1x. -> Flatten front-on.
+  - craft 6: Muddy dither. -> Less.
+- FAIL **Padding** 6.62
+  - represents 7: Quilted cushion with stitching. -> Puffier bulges.
+  - distinct 7: OK. -> Keep.
+  - legibility 6: Stitching muddy. -> Bolder.
+  - craft 6: Muddy. -> Clean.
+- FAIL **Remesh** 6.62
+  - represents 7: Sphere with dark grid lines: mesh of polygons. -> Make grid evenly triangulated/quads and add red accent.
+  - distinct 7: Wire sphere unique. -> Keep.
+  - legibility 6: Grid lines muddy at 1x; no red. -> Fewer, bolder lines and red.
+  - craft 6: Dark lines muddy. -> Cleaner lines.
+- FAIL **Wearer** 6.62
+  - represents 6: Cream pawn/snowman figure. -> Mannequin torso on a stand.
+  - distinct 7: Unique. -> Keep.
+  - legibility 7: Reads. -> Keep.
+  - craft 7: Clean. -> Keep.
+- FAIL **Corrective** 6.75
+  - represents 7: Bent pink limb with red at elbow. -> Show crease fix.
+  - distinct 6: Like #73. -> Differ.
+  - legibility 7: Reads. -> Keep.
+  - craft 7: Clean. -> Keep.
+- FAIL **Delete face** 6.75
+  - represents 7: Cube with red open face showing interior. -> Make hole dark inside, red rim.
+  - distinct 6: Close to #18 and #14. -> Dark void.
+  - legibility 7: Red reads. -> Keep.
+  - craft 7: Clean. -> Keep.
+- FAIL **Row pattern** 6.75
+  - represents 7: Three cylinders in a row with red arrow along them: row pattern. -> Space cylinders evenly apart with gaps; arrow parallel to row.
+  - distinct 7: Differs from circle pattern by arrow. -> Keep.
+  - legibility 6: Cylinders touch and merge at 1x; arrow thin. -> Gaps between items, thicker arrow.
+  - craft 7: Clean. -> Less dither.
+- FAIL **Measure** 6.75
+  - represents 7: Ruler with red end marks. -> Keep.
+  - distinct 7: OK. -> Keep.
+  - legibility 6: Small. -> Bigger.
+  - craft 7: Clean. -> Keep.
+- FAIL **Mesh edit** 6.75
+  - represents 7: Cube with yellow vertex dots. -> Highlight one vertex red with move arrow.
+  - distinct 7: Vertex dots unique. -> Keep.
+  - legibility 6: Yellow dots small. -> Bigger.
+  - craft 7: Clean. -> Keep.
+- FAIL **Mirror** 6.75
+  - represents 7: Red plane between two grey cone-like shapes: mirror present, but shapes aren't clearly mirror images. -> Use an asymmetric shape and its exact reflected copy on either side.
+  - distinct 7: Red plane distinct in Build. -> Keep.
+  - legibility 6: Cluttered at 1x, plane and shapes merge. -> Separate shapes from plane.
+  - craft 7: OK. -> Cleaner spacing.
+- FAIL **Loop cut** 6.88
+  - represents 8: Cube with red line all the way round. -> Thicker loop.
+  - distinct 6: Similar to #23 Trim band. -> Add second faint loop.
+  - legibility 6: Thin red line at 1x. -> Thicker.
+  - craft 7: Clean. -> Keep.
+- FAIL **Boolean** 7.00
+  - represents 7: Grey cube with red spherical scoop subtracted: reads as boolean subtract. -> Show the cutting sphere ghosted partly outside the cube.
+  - distinct 6: Close to #18 Shell (grey box with red interior). -> Make cut clearly spherical and leave the tool sphere visible.
+  - legibility 8: Red scoop reads at 1x. -> Keep.
+  - craft 7: Clean. -> Less dither.
+- FAIL **Clearance** 7.00
+  - represents 7: Two blocks with red gap. -> Arrows.
+  - distinct 7: OK. -> Keep.
+  - legibility 7: Reads. -> Keep.
+  - craft 7: Clean. -> Keep.
+- FAIL **Material** 7.00
+  - represents 7: Red material ball on dark base. -> Shiny highlight.
+  - distinct 7: OK. -> Keep.
+  - legibility 7: Reads. -> Keep.
+  - craft 7: Clean. -> Keep.
+- FAIL **Rebuild** 7.00
+  - represents 7: Cube with red circular arrow. -> Arrowheads.
+  - distinct 7: OK. -> Keep.
+  - legibility 7: Reads. -> Keep.
+  - craft 7: Clean. -> Keep.
+- FAIL **Section** 7.00
+  - represents 7: Cut-open tube with red cut faces. -> Keep.
+  - distinct 7: OK. -> Keep.
+  - legibility 7: Reads. -> Keep.
+  - craft 7: Clean. -> Keep.
+- FAIL **Stroke** 7.00
+  - represents 7: Red zigzag raised line on slab: stroke on surface. -> Make it a smooth brushstroke curve with clay texture.
+  - distinct 7: Zigzag distinct. -> Keep.
+  - legibility 7: Red line reads at 1x. -> Keep.
+  - craft 7: Clean. -> Keep.
+- FAIL **Turnaround** 7.00
+  - represents 7: Object on turntable with red ring. -> Arrow.
+  - distinct 7: OK. -> Keep.
+  - legibility 7: Reads. -> Keep.
+  - craft 7: Clean. -> Keep.
+- FAIL **Bridge** 7.25
+  - represents 7: Two grey blocks joined by red span. -> Show gap edges and bridging faces more like a bridge.
+  - distinct 8: Unique. -> Keep.
+  - legibility 7: Reads. -> Keep.
+  - craft 7: Clean. -> Keep.
+- FAIL **Face material** 7.38
+  - represents 8: Cube with red top face. -> Keep.
+  - distinct 6: Like #34/#35. -> Different material texture.
+  - legibility 8: Reads. -> Keep.
+  - craft 7: Clean. -> Keep.
+- FAIL **Lattice** 7.38
+  - represents 8: Dark wire cage with red corner points around pink ball. -> Pull one corner point out and show the ball deformed.
+  - distinct 8: Unique cage. -> Keep.
+  - legibility 6: Dark cage lines thin on dark wheel at 1x. -> Lighter cage lines.
+  - craft 7: Clean. -> Brighter lines.
+- FAIL **Paint** 7.38
+  - represents 8: Paintbrush with red paint. -> Bigger stroke.
+  - distinct 8: Unique. -> Keep.
+  - legibility 6: Thin brush at 1x. -> Thicker.
+  - craft 7: Clean. -> Keep.
+- FAIL **Revolve** 7.38
+  - represents 8: Vase/bottle shape with red rotation ring around it: revolve clear. -> Add a small arrowhead on the ring for direction and a thin axis line.
+  - distinct 7: Ring differs from Loft rings but both use red rings on grey round solids. -> Arrowhead on ring.
+  - legibility 7: Ring and bottle read at 1x. -> Thicker ring.
+  - craft 7: Clean, dithered grey. -> Less dither.
+- FAIL **Shell** 7.38
+  - represents 8: Hollow box with thin walls and red interior, open top. -> Thinner walls to stress the shell.
+  - distinct 6: Close to #66 Fix mesh (hollow grey box with red rim) and #14. -> Change Fix mesh instead; keep.
+  - legibility 8: Red interior reads at 1x. -> Keep.
+  - craft 7: Clean. -> Less dither.
+- FAIL **Inset** 7.62
+  - represents 8: Slab with inner red square face and border ring. -> Show the border edges as lines to corners.
+  - distinct 7: Fine. -> Keep.
+  - legibility 8: Red square clear. -> Keep.
+  - craft 7: Clean. -> Keep.
+- FAIL **Hardware** 7.62
+  - represents 8: Gold buckle on strap. -> Add prong.
+  - distinct 8: Unique. -> Keep.
+  - legibility 7: Reads. -> Keep.
+  - craft 7: Clean. -> Keep.
+- FAIL **Save** 7.62
+  - represents 8: Floppy disk. -> Keep.
+  - distinct 8: Unique. -> Keep.
+  - legibility 7: Reads. -> Keep.
+  - craft 7: Clean. -> Keep.
+- FAIL **Glow** 7.88
+  - represents 8: Yellow lightbulb. -> Glow rays.
+  - distinct 8: Unique. -> Keep.
+  - legibility 8: Reads. -> Keep.
+  - craft 7: Clean. -> Keep.
+- FAIL **Render** 7.88
+  - represents 8: Camera. -> Keep.
+  - distinct 8: Unique. -> Keep.
+  - legibility 8: Reads. -> Keep.
+  - craft 7: Clean. -> Keep.
