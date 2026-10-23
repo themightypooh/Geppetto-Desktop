@@ -15,6 +15,12 @@ the parts apart and repaint them in the chest's dithered ramps from the rendered
   python3 render_frames.py paperball part=turn src=poses/unfold_00.obj roll=16 turn=16 ball=1
       a ball rolling any way: rolled about an axis lying at each heading (turned back after
       rolling), so at roll 0 every heading is the same ball and changing course doesn't jump
+  python3 render_frames.py rolodex part=spin slots=0,2,3 roll=24 axis=x pivot=0,0.05,3.30
+      cam=0,0.05,28.9 look=0,0.05,2.9 yaw=90
+      the card wheel turned about its spindle (X), around that pivot, camera fixed so a
+      second pass of the cradle (slots=1,4, part=base, same yaw) lands on the same pixels.
+      yaw turns the whole thing on the mat afterwards (about Z through the pivot): 90 lays
+      the spindle up the frame, along the drawer's depth, so the cards flip sideways
 """
 import math
 from concurrent.futures import ThreadPoolExecutor
@@ -68,6 +74,10 @@ def main():
     part = opts.get("part", "roll")
     keep = {int(s) for s in opts["slots"].split(",")} if "slots" in opts else None
     size = int(opts.get("size", "512"))
+    axis = opts.get("axis", "y")
+    pivot = tuple(float(v) for v in opts.get("pivot", "0,0,0").split(","))
+    cam = opts.get("cam", "0,0,60")
+    look = opts.get("look", "0,0,0")
     src = os.path.join(HERE, name, opts.get("src", os.path.join("out", name + ".obj")))
     work = os.path.join(HERE, name, "frames", part)
     shutil.rmtree(work, ignore_errors=True)
@@ -93,6 +103,23 @@ def main():
             write_obj(obj, pvs, pfaces, keep)
             jobs.append((obj, "%02d" % i))
         frames = turns = 0
+    if axis == "x" and frames:              # turn about the spindle (X) through pivot; the camera stays put
+        px, py, pz = pivot
+        yaw = math.radians(float(opts.get("yaw", "0")))
+        cy, sy = math.cos(yaw), math.sin(yaw)
+        for i in range(frames):
+            th = 2 * math.pi * i / frames
+            c, s = math.cos(th), math.sin(th)
+            rv = []
+            for x, y, z in vs:
+                x, y, z = x - px, y - py, z - pz
+                y, z = y * c - z * s, y * s + z * c
+                x, y = x * cy - y * sy, x * sy + y * cy     # then turned on the mat
+                rv.append((x + px, y + py, z + pz))
+            obj = os.path.join(work, "%s_%02d.obj" % (part, i))
+            write_obj(obj, rv, faces, keep)
+            jobs.append((obj, "%02d" % i))
+        frames = turns = 0
     for h in range(max(1, turns) if frames else 0):
         ph = 2 * math.pi * h / turns if turns else 0
         ch, sh = math.cos(ph), math.sin(ph)
@@ -112,7 +139,7 @@ def main():
 
     def shade(job):
         obj, tag = job
-        subprocess.run(["sh", EFFIGY, "shade", obj, work, "size=%d" % size, "cam=0,0,60", "look=0,0,0",
+        subprocess.run(["sh", EFFIGY, "shade", obj, work, "size=%d" % size, "cam=" + cam, "look=" + look,
                         "lens=" + opts.get("lens", "140"), "ground=0", "exposure=" + opts.get("exposure", "0.12"), "assets=" + os.path.join(work, "Assets")], check=True,
                        stdout=subprocess.DEVNULL)
         os.replace(os.path.join(work, "%s_%s_custom.png" % (part, tag)), os.path.join(work, "%s.png" % tag))

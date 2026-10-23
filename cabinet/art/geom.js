@@ -273,6 +273,18 @@ var G = {
   "radius": 32.0,
   "halfLen": 2.0
  },
+ "rolodex": {
+  "w": 216,
+  "h": 335,
+  "bodyW": 216,
+  "bodyH": 335,
+  "frames": 24,
+  "cards": 12,
+  "labelX": 0,
+  "labelY": 0,
+  "labelW": 0,
+  "labelH": 0
+ },
  "keyS": {
   "w": 44,
   "h": 36

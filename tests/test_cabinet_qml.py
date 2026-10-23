@@ -13,7 +13,7 @@ CABINET = Path(__file__).resolve().parents[1] / "cabinet"
 sys.path.insert(0, str(CABINET))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QObject, QPoint, QPointF, Qt, QUrl, qInstallMessageHandler  # noqa: E402
+from PySide6.QtCore import QMetaObject, QObject, QPoint, QPointF, Q_ARG, Qt, QUrl, qInstallMessageHandler  # noqa: E402
 from PySide6.QtGui import QGuiApplication, QWheelEvent  # noqa: E402
 from PySide6.QtQuick import QQuickItem  # noqa: E402
 
@@ -64,6 +64,75 @@ class CabinetQmlTests(unittest.TestCase):
         self.assertIsNotNone(self.root, "cabinet.qml did not load: " + "; ".join(MESSAGES[-8:]))
         self.assertEqual(self.qml_errors(), [])
 
+    def test_live_now_lists_every_running_run_with_who_and_the_step(self):
+        """LIVE NOW in the research drawer: a row per running run, who is on it and the step it is on, nothing for ended runs"""
+        import time
+        saved = (self.host._runs, self.host.watching)
+        self.host.runTimer.stop()                    # the run scan would put the real runs back
+        try:
+            base = {"status": "running", "paused": False, "bench": False, "latestRevision": 3, "started": time.time() - 30,
+                    "lastEvent": time.time(), "openState": ""}
+            self.host._runs = [dict(base, dir="/tmp/r1", name="script-rolodex", prompt="script: rolodex", title="rolodex", who="Right drawer rolodex",
+                                    pane=2, activity="building", watch={"line": 14, "total": 31, "say": "Card 12: a flat slab, so the wheel fills in"}),
+                               dict(base, dir="/tmp/r2", name="piranha2", prompt="a piranha", title="piranha2", who="", pane=0, activity="researching", watch={}),
+                               dict(base, dir="/tmp/r3", name="old", prompt="an old run", title="old", status="ended", who="", pane=0, watch={})]
+            self.host.runsChanged.emit()
+            self.settle(0.8)
+            card = self.root.findChild(QObject, "liveNow")
+            self.assertTrue(card.property("visible"))
+            self.assertEqual(len(card.property("live").toVariant()), 2, "the two running runs, not the ended one")
+            QMetaObject.invokeMethod(card, "probeRows")
+            rows = card.property("rowProbe").toVariant()
+            self.assertEqual(len(rows), 2)
+            texts = [r["who"] + " | " + r["doing"] + r["where"] for r in rows]
+            self.assertIn("Right drawer rolodex | Card 12: a flat slab, so the wheel fills in (14/31)", texts)
+            self.assertIn("someone | researching", texts)
+            for r in rows:                       # every line one elided line: the box is a fixed height, nothing spills
+                self.assertEqual(r["height"], card.property("rowH"))
+                self.assertTrue(r["clip"])
+            self.assertEqual(self.qml_errors(), [])
+        finally:
+            self.host._runs, self.host.watching = saved
+            self.host.runsChanged.emit()
+            self.host.runTimer.start()
+
+    def test_a_run_landing_in_another_pane_asks_before_moving_anyone(self):
+        """the chest puts a live run in a pane you are not in: a YES/NO sheet asks; NO leaves it, YES acts; your own pane asks nothing"""
+        import time
+        saved = (self.host._runs, self.host.watching)
+        self.host.runTimer.stop()                    # the run scan would put the real runs back, and land them again
+        try:
+            self.host._runs = [{"dir": "/tmp/r1", "name": "script-rolodex", "prompt": "script", "title": "rolodex", "who": "Grok", "status": "running",
+                                "paused": False, "bench": False, "latestRevision": 3, "started": time.time(), "lastEvent": time.time(), "pane": 2, "watch": {}}]
+            self.host.runsChanged.emit()
+            ask = self.root.findChild(QObject, "joinAsk")
+            self.host.waiting[:] = []                    # the chest keeps trying to land real runs: not in this test
+            self.host.auto_pending.clear()
+            self.settle(0.3)                             # a landing already on its way arrives now, not mid-test
+            QMetaObject.invokeMethod(ask, "no")          # it may have landed one at start
+            self.root.setProperty("activePane", 1)
+            self.host.runLanded.emit("/tmp/r1", 1)
+            self.settle(0.3)
+            self.assertFalse(ask.property("visible"), "landed in the pane you are in: nothing to ask")
+            self.host.runLanded.emit("/tmp/r1", 2)
+            self.settle(0.3)
+            self.assertTrue(ask.property("visible"))
+            self.assertEqual(self.root.findChild(QObject, "joinAskWho").property("text"), "GROK started: rolodex")
+            self.assertIn("pane 2", ask.property("question"))
+            if ask.property("mineBusy"):                 # the real chest decides whether pane 1 is free
+                self.assertIn("Go there?", ask.property("question"), "pane 1 is busy: offer to go to pane 2")
+            else:
+                self.assertIn("your pane 1", ask.property("question"), "pane 1 is free: offer to show it there")
+            QMetaObject.invokeMethod(ask, "no")
+            self.assertFalse(ask.property("visible"))
+            self.assertEqual(self.root.property("activePane"), 1, "NO changes nothing")
+            self.assertEqual(self.qml_errors(), [])
+        finally:
+            QMetaObject.invokeMethod(ask, "no")
+            self.host._runs, self.host.watching = saved
+            self.host.runsChanged.emit()
+            self.host.runTimer.start()
+
     def test_a_live_run_shows_its_bar_with_hold_and_stop(self):
         """a research run in pane 1 says what it is doing and how long it has been quiet, with HOLD and STOP"""
         import time
@@ -90,11 +159,38 @@ class CabinetQmlTests(unittest.TestCase):
             self.host.runsChanged.emit()
         self.assertEqual(self.qml_errors(), [])
 
+    def test_a_pane_header_drops_a_menu_to_make_put_and_split(self):
+        """click PANE n: TOOLS, DRAW, PUT A MODEL HERE >, PANES >; TOOLS opens the wheel"""
+        menu = self.root.findChild(QObject, "paneMenu")
+        wheel = self.root.findChild(QObject, "toolWheel")
+        self.assertIsNotNone(menu)
+        self.assertIsNotNone(self.root.findChild(QObject, "paneMenuKey1"))
+        self.assertIsNone(self.root.findChild(QObject, "viewportsMenu"))     # the lid's dropdown is gone
+        menu.setProperty("n", 1)
+        menu.metaObject().invokeMethod(menu, "build")
+        rows = menu.property("rows")
+        rows = rows.toVariant() if hasattr(rows, "toVariant") else rows
+        self.assertEqual([r.get("k") for r in rows], ["tools", "draw", "page:put", "page:panes"])
+        tools = next(r for r in rows if r.get("k") == "tools")
+        wheel.setProperty("manual", False)
+        try:
+            from PySide6.QtCore import QMetaObject, Q_ARG
+            QMetaObject.invokeMethod(menu, "act", Q_ARG("QVariant", tools))
+            self.settle(0.2)
+            self.assertTrue(wheel.property("manual"))
+            self.assertFalse(menu.property("open"))
+        finally:
+            wheel.setProperty("manual", False)
+        self.assertEqual(self.qml_errors(), [])
+
     def test_a_held_script_run_shows_line_part_error_and_its_steps(self):
-        """pane 1's watch panel: LINE x/n, the part, the whole line, a held run's error in red, newest step first"""
+        """LIVE BUILD's NOTE key tosses out the build note: LINE x of n, the part, the line, a held run's
+        error, every step newest first; the pane itself stays clear"""
         import time
-        panel = self.root.findChild(QObject, "watchPanel1")
-        self.assertIsNotNone(panel)
+        from PySide6.QtCore import QMetaObject, Q_ARG
+        self.assertIsNone(self.root.findChild(QObject, "watchPanel1"))       # nothing squeezed into the pane
+        note = self.root.findChild(QObject, "buildNote")
+        self.assertIsNotNone(note)
         saved = (self.host._runs, self.host.watching)
         self.host.runTimer.stop()
         try:
@@ -108,23 +204,37 @@ class CabinetQmlTests(unittest.TestCase):
             self.host.watching = "/tmp/fake-run"
             self.host.runsChanged.emit()
             self.settle(1.2)
-            panel.setProperty("room", 400)               # a big pane: room for the step list under the line
-            self.settle(0.4)
-            self.assertTrue(panel.property("visible"))
-            self.assertGreater(panel.property("fit"), 0, panel.property("room"))
-            def walk(item):                              # repeater rows sit in the visual tree, not the object tree
+            key = self.root.findChild(QObject, "liveNote")
+            if key is None:
+                row = self.root.findChild(QObject, "liveBuild")
+                names = [c.objectName() for c in self.root.findChildren(QObject) if c.objectName()]
+                self.fail("no liveNote; open=%s count=%s probe=%s named=%s" % (
+                    row.property("open") if row else None,
+                    row.property("keyCount") if row else None,
+                    row.property("noteProbe") if row else None,
+                    [n for n in names if "live" in n.lower() or "Note" in n or "note" in n]))
+            self.assertTrue(key.property("visible"))
+            self.assertEqual(key.property("label"), "NOTE")
+            self.assertIn("9/12", key.property("tip"))
+            QMetaObject.invokeMethod(self.root, "toggleBuildNote", Q_ARG("QVariant", "/tmp/fake-run"), Q_ARG("QVariant", 1), Q_ARG("QVariant", key))
+            self.settle(1.2)
+            self.assertTrue(note.property("visible"))
+            self.assertEqual(note.property("t"), 1)
+            def walk(item):                              # list rows sit in the visual tree, not the object tree
                 for c in item.childItems():
                     yield c
                     yield from walk(c)
-            texts = [t.property("text") for t in walk(panel) if isinstance(t.property("text"), str)]
-            self.assertIn("LINE 9/12", texts)
-            self.assertIn("PART Eraserr", texts)
-            self.assertTrue(any("set Eraserr voxel=0.012" in t for t in texts), texts)
-            self.assertTrue(any(t.startswith("HELD AT line 9: no feature") for t in texts), texts)
-            rows = [t for t in texts if t.startswith("R")]
+            texts = [t.property("text") for t in walk(note) if isinstance(t.property("text"), str)]
+            self.assertIn("LINE 9 of 12", texts)
+            self.assertIn("Eraserr: set Eraserr voxel=0.012", texts)
+            self.assertTrue(any(t.startswith("HELD: line 9: no feature") for t in texts), texts)
+            rows = [t for t in texts if t.startswith("R") and t[1:2].isdigit()]
             self.assertTrue(rows and rows[0].startswith("R8"), rows)          # newest first
-            self.assertLessEqual(panel.property("height"), panel.property("room"))
+            QMetaObject.invokeMethod(self.root, "toggleBuildNote", Q_ARG("QVariant", "/tmp/fake-run"), Q_ARG("QVariant", 1), Q_ARG("QVariant", key))
+            self.settle(1.0)
+            self.assertFalse(note.property("visible"))                         # crumpled back
         finally:
+            self.root.setProperty("buildNoteDir", "")
             self.host._runs, self.host.watching = saved
             self.host.runTimer.start()
             self.host.runsChanged.emit()
@@ -172,15 +282,66 @@ class CabinetQmlTests(unittest.TestCase):
             self.assertTrue(drawing["thumb"].endswith(".jpg"))
 
     def test_the_drawing_kit_is_loose_in_the_tools_drawer(self):
-        """the pencil and the drawings folder lie loose in the drawer, and the folder opens the drawings"""
+        """the pencil lies loose in the drawer"""
         self.assertTrue(callable(getattr(self.host, "openDrawingsFolder", None)))
         kit = self.root.findChild(QObject, "drawingKit")
         self.assertIsNotNone(kit)
-        for name in ("pencil3d", "drawingsFolder"):
-            body = self.root.findChild(QObject, name)
-            self.assertIsNotNone(body, name)
-            self.assertEqual(body.property("world"), kit, name + " is not in the drawer's world")
+        body = self.root.findChild(QObject, "pencil3d")
+        self.assertIsNotNone(body)
+        self.assertEqual(body.property("world"), kit, "pencil3d is not in the drawer's world")
         self.assertIsNotNone(self.root.findChild(QObject, "modelingBin"))
+        self.assertEqual(self.qml_errors(), [])
+
+    def test_the_rolodex_spins_on_its_spindle_and_a_card_can_be_picked(self):
+        """drag angle picks a frame; a click on a letter card selects it and does not open a tool"""
+        import math
+        from PySide6.QtCore import QMetaObject
+        rx = self.root.findChild(QObject, "rolodex")
+        self.assertIsNotNone(rx)
+        frames = rx.property("frames")
+        cards = rx.property("cards")
+        self.assertGreater(frames, 1)
+        self.assertGreater(cards, 1)
+        self.assertEqual(frames % cards, 0)
+        rx.setProperty("ang", 0)
+        self.app.processEvents()
+        self.assertEqual(rx.property("frame"), 0)
+        self.assertEqual(rx.property("card"), 0)
+        step = 2 * math.pi / cards
+        # card 7 is a letter, two render frames past each stop when frames is twice cards
+        rx.setProperty("ang", 7 * step)
+        self.app.processEvents()
+        self.assertEqual(rx.property("card"), 7)
+        self.assertEqual(rx.property("frame"), 7 * (frames // cards))
+        QMetaObject.invokeMethod(rx, "pick")
+        self.app.processEvents()
+        self.assertEqual(rx.property("picked"), 7)
+        self.assertEqual(self.qml_errors(), [])
+
+    def test_the_pencil_brings_up_the_sketch_carousel(self):
+        """a click on the pencil fans the starting tools along the bottom of the viewport;
+        clicking the front card opens that tool's card, like picking it off the wheel"""
+        car = self.root.findChild(QObject, "sketchCarousel")
+        self.assertIsNotNone(car)
+        tools = car.property("tools").toVariant()
+        keys = [t[0] for t in tools]
+        self.assertEqual(sorted(keys), sorted(["primitive", "blob", "part", "sketch", "profile", "spline", "plane", "import", "bodyfrombones"]))
+        self.assertFalse(car.property("open"))
+        pencil = self.root.findChild(QObject, "pencil3d")
+        pencil.tapped.emit(); self.settle(0.3)
+        self.assertTrue(car.property("open"))
+        self.assertEqual(car.property("front"), 4)                 # the fan starts centred
+        QMetaObject.invokeMethod(car, "turn", Q_ARG("QVariant", -2)); self.settle(0.3)
+        self.assertEqual(car.property("front"), 2)
+        card = self.root.findChild(QObject, "toolCard")
+        QMetaObject.invokeMethod(car, "use", Q_ARG("QVariant", 2)); self.settle(0.3)
+        self.assertFalse(car.property("open"))
+        self.assertTrue(card.property("open"))
+        self.assertEqual(card.property("label"), tools[2][1])
+        pencil.tapped.emit(); self.settle(0.3)
+        self.assertTrue(car.property("open"))
+        pencil.tapped.emit(); self.settle(0.3)             # the pencil puts it away too
+        self.assertFalse(car.property("open"))
         self.assertEqual(self.qml_errors(), [])
 
     def test_a_sideways_yank_rolls_the_pencil(self):
@@ -259,32 +420,45 @@ class CabinetQmlTests(unittest.TestCase):
         self.assertEqual(self.qml_errors(), [])
 
     def test_chat_and_research_pop_out_into_their_own_windows(self):
-        """POP OUT moves a panel into a resizable window; closing it docks it back in the drawer"""
-        for flag, box, name in (("chatOut", "chatWell", "chatWindowBox"),
-                                ("researchOut", "newRun", "researchWindowNewRun")):
-            self.root.setProperty(flag, True)
-            self.settle()
-            popped = self.root.findChild(QObject, name)
-            self.assertIsNotNone(popped, name)
-            self.assertTrue(popped.window().isVisible())
-            self.assertGreater(popped.window().width(), 254)
-            self.assertFalse(self.root.findChild(QObject, box).property("visible"))
-            popped.window().close()
-            self.settle()
-            self.assertFalse(self.root.property(flag))
-            self.assertTrue(self.root.findChild(QObject, box).property("visible"))
-            self.assertIsNone(self.root.findChild(QObject, name))
+        """POP OUT moves a panel into a resizable window; closing it docks it back in the drawer.
+        The paper ball is the research, so the chat window does not take it"""
+        self.root.setProperty("chatOut", True)
+        self.settle()
+        popped = self.root.findChild(QObject, "chatWindowBox")
+        self.assertIsNotNone(popped)
+        self.assertTrue(popped.window().isVisible())
+        self.assertGreater(popped.window().width(), 254)
+        self.assertTrue(self.root.findChild(QObject, "chatWell").property("visible"))
+        popped.window().close()
+        self.settle()
+        self.assertFalse(self.root.property("chatOut"))
+        self.assertIsNone(self.root.findChild(QObject, "chatWindowBox"))
+
+        self.root.setProperty("researchOut", True)
+        self.settle()
+        popped = self.root.findChild(QObject, "researchWindowNewRun")
+        self.assertIsNotNone(popped)
+        self.assertTrue(popped.window().isVisible())
+        self.assertGreater(popped.window().width(), 254)
+        self.assertFalse(self.root.findChild(QObject, "newRun").property("visible"))
+        popped.window().close()
+        self.settle()
+        self.assertFalse(self.root.property("researchOut"))
+        self.assertTrue(self.root.findChild(QObject, "newRun").property("visible"))
+        self.assertIsNone(self.root.findChild(QObject, "researchWindowNewRun"))
         self.assertEqual(self.qml_errors(), [])
 
-    def test_chat_note_opens_over_the_viewport_and_crumples_back(self):
-        """the chat is a paper ball in the research drawer: open, it's a note on the viewport you can move; closed, it's back"""
+    def test_the_paper_opens_the_research_and_crumples_back(self):
+        """the paper ball in the research drawer opens the research column; closed, the ball is back and the column is in the drawer"""
         scroll = self.root.findChild(QObject, "paperBall")
         sheet = self.root.findChild(QObject, "openNote")
+        panel = self.root.findChild(QObject, "researchPanel")
         self.root.findChild(QObject, "research").setProperty("open", 1.0)
         self.settle()
         self.assertTrue(scroll.property("visible"))
         self.assertFalse(sheet.property("visible"))
-        self.root.setProperty("chatUnrolled", True)
+        self.assertEqual(panel.property("parent").objectName(), "researchDock")
+        self.root.setProperty("paperOpen", True)
         self.settle(1.0)
         self.assertFalse(scroll.property("visible"))
         self.assertTrue(sheet.property("visible"))
@@ -295,34 +469,36 @@ class CabinetQmlTests(unittest.TestCase):
         sheet.setProperty("homeX", sheet.property("homeX") + 120)    # where a drag leaves it
         self.settle()
         self.assertEqual(sheet.property("x"), x0 + 120)
-        self.assertTrue(self.root.findChild(QObject, "chatNoteBox").property("enabled"))
-        close = self.root.findChild(QObject, "chatNoteClose")
+        self.assertEqual(panel.property("parent").objectName(), "paperResearchScroll")
+        self.assertTrue(panel.property("enabled"))
+        self.assertFalse(self.root.findChild(QObject, "researchDock").property("height") > 1)
+        close = self.root.findChild(QObject, "paperClose")
         self.assertTrue(close.property("visible"))
         close.clicked.emit()                                          # its close key crumples it
         self.settle(1.0)
-        self.assertFalse(self.root.property("chatUnrolled"))
+        self.assertFalse(self.root.property("paperOpen"))
         self.assertFalse(sheet.property("visible"))
         self.assertTrue(scroll.property("visible"))
+        self.assertEqual(panel.property("parent").objectName(), "researchDock")
         self.assertEqual(self.qml_errors(), [])
 
-    def test_long_chat_stays_fixed_inside_the_note(self):
-        self.root.setProperty("chatUnrolled", True)
+    def test_research_stays_inside_the_paper(self):
+        self.root.setProperty("paperOpen", True)
         self.settle(1.0)
         sheet = self.root.findChild(QObject, "openNote")
-        box = self.root.findChild(QObject, "chatNoteBox")
-        log = self.root.findChild(QObject, "chatNoteLog")
+        box = self.root.findChild(QObject, "paperResearchScroll")
         original = box.property("height")
+        self.assertGreater(original, 100)
         self.host._chat = [{"role": "model", "text": "A long answer with all its lines. " * 200}]
         self.host.chatChanged.emit()
         self.settle()
-        self.assertEqual(box.property("height"), original)
+        self.assertEqual(box.property("height"), original)            # the chat growing does not stretch the paper
         from PySide6.QtCore import QPointF
         box_bottom = box.mapToScene(QPointF(0, box.property("height"))).y()
         sheet_bottom = sheet.mapToScene(QPointF(0, sheet.property("height"))).y()
-        self.assertLessEqual(box_bottom, sheet_bottom)
-        self.assertTrue(log.property("clip"))
-        self.assertGreater(log.property("contentHeight"), log.property("height"))
-        self.root.setProperty("chatUnrolled", False)
+        self.assertLessEqual(box_bottom, sheet_bottom + 1)
+        self.assertTrue(box.property("clip"))
+        self.root.setProperty("paperOpen", False)
         self.settle(1.0)
         self.assertEqual(self.qml_errors(), [])
 
@@ -332,23 +508,30 @@ class CabinetQmlTests(unittest.TestCase):
                    "endpoint": "http://localhost:9/", "model": "one", "available": True, "research": True}]
         models += [dict(models[0], id="other" + str(i), label="Other model " + str(i)) for i in range(25)]
         self.root.findChild(QObject, "research").setProperty("open", 1.0)
-        self.root.setProperty("chatUnrolled", True)
+        self.root.setProperty("paperOpen", True)
+        self.root.setProperty("chatOut", True)
         self.settle(1.0)
         self.host._models_done(models)
         self.settle()
-        for name, room in (("chatNoteSelector", 576), ("researchSelector", 414)):
+        # research dropdown lives on the paper; the chat dropdown lives in the chat window
+        for name in ("chatWindowSelector", "researchSelector"):
             selector = self.root.findChild(QObject, name)
-            self.assertEqual(selector.property("count"), 26)
+            self.assertIsNotNone(selector, name)
+            self.assertEqual(selector.property("count"), 26, name)
             popup = self.root.findChild(QObject, name + "Popup")
-            self.assertIsNotNone(popup)
+            self.assertIsNotNone(popup, name)
+            visual = popup.property("parent")
+            self.assertIsNotNone(visual, name)
+            room = visual.property("height")
             QMetaObject.invokeMethod(popup, "open", Qt.DirectConnection)
             self.settle(.1)
-            self.assertTrue(popup.property("visible"))
-            self.assertGreaterEqual(popup.property("y"), 0)
-            self.assertLessEqual(popup.property("y") + popup.property("height"), room)
-            self.assertLessEqual(popup.property("width"), 400)
+            self.assertTrue(popup.property("visible"), name)
+            self.assertGreaterEqual(popup.property("y"), 0, name)
+            self.assertLessEqual(popup.property("y") + popup.property("height"), room + 1, name)
+            self.assertLessEqual(popup.property("width"), visual.property("width"), name)
             QMetaObject.invokeMethod(popup, "close", Qt.DirectConnection)
-        self.root.setProperty("chatUnrolled", False)
+        self.root.setProperty("paperOpen", False)
+        self.root.setProperty("chatOut", False)
         self.settle(1.0)
         self.host.setChatModel("other1")
         self.assertEqual(self.host.chatModel, "other1")
@@ -507,10 +690,6 @@ class CabinetQmlTests(unittest.TestCase):
         wheel = self.root.findChild(QObject, "toolWheel")
         wheel.setProperty("manual", False)
 
-        def line():
-            v = wheel.property("info")
-            return (v.toVariant() if hasattr(v, "toVariant") else v)["line"]
-
         def parse(op):
             v = QMetaObject.invokeMethod(wheel, "parse", Q_RETURN_ARG("QVariant"), Q_ARG("QVariant", op))
             return v.toVariant() if hasattr(v, "toVariant") else v
@@ -532,29 +711,16 @@ class CabinetQmlTests(unittest.TestCase):
         self.assertIsNone(parse("initial"), "the empty document changes nothing on screen")
         self.assertEqual(parse("echo hi")["key"], "echo", "a verb with no tile still names itself in the core")
 
-        # a new revision on screen moves the wheel at once: no reach played out after the model changed
+        # a run's step does not put the wheel on the model. it comes up only when opened by hand
         wheel.setProperty("op", "line 3: add Primitive name=Box")
-        self.assertEqual(wheel.property("tool"), "primitive")
+        self.assertFalse(wheel.property("shown"))
+        wheel.setProperty("manual", True)
         self.assertTrue(wheel.property("shown"))
         wheel.setProperty("op", "line 5: edit Box bevel")
-        self.assertEqual(wheel.property("tool"), "edit:bevel", "lands on the step's tool the moment it is shown")
-        self.assertEqual(wheel.property("openGroup"), 4)
-        # the same tool again: the core presses in and the line moves on
-        wheel.setProperty("op", "line 6: edit Box bevel width=0.2")
-        self.assertEqual(line(), 6)
-        core = wheel.findChild(QObject, "wheelCore")
-        squash = 0
-        for _ in range(15):
-            self.settle(0.01)
-            squash = max(squash, core.property("squash"))
-        self.assertGreater(squash, 0.3, "the same tool again still visibly presses")
-        # nothing on screen changed: the wheel holds still
-        before = (wheel.property("tool"), wheel.property("openGroup"), line())
-        wheel.setProperty("working", "line 7: edit Box inset")   # being built, not yet shown
-        self.settle(0.3)
-        self.assertEqual((wheel.property("tool"), wheel.property("openGroup"), line()), before,
-                         "the step being built does not move the wheel before the model shows it")
-        wheel.setProperty("working", "")
+        self.assertTrue(wheel.property("manual"))
+        self.assertTrue(wheel.property("shown"))
+        wheel.setProperty("manual", False)
+        self.assertFalse(wheel.property("shown"))
         wheel.setProperty("op", "")
         self.assertEqual(self.qml_errors(), [])
 

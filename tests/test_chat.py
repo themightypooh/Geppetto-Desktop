@@ -1,4 +1,5 @@
 """Drawer model discovery, actual HTTP protocols, cancellation and research routing."""
+import base64
 import json
 import os
 import sys
@@ -16,6 +17,7 @@ import chat
 
 REAL_CLAUDE = chat.CLAUDE
 chat.CLAUDE = '/no/claude'   # the catalogue tests see only their own fake models
+chat.GROK = '/no/grok'
 
 
 def fixture(**kw):
@@ -131,6 +133,31 @@ class CatalogueTests(unittest.TestCase):
                 self.assertEqual(''.join(chat.stream(chat.find('claude/sonnet', models), history, session='s1')), 'saw True')
                 self.assertIn('s1', chat._claude_sessions)   # the next turn resumes it
 
+    def test_grok_cli_streams_on_its_own_login(self):
+        with tempfile.TemporaryDirectory() as d:
+            fake = Path(d) / 'grok'
+            fake.write_text('#!/usr/bin/env python3\nimport json, os, sys\n'
+                            'assert \'GROK_SESSION_ID\' not in os.environ\n'
+                            'assert \'XAI_API_KEY\' not in os.environ\n'
+                            'assert sys.argv[sys.argv.index(\'--session-id\') + 1] == \'g1\'\n'
+                            'assert sys.argv[sys.argv.index(\'--permission-mode\') + 1] == \'auto\'\n'
+                            'said = sys.argv[sys.argv.index(\'--single\') + 1]\n'
+                            'print(json.dumps(dict(type=\'system\', session_id=\'g1\')))\n'
+                            'for t in (\'saw \', str(\'teal\' in said)):\n'
+                            '    print(json.dumps(dict(type=\'stream_event\', event=dict(delta=dict(type=\'text_delta\', text=t)))))\n'
+                            'print(json.dumps(dict(type=\'result\', is_error=False, result=\'saw True\')))\n')
+            fake.chmod(0o755)
+            with patch.object(chat, 'GROK', str(fake)), patch.object(chat, '_get', side_effect=OSError), \
+                 patch.object(chat, 'CONFIG', '/no/file'), patch.object(chat, 'DEFAULT_MODELS', []), \
+                 patch.object(chat, 'CLAUDE', '/no/claude'), \
+                 patch.dict(os.environ, {'GROK_SESSION_ID': 'must-not-be-used', 'XAI_API_KEY': 'must-not-be-used'}):
+                models = chat.models()
+                self.assertEqual([m['id'] for m in models if m['id'].startswith('grok/')],
+                                 ['grok/grok-4.5', 'grok/grok-4.6', 'grok/grok-4.7', 'grok/grok-4.7-build-fast'])
+                history = [dict(role='you', text='I like teal'), dict(role='model', text='ok'), dict(role='you', text='colour?')]
+                self.assertEqual(''.join(chat.stream(chat.find('grok/grok-4.7', models), history, session='g1')), 'saw True')
+                self.assertIn('g1', chat._grok_sessions)
+
 
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
@@ -158,6 +185,27 @@ class WireTests(unittest.TestCase):
 
     def tearDown(self):
         self.server.shutdown(); self.server.server_close()
+
+    def test_attached_pictures_go_out_on_the_wire(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / 'dot.png'
+            path.write_bytes(base64.b64decode(
+                'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='))
+            turn = [dict(role='you', text='what is this', images=[str(path)])]
+            chat.complete(self.model, turn)
+            block = self.server.body['messages'][-1]['content']
+            self.assertEqual(block[0]['type'], 'text')
+            self.assertTrue(block[1]['image_url']['url'].startswith('data:image/png;base64,'))
+            ollama = chat._body(dict(self.model, kind='ollama'), turn)
+            self.assertEqual(len(ollama['messages'][-1]['images']), 1)
+            anthropic = chat._body(dict(self.model, kind='anthropic'), turn)
+            self.assertEqual(anthropic['messages'][-1]['content'][0]['type'], 'image')
+            google = chat._body(dict(self.model, kind='google', model='g'), turn)
+            self.assertIn('inline_data', google['contents'][-1]['parts'][1])
+            self.assertEqual(chat._said(dict(role='you', text='look', images=[str(path)])).count(str(path)), 1)
+            self.assertEqual(chat._image_payloads([str(Path(d) / 'note.txt')]), [])
+            (Path(d) / 'note.txt').write_text('no')
+            self.assertEqual(chat._image_payloads([str(Path(d) / 'note.txt')]), [])
 
     def test_openai_system_history_and_errors_filtered(self):
         answer = chat.complete(self.model, [dict(role='you', text='hi'), dict(role='error', text='bad'), dict(role='model', text='hello'), dict(role='you', text='again')])
@@ -250,6 +298,24 @@ class HostTests(unittest.TestCase):
         self.host.clearChat()
         self.host._chat_done(self.host._chat_request - 1, 'stale', '')
         self.assertEqual(self.host.chatMessages, [])
+
+    def test_pictures_attach_and_send_with_the_message(self):
+        from PySide6.QtGui import QImage
+        with tempfile.TemporaryDirectory() as d:
+            src = Path(d) / 'shot.png'
+            self.assertTrue(QImage(4, 4, QImage.Format_RGB32).save(str(src)))
+            self.assertFalse(self.host.attachChatImage(str(Path(d) / 'missing.png')))
+            self.assertTrue(self.host.attachChatImage(src.as_uri()))
+            self.assertEqual(len(self.host.chatImages), 1)
+            self.host.sendChat('')
+            sent = self.host.chatMessages[0]
+            self.assertEqual(sent['text'], 'What is in this picture?')
+            self.assertTrue(sent['images'][0].endswith('.jpg'))
+            self.assertEqual(self.host.chatImages, [])
+            self.host._chat_busy = False
+            note = Path(d) / 'note.txt'
+            note.write_text('no')
+            self.assertFalse(self.host.attachChatImage(str(note)))
 
     def test_independent_selectors_and_invalid_selections(self):
         self.host.setChatModel('cloud')

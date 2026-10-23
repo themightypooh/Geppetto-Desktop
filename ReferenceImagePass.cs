@@ -103,6 +103,20 @@ void main() {
 		return new[] { c - right * w / 2 - up * h / 2, c + right * w / 2 - up * h / 2, c + right * w / 2 + up * h / 2, c - right * w / 2 + up * h / 2 };
 	}
 
+	/// <summary>The box the shown pictures cover; null when none is shown.</summary>
+	public (Vector3 Min, Vector3 Max)? Bounds()
+	{
+		Vector3 min = new( float.MaxValue ), max = new( float.MinValue );
+		bool any = false;
+		foreach ( var image in Images )
+		{
+			if ( image is null || !image.Visible || string.IsNullOrWhiteSpace( image.Path ) ) continue;
+			foreach ( var c in Corners( image, Aspect( image ) ) ) { min = Vector3.Min( min, c ); max = Vector3.Max( max, c ); }
+			any = true;
+		}
+		return any ? (min, max) : null;
+	}
+
 	public string Resolve( string path ) =>
 		Path.IsPathRooted( path ) ? path : Path.GetFullPath( Path.Combine( BaseDirectory ?? Directory.GetCurrentDirectory(), path ) );
 

@@ -223,16 +223,10 @@ class Pane(QObject):
     @Slot()
     def clear(self):
         """empty the pane (its viewer stays up, showing nothing)"""
-        if self.model:
-            self.shut()     # a --model viewer can't be told to forget its model: "follow" left it on screen
-            return
-        self._end_replay()
-        self.run = ""
-        self.model = ""
-        self.owner_session, self.since = "", 0.0
-        self.displayed_revision = 0
-        self.cmd("follow")
-        self.changed.emit()
+        # stop the viewer outright: a --model viewer can't be told to forget its model, and an older
+        # --watch-run viewer kept the last revision on screen under the "pane is empty" sign.
+        # show()/openModel() start a fresh one when something is put here again.
+        self.shut()
 
     def shut(self):
         """the layout hid this pane: stop its viewer, free the GPU"""
@@ -341,7 +335,8 @@ class Pane(QObject):
             return {}
         at = max(0, min(len(steps) - 1, at))
         st = steps[at]
-        return {"at": at, "rev": st["rev"], "op": st["op"], "code": live_runs.script_line(self._replay["dir"], st["op"])}
+        return {"at": at, "rev": st["rev"], "op": st["op"], "code": live_runs.script_line(self._replay["dir"], st["op"]),
+                "say": live_runs.plain_words.say(live_runs.script_line(self._replay["dir"], st["op"]) or st["op"].split(": ", 1)[-1])}
 
     def _replay_set(self, at, **extra):
         step = self._replay_step(at)

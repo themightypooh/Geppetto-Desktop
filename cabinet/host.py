@@ -70,16 +70,18 @@ from PySide6.QtQml import qmlRegisterType  # noqa: E402
 
 HOST = None
 
-# On Wayland a window can't put itself in front; KWin can, through a one-shot script.
+# On Wayland a window can't put itself in front; KWin can, through a one-shot script. It must NOT take focus:
+# po shares the screen with several sessions, and a chest that activates itself on every new run steals the keyboard
+# from whatever po is typing in (2026-10-22). It only un-minimizes and flashes in the taskbar; po raises it when ready.
 RAISE_JS = """
 for (const w of workspace.windowList()) {
-    if (w.resourceClass === "geppetto") { w.minimized = false; workspace.activeWindow = w; }
+    if (w.resourceClass === "geppetto") { w.minimized = false; w.demandsAttention = true; }
 }
 """
 
 
 def kwin_raise():
-    """bring the chest to the front even when it doesn't have focus (KDE; silently nothing elsewhere)"""
+    """un-minimize the chest and flash it in the taskbar, without taking focus (KDE; silently nothing elsewhere)"""
     def go():
         try:
             path = os.path.join(tempfile.gettempdir(), "geppetto-raise-%d.js" % os.getuid())
@@ -292,14 +294,18 @@ class Host(QObject):
     """what cabinet.qml can ask of Python"""
     frameReady = Signal()
     infoChanged = Signal()
+    schemeChanged = Signal()
     playheadChanged = Signal()
     keysChanged = Signal()
     listsChanged = Signal()
     runsChanged = Signal()
+    runLanded = Signal(str, int)        # the chest put a live run in a pane by itself: (run dir, pane)
     statusChanged = Signal()
     toolsChanged = Signal()
     chatChanged = Signal()
     claudeChanged = Signal()
+    otherChunk = Signal(int, str)               # a non-Claude model's reply streaming into the CLAUDE card
+    otherAnswer = Signal(int, str, str)
     claudePicturesChanged = Signal()
     claudePicture = Signal(str)               # a new picture to pop large (its file path)
     p1OwnerChanged = Signal()
@@ -336,7 +342,8 @@ class Host(QObject):
         self._drawings = []
         self._drawing_open = False
         self._chat_session = str(uuid.uuid4())   # Claude's CLI session for this conversation; CLEAR starts a new one
-        self._chat = []                   # [{"role": "you"|"model", "text": ...}, ...]
+        self._chat = []                   # [{"role": "you"|"model", "text": ..., "images": [...]?}, ...]
+        self._chat_pending = []           # picture paths waiting to go with the next send
         self._chat_models = []
         self._chat_model = self._chat_models[0]["id"] if self._chat_models else ""
         self._chat_busy = False
@@ -382,6 +389,9 @@ class Host(QObject):
         self._sub_lost = 0
         self._hover_at = None           # last hover sent, and the one waiting for the throttle
         self._hover_pending = None
+        self._tool_open = False          # the tool card is up: a face/edge tool may be driving the pick mode
+        self._tool_mode = None           # the mode that card imposed (face or edge), or None
+        self._mode_before_tool = None    # what to put back when the card closes, if the user didn't pick one
         self.hoverTimer = QTimer(self)
         self.hoverTimer.setSingleShot(True)
         self.hoverTimer.setInterval(16)
@@ -401,6 +411,12 @@ class Host(QObject):
         # the CLAUDE card: a Claude Code session of its own (claude_link.py); its reader thread only
         # emits, Qt queues that onto this thread
         self.claude = claude_link.ClaudeLink(on_change=self.claudeChanged.emit)
+        self._claude_model = self._model_preferences.get("claude", "")
+        self._other_session = str(uuid.uuid4())   # the CLI session (Grok) for a non-Claude model on the card
+        self._other_cancel = threading.Event()
+        self._other_request = 0
+        self.otherChunk.connect(self._other_chunk)
+        self.otherAnswer.connect(self._other_done)
         # pictures Claude reads or sends pop over the viewport (claude_feed.py, written by the gate hook)
         self.claudeFeed = claude_feed.Feed()
         self.pictureTimer = QTimer(self)
@@ -424,12 +440,14 @@ class Host(QObject):
         self._mine = False              # pane 1 is po's own scene (a model po opened): runs never take it.
                                         # Off, pane 1 is an empty pane like the others, any run can join it
         self._solo = 0                  # 1 pane, po's pick: only pane N shows, full size; the rest keep going hidden
+        self._scheme = "red"            # the chest's enamel colour: a folder under art/schemes/, "red" is the stock art
         try:
             prefs = json.load(open(VIEW_PREFS))
             self._layout = prefs.get("layout", 1) if prefs.get("layout") in (1, 2, 4) else 1
             self._link = bool(prefs.get("link", False))
             self._auto = bool(prefs.get("auto", True))
             self._solo = prefs.get("solo", 0) if prefs.get("solo") in (1, 2, 3, 4) and prefs["solo"] <= self._layout else 0
+            self._scheme = str(prefs.get("scheme", "red"))
         except (OSError, ValueError, AttributeError):
             pass
 
@@ -460,6 +478,7 @@ class Host(QObject):
     folder = Property("QVariantList", lambda self: [folder_entry(s) for s in self._filed], notify=filedChanged)
     drawingOpen = Property(bool, lambda self: self._drawing_open, notify=toolsChanged)
     chatMessages = Property("QVariantList", lambda self: self._chat, notify=chatChanged)
+    chatImages = Property("QVariantList", lambda self: self._chat_pending, notify=chatChanged)
     claudeMessages = Property("QVariantList", lambda self: list(self.claude.messages), notify=claudeChanged)
     claudeStatus = Property(str, lambda self: self.claude.status, notify=claudeChanged)
     claudePictures = Property("QVariantList", lambda self: [p["path"] for p in self.claudeFeed.pictures],
@@ -491,6 +510,7 @@ class Host(QObject):
     linkCameras = Property(bool, lambda self: self._link, notify=panesChanged)
     autoLayout = Property(bool, lambda self: self._auto, notify=panesChanged)
     soloPane = Property(int, lambda self: self._solo, notify=panesChanged)
+    scheme = Property(str, lambda self: self._scheme, notify=schemeChanged)    # the enamel colour scheme
     myScene = Property(bool, lambda self: self._mine, notify=panesChanged)
 
     # ---- the Face Poser: GMod-style flex sliders over one pane's model -----------------------
@@ -686,6 +706,49 @@ class Host(QObject):
         self.cmd("selmode " + mode)
         self.subSelectionChanged.emit()               # the viewer answers with the (cleared) selection
 
+    @staticmethod
+    def _pick_mode_for(form):
+        """A tool that takes a face lights faces (fillet included: the face is the pick, its rim is the
+        edge the face-mode snap already draws). Edge, and only edge, when it takes edges and no faces."""
+        accepts = form.get("accepts") or []
+        if isinstance(accepts, str):
+            accepts = [accepts]
+        kinds = {str(a).lower() for a in accepts}
+        if "face" in kinds:
+            return "face"
+        if "edge" in kinds:
+            return "edge"
+        return None
+
+    def _arm_tool_pick(self, form):
+        """the open card's tool: leave body mode so hovering the model lights what the tool selects"""
+        if not self._tool_open:
+            return
+        mode = self._pick_mode_for(form)
+        if mode is None:
+            self._release_tool_pick()
+            return
+        if self._tool_mode is None:
+            self._mode_before_tool = self._sub_mode
+        self._tool_mode = mode
+        if self._sub_mode != mode:
+            self.setSelMode(mode)
+
+    def _release_tool_pick(self):
+        """the card went away, or the tool takes no face or edge: put the old pick mode back,
+        unless the user has since pressed 1-4 and chosen one themselves"""
+        imposed, back = self._tool_mode, self._mode_before_tool
+        self._tool_mode = self._mode_before_tool = None
+        if imposed and back and self._sub_mode == imposed and back != imposed:
+            self.setSelMode(back)
+
+    @Slot(bool)
+    def toolPicking(self, open):
+        """the tool card opened or closed. The describe reply is what knows whether the tool takes a face."""
+        self._tool_open = bool(open)
+        if not self._tool_open:
+            self._release_tool_pick()
+
     @Slot(float, float, bool, bool, bool)
     def subPick(self, x, y, shift=False, ctrl=False, alt=False):
         """a click in face/edge/vertex mode: plain replaces, shift toggles in, ctrl removes, alt takes the opposite face too"""
@@ -770,6 +833,9 @@ class Host(QObject):
                 self._clip = ev.get("clip") or {}
                 self.infoChanged.emit()
                 self.set_status("%s  %d tris  %.1fs" % (os.path.basename(ev["model"]), ev.get("tris", 0), ev.get("load_s", 0)))
+                # a new viewer starts in body mode; a face tool still on the card wants the face under the cursor lit
+                if self._tool_open and self._tool_mode and self._sub_mode != self._tool_mode:
+                    self.setSelMode(self._tool_mode)
             elif kind == "place":
                 self._place_landed(ev)
             elif kind == "ai-activity":
@@ -1107,6 +1173,8 @@ class Host(QObject):
                 self.set_status("can't: " + ev.get("error", "")[:100])
             elif kind == "describe":
                 self._bench_set(form=ev, error=ev.get("error", ""))
+                if self._tool_open:
+                    self._arm_tool_pick(ev)
 
     @Slot(str)
     def benchDescribe(self, key):
@@ -1273,7 +1341,8 @@ class Host(QObject):
             return {}
         at = max(0, min(len(steps) - 1, at))
         st = steps[at]
-        return {"at": at, "rev": st["rev"], "op": st["op"], "code": live_runs.script_line(self._replay["dir"], st["op"])}
+        return {"at": at, "rev": st["rev"], "op": st["op"], "code": live_runs.script_line(self._replay["dir"], st["op"]),
+                "say": live_runs.plain_words.say(live_runs.script_line(self._replay["dir"], st["op"]) or st["op"].split(": ", 1)[-1])}
 
     def _replay_set(self, at, **extra):
         step = self._replay_step(at)
@@ -1502,6 +1571,9 @@ class Host(QObject):
                     r.update(activity="starting" if d in self.jobs else "", operation="", wheelOp="", latestRevision=0, displayedRevision=0, preview="",
                              paused=False, pace=0, pendingDirections=0, openState="", outcome="", watch={})
                 r["pane"] = self.pane_of(d)             # the viewport pane showing it, 0 for none
+                # who is building it: the session's title (its Claude Code transcript), else the model named in its meta
+                r["modeller"] = paneslib.modeller(d) if r["status"] == "running" else ""
+                r["who"] = (pane_owner.owner(run=d, live=True)["title"] if r["status"] == "running" else "") or r["modeller"]
                 r["waiting"] = d in self.waiting and r["pane"] == 0   # live, but every pane is busy
                 r["collapsed"] = self.collapsed.get(d, r["status"] != "running" and r["pane"] == 0)
                 log = os.path.join(RUNS, name + ".log")
@@ -1649,6 +1721,8 @@ class Host(QObject):
             self.waiting.remove(d)
             self.showRunIn(d, n)
             placed = True
+            if self.pane_of(d) == n:        # it stuck: the chest asks po before touching the pane they are in
+                self.runLanded.emit(d, n)
         if placed:
             kwin_raise()
 
@@ -1726,6 +1800,11 @@ class Host(QObject):
             return "pane N model|clip|cmd|face|clear ..."
         return "ok"
 
+    @Slot(int, result=bool)
+    def paneBusy(self, n):
+        """a live run, a replay or your bench in pane n: it can't be given to another run"""
+        return 1 <= n <= 4 and self.pane_busy(n)
+
     def pane_busy(self, n):
         if n == 1:
             if self._mine and not self.watching and self.model and self.proc is not None and self.proc.state() != QProcess.NotRunning:
@@ -1802,6 +1881,18 @@ class Host(QObject):
         elif 2 <= n <= 4:
             self.panes[n - 2].clear()
             self.scanRuns()
+
+    @Slot(str)
+    def setScheme(self, name):
+        """the chest's enamel colour: one of art/schemes/<name>/ (baked by bake.py --schemes), or "red" for stock"""
+        name = (name or "red").strip().lower()
+        if name != "red" and not os.path.isdir(os.path.join(HERE, "art", "schemes", name)):
+            self.set_status("no colour scheme %r: bake it with bake.py --schemes %s" % (name, name))
+            return
+        self._scheme = name
+        self._save_view_prefs()
+        self.schemeChanged.emit()
+        self.set_status("colour scheme: " + name)
 
     @Slot(int)
     def setViewLayout(self, n):
@@ -1916,7 +2007,8 @@ class Host(QObject):
         try:
             os.makedirs(os.path.dirname(VIEW_PREFS), exist_ok=True)
             with open(VIEW_PREFS + ".tmp", "w") as f:
-                json.dump({"layout": self._layout, "link": self._link, "auto": self._auto, "solo": self._solo}, f)
+                json.dump({"layout": self._layout, "link": self._link, "auto": self._auto, "solo": self._solo,
+                           "scheme": self._scheme}, f)
             os.replace(VIEW_PREFS + ".tmp", VIEW_PREFS)
         except OSError:
             self.set_status("could not save the viewport layout")
@@ -1947,7 +2039,7 @@ class Host(QObject):
         self.set_status("note kept on step %d%s" % (r["rev"], sent))
 
     def _save_model_preferences(self):
-        self._model_preferences = {"chat": self._chat_model, "research": self.ai_model}
+        self._model_preferences = {"chat": self._chat_model, "research": self.ai_model, "claude": self._claude_model}
         try:
             os.makedirs(os.path.dirname(self._preferences_path), exist_ok=True)
             temporary = self._preferences_path + ".tmp"
@@ -2149,12 +2241,107 @@ class Host(QObject):
 
 
     # ---- the CLAUDE card ---------------------------------------------------------------------
+    # which model the card talks to. A Claude (claude-cli) model goes through the Claude Code
+    # session (tools, ALLOW/DENY, PAUSE); any other model in the catalogue (Grok, a local Ollama
+    # model, an API model) is asked through chat.py and answers in the same log.
+    claudeModel = Property(str, lambda self: self._claude_model, notify=claudeChanged)
+
+    def _claude_model_record(self):
+        return chatlib.find(self._claude_model, self._chat_models)
+
+    @Slot(str)
+    def setClaudeModel(self, model_id):
+        model = chatlib.find(model_id, self._chat_models)
+        if model is None or not model.get("available", True) or self.claude.status in ("working", "starting", "paused"):
+            return
+        self._claude_model = model_id
+        self.claude.set_model(model["model"] if model["kind"] == "claude-cli" else "")
+        self._save_model_preferences()
+        self.claudeChanged.emit()
+
     @Slot(str)
     def claudeSend(self, text):
-        self.claude.send(text)
+        model = self._claude_model_record()
+        if model is None or model["kind"] == "claude-cli":
+            self.claude.send(text)
+        else:
+            self._other_send(model, text)
+
+    def _other_send(self, model, text):
+        """Ask a non-Claude model: its reply streams into the card's log like Claude's would."""
+        text = (text or "").strip()[:8000]
+        if not text or self.claude.status in ("working", "starting"):
+            return
+        link = self.claude
+        link._add("you", text)
+        history = [{"role": "you" if m["role"] == "you" else "model", "text": m["text"]}
+                   for m in link.messages if m["role"] in ("you", "claude") and m.get("text")][-16:]
+        reply = link._add("claude", "", live=True, label=model["label"])
+        link._set("working")
+        self._other_cancel = cancel = threading.Event()
+        self._other_request += 1
+        request_id = self._other_request
+        api = chatlib.effigy_reference(text)
+        def work():
+            got = ""
+            last = 0.0
+            error = ""
+            try:
+                for chunk in chatlib.stream(model, history, cancel, api=api, session=self._other_session):
+                    if cancel.is_set():
+                        return
+                    got += chunk
+                    if chunk and time.monotonic() - last >= 0.05:
+                        self.otherChunk.emit(request_id, got)
+                        last = time.monotonic()
+                if not got.strip():
+                    error = model["label"] + " sent back no text"
+            except Exception as e:
+                error = str(e)
+            self.otherAnswer.emit(request_id, got, error)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _other_row(self):
+        for m in reversed(self.claude.messages):
+            if m["role"] == "claude" and m.get("live"):
+                return m
+        return None
+
+    @Slot(int, str)
+    def _other_chunk(self, request_id, text):
+        row = self._other_row()
+        if request_id == self._other_request and row is not None:
+            row["text"] = text
+            self.claudeChanged.emit()
+
+    @Slot(int, str, str)
+    def _other_done(self, request_id, text, error):
+        if request_id != self._other_request:
+            return
+        link = self.claude
+        row = self._other_row()
+        if row is not None:
+            row["text"] = text
+            row["live"] = False
+            if not text:
+                with link.lock:
+                    link.messages.remove(row)
+        if error:
+            link._add("note", "refused: " + error)
+        if link.status == "working":
+            link._set("idle")
+        self.claudeChanged.emit()
 
     @Slot()
     def claudeStop(self):
+        model = self._claude_model_record()
+        if model is not None and model["kind"] != "claude-cli" and self.claude.status == "working":
+            self._other_cancel.set()
+            self._other_request += 1
+            self._other_done(self._other_request, (self._other_row() or {}).get("text", ""), "")
+            self.claude._set("stopped")
+            self.claude._add("note", "stopped")
+            return
         self.claude.stop()
 
     @Slot()
@@ -2167,6 +2354,7 @@ class Host(QObject):
 
     @Slot()
     def claudeNew(self):
+        self._other_session = str(uuid.uuid4())
         self.claude.fresh()
 
     def _poll_pictures(self):
@@ -2197,6 +2385,14 @@ class Host(QObject):
         available = [m for m in catalogue if m.get("available", True)]
         wanted = self._chat_model or self._model_preferences.get("chat", "")
         self._chat_model = wanted if any(m["id"] == wanted for m in available) else (available[0]["id"] if available else "")
+        wanted = self._claude_model or self._model_preferences.get("claude", "") or "claude/opus"
+        if not any(m["id"] == wanted for m in available):
+            claude = [m for m in available if m["kind"] == "claude-cli"]
+            wanted = claude[0]["id"] if claude else (available[0]["id"] if available else "")
+        self._claude_model = wanted
+        picked = chatlib.find(wanted, available)
+        self.claude.set_model(picked["model"] if picked and picked["kind"] == "claude-cli" else "")
+        self.claudeChanged.emit()
         research = [m for m in available if m.get("research", True)]
         if not any(m["id"] == self.ai_model for m in research):
             self.ai_model = research[0]["id"] if research else ""
@@ -2224,20 +2420,87 @@ class Host(QObject):
     def clearChat(self):
         self.stopChat()
         self._chat = []
+        self._chat_pending = []
         self._chat_session = str(uuid.uuid4())
         self.chatChanged.emit()
+
+    def _chat_image_path(self, spec):
+        spec = (spec or "").strip()
+        if spec.startswith("file:"):
+            spec = QUrl(spec).toLocalFile()
+        return os.path.abspath(os.path.expanduser(spec)) if spec else ""
+
+    def _store_chat_image(self, image, source=""):
+        if image is None or image.isNull():
+            self.set_status("not a picture" + ("" if not source else ": " + os.path.basename(source)))
+            return ""
+        if len(self._chat_pending) >= 4:
+            self.set_status("four pictures is the limit for one message")
+            return ""
+        edge = 1280
+        if max(image.width(), image.height()) > edge:
+            image = image.scaled(edge, edge, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        image = image.convertToFormat(QImage.Format_RGB32)
+        folder = os.path.expanduser("~/.cache/geppetto/chat-images")
+        try:
+            os.makedirs(folder, exist_ok=True)
+            path = os.path.join(folder, uuid.uuid4().hex + ".jpg")
+            if not image.save(path, "JPEG", 82):
+                raise OSError("could not write the picture")
+        except OSError as e:
+            self.set_status("picture: " + str(e))
+            return ""
+        self._chat_pending.append(path)
+        self.chatChanged.emit()
+        self.set_status("picture added")
+        return path
+
+    @Slot(str, result=bool)
+    def attachChatImage(self, spec):
+        path = self._chat_image_path(spec)
+        if not path or not os.path.isfile(path):
+            self.set_status("no such picture")
+            return False
+        return bool(self._store_chat_image(QImage(path), path))
+
+    @Slot(result=bool)
+    def pasteChatImage(self):
+        clip = QGuiApplication.clipboard()
+        image = clip.image()
+        if not image.isNull():
+            return bool(self._store_chat_image(image))
+        mime = clip.mimeData()
+        added = False
+        if mime is not None and mime.hasUrls():
+            for url in mime.urls():
+                if url.isLocalFile() and self.attachChatImage(url.toLocalFile()):
+                    added = True
+        return added
+
+    @Slot(int)
+    def removeChatImage(self, index):
+        if 0 <= index < len(self._chat_pending):
+            self._chat_pending.pop(index)
+            self.chatChanged.emit()
 
     @Slot(str)
     def sendChat(self, text):
         text = (text or "").strip()[:8000]
-        if not text or self._chat_busy:
+        images = list(self._chat_pending)
+        if (not text and not images) or self._chat_busy:
             return
         model = chatlib.find(self._chat_model, self._chat_models)
         if model is None:
             self.set_status("no chat model is selected")
             return
-        self._chat.append({"role": "you", "text": text})
-        history = [dict(m) for m in self._chat if m["role"] in ("you", "model") and m["text"]]
+        if not text:
+            text = "What is in this picture?"
+        message = {"role": "you", "text": text}
+        if images:
+            message["images"] = images
+        self._chat.append(message)
+        self._chat_pending = []
+        history = [dict(m) for m in self._chat if m["role"] in ("you", "model") and (m.get("text") or m.get("images"))]
         self._chat.append({"role": "model", "text": "", "label": model["label"]})
         self._chat = self._chat[-40:]
         self._chat_busy = True
@@ -2380,7 +2643,7 @@ def pane_args(args):
 
 
 def main():
-    if len(sys.argv) > 1 and sys.argv[1] in ("snap", "quit", "open", "shut", "page", "cmd", "mask", "clip", "draw", "tools", "replay", "layout", "vpmenu", "face", "folder", "openfiled", "placefiled", "drag", "where", "research", "scroll", "sheet", "pane"):
+    if len(sys.argv) > 1 and sys.argv[1] in ("snap", "quit", "open", "shut", "page", "cmd", "mask", "clip", "draw", "tools", "replay", "layout", "scheme", "vpmenu", "face", "folder", "openfiled", "placefiled", "drag", "where", "research", "scroll", "sheet", "pane"):
         app = QCoreApplication(sys.argv)
         cmd = sys.argv[1] + (" " + os.path.abspath(sys.argv[2]) if sys.argv[1] in ("snap", "clip", "replay", "sheet") else
                              " " + pane_args(sys.argv[2:]) if sys.argv[1] == "pane" else
@@ -2454,9 +2717,7 @@ def main():
             if msg.startswith("as "):                      # as SESSION VERB ...: the client named its session
                 _, owner, msg = (msg.split(" ", 2) + ["", ""])[:3]
             if msg == "raise" or msg.startswith("model "):
-                host.window.show()
-                host.window.raise_()
-                host.window.requestActivate()
+                host.window.show()          # no raise_/requestActivate: never take focus from what po is typing in
                 kwin_raise()
                 if msg.startswith("model "):
                     host.openModel(msg[6:])
@@ -2479,9 +2740,9 @@ def main():
                 name = msg[5:].strip()
                 name = DRAWER_ALIASES.get(name, name)      # the outliner drawer is the tools drawer now
                 d = host.window.findChild(QObject, name)
-                if name == "chat":                         # the chat note: toss it out and open it, or crumple it back
-                    host.window.setProperty("chatUnrolled", msg[:4] == "open")
-                elif name == "claude":                     # the CLAUDE card over the viewport
+                if name == "chat":                         # the chat, in its own window, not unrolled over the model
+                    host.window.setProperty("chatOut", msg[:4] == "open")
+                elif name == "claude":                     # Claude, in its own window
                     host.window.setProperty("claudeOpen", msg[:4] == "open")
                 elif d is None:
                     reply = "no such drawer"
@@ -2498,8 +2759,12 @@ def main():
                 host.window.setProperty("sheetDir", os.path.abspath(msg[5:].strip()) if msg[5:].strip() else "")
             elif msg in ("face", "face shut"):           # the Face Poser on pane 1 (pane N face for the others)
                 host.faceOpen(0 if msg == "face shut" else 1)
-            elif msg in ("vpmenu", "vpmenu shut"):           # the lid's VIEWPORTS dropdown, open or shut
-                host.window.findChild(QObject, "viewportsList").setProperty("open", msg == "vpmenu")
+            elif msg == "panemenu shut" or msg == "vpmenu shut":
+                host.window.findChild(QObject, "paneMenu").setProperty("open", False)
+            elif msg.startswith("panemenu") or msg == "vpmenu":  # panemenu [N]: pane N's header menu
+                n = int(msg[8:].strip() or 1) if msg.startswith("panemenu") else 1
+                QMetaObject.invokeMethod(host.window.findChild(QObject, "paneMenu"), "openFor",
+                                         Q_ARG("QVariant", n), Q_ARG("QVariant", None))
             elif msg == "wheel":                         # the WHEEL key
                 w = host.window.findChild(QObject, "toolWheel")
                 w.setProperty("manual", not w.property("manual"))
@@ -2517,6 +2782,8 @@ def main():
                 host.benchUndo()
             elif msg in ("view edit", "view run"):         # the EDIT/RUN key
                 host.benchView(msg == "view edit")
+            elif msg.startswith("scheme "):                # scheme NAME: the chest's enamel colour
+                host.setScheme(msg[7:])
             elif msg.startswith("layout "):                # layout 1|2|4: the viewport's panes
                 host.setViewLayout(int(msg[7:]))
             elif msg.startswith("seek "):                  # scrub the replay to step N

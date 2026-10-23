@@ -198,6 +198,10 @@ public static class ServeMode
 				centre = (bounds.Min + bounds.Max) * 0.5f;
 				radius = Math.Max((bounds.Max - bounds.Min).Length() * 0.5f, 0.1f);
 			}
+			FrameAt( centre, radius );
+		}
+		void FrameAt( Vector3 centre, float radius )
+		{
 			camera.Frame( centre, radius );
 			float vertical = camera.FovDegrees * MathF.PI / 360;
 			float horizontal = MathF.Atan(MathF.Tan(vertical) * width / Math.Max(1f, height));
@@ -205,6 +209,15 @@ public static class ServeMode
 			camera.YawDegrees = fbx ? -55 : 35;
 			camera.PitchDegrees = 18;
 			renderer.ResetTemporalHistory();
+		}
+		// Nothing built yet but a reference picture (a build's first line): frame the picture, or it is a
+		// speck from the default 200-unit camera. Once per picture list, so an orbit while empty stays.
+		string framedRefs = null;
+		void FrameRefs()
+		{
+			if ( mesh.TriangleCount > 0 || everFramedLive || refsSignature == framedRefs || refs.Bounds() is not { } box ) return;
+			framedRefs = refsSignature;
+			FrameAt( (box.Min + box.Max) * 0.5f, Math.Max( (box.Max - box.Min).Length() * 0.5f, 0.1f ) );
 		}
 		// glide to these bodies (none: the whole model): close enough that the part fills even a small pane
 		void Glide( IReadOnlyList<int> bodies, float seconds )
@@ -281,6 +294,7 @@ public static class ServeMode
 		Emit( Ready( options, mesh, player, shmPath, loader ) );
 		SyncRefs( loader.Session?.Studio?.ReferenceImages, options.WatchRun is null ? options.Model : null );
 		if ( refsSignature is null ) EmitRefs();
+		FrameRefs();
 		ClipKeyEditor keys = null;
 		void OpenKeys( string path )
 		{
@@ -344,6 +358,7 @@ public static class ServeMode
 								previewPath = update.Path; publishedAt = update.PublishedAt; previewError = null;
 								displayedRun = update.RunId; displayedRevision = update.Revision;
 								SyncRefs( update.Refs, update.Path );
+								FrameRefs();
 								if ( sub.Mode != SubMode.Body ) { SubLoad(); SubEmit(); }
 								old.ReleaseGpu( gl ); old.Dispose();
 								// Only the first live model gets the default view; a new run (a remodel) keeps the
@@ -525,6 +540,15 @@ public static class ServeMode
 					follow?.Dispose(); follow = null;
 					displayedRevision = eventSequence = 0; displayedRun = null; framedLive = false; previewError = publishedAt = null;
 					if ( arg.Length > 0 ) follow = new AiLivePreview( arg );
+					else if ( mesh.TriangleCount > 0 )     // "follow" nothing: the pane is emptied, drop the model too
+					{
+						var gone = mesh; mesh = AiLivePreview.EmptyMesh();
+						gone.ReleaseGpu( gl ); gone.Dispose();
+						foreach ( var prop in renderer.Props ) { prop.Mesh.ReleaseGpu( gl ); prop.Dispose(); }
+						renderer.Props = Array.Empty<PropScene>();
+						player = null; previewPath = "";
+						renderer.ResetTemporalHistory(); dirty = true;   // push an empty frame out
+					}
 					subPath = null;                        // re-resolve on the next shown revision: refs on bodies that carried over stay (s&box prunes by body id)
 					refsSignature = null; SyncRefs( null, null );
 					Emit( new JsonObject { ["ev"] = "ai-follow", ["path"] = arg } );

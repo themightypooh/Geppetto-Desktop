@@ -19,6 +19,7 @@ with 4x4 ordered (Bayer) dithering, Amiga style, then upscaled nearest-neighbour
   sheet*.png       inspection-sheet tiles, dymo.png tape tile, rule.png steel rule tile
 
 Run: python3 bake.py   (needs numpy + Pillow)
+Colour schemes: python3 bake.py --schemes [name ...]  -> art/schemes/<name>/ (enamel pieces only)
 """
 import json
 import os
@@ -50,6 +51,66 @@ BAYER = np.array([[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]])
 YELLOW = hexes("#5c4004", "#7d5806", "#9d7209", "#bc8c0d", "#d8a615", "#eec029", "#fbdc66")
 WOOD = hexes("#5e3c1c", "#835829", "#a5753e", "#c09158", "#d6ae7c", "#e7c9a4")
 GRAPHITE = hexes("#101116", "#1d1f27", "#2c2f38", "#3d414c")
+
+
+# ---- colour schemes: the chest's enamel in other colours ---------------------------------
+# name: (target colour, hue shift in degrees, ink colour for text) or None for the stock red.
+# The targets are well-known brand colours (cola red, streaming green, auction-site purple...),
+# each turned a few degrees off its brand so it reads as "that kind of colour" without being
+# the brand. The RED ramp is re-tinted to the target's hue, saturation and brightness so the
+# shading (sheen, orange-peel, dark outline) stays the same and only the colour changes.
+SCHEMES = {
+    "red":      None,
+    "cola":     ("#F40009", +6),     # Coca-Cola
+    "rosso":    ("#D40000", -8),     # Ferrari rosso corsa
+    "cinema":   ("#E50914", +10),    # Netflix
+    "hazard":   ("#F96302", -6),     # Home Depot
+    "fanta":    ("#FF8300", +8),     # Fanta
+    "fries":    ("#FFC72C", +6),     # McDonald's golden arches
+    "lemon":    ("#FFDA1A", -6),     # IKEA yellow
+    "lime":     ("#1DB954", +10),    # Spotify
+    "deere":    ("#367C2B", +8),     # John Deere
+    "pine":     ("#00704A", -8),     # Starbucks
+    "robin":    ("#0ABAB5", +8),     # Tiffany blue
+    "sky":      ("#1DA1F2", +8),     # Twitter
+    "azure":    ("#1877F2", -8),     # Facebook
+    "cobalt":   ("#0051BA", +6),     # IKEA blue
+    "twitch":   ("#9146FF", -8),     # Twitch
+    "grape":    ("#482683", +8),     # Cadbury
+    "magenta":  ("#E20074", +6),     # T-Mobile
+    "barbie":   ("#E0218A", -8),     # Barbie
+    "graphite": ("#5a6068", 0),
+    "black":    ("#2a2c30", 0),
+    "cream":    ("#f3e6c4", 0),
+}
+RED_MID = 6                             # the RED ramp's "body" tone: the target colour lands on this step
+
+
+def scheme_tint(name):
+    """(hue, sat x, val x, ink) for a scheme: the RED ramp's body tone moved onto the target colour"""
+    import colorsys
+    if SCHEMES[name] is None:
+        return None, 1.0, 1.0, "#b3261c"
+    hexc, shift = SCHEMES[name]
+    r, g, b = (int(hexc[i:i + 2], 16) / 255.0 for i in (1, 3, 5))
+    th, ts, tv = colorsys.rgb_to_hsv(r, g, b)
+    rh, rs, rv = colorsys.rgb_to_hsv(*(RED[RED_MID].astype(np.float32) / 255.0))
+    hue = (th * 360.0 + shift) % 360.0
+    ink = colorsys.hsv_to_rgb(hue / 360.0, min(1.0, ts * 1.05), tv * 0.72)      # text in the scheme's colour: darker
+    return hue, ts / max(rs, 1e-3), tv / max(rv, 1e-3), "#%02x%02x%02x" % tuple(int(c * 255) for c in ink)
+
+
+def tinted(ramp, hue, sat, val):
+    """the same ramp in another colour: hue swapped, saturation and value scaled, lightness steps kept"""
+    import colorsys
+    out = []
+    for r, g, b in ramp.astype(np.float32) / 255.0:
+        h, s, v = colorsys.rgb_to_hsv(r, g, b)
+        if hue is not None:
+            h = (hue / 360.0) % 1.0
+        rr, gg, bb = colorsys.hsv_to_rgb(h, min(1.0, s * sat), min(1.0, v * val))
+        out.append([int(round(c * 255)) for c in (rr, gg, bb)])
+    return np.array(out, np.uint8)
 
 
 def bayer(h, w):
@@ -209,21 +270,38 @@ def bake_drawer(name, W, H, front, vp, k=0.86, seed=1):
     fx1, fy1 = vx + (x1 - vx) * k, vy + (y1 - vy) * k
     across = (xx - fx0) if slide_h else (yy - fy0)
     rib = np.mod(across, 4)
-    f = 3.0 + noise(H, W, 30, seed) * 0.3
-    f = np.where(rib == 0, f + 1.6, np.where(rib == 1, f + 0.6, np.where(rib == 3, f - 1.4, f)))
-    dl, dt = xc - fx0, yc - fy0                       # walls cast shadow on the liner
-    f -= np.clip(1 - dl / 8, 0, 1) * 2.2 + np.clip(1 - dt / 8, 0, 1) * 2.0
+    f = 3.1 + noise(H, W, 30, seed) * 0.08
+    # each rib: a lit crown, a flank, a flat and a dark groove
+    f = f + np.choose(rib.astype(int), [1.9, 0.8, 0.0, -1.3])
+    # a soft pool of light from the top-left, falling off toward the far corner
+    fu = np.clip((xc - fx0) / max(fx1 - fx0, 1), 0, 1)
+    fv = np.clip((yc - fy0) / max(fy1 - fy0, 1), 0, 1)
+    f += 0.45 * np.exp(-((fu - 0.3) ** 2 + (fv - 0.25) ** 2) / 0.25) - 0.2
+    # ambient occlusion where the liner meets each wall: deepest under the lit (top/left) walls
+    def ao(d, r):
+        return np.clip(1 - d / r, 0, 1) ** 1.6
+    f -= ao(xc - fx0, 11) * 2.6 + ao(yc - fy0, 11) * 2.4 + ao(fx1 - xc, 7) * 1.2 + ao(fy1 - yc, 7) * 1.1
     rgb[floor] = dither(f, RUBBER)[floor]
 
-    # -- walls: brushed zinc-plated steel, lit from the top-left
-    depth = np.clip((s - k) / (1 - k), 0, 1)
-    brush = noise(H, W, 2, seed + 4) * 0.35
+    # -- walls: brushed zinc-plated steel, lit from the top-left, grain running along each wall
+    depth = np.clip((s - k) / (1 - k), 0, 1)             # 0 where the wall meets the floor, 1 at the lip
+    rng = np.random.default_rng(seed + 5)
+    grain_rows = (rng.random((H, 1)) - 0.5) * 0.7          # streaks along x (top and bottom walls)
+    grain_cols = (rng.random((1, W)) - 0.5) * 0.7          # streaks along y (left and right walls)
     wsh = np.zeros((H, W), np.float32)
-    for m, base in ((wr, 5.4), (wb, 4.8), (wt, 2.2), (wl, 1.8)):
-        val = base - (1 - depth) ** 2 * 1.6 + brush
+    for m, base, grain in ((wr, 5.4, grain_cols), (wb, 4.8, grain_rows), (wt, 2.3, grain_rows), (wl, 1.9, grain_cols)):
+        val = base - (1 - depth) ** 2 * 1.7 + np.broadcast_to(grain, (H, W)) + noise(H, W, 2, seed + 4) * 0.15
         wsh[m] = val[m]
-    seam = wall & (np.abs(u - v) * np.minimum(x1 - x0, y1 - y0) < 0.9)
-    wsh[seam] -= 1.2
+    wsh[wall & (depth < 0.16)] -= 1.3                      # contact shadow down where the wall meets the liner
+    wsh[wall & (depth > 0.88)] += 1.4                      # the box's rolled top edge catches the light
+    # slide rails pressed into the two walls that run along the slide axis: a lit ridge over a dark groove
+    rail_walls = (wt | wb) if slide_h else (wl | wr)
+    wsh[rail_walls & (np.abs(depth - 0.52) < 0.035)] += 2.2
+    wsh[rail_walls & (np.abs(depth - 0.44) < 0.035)] -= 1.8
+    # the corner seams: a dark fold with a thin highlight beside it
+    gap = np.abs(u - v) * np.minimum(x1 - x0, y1 - y0)
+    wsh[wall & (gap < 0.9)] -= 1.6
+    wsh[wall & (gap >= 0.9) & (gap < 1.9)] += 0.8
     rgb[wall] = dither(wsh, ZINC)[wall]
     rgb[inside & (s > k) & (s < k + 0.02)] = ZINC[0]
 
@@ -232,19 +310,31 @@ def bake_drawer(name, W, H, front, vp, k=0.86, seed=1):
     esh = enamel(H, W, seed + 7, 6.2)
     fb = {"l": xx, "r": W - 1 - xx, "t": yy, "b": H - 1 - yy}[front]
     front_board = fb < lip[front]
+    # the front board catches more light toward its top edge, the side lips are a touch darker
+    esh[front_board] += 0.5 - (yy[front_board] / H) * 0.8
+    esh[rim & ~front_board] -= 0.4
     # rolled edge: highlight on the outer top/left, shade on the bottom/right
-    esh[(xx == 1) | (yy == 1)] += 2.4
-    esh[(xx == 2) | (yy == 2)] += 1.0
+    esh[(xx == 1) | (yy == 1)] += 2.6
+    esh[(xx == 2) | (yy == 2)] += 1.1
     esh[(xx == W - 2) | (yy == H - 2)] -= 2.6
-    # a pressed bead across the drawer front
-    esh[front_board & (fb == 4)] -= 2.2
-    esh[front_board & (fb == 5)] += 1.6
-    esh[front_board & (fb == 7)] -= 1.0
+    esh[(xx == W - 3) | (yy == H - 3)] -= 0.9
     # where the lip folds down into the box
     lipline = rim & ((np.abs(xc - x0) < 1) | (np.abs(xc - x1) < 1) | (np.abs(yc - y0) < 1) | (np.abs(yc - y1) < 1))
     lipline &= (xc > x0 - 1) & (xc < x1 + 1) & (yc > y0 - 1) & (yc < y1 + 1)
     esh[lipline] = 1.4
+    # the shut-line between the front board and the box behind it
+    esh[front_board & (fb == lip[front] - 1)] -= 1.8
     rgb[rim] = dither(esh, RED)[rim]
+    # a chrome pinstripe inlaid across the front, like a real tool-chest drawer: one row of
+    # metal over a dark groove, thin so the enamel still carries the colour
+    along = yy if slide_h else xx
+    span = (H if slide_h else W)
+    run = (along >= 4) & (along < span - 4)                 # it stops short of the corners
+    groove = front_board & run & (fb == 7)
+    trim = front_board & run & (fb == 6)
+    tsh = 5.8 + np.sin(along * 0.11) * 0.5 + (rng.random((H, W)) - 0.5) * 0.3
+    rgb[groove] = dither(np.full((H, W), 1.2, np.float32), RED)[groove]
+    rgb[trim] = dither(tsh, ALU)[trim]
     outline = (xx == 0) | (yy == 0) | (xx == W - 1) | (yy == H - 1)
     rgb[outline] = RED[0]
 
@@ -306,6 +396,9 @@ def bake_drawer(name, W, H, front, vp, k=0.86, seed=1):
         for o in range(1, P - 3):
             for t, b in ((-3, -1), (-2, 6.8), (-1, 5.6), (0, 4.4), (1, 3.4), (2, 2.4), (3, -1)):
                 put(end + t, o, b)
+        put(end - 1, 2, 9.0)                             # the foot's screw head: a lit dot over a dark one
+        put(end, 2, 1.0)
+        put(end, P - 7, 1.4)                             # where the bracket meets the bar: a little shadow
     prof = ((P - 6, -1), (P - 5, 8.8), (P - 4, 7.4), (P - 3, 5.6), (P - 2, 3.8), (P - 1, 2.2), (P, -1))
     for t_ in range(L0 - 5, L1 + 6):                    # the bar
         endcap = t_ in (L0 - 5, L1 + 5)
@@ -1274,6 +1367,79 @@ def bake_eraser(name="eraser.png", L=18):     # small: it lies in the gap over t
     return {"w": (L + 4) * S, "h": (H + 4) * S, "bodyW": L * S, "bodyH": H * S}
 
 
+# the open rotary rolodex (model/rolodex): cream cards, dark cradle, blue index tabs, ink, black knobs
+# (slots 0, 1, 2, 3, 4). The card wheel is rendered apart from the cradle so only the cards turn.
+PLASTIC = hexes("#100e0c", "#1e1814", "#342820", "#4c3c30", "#685444", "#847060", "#a49280", "#c8beb2")
+TAB = hexes("#163038", "#245868", "#387888", "#5898a8", "#7eb4c0", "#a6d0d8", "#d0e8ec", "#f0f8f8")
+ROLO_PARTS = {1: (PARCH, 1.6, 6.2), 2: (PLASTIC, 0.4, 5.4), 3: (TAB, 1.2, 6.4), 4: (INK, 0.2, 2.2),
+              5: (PLASTIC, 0.2, 4.6)}
+
+
+def _rolo_crop(ids):
+    """one crop for every pass, so the cradle and the turning cards stay on the same pixels"""
+    on = np.zeros(ids[0][0].shape, bool)
+    for k, _ in ids:
+        on |= k > 0
+    ys, xs = np.where(on)
+    return ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
+
+
+def _rolo_face(cls):
+    """where the front card's face sits: the paper block on the right of the wheel (the spindle runs
+    up the frame, the cards flip sideways, and the one lying flat on the right is the one you read)"""
+    paper = cls == 1
+    if not paper.any():
+        return None
+    cols = paper.sum(0)
+    band = cols > max(4, cols.max() * 0.35)
+    xs = np.where(band)[0]
+    splits = np.where(np.diff(xs) > 2)[0]
+    groups = np.split(xs, splits + 1) if len(xs) else []
+    if not groups:
+        return None
+    face = max(groups, key=lambda g: g.mean())
+    x0, x1 = int(face.min()), int(face.max()) + 1
+    rows = np.where(paper[:, x0:x1].sum(1) > 0)[0]
+    if len(rows) == 0:
+        return None
+    return int(rows.min()), int(rows.max()) + 1, x0, x1
+
+
+def bake_rolodex(name="rolodex", W=104):
+    """The rotary card file (model/rolodex) seen from above, W art px wide, its spindle running
+    up the drawer so the cards flip sideways. The cradle is <name>_base.png; each turn of the
+    card wheel is <name>_NN.png, same canvas, so the two stack. The front card (the one lying
+    flat, on the right) is where a label goes."""
+    base = model_frames("rolodex", "base")
+    spins = model_frames("rolodex", "spin")
+    if not base or not spins:
+        return None
+    ids = [id_classes(base[0])] + [id_classes(f) for f in spins]
+    y0, y1, x0, x1 = _rolo_crop(ids)
+    H = max(1, int(round((y1 - y0) * W / (x1 - x0))))
+    rng = light_range(ids)
+
+    def paint(k, v):
+        cls, lit = shrink_ids(k[y0:y1, x0:x1], v[y0:y1, x0:x1], W, H)
+        return cls, lit, outlined(paint_ids(cls, lit, ROLO_PARTS, rng), cls > 0)
+
+    _, _, base_img = paint(*ids[0])
+    save(name + "_base.png", base_img)
+    face = None
+    for i, kv in enumerate(ids[1:]):
+        cls, _, img = paint(*kv)
+        save("%s_%02d.png" % (name, i), img)
+        if i == 0:
+            face = _rolo_face(cls)
+    meta = {"w": (W + 4) * S, "h": (H + 4) * S, "bodyW": W * S, "bodyH": H * S,
+            "frames": len(spins), "cards": 12}
+    if face:
+        fy0, fy1, fx0, fx1 = face
+        meta.update(labelX=(fx0 + 1) * S, labelY=(fy0 + 1) * S,
+                    labelW=(fx1 - fx0) * S, labelH=(fy1 - fy0) * S)
+    return meta
+
+
 def main():
     VIEW_W, VIEW_H = 512, 288             # art px: the viewport is 1024 x 576 on screen
     T = 20
@@ -1309,6 +1475,7 @@ def main():
     geom["parchment"] = bake_parchment("parchment.png")
     geom["paperball"] = bake_paperball("paperball")
     geom["paperballRoll"] = bake_turning("paperball_roll", "paperball", 34, PAPER_PARTS, 1)
+    geom["rolodex"] = bake_rolodex()
     geom["keyS"] = bake_key("key_s.png", 20, 16)
     bake_key("key_s_down.png", 20, 16, pressed=True)
     bake_tiles()
@@ -1321,5 +1488,51 @@ def main():
     print(json.dumps(geom))
 
 
+
+ENAMEL_FILES = ["frame.png", "bar.png", "drawer_research.png", "drawer_tools.png", "drawer_timeline.png",
+                "modelfolder_back.png", "modelfolder_cover.png"]
+
+
+def bake_scheme(name):
+    """Bake the chest's enamel pieces in one colour scheme into art/schemes/<name>/ (same geometry
+    as the stock bake, so geom.js is shared). "red" is the stock art and needs no folder."""
+    global RED, OUT
+    hue, sat, val, ink = scheme_tint(name)
+    stock_red, stock_out = RED, OUT
+    RED = tinted(stock_red, hue, sat, val)
+    OUT = os.path.join(stock_out, "schemes", name)
+    os.makedirs(OUT, exist_ok=True)
+    try:
+        VIEW_W, VIEW_H, T = 512, 288, 20
+        bake_frame(VIEW_W, VIEW_H, T)
+        bake_drawer("drawer_research.png", 164, 250, "l", (0.94, 0.40), seed=11)
+        bake_drawer("drawer_tools.png", 164, 250, "r", (0.06, 0.40), seed=23)
+        bake_drawer("drawer_timeline.png", 500, 112, "b", (0.5, 0.05), k=0.88, seed=37)
+        bake_bar(VIEW_W + 2 * T + 10, 30)
+        bake_modelfolder("modelfolder")
+    finally:
+        RED, OUT = stock_red, stock_out
+    return ink
+
+
+def bake_schemes(names=None):
+    """every scheme but the stock red, plus art/schemes/schemes.js: the list and each one's ink colour"""
+    names = names or [n for n in SCHEMES if n != "red"]
+    inks = {n: scheme_tint(n)[3] for n in SCHEMES}
+    for n in names:
+        print("scheme", n)
+        bake_scheme(n)
+    os.makedirs(os.path.join(OUT, "schemes"), exist_ok=True)
+    with open(os.path.join(OUT, "schemes", "schemes.js"), "w") as f:
+        f.write("// generated by bake.py --schemes, do not edit\n.pragma library\n")
+        f.write("var NAMES = " + json.dumps(list(SCHEMES)) + ";\n")
+        f.write("var INK = " + json.dumps(inks) + ";\n")
+        f.write("var FILES = " + json.dumps(ENAMEL_FILES) + ";\n")
+
+
 if __name__ == "__main__":
-    main()
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "--schemes":
+        bake_schemes(sys.argv[2:])
+    else:
+        main()

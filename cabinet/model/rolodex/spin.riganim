@@ -1,0 +1,103 @@
+{
+  "SourceModel": "/home/poo/Desktop/geppetto-desktop/cabinet/model/rolodex/out/rolodex.fbx",
+  "RigAsset": "",
+  "AnimationSpeed": 24,
+  "FrameCount": 49,
+  "ReferenceProps": [],
+  "Objects": [],
+  "Lights": [],
+  "Cameras": [],
+  "Events": [],
+  "MorphEvents": [],
+  "Marks": [],
+  "BoneTracks": [
+    {
+      "BoneName": "Wheel",
+      "Target": "Bone",
+      "DisplayName": "Wheel",
+      "Keyframes": [
+        {
+          "Frame": 0,
+          "Local": {
+            "Position": "-3.2,0.05,3.3",
+            "Rotation": "0,0,-0.70710678,0.70710678",
+            "Scale": "1,1,1"
+          },
+          "Interpolation": "Linear"
+        },
+        {
+          "Frame": 6,
+          "Local": {
+            "Position": "-3.2,0.05,3.3",
+            "Rotation": "0.27059805,0.27059805,-0.65328148,0.65328148",
+            "Scale": "1,1,1"
+          },
+          "Interpolation": "Linear"
+        },
+        {
+          "Frame": 12,
+          "Local": {
+            "Position": "-3.2,0.05,3.3",
+            "Rotation": "0.5,0.5,-0.5,0.5",
+            "Scale": "1,1,1"
+          },
+          "Interpolation": "Linear"
+        },
+        {
+          "Frame": 18,
+          "Local": {
+            "Position": "-3.2,0.05,3.3",
+            "Rotation": "0.65328148,0.65328148,-0.27059805,0.27059805",
+            "Scale": "1,1,1"
+          },
+          "Interpolation": "Linear"
+        },
+        {
+          "Frame": 24,
+          "Local": {
+            "Position": "-3.2,0.05,3.3",
+            "Rotation": "0.70710678,0.70710678,-4.3297803e-17,4.3297803e-17",
+            "Scale": "1,1,1"
+          },
+          "Interpolation": "Linear"
+        },
+        {
+          "Frame": 30,
+          "Local": {
+            "Position": "-3.2,0.05,3.3",
+            "Rotation": "0.65328148,0.65328148,0.27059805,-0.27059805",
+            "Scale": "1,1,1"
+          },
+          "Interpolation": "Linear"
+        },
+        {
+          "Frame": 36,
+          "Local": {
+            "Position": "-3.2,0.05,3.3",
+            "Rotation": "0.5,0.5,0.5,-0.5",
+            "Scale": "1,1,1"
+          },
+          "Interpolation": "Linear"
+        },
+        {
+          "Frame": 42,
+          "Local": {
+            "Position": "-3.2,0.05,3.3",
+            "Rotation": "0.27059805,0.27059805,0.65328148,-0.65328148",
+            "Scale": "1,1,1"
+          },
+          "Interpolation": "Linear"
+        },
+        {
+          "Frame": 48,
+          "Local": {
+            "Position": "-3.2,0.05,3.3",
+            "Rotation": "8.6595606e-17,8.6595606e-17,0.70710678,-0.70710678",
+            "Scale": "1,1,1"
+          },
+          "Interpolation": "Linear"
+        }
+      ]
+    }
+  ]
+}

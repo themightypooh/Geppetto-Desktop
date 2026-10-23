@@ -63,7 +63,21 @@ internal static class BenchTests
 			Check( prim["kind"]!.GetValue<string>() == "add" && prim["type"]!.GetValue<string>() == "Primitive", "primitive: " + prim.ToJsonString() );
 			Check( prim["fields"]!.AsArray().Any( f => f!["key"]!.GetValue<string>() == "name" ), "primitive has no name field" );
 			Check( Bench.Describe( "set" )["kind"]!.GetValue<string>() == "verb", "set is not a verb" );
+			Check( Bench.Describe( "set" )["accepts"] is null, "a verb accepts geometry" );
 			Check( Bench.Describe( "edit:nosuchop" )["error"] is not null, "unknown edit op has no error" );
+			string[] Takes( string key )
+			{
+				var node = Bench.Describe( key )["accepts"] as JsonArray;
+				return node is null ? Array.Empty<string>() : node.Select( x => x!.GetValue<string>() ).ToArray();
+			}
+			Check( Takes( "sketch" ).SequenceEqual( new[] { "face" } ), "sketch: " + string.Join( ",", Takes( "sketch" ) ) );
+			Check( Takes( "plane" ).SequenceEqual( new[] { "face" } ), "plane: " + string.Join( ",", Takes( "plane" ) ) );
+			Check( Takes( "shell" ).SequenceEqual( new[] { "face", "body" } ), "shell: " + string.Join( ",", Takes( "shell" ) ) );
+			Check( Takes( "extrude" ).SequenceEqual( new[] { "face", "sketch" } ), "extrude: " + string.Join( ",", Takes( "extrude" ) ) );
+			Check( Takes( "fillet" ).SequenceEqual( new[] { "face", "edge", "body" } ), "fillet: " + string.Join( ",", Takes( "fillet" ) ) );
+			Check( Takes( "revolve" ).SequenceEqual( new[] { "sketch" } ), "revolve: " + string.Join( ",", Takes( "revolve" ) ) );
+			Check( Takes( "primitive" ).Length == 0 && Bench.Describe( "primitive" )["accepts"] is JsonArray, "primitive takes a pick: " + string.Join( ",", Takes( "primitive" ) ) );
+			Check( Takes( "edit:bevel" ).SequenceEqual( new[] { "body" } ), "bevel: " + string.Join( ",", Takes( "edit:bevel" ) ) );
 		} );
 
 		registry.Add( "bench", "editing a scrubbed run step leaves the run byte-identical", () =>

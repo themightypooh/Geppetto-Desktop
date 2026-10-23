@@ -353,6 +353,10 @@ internal static class AiLiveTests
             // Detach preserves the last preview and the provider result; reconnect replays it.
             viewer.Send("follow");
             viewer.Wait(x => x["ev"]!.GetValue<string>() == "ai-follow");
+            // An emptied pane shows nothing: the last revision must not stay on screen.
+            var emptied = viewer.Wait(x => x["ev"]!.GetValue<string>() == "frame");
+            Check(emptied["tris"]!.GetValue<int>() == 0, "bare follow kept the last model on screen");
+            viewer.Send("ack");
             viewer.Send("follow " + root);
             viewer.Wait(x => x["ev"]!.GetValue<string>() == "ai-preview" && x["revision"]!.GetValue<long>() == 7);
             Check(viewer.HardwareEgl, "viewer did not use windowless EGL");

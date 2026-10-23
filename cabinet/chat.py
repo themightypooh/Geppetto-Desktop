@@ -5,6 +5,7 @@ Optional ~/.config/geppetto/chat-models.json is a list of provider records. It a
 live Ollama/KoboldCpp discovery. Records use id, label, kind, endpoint, model and
 optionally key_env, env_file, auth_header, extra_body and research (tool support).
 """
+import base64
 import json
 import re
 import os
@@ -101,6 +102,8 @@ def models(discover=True):
             pass
     if os.access(CLAUDE, os.X_OK):
         out += [dict(m) for m in CLAUDE_MODELS]
+    if os.access(GROK, os.X_OK):
+        out += [dict(m) for m in GROK_MODELS]
     for m in DEFAULT_MODELS:
         if key(m) or m.get('always'):
             out.append(dict(m))
@@ -212,21 +215,81 @@ def _system(notes, api=''):
     return system
 
 
+IMAGE_TYPES = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif'}
+IMAGE_CAP = 4 * 1024 * 1024
+
+
+def _image_payloads(paths):
+    """Local picture files as mime + base64, capped so a chat turn cannot ship a huge file."""
+    out = []
+    for raw in (paths or [])[:4]:
+        path = os.path.abspath(os.path.expanduser(str(raw)))
+        mime = IMAGE_TYPES.get(os.path.splitext(path)[1].lower())
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            continue
+        if not mime or size <= 0 or size > IMAGE_CAP:
+            continue
+        out.append({'mime': mime, 'data': base64.b64encode(Path(path).read_bytes()).decode('ascii'), 'path': path})
+    return out
+
+
+def _said(turn):
+    """Text of one turn, plus any attached picture paths a CLI model can open itself."""
+    text = turn.get('text') or ''
+    paths = [p['path'] for p in _image_payloads(turn.get('images'))]
+    if not paths:
+        return text
+    return (text or 'What is in this picture?') + '\n\nImage files to look at:\n' + '\n'.join(paths)
+
+
+def _wire_messages(history, kind):
+    messages = []
+    for turn in history:
+        role = 'user' if turn['role'] == 'you' else 'assistant'
+        text = turn.get('text') or ''
+        images = _image_payloads(turn.get('images')) if role == 'user' else []
+        if not images:
+            messages.append({'role': role, 'content': text})
+            continue
+        caption = text or 'What is in this picture?'
+        if kind == 'ollama':
+            messages.append({'role': role, 'content': caption, 'images': [p['data'] for p in images]})
+        elif kind == 'anthropic':
+            blocks = [{'type': 'image', 'source': {'type': 'base64', 'media_type': p['mime'], 'data': p['data']}} for p in images]
+            blocks.append({'type': 'text', 'text': caption})
+            messages.append({'role': role, 'content': blocks})
+        else:
+            blocks = [{'type': 'text', 'text': caption}]
+            blocks += [{'type': 'image_url', 'image_url': {'url': 'data:%s;base64,%s' % (p['mime'], p['data'])}} for p in images]
+            messages.append({'role': role, 'content': blocks})
+    return messages
+
+
+def _google_parts(turn):
+    text = turn.get('text') or ''
+    images = _image_payloads(turn.get('images')) if turn['role'] == 'you' else []
+    parts = [{'text': text or ('What is in this picture?' if images else '')}]
+    parts += [{'inline_data': {'mime_type': p['mime'], 'data': p['data']}} for p in images]
+    return [p for p in parts if p.get('text') or p.get('inline_data')]
+
+
 def _body(model, history, streaming=False, notes='', api=''):
-    history = [h for h in history if h['role'] in ('you', 'model')][-16:]
+    history = [h for h in history if h['role'] in ('you', 'model') and (h.get('text') or h.get('images'))][-16:]
     # Keep whole recent turns, leaving headroom in the local 8k context for notes and the reply.
-    while len(history) > 1 and sum(len(h['text']) for h in history) > 16000 - len(notes) - len(api):
+    while len(history) > 1 and sum(len(h.get('text') or '') for h in history) > 16000 - len(notes) - len(api):
         history = history[1:]
     while history and history[0]['role'] != 'you':
         history = history[1:]
-    messages = [{'role': 'user' if h['role'] == 'you' else 'assistant', 'content': h['text']} for h in history]
     kind = model['kind']
+    messages = _wire_messages(history, kind)
     system = _system(notes, api)
     if kind == 'anthropic':
         return dict(model=model['model'], max_tokens=2048, system=system, messages=messages)
     if kind == 'google':
         return {'systemInstruction': {'parts': [{'text': system}]},
-                'contents': [{'role': 'user' if h['role'] == 'you' else 'model', 'parts': [{'text': h['text']}]} for h in history]}
+                'contents': [{'role': 'user' if h['role'] == 'you' else 'model', 'parts': _google_parts(h)} for h in history]}
     body = dict(model=model['model'], messages=[{'role': 'system', 'content': system}] + messages, stream=streaming)
     if kind == 'ollama':
         body.update(think=False, keep_alive='2m', options={'num_ctx': 8192, 'num_predict': 2048})
@@ -273,6 +336,17 @@ CLAUDE_CHAT = ("You are the chat in Geppetto's cabinet (the paper ball), talking
                " take over the Geppetto chest. The chat window is small: keep replies short.")
 _claude_sessions = set()      # chat sessions the CLI has already started; later turns --resume them
 
+# Grok through the grok CLI, on its own grok.com login, never an API key.
+GROK = shutil.which('grok') or os.path.expanduser('~/.local/bin/grok')
+GROK_MODELS = [
+    dict(id='grok/grok-4.7', label='Grok 4.7', kind='grok-cli', model='grok-4.7', endpoint='cli', research=False),
+    dict(id='grok/grok-4.7-build-fast', label='Grok 4.7 fast', kind='grok-cli', model='grok-4.7-build-fast', endpoint='cli', research=False),
+    dict(id='grok/grok-4.6', label='Grok 4.6', kind='grok-cli', model='grok-4.6', endpoint='cli', research=False),
+    dict(id='grok/grok-4.5', label='Grok 4.5', kind='grok-cli', model='grok-4.5', endpoint='cli', research=False),
+]
+GROK_CHAT = CLAUDE_CHAT
+_grok_sessions = set()
+
 
 def _claude_cli(model, history, cancel, timeout, session=''):
     """Claude via `claude -p` on its own login (the Max plan), with modelling tools, one CLI session per chat."""
@@ -281,11 +355,11 @@ def _claude_cli(model, history, cancel, timeout, session=''):
         history = history[1:]
     resume = bool(session) and session in _claude_sessions
     if resume or len(history) == 1:
-        prompt = history[-1]['text']
+        prompt = _said(history[-1])
     else:     # the chat began with another model: hand Claude what was said so far
         prompt = ('The conversation so far:\n\n' +
-                  '\n\n'.join(('User: ' if h['role'] == 'you' else 'Assistant: ') + h['text'] for h in history[:-1]) +
-                  '\n\nReply to the user\'s latest message:\n\n' + history[-1]['text'])
+                  '\n\n'.join(('User: ' if h['role'] == 'you' else 'Assistant: ') + _said(h) for h in history[:-1]) +
+                  '\n\nReply to the user\'s latest message:\n\n' + _said(history[-1]))
     env = {k: v for k, v in os.environ.items() if k not in ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN')}
     args = [CLAUDE, '-p', '--model', model['model'], '--output-format', 'stream-json', '--include-partial-messages',
             '--verbose', '--setting-sources', 'user', '--append-system-prompt', CLAUDE_CHAT,
@@ -331,6 +405,59 @@ def _claude_cli(model, history, cancel, timeout, session=''):
             p.kill()
 
 
+def _grok_cli(model, history, cancel, timeout, session=''):
+    """Grok via `grok -p` on its grok.com login, one CLI session per chat."""
+    history = [h for h in history if h['role'] in ('you', 'model')][-16:]
+    while history and history[0]['role'] != 'you':
+        history = history[1:]
+    resume = bool(session) and session in _grok_sessions
+    if resume or len(history) == 1:
+        prompt = _said(history[-1])
+    else:
+        prompt = ('The conversation so far:\n\n' +
+                  '\n\n'.join(('User: ' if h['role'] == 'you' else 'Assistant: ') + _said(h) for h in history[:-1]) +
+                  '\n\nReply to the user\'s latest message:\n\n' + _said(history[-1]))
+    env = {k: v for k, v in os.environ.items() if k not in ('GROK_SESSION_ID', 'GROK_AGENT', 'XAI_API_KEY')}
+    args = [GROK, '--single', prompt, '--model', model['model'], '--output-format', 'streaming-messages-json',
+            '--include-partial-messages', '--no-alt-screen', '--no-subagents', '--permission-mode', 'auto',
+            '--rules', GROK_CHAT, '--cwd', CLAUDE_HOME]
+    if session:
+        args += ['--resume', session] if resume else ['--session-id', session]
+    os.makedirs(CLAUDE_HOME, exist_ok=True)
+    p = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
+                         cwd=CLAUDE_HOME, text=True)
+    timer = threading.Timer(max(timeout, 3600), p.kill)
+    timer.start()
+    said = False
+    try:
+        for line in p.stdout:
+            if cancel is not None and cancel.is_set():
+                return
+            try:
+                data = json.loads(line)
+            except ValueError:
+                continue
+            if session and data.get('type') == 'system':
+                _grok_sessions.add(session)
+            if data.get('type') == 'stream_event':
+                event = data.get('event') or {}
+                delta = event.get('delta') or {}
+                if delta.get('type') == 'text_delta':
+                    said = True
+                    yield delta.get('text', '')
+                elif event.get('type') == 'content_block_start' and event.get('content_block', {}).get('type') == 'tool_use':
+                    yield ('\n\n' if said else '') + '[' + event['content_block'].get('name', 'tool') + ']\n\n'
+                    said = False
+            elif data.get('type') == 'result' and data.get('is_error'):
+                raise RuntimeError('Grok: ' + str(data.get('result') or 'the request failed'))
+        if p.wait() != 0:
+            raise RuntimeError('grok CLI failed: ' + (p.stderr.read().strip()[-300:] or 'exit %d' % p.returncode))
+    finally:
+        timer.cancel()
+        if p.poll() is None:
+            p.kill()
+
+
 def stream(model, history, cancel=None, timeout=120, notes='', api='', session=''):
     """Yield answer text; native Ollama NDJSON and OpenAI SSE stream immediately."""
     if cancel is not None and cancel.is_set():
@@ -338,6 +465,9 @@ def stream(model, history, cancel=None, timeout=120, notes='', api='', session='
     kind = model['kind']
     if kind == 'claude-cli':
         yield from _claude_cli(model, history, cancel, timeout, session)
+        return
+    if kind == 'grok-cli':
+        yield from _grok_cli(model, history, cancel, timeout, session)
         return
     streaming = kind in ('ollama', 'openai')
     try:

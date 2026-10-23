@@ -1,4 +1,5 @@
 """Run protocol helpers, independent of Qt and any visible window."""
+import plain_words
 import json
 import math
 import os
@@ -256,6 +257,14 @@ def script_line(root, op):
     return next((x for x in lines if x.strip().startswith(recorded)), "")
 
 
+def _line_no(op):
+    """14 from 'line 14: add Blob ...', else 0"""
+    try:
+        return int(op[5:].split(":", 1)[0]) if op.startswith("line ") else 0
+    except ValueError:
+        return 0
+
+
 def line_part(line):
     """The part a script line works on, for the watch panel: `set Eraser ...` -> Eraser, `add Blob ... name=Head` -> Head,
     `material 0 ...` -> material 0; '' for lines that change no part (echo, comments)."""
@@ -305,6 +314,8 @@ def watch(root, state, recent=6):
         except ValueError:
             pass
     code = script_line(root, op) if op.startswith("line ") else ""
+    if state.get("state") in ("open", "completed") and lines:
+        at = len(lines)                         # renders/saves after the last model step make no step of their own
     error = ""
     if state.get("state") in ("held", "failed"):
         error = str(state.get("outcome") or "")[:300]
@@ -317,8 +328,10 @@ def watch(root, state, recent=6):
     tail = []
     for st in shown[-recent:]:
         line = script_line(root, st["op"])
-        tail.append(dict(st, code=line or st["op"].split(": ", 1)[-1], part=line_part(line)))
+        tail.append(dict(st, code=line or st["op"].split(": ", 1)[-1], part=line_part(line),
+                         say=plain_words.say(line or st["op"].split(": ", 1)[-1], lines, _line_no(st["op"]))))
     out = {"line": at, "total": len(lines), "code": code or op.split(": ", 1)[-1], "part": line_part(code),
+           "say": plain_words.say(code or op.split(": ", 1)[-1], lines, at),
            "building": state.get("state") == "building", "error": error, "steps": tail, "count": len(shown)}
     _watch[root] = (key, out)
     return out

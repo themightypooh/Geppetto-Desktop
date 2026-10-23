@@ -405,6 +405,7 @@ public static class Bench
             var feature = new EditOpFeature();
             foreach (var p in feature.Parameters)
                 if (p != feature.Op) fields.Add(Field(p));
+            PutAccepts(ev, feature);
             return ev;
         }
         var made = BuildScript.CreateFeature(key);
@@ -425,6 +426,7 @@ public static class Bench
                 if (kind is not null) fields.Add(new JsonObject { ["key"] = Norm(f.Name), ["label"] = f.Name, ["kind"] = kind, ["value"] = "" });
             }
             fields.Add(new JsonObject { ["key"] = "name", ["label"] = "Name", ["kind"] = "text", ["value"] = "" });
+            PutAccepts(ev, made);
             return ev;
         }
         // a script verb: set, remove, measure, render ... one line of arguments, as the script takes them
@@ -432,6 +434,19 @@ public static class Bench
         ev["verb"] = key;
         fields.Add(new JsonObject { ["key"] = "", ["label"] = "Arguments", ["kind"] = "text", ["value"] = "" });
         return ev;
+    }
+
+    /// <summary>What a click on the model gives this tool. The cabinet leaves body mode for face or edge
+    /// so the thing under the cursor lights up; a verb takes no geometry.</summary>
+    static void PutAccepts(JsonObject ev, Feature feature)
+    {
+        var kinds = new JsonArray();
+        var a = feature.Accepts;
+        if ((a & GeometryKind.Face) != 0) kinds.Add(JsonValue.Create("face"));
+        if ((a & GeometryKind.Edge) != 0) kinds.Add(JsonValue.Create("edge"));
+        if ((a & GeometryKind.Body) != 0) kinds.Add(JsonValue.Create("body"));
+        if ((a & GeometryKind.SketchRegion) != 0) kinds.Add(JsonValue.Create("sketch"));
+        ev["accepts"] = kinds;
     }
 
     static JsonObject Field(IParam p)

@@ -37,7 +37,7 @@ Item {
     readonly property string mono: "DejaVu Sans Mono"
 
     width: big ? 560 : 340
-    height: folded ? head.height + strip.space + inputRow.height + (ask ? askRow.height + 4 : 0) + 16 : big ? bigHeight : maxHeight
+    height: folded ? head.height + pick.height + 3 + strip.space + inputRow.height + (ask ? askRow.height + 4 : 0) + 16 : big ? bigHeight : maxHeight
     Behavior on width { NumberAnimation { duration: 120 } }
     visible: open
     opacity: open ? 1 : 0
@@ -74,7 +74,7 @@ Item {
         Text {
             x: 14; anchors.verticalCenter: parent.verticalCenter
             width: parent.width - keys.width - 20; elide: Text.ElideRight
-            text: (card.folded ? "▸ " : "▾ ") + "CLAUDE  " + (card.ask ? "needs OK" : card.status)
+            text: (card.folded ? "▸ " : "▾ ") + card.who.toUpperCase() + "  " + (card.ask ? "needs OK" : card.status)
             color: card.lit; font.family: card.mono; font.bold: true; font.pixelSize: 11
             MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: card.folded = !card.folded }
         }
@@ -84,7 +84,7 @@ Item {
             CardKey {
                 objectName: "claudePause"
                 text: card.status === "paused" ? "RESUME" : "PAUSE"; hot: card.status === "paused"
-                enabled: card.status === "working" || card.status === "paused"
+                enabled: card.isClaude && (card.status === "working" || card.status === "paused")
                 onClicked: host.claudePause()
                 tip: "hold Claude at its next tool call and pause the runs it started"
             }
@@ -105,12 +105,71 @@ Item {
         }
     }
 
+    // ---- which model you are talking to: every model the chest knows (the chat's catalogue) --
+    // A Claude model is the Claude Code session (tools, ALLOW/DENY, PAUSE); Grok, a local model or
+    // an API model answers here too, through the chat's wiring.
+    readonly property var modelRecord: {
+        var ms = host.chatModels || [];
+        for (var i = 0; i < ms.length; ++i) if (ms[i].id === host.claudeModel) return ms[i];
+        return null;
+    }
+    readonly property string who: modelRecord ? modelRecord.label.split(" · ")[0] : "Claude"
+    readonly property bool isClaude: !modelRecord || modelRecord.kind === "claude-cli"
+    property Item popupParent: card
+    function showPopup() { pick.popup.open() }
+    C.ComboBox {
+        id: pick
+        objectName: "claudeModelPick"
+        x: 5; y: head.y + head.height + 3; width: parent.width - 10; height: 22
+        textRole: "label"; valueRole: "id"
+        model: host.chatModels
+        enabled: count > 0 && !card.busy
+        currentIndex: {
+            var ms = host.chatModels || [];
+            for (var i = 0; i < ms.length; ++i) if (ms[i].id === host.claudeModel) return i;
+            return -1;
+        }
+        onActivated: host.setClaudeModel(currentValue)
+        contentItem: Text {
+            text: pick.currentIndex < 0 ? (host.catalogueBusy ? "finding models…" : "no models: start Ollama or log in to claude / grok") : pick.currentText
+            color: pick.enabled ? card.text : card.dim; font.family: card.mono; font.pixelSize: 10; font.bold: true
+            verticalAlignment: Text.AlignVCenter; elide: Text.ElideMiddle
+            leftPadding: 6; rightPadding: 18
+        }
+        indicator: Text { x: pick.width - 14; anchors.verticalCenter: parent.verticalCenter; text: "▾"; color: card.text; font.pixelSize: 11 }
+        background: Rectangle { color: card.steel; radius: 3; border.width: 1; border.color: pick.activeFocus ? card.lit : card.edge }
+        delegate: C.ItemDelegate {
+            required property var modelData
+            required property int index
+            width: pick.popup.width - 2; height: 26
+            enabled: modelData.available !== false
+            highlighted: pick.highlightedIndex === index
+            contentItem: Text {
+                text: modelData.label; color: !parent.enabled ? card.dim : parent.highlighted ? card.steelLo : card.text
+                font.family: card.mono; font.pixelSize: 10; font.bold: true
+                verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight; leftPadding: 4
+            }
+            background: Rectangle { color: parent.highlighted ? card.lit : card.steel }
+        }
+        popup: C.Popup {
+            objectName: "claudeModelPickPopup"
+            parent: card.popupParent
+            x: Math.max(0, Math.min(parent.width - width, pick.mapToItem(parent, 0, 0).x))
+            y: Math.max(0, Math.min(parent.height - height, pick.mapToItem(parent, 0, pick.height).y))
+            width: pick.width
+            implicitHeight: Math.min(parent.height - 8, contentItem.implicitHeight + 2)
+            padding: 1
+            contentItem: ListView { clip: true; implicitHeight: contentHeight; model: pick.popup.visible ? pick.delegateModel : null; currentIndex: pick.highlightedIndex }
+            background: Rectangle { color: card.steel; border.color: card.edge; border.width: 1; radius: 3 }
+        }
+    }
+
     // ---- pictures it looked at or showed you, newest right; a click pops one large again ----
     ListView {
         id: strip
         objectName: "claudeStrip"
         readonly property real space: count > 0 ? height + 4 : 0
-        x: 5; y: head.y + head.height + 4
+        x: 5; y: pick.y + pick.height + 4
         width: parent.width - 10; height: count > 0 ? 40 : 0
         visible: count > 0
         orientation: ListView.Horizontal; spacing: 3; clip: true
@@ -208,7 +267,8 @@ Item {
         Text {
             anchors.centerIn: parent; width: parent.width - 20; visible: log.count === 0
             horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap
-            text: "Talk to Claude here. It works in this checkout, builds with geppetto-live so you see it here, and STOP stops it."
+            text: card.isClaude ? "Talk to Claude here. It works in this checkout, builds with geppetto-live so you see it here, and STOP stops it."
+                                : "Talk to " + card.who + " here. It can model with geppetto-live so you see it here; STOP stops it. Pick a Claude model above for tools you can ALLOW or DENY."
             color: card.dim; font.family: card.mono; font.pixelSize: 10
         }
     }
@@ -264,7 +324,7 @@ Item {
             }
             Text {
                 visible: field.text === "" && !field.activeFocus
-                text: card.busy ? "add something while it works…" : "tell Claude what to make…"
+                text: card.busy ? "add something while it works…" : "tell " + card.who + " what to make…"
                 color: card.dim; font.family: card.mono; font.pixelSize: 11
             }
         }

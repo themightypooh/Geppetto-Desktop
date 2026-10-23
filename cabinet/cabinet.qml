@@ -13,15 +13,21 @@ import QtQuick.Controls as C
 import QtQuick.Dialogs as D
 import Geppetto 1.0
 import "art/geom.js" as Geom
+import "art/schemes/schemes.js" as Schemes
 
 Window {
     id: root
     readonly property var g0: Geom.G
     readonly property string art: Qt.resolvedUrl("art/")
+    // the chest's enamel colour scheme (host.scheme, saved with the view prefs): the enamel pieces
+    // (frame, lid bar, drawers, model folder) come from art/schemes/<name>/, everything else is shared
+    readonly property string scheme: host.scheme || "red"
+    readonly property var schemeInk: Schemes.INK
+    function enamel(name) { return scheme === "red" ? art + name : art + "schemes/" + scheme + "/" + name }
 
     // ---- palette for the non-baked bits (text) -------------------------------------------
     readonly property color ink: "#1d2318"
-    readonly property color inkRed: "#b3261c"
+    readonly property color inkRed: (schemeInk && schemeInk[scheme]) ? schemeInk[scheme] : "#b3261c"
     readonly property color inkFaint: "#424a3c"
     readonly property color panelFill: "#f4f7ee"
     readonly property color sheetEdge: "#5d6655"
@@ -57,6 +63,7 @@ Window {
     property bool followFrame: true           // live: keep the growing model framed every revision
     property bool refsOpen: false             // the reference pictures panel over the camera keys
     property bool claudeOpen: false           // the CLAUDE card: talk to Claude Code from here (Ctrl+L)
+    onClaudeOpenChanged: if (claudeOpen) host.refreshChat()   // its model list is the chat's catalogue
     Shortcut { sequence: "Ctrl+L"; context: Qt.ApplicationShortcut; onActivated: { root.claudeOpen = !root.claudeOpen; if (root.claudeOpen) claudePanel.focusInput() } }
     // the run the controls work: the one being watched if it is building, else any that is
     readonly property var liveRun: {
@@ -129,15 +136,25 @@ Window {
     // ---- the chat window --------------------------------------------------------------------
     function sendChat(input) {
         var t = String(input.text).trim();
-        if (t === "" || host.chatBusy) return;
+        if ((t === "" && host.chatImages.length === 0) || host.chatBusy) return;
         host.sendChat(t);
         input.text = "";
     }
     // the chat and the research can each pop out of the drawer into a window of their own
     property bool chatOut: false
-    property bool chatUnrolled: false         // the chat note taken out of the drawer and opened over the viewport
-    onChatUnrolledChanged: if (chatUnrolled) host.refreshChat()
+    onChatOutChanged: if (chatOut) host.refreshChat()
+    property bool paperOpen: false            // the paper ball, open: the research column and the live run, written on it
+    onPaperOpenChanged: if (paperOpen) host.refreshChat()
     property bool researchOut: false
+    // the build note: a run's watch written out on paper, tossed from its run bar's NOTE key
+    property string buildNoteDir: ""
+    property int buildNotePane: 1
+    property point buildNoteFrom: Qt.point(0, 0)
+    function toggleBuildNote(dir, n, key) {
+        if (buildNoteDir === dir) { buildNoteDir = ""; return }
+        buildNoteFrom = key ? key.mapToItem(root.contentItem, key.width / 2, key.height / 2) : Qt.point(cabX, cabY)
+        buildNotePane = n; buildNoteDir = dir;
+    }
     property bool blinkOn: true
     property string keyTip: ""                // the hovered key's tip
     Timer { interval: 300; repeat: true; running: true; onTriggered: root.blinkOn = !root.blinkOn }
@@ -149,8 +166,9 @@ Window {
             r.push(d.x + d.hitX, d.y + d.hitY, d.hitW, d.hitH);
         });
         if (openNote.visible) r.push(openNote.x, openNote.y, openNote.width, openNote.height);
+        if (buildNote.visible) r.push(buildNote.x, buildNote.y, buildNote.width, buildNote.height);
         if (flyer.visible) r.push(flyer.x - 30, flyer.y - 30, flyer.width + 60, flyer.height + 60);
-        if (vpMenu.open) r.push(vpMenu.x, vpMenu.y, vpMenu.width, vpMenu.height);
+        if (paneMenu.open) r.push(paneMenu.x, paneMenu.y, paneMenu.width, paneMenu.height);
         host.setMask(r);
     }
     function maskLater() { Qt.callLater(updateMask) }
@@ -290,6 +308,7 @@ Window {
         property bool closable: false         // a close key in its top right corner
         signal closed()
         readonly property real headH: closable ? 40 : 26
+        readonly property int picStrip: host.chatImages.length > 0 ? 40 : 0
         readonly property alias selector: chatSelector
         objectName: tag + "Box"
         Shade { visible: !chatBox.bare; x: 6; y: 6; width: chatBox.width; height: chatBox.height }
@@ -332,7 +351,7 @@ Window {
             objectName: chatBox.tag + "Log"
             x: 8; y: chatBox.headH
             width: parent.width - 16
-            height: parent.height - 100 - chatBox.headH
+            height: parent.height - 100 - chatBox.headH - chatBox.picStrip
             contentHeight: chatLines.height
             boundsBehavior: Flickable.StopAtBounds
             clip: true
@@ -343,17 +362,76 @@ Window {
                 spacing: 4
                 Repeater {
                     model: host.chatMessages
-                    delegate: TextEdit {
+                    delegate: Column {
+                        id: line
                         required property var modelData
                         width: chatLines.width
-                        text: (modelData.role === "you" ? "you: " : modelData.role === "error" ? "! " : "") + modelData.text
-                        readOnly: true; selectByMouse: true
-                        wrapMode: TextEdit.Wrap; textFormat: TextEdit.PlainText
-                         font.family: root.mono; font.pixelSize: chatBox.popped ? 16 : 15
-                        color: modelData.role === "error" ? root.inkRed
-                             : modelData.role === "you" ? root.ink : root.inkFaint
+                        spacing: 2
+                        Row {
+                            spacing: 3
+                            visible: (line.modelData.images || []).length > 0
+                            Repeater {
+                                model: line.modelData.images || []
+                                delegate: Image {
+                                    required property string modelData
+                                    width: 72; height: 48
+                                    fillMode: Image.PreserveAspectCrop
+                                    source: modelData ? "file://" + modelData : ""
+                                    sourceSize.width: 144; asynchronous: true; cache: false
+                                }
+                            }
+                        }
+                        TextEdit {
+                            width: line.width
+                            text: (line.modelData.role === "you" ? "you: " : line.modelData.role === "error" ? "! " : "") + line.modelData.text
+                            readOnly: true; selectByMouse: true
+                            wrapMode: TextEdit.Wrap; textFormat: TextEdit.PlainText
+                            font.family: root.mono; font.pixelSize: chatBox.popped ? 16 : 15
+                            color: line.modelData.role === "error" ? root.inkRed
+                                 : line.modelData.role === "you" ? root.ink : root.inkFaint
+                        }
                     }
                 }
+            }
+        }
+        // pictures waiting to go with the next message; click one to take it off
+        Row {
+            x: 8; y: parent.height - 94 - chatBox.picStrip
+            spacing: 3; visible: chatBox.picStrip > 0
+            Repeater {
+                model: host.chatImages
+                delegate: Rectangle {
+                    required property string modelData
+                    required property int index
+                    width: 48; height: 36; color: root.sheetEdge
+                    Image {
+                        anchors.fill: parent; anchors.margins: 1
+                        source: modelData ? "file://" + modelData : ""
+                        fillMode: Image.PreserveAspectCrop
+                        sourceSize.width: 96; asynchronous: true; cache: false
+                    }
+                    MouseArea {
+                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                        onClicked: host.removeChatImage(index)
+                    }
+                }
+            }
+        }
+        D.FileDialog {
+            id: chatPic
+            title: "Picture for the chat"
+            nameFilters: ["Pictures (*.png *.jpg *.jpeg *.webp *.gif)", "All files (*)"]
+            onAccepted: host.attachChatImage(selectedFile.toString())
+        }
+        DropArea {
+            anchors.fill: parent
+            onDropped: function(drop) {
+                for (var i = 0; i < drop.urls.length; i++)
+                    host.attachChatImage(drop.urls[i].toString());
+            }
+            Rectangle {
+                anchors.fill: parent; visible: parent.containsDrag
+                color: "#66f2a91c"; border.width: 2; border.color: root.amber
             }
         }
         // what you type, and the key that sends it
@@ -364,11 +442,24 @@ Window {
             TextInput {
                 id: chatInput
                 objectName: chatBox.tag + "Input"
-                anchors.fill: parent; anchors.margins: 5
+                anchors.fill: parent; anchors.margins: 5; anchors.rightMargin: 36
                 color: root.ink; clip: true; maximumLength: 8000
                 font.family: root.mono; font.pixelSize: 13; font.bold: true
                 renderType: Text.NativeRendering
                 onAccepted: root.sendChat(chatInput)
+                Keys.onPressed: function(e) {
+                    if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_V && host.pasteChatImage())
+                        e.accepted = true;
+                }
+            }
+            Px {
+                anchors.right: parent.right; anchors.rightMargin: 4; anchors.verticalCenter: parent.verticalCenter
+                text: "PIC"; size: 6; color: root.ink
+                MouseArea {
+                    anchors.fill: parent; anchors.margins: -4
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: chatPic.open()
+                }
             }
             Px {
                 x: 6; y: 6
@@ -380,7 +471,7 @@ Window {
         }
         Key {
             x: parent.width - 92; y: parent.height - 97
-            label: host.chatBusy ? "STOP" : "SEND"; lamp: true; lit: chatInput.text.trim() !== "" && !host.chatBusy
+            label: host.chatBusy ? "STOP" : "SEND"; lamp: true; lit: (chatInput.text.trim() !== "" || host.chatImages.length > 0) && !host.chatBusy
             onClicked: host.chatBusy ? host.stopChat() : root.sendChat(chatInput)
         }
         Px { x: 8; y: parent.height - 60; visible: host.chatBusy; text: "replying…"; size: 6; color: root.inkFaint }
@@ -423,42 +514,74 @@ Window {
                            "% & OTHERS", "A HISTORY OF %", "COLLECTED %", "THE LAST %", "% ILLUSTRATED", "UPON %"];
             return forms[rp.bookHash(r.dir + "t") % forms.length].replace("%", noun)
         }
-        // a run building right now: first thing in the drawer, loud, one click to see it
+        // every run building right now: first thing in the drawer, loud, one row each: who is on it,
+        // what they asked for, the step it is on, and the keys. Each row is a fixed height, every line
+        // one elided line, so a long prompt or a long step never spills out of the box.
         Item {
             id: liveCard
-            readonly property var lr: { for (const r of host.runs) if (r.status === "running") return r; return null }
-            readonly property bool watching: !!lr && host.watchedRun === lr.dir
-            visible: !!lr
-            // fixed height: a long or short prompt, or a key that can't be used right now, never moves the box
-            width: parent.width - 8; height: visible ? 34 + 44 + root.g0.key.h : 0
+            objectName: "liveNow"
+            readonly property var live: { const out = []; for (const r of host.runs) if (r.status === "running") out.push(r); return out }
+            readonly property var lr: live.length ? live[0] : null
+            readonly property int rowH: 10 + 3 * 20 + 6 + root.g0.key.h + 8
+            visible: live.length > 0
+            width: parent.width - 8; height: visible ? 30 + live.length * (rowH + 6) : 0
+            property var rowProbe: []             // what each row says, for the tests (QML-private items can't be walked from Python)
+            function probeRows() {
+                const out = [];
+                for (let i = 0; i < liveRows.count; i++) {
+                    const it = liveRows.itemAt(i);
+                    if (it) out.push({ who: it.who, doing: it.doing, where: it.where, height: it.height, clip: it.clip })
+                }
+                rowProbe = out
+            }
             Shade { x: 6; y: 6; width: liveCard.width; height: liveCard.height }
             Rectangle { anchors.fill: parent; color: root.inkRed }
             Rectangle { anchors.fill: parent; anchors.margins: 4; color: root.amber }
-            Tape { x: 6; y: -6; text: "LIVE NOW" }
+            Tape { x: 6; y: -6; text: liveCard.live.length > 1 ? "LIVE NOW  x" + liveCard.live.length : "LIVE NOW" }
             Image { x: liveCard.width - 22; y: 6; source: root.art + "lamp_on.png"; smooth: false; opacity: root.blinkOn ? 1 : 0.3 }
             Column {
-                id: liveCol
-                x: 12; y: 26; width: liveCard.width - 24; spacing: 4
-                Item {
-                    width: liveCol.width; height: 40
-                    clip: true
-                    Px { text: liveCard.lr ? (liveCard.lr.prompt || liveCard.lr.name) : ""; maxWidth: liveCol.width; maxLines: 2 }
-                }
-                Row {
-                    spacing: 8
-                    Key {
-                        label: liveCard.lr && liveCard.lr.pane > 0 ? "LIVE " + liveCard.lr.pane : "VIEW"; lamp: true; lit: !!liveCard.lr && !(liveCard.lr.pane > 0)
-                        tip: liveCard.lr && liveCard.lr.pane > 0 ? "showing in viewport pane " + liveCard.lr.pane : "show this run in the selected viewport pane"
-                        onClicked: if (liveCard.lr && !(liveCard.lr.pane > 0)) host.showRunIn(liveCard.lr.dir, root.activePane)
+                x: 6; y: 24; width: liveCard.width - 12; spacing: 6
+                Repeater {
+                    id: liveRows
+                    model: liveCard.live
+                    Item {
+                        id: liveRow
+                        objectName: "liveNowRow"
+                        required property var modelData
+                        readonly property var r: modelData
+                        // who: the session's title, else the model, else the pane it is in
+                        readonly property string who: r.who ? r.who : (r.pane > 0 ? "someone in pane " + r.pane : "someone")
+                        // the step: plain words from the watch panel, else the run's activity
+                        readonly property string doing: (r.watch && r.watch.say) ? r.watch.say : (r.activity || "starting")
+                        readonly property string where: (r.watch && r.watch.total > 0) ? " (" + r.watch.line + "/" + r.watch.total + ")" : ""
+                        width: parent.width; height: liveCard.rowH
+                        clip: true
+                        Rectangle { anchors.fill: parent; color: root.panelFill; border.color: root.inkRed; border.width: 2 }
+                        Column {
+                            x: 6; y: 6; width: parent.width - 12; spacing: 0
+                            Px { text: liveRow.who.toUpperCase(); color: root.inkRed; maxWidth: parent.width; maxLines: 1 }
+                            Px { text: liveRow.r.title || liveRow.r.prompt || liveRow.r.name; maxWidth: parent.width; maxLines: 1 }
+                            Px { text: liveRow.doing + liveRow.where; color: root.inkFaint; bold: false; maxWidth: parent.width; maxLines: 1 }
+                            Item { width: 1; height: 6 }
+                            Row {
+                                // three keys in the drawer's width: the stop key is the narrow transport one
+                                spacing: 2
+                                Key {
+                                    label: liveRow.r.pane > 0 ? "IN " + liveRow.r.pane : "VIEW"; lamp: true; lit: !(liveRow.r.pane > 0)
+                                    tip: liveRow.r.pane > 0 ? "showing in viewport pane " + liveRow.r.pane : "show this run in the selected viewport pane"
+                                    onClicked: if (!(liveRow.r.pane > 0)) host.showRunIn(liveRow.r.dir, root.activePane)
+                                }
+                                Key {
+                                    readonly property bool can: liveRow.r.latestRevision > 0
+                                    enabled: can; opacity: can ? 1 : 0.4
+                                    label: liveRow.r.paused ? "RESUME" : "PAUSE"
+                                    tip: can ? "hold the build before its next change, or let it carry on" : "nothing built yet to pause"
+                                    onClicked: host.togglePause(liveRow.r.dir)
+                                }
+                                Key { small: true; label: "\u25A0"; tip: "STOP: end the run, keep the model"; onClicked: host.stopResearch(liveRow.r.dir) }
+                            }
+                        }
                     }
-                    Key {
-                        readonly property bool can: !!liveCard.lr && liveCard.lr.latestRevision > 0
-                        enabled: can; opacity: can ? 1 : 0.4
-                        label: liveCard.lr && liveCard.lr.paused ? "RESUME" : "PAUSE"
-                        tip: can ? "hold the build before its next change, or let it carry on" : "nothing built yet to pause"
-                        onClicked: host.togglePause(liveCard.lr.dir)
-                    }
-                    Key { label: "STOP"; tip: "end the run, keep the model"; onClicked: host.stopResearch(liveCard.lr.dir) }
                 }
             }
         }
@@ -473,13 +596,17 @@ Window {
             Rectangle { anchors.fill: parent; anchors.margins: 2; color: root.panelFill }
             Tape { x: 6; y: -6; text: "NEW RUN" }
             Px {
-                x: parent.width - 76; y: 4
+                x: parent.width - (root.paperOpen && !rp.popped ? 120 : 76); y: 4
                 text: rp.popped ? "DOCK" : "POP OUT"; size: 6
                 color: root.inkFaint
                 MouseArea {
                     anchors.fill: parent; anchors.margins: -4
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: root.researchOut = !rp.popped
+                    onClicked: {
+                        var opening = !rp.popped;
+                        root.researchOut = opening;
+                        if (opening) root.paperOpen = false;   // the window takes it; the paper crumples
+                    }
                 }
             }
             Rectangle {
@@ -775,7 +902,7 @@ Window {
     }
     component FlyStrip: Rectangle {             // what the keys do, and the speed, while flying
         required property var fly
-        visible: fly.on
+        visible: false                          // the model stays clear; fly is still the right mouse button
         anchors.horizontalCenter: parent.horizontalCenter
         y: parent.height - height - 54
         width: flyText.implicitWidth + 20; height: 24; radius: 3
@@ -831,6 +958,7 @@ Window {
         readonly property string presence: owner && owner.presence ? owner.presence : ""
         readonly property string title: owner && owner.title ? owner.title : ""
         x: 0; y: 0; width: parent.width; height: 22
+        visible: false                          // pane name stays off the model
         color: root.activePane === n ? "#3a2f12" : "#16191c"; opacity: 0.9
         Rectangle {
             id: phDot
@@ -841,7 +969,7 @@ Window {
         }
         Text {
             x: phDot.visible ? 22 : 8; anchors.verticalCenter: parent.verticalCenter
-            width: parent.width - x - 8; elide: Text.ElideRight
+            width: phMenuKey.x - x - 8; elide: Text.ElideRight
             text: "PANE " + ph.n + (ph.who || ph.what || ph.title
                       ? "  " + [ph.who, ph.title ? "“" + ph.title + "”" : "", ph.what].filter(function (t) { return !!t }).join("  ")
                       : "  empty")
@@ -850,6 +978,25 @@ Window {
             color: root.activePane === ph.n ? root.amber : root.keyText
             font.family: root.mono; font.bold: true; font.pixelSize: 11
         }
+        // the whole strip is the menu's handle; the key on the right says so
+        MouseArea {
+            anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+            onClicked: { root.activePane = ph.n; if (paneMenu.open && paneMenu.n === ph.n) paneMenu.open = false; else paneMenu.openFor(ph.n, ph) }
+        }
+        Rectangle {
+            id: phMenuKey
+            objectName: "paneMenuKey" + ph.n
+            anchors.right: parent.right; anchors.rightMargin: 4; anchors.verticalCenter: parent.verticalCenter
+            width: phMenuText.implicitWidth + 14; height: 16; radius: 2
+            readonly property bool lit: paneMenu.open && paneMenu.n === ph.n
+            color: lit ? root.amber : "#2a2e34"; border.color: "#0b0c0e"
+            Text {
+                id: phMenuText; anchors.centerIn: parent
+                text: phMenuKey.lit ? "^" : "v"
+                color: phMenuKey.lit ? "#1f2228" : root.keyText
+                font.family: root.mono; font.bold: true; font.pixelSize: 10
+            }
+        }
     }
 
     // a live run's bar under its pane header, always readable: what it is doing, how long it has run,
@@ -857,137 +1004,163 @@ Window {
     component RunBar: Rectangle {
         id: rb
         property var run: null
+        property int n: 1                        // the pane it heads (the build note replays there)
         property real now: Date.now() / 1000
         // an open run is quiet on purpose (it waits for lines), so it never counts as stuck
         readonly property real quiet: run && run.lastEvent && !run.openState ? Math.max(0, now - run.lastEvent) : 0
         function clock(t) { t = Math.floor(t); return Math.floor(t / 60) + ":" + ("0" + t % 60).slice(-2) }
-        Timer { interval: 1000; repeat: true; running: rb.visible; onTriggered: rb.now = Date.now() / 1000 }
-        visible: !!run && run.status === "running"
-        width: rbRow.width + 16; height: rbRow.height + 8
+        onRunChanged: now = Date.now() / 1000
+        Timer { interval: 1000; repeat: true; running: !!rb.run; onTriggered: rb.now = Date.now() / 1000 }
+        visible: false                          // HOLD / STOP / CLAUDE live in the drawers, not on the model
+        width: rbRow.width + 12; height: rbRow.height + 6
         color: "#16191c"; opacity: 0.92; border.color: rb.quiet > 60 ? "#c0392b" : "#3a2f12"
         Row {
             id: rbRow
-            x: 8; y: 4; spacing: 6
+            x: 6; y: 3; spacing: 4
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 width: Math.min(implicitWidth, 320); elide: Text.ElideRight
-                text: !rb.run ? "" : (rb.run.paused ? "HELD" : (rb.run.activity || "working").toUpperCase())
+                text: !rb.run ? "" : (rb.run.paused ? "HELD" : rb.run.openState === "open" ? "OPEN" : rb.run.openState === "held" ? "HELD AT A BAD LINE"
+                                     : (rb.run.activity || "working").toUpperCase())
                       + (rb.run.started ? "  " + rb.clock(rb.now - rb.run.started) : "")
                       + (rb.quiet > 20 ? "  quiet " + rb.clock(rb.quiet) : "")
                 color: rb.quiet > 60 ? "#e05a4a" : root.amber
                 font.family: root.mono; font.bold: true; font.pixelSize: 11
             }
-            Key {
+            Chip {                              // the build note: where it is in the script, out on paper
+                id: rbNote
+                objectName: "runBarNote"
+                readonly property var w: rb.run && rb.run.watch ? rb.run.watch : ({})
+                readonly property bool held: !!rb.run && (rb.run.openState === "held" || !!w.error)
+                visible: (w.count || 0) > 0
+                label: "NOTE" + (w.line ? " " + w.line + "/" + w.total : "")
+                lit: (!!rb.run && root.buildNoteDir === rb.run.dir) || (held && root.blinkOn)
+                tip: "the build note: the line, the part, the error and every step"
+                onClicked: root.toggleBuildNote(rb.run.dir, rb.n, rbNote)
+            }
+            Chip {
                 objectName: "runBarHold"
-                label: rb.run && rb.run.paused ? "GO" : "HOLD"; lamp: true; lit: !!rb.run && rb.run.paused && root.blinkOn
+                label: rb.run && rb.run.paused ? "GO" : "HOLD"; lit: !!rb.run && rb.run.paused && root.blinkOn
                 tip: rb.run && rb.run.paused ? "GO: carry on" : "HOLD: pause before its next step"
                 onClicked: host.togglePause(rb.run.dir)
             }
-            Key {
+            Chip {
                 objectName: "runBarStop"
                 label: rb.run && rb.run.openState ? "CLOSE" : "STOP"
                 tip: rb.run && rb.run.openState ? "CLOSE: the model is done, end the run and keep it" : "STOP: end the run, keep what it made"
                 onClicked: host.stopResearch(rb.run.dir)
             }
-            Key {
+            Chip {
                 objectName: "runBarClaude"
-                label: "CLAUDE"; lamp: true; lit: root.claudeOpen
-                tip: "talk to Claude here (Ctrl+L)"
+                label: "TALK"; lit: root.claudeOpen
+                tip: "talk to " + claudePanel.who + " about this run (Ctrl+L)"
                 onClicked: root.claudeOpen = !root.claudeOpen
             }
         }
     }
 
-    // what a live script run is doing, readable at a glance: LINE x/n with a bar, the part it changes,
-    // the whole line, a held run's error in red, and its last steps (click one to replay from it)
-    component WatchPanel: Rectangle {
-        id: wp
+    // what a live script run is doing, written out on the build note (the paper the run bar's NOTE key
+    // tosses out): LINE x of n, the part, what the line does, the line itself, a held run's error, and
+    // every step so far, newest first (click one to replay from it; the raw line shows under the pointer)
+    component BuildSheet: Item {
+        id: bs
         property var run: null
-        property real room: 300                  // the height it may take before the pane's keys
+        property string hoverRaw: ""
         signal pick(int rev)
+        signal shut()
         readonly property var w: run && run.watch ? run.watch : ({})
         readonly property bool held: !!run && (run.openState === "held" || !!w.error)
-        readonly property int fit: Math.max(0, Math.min((w.steps || []).length, Math.floor((room - wpHead.height - 20) / 16)))
-        visible: !!run && run.status === "running" && (w.count || 0) > 0 && room > 40
-        height: Math.min(room, wpCol.height + 12)
-        clip: true
-        color: "#16191c"; opacity: 0.92
-        border.color: held ? "#d2493a" : run && run.openState === "open" ? "#4f9a62" : "#3a2f12"
+        readonly property color ink: "#3b2a18"
+        readonly property color faint: "#8a7454"
+        readonly property color red: "#a8281c"
         Column {
-            id: wpCol
-            x: 8; y: 6; width: wp.width - 16
-            spacing: 4
-            Column {
-                id: wpHead
-                width: parent.width; spacing: 3
-                Row {
-                    spacing: 8; width: parent.width
-                    Text {
-                        id: wpLine
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: wp.w.line ? "LINE " + wp.w.line + "/" + wp.w.total : "STEP " + (wp.w.count || 0)
-                        color: root.amber; font.family: root.mono; font.bold: true; font.pixelSize: 11
-                    }
-                    Rectangle {
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: Math.max(30, wpCol.width - wpLine.width - wpPart.width - 16); height: 4; radius: 2; color: "#3a3f45"
-                        Rectangle {
-                            height: parent.height; radius: 2; color: wp.held ? "#d2493a" : root.amber
-                            width: wp.w.total ? parent.width * Math.min(1, wp.w.line / wp.w.total) : 0
-                        }
-                    }
-                    Text {
-                        id: wpPart
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: Math.min(implicitWidth, wpCol.width * 0.45); elide: Text.ElideRight
-                        text: wp.w.part ? "PART " + wp.w.part : ""
-                        color: "#eef0ea"; font.family: root.mono; font.bold: true; font.pixelSize: 11
-                    }
-                }
-                Text {                              // the whole line, not the clipped op
-                    width: parent.width; visible: !!wp.w.code
-                    text: (wp.w.building ? "> " : "  ") + (wp.w.code || "")
-                    color: "#9fd18b"; font.family: root.mono; font.pixelSize: 12
-                    wrapMode: Text.WrapAnywhere; maximumLineCount: 2; elide: Text.ElideRight
-                    renderType: Text.NativeRendering
+            id: bsHead
+            width: parent.width; spacing: 4
+            Item {
+                width: parent.width; height: 16
+                Text {
+                    width: parent.width - 20; elide: Text.ElideMiddle
+                    text: "BUILD NOTE" + (bs.run ? "  " + (bs.run.name || "") : "")
+                    color: bs.faint; font.family: root.mono; font.bold: true; font.pixelSize: 10
                 }
                 Text {
-                    objectName: "watchError"
-                    width: parent.width; visible: wp.held
-                    text: "HELD AT " + (wp.w.error || (wp.run ? wp.run.outcome : "")) + "\nthe model is back at its last good step; the modeller sends the fixed line, or REWIND"
-                    color: "#ff8a7a"; font.family: root.mono; font.pixelSize: 11
-                    wrapMode: Text.Wrap; maximumLineCount: 3; elide: Text.ElideRight
-                    renderType: Text.NativeRendering
-                }
-                Text {
-                    width: parent.width; visible: !!wp.run && wp.run.openState === "open"
-                    text: "OPEN: the model stays loaded for more lines. CLOSE when it's right"
-                    color: "#9fe0ae"; font.family: root.mono; font.pixelSize: 11
-                    wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
+                    objectName: "buildNoteShut"
+                    anchors.right: parent.right
+                    text: "x"; color: bsShutM.containsMouse ? bs.red : bs.faint
+                    font.family: root.mono; font.bold: true; font.pixelSize: 13
+                    MouseArea { id: bsShutM; anchors.fill: parent; anchors.margins: -6; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: bs.shut() }
                 }
             }
-            Repeater {
-                objectName: "watchSteps"
-                model: (wp.w.steps || []).slice((wp.w.steps || []).length - wp.fit).reverse()
+            Text {
+                objectName: "buildNoteLine"
+                text: bs.w.line ? "LINE " + bs.w.line + " of " + bs.w.total : "STEP " + (bs.w.count || 0)
+                color: bs.held ? bs.red : bs.ink; font.family: root.mono; font.bold: true; font.pixelSize: 17
+            }
+            Rectangle {
+                width: parent.width; height: 5; radius: 2; color: "#e2d3b0"
                 Rectangle {
-                    required property var modelData
-                    required property int index
-                    width: wpCol.width; height: 14
-                    color: wpStep.containsMouse ? "#2b2f36" : "transparent"
-                    Text {
-                        x: 2; width: parent.width - 4; elide: Text.ElideRight
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: ("R" + modelData.rev + "   ").slice(0, 5) + (modelData.part && modelData.code.indexOf(modelData.part) !== 0 ? modelData.part + ": " : "") + modelData.code
-                        color: index === 0 ? root.amber : root.keyText
-                        font.family: root.mono; font.pixelSize: 11
-                    }
-                    MouseArea {
-                        id: wpStep
-                        anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                        onClicked: wp.pick(modelData.rev)
-                    }
+                    height: parent.height; radius: 2; color: bs.held ? bs.red : "#b9852a"
+                    width: bs.w.total ? parent.width * Math.min(1, bs.w.line / bs.w.total) : 0
                 }
             }
+            Text {                                  // what the line does, in plain words
+                width: parent.width; wrapMode: Text.WordWrap; maximumLineCount: 3; elide: Text.ElideRight
+                text: (bs.w.part ? bs.w.part + ": " : "") + (bs.w.say || bs.w.code || "")
+                color: bs.ink; font.family: root.mono; font.bold: true; font.pixelSize: 12
+            }
+            Text {                                  // the line itself, for the technical
+                width: parent.width; wrapMode: Text.WrapAnywhere; maximumLineCount: 3; elide: Text.ElideRight
+                visible: !!bs.w.code && bs.w.code !== bs.w.say
+                text: bs.w.code || ""
+                color: bs.faint; font.family: root.mono; font.pixelSize: 11
+            }
+            Text {
+                objectName: "buildNoteError"
+                width: parent.width; visible: bs.held
+                wrapMode: Text.WordWrap; maximumLineCount: 3; elide: Text.ElideRight
+                text: "HELD: " + (bs.w.error || (bs.run ? bs.run.outcome : ""))
+                color: bs.red; font.family: root.mono; font.bold: true; font.pixelSize: 11
+            }
+            Item { width: 1; height: 2 }
+            Text {
+                visible: (bs.w.steps || []).length > 0
+                text: "STEPS  (click one to replay from it)"
+                color: bs.faint; font.family: root.mono; font.bold: true; font.pixelSize: 10
+            }
+        }
+        ListView {
+            objectName: "buildNoteSteps"
+            y: bsHead.height + 4; width: parent.width
+            height: parent.height - y - (bsRaw.visible ? bsRaw.height + 4 : 0)
+            clip: true; boundsBehavior: Flickable.StopAtBounds
+            model: (bs.w.steps || []).slice().reverse()
+            delegate: Rectangle {
+                required property var modelData
+                required property int index
+                width: ListView.view.width; height: 16
+                color: bsStep.containsMouse ? "#ecdcb4" : "transparent"
+                Text {
+                    x: 2; width: parent.width - 4; elide: Text.ElideRight
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: ("R" + modelData.rev + "   ").slice(0, 5) + (modelData.say || modelData.code)
+                    color: index === 0 ? "#8a5a10" : bs.ink
+                    font.family: root.mono; font.bold: index === 0; font.pixelSize: 11
+                }
+                MouseArea {
+                    id: bsStep
+                    anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                    onClicked: bs.pick(modelData.rev)
+                    onContainsMouseChanged: bs.hoverRaw = containsMouse ? (modelData.part ? modelData.part + ": " : "") + modelData.code : ""
+                }
+            }
+        }
+        Text {
+            id: bsRaw
+            anchors.bottom: parent.bottom; width: parent.width
+            visible: bs.hoverRaw !== ""
+            text: bs.hoverRaw
+            color: bs.faint; font.family: root.mono; font.pixelSize: 10
+            wrapMode: Text.WrapAnywhere; maximumLineCount: 2; elide: Text.ElideRight
         }
     }
 
@@ -1040,11 +1213,11 @@ Window {
         }
         FlyStrip { fly: spFly; z: 5 }
         Text {                                       // an empty pane says what fills it
-            visible: !sp.pn.runDir && !sp.pn.modelPath
+            visible: false
             anchors.centerIn: parent; width: parent.width - 40
             horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap
-            text: "PANE " + sp.n + " IS EMPTY\nthe next live run lands here,\nor drag a run from RUNS onto it"
-                  + (host.autoLayout ? "\n\nAUTO: empty panes fold away on their own" : "\n\nVIEWPORTS is fixed at " + root.layoutN + ": pick AUTO to fold empty panes")
+            text: "PANE " + sp.n + " IS EMPTY\nclick its header: make something, or put a model here\n(or drag a run from RUNS onto it)"
+                  + (host.autoLayout ? "\n\nAUTO: empty panes fold away on their own" : "\n\nfixed at " + root.layoutN + " panes: AUTO SPLIT (header menu) folds empty ones")
             color: "#6b6f75"; font.family: root.mono; font.pixelSize: 12
         }
         PaneHeader {
@@ -1053,23 +1226,15 @@ Window {
             state: sp.replaying ? "REPLAY" : !sp.r ? "" : sp.live ? (sp.r.openState === "held" ? "HELD  REV " + sp.r.latestRevision
                    : sp.r.openState === "open" ? "OPEN  REV " + sp.r.latestRevision : sp.r.paused ? "PAUSED" : "LIVE  REV " + sp.r.latestRevision) : "DONE"
         }
-        ReplayStrip { src: sp.pn; x: 8; y: 28; width: sp.width - 16 }
-        RunBar { id: spRunBar; run: sp.replaying ? null : sp.r; x: 8; y: 28 }
-        WatchPanel {
-            objectName: "watchPanel" + sp.n
-            run: sp.replaying ? null : sp.r
-            x: 8; y: spRunBar.visible ? spRunBar.y + spRunBar.height + 4 : 28
-            width: Math.min(sp.width - 16, 460)
-            room: (spKeys.visible ? spKeys.y : sp.height) - y - 8
-            onPick: function (rev) { sp.pn.replayAt(sp.r.dir, rev) }
-        }
+        ReplayStrip { src: sp.pn; x: 8; y: 28; width: sp.width - 16; visible: false }
+        RunBar { id: spRunBar; n: sp.n; run: sp.replaying ? null : sp.r; x: 8; y: 28 }
         // this pane's run controls, faint until the mouse comes near
         Flow {
             id: spKeys
             x: 8; y: sp.height - height - 8; width: sp.width * 0.62
             spacing: 4
             opacity: spHover.hovered ? 1 : 0.5
-            visible: !!sp.pn.runDir
+            visible: false
             HoverHandler { id: spHover }
             Key {
                 label: sp.replaying ? "LIVE" : sp.live ? "LIVE" : "DONE"; lamp: true; lit: sp.live && !sp.replaying && (!sp.r.paused || root.blinkOn)
@@ -1113,6 +1278,7 @@ Window {
             revision: rp ? (rp.shown || 0) : sp.pn.shownRevision
             stepping: rp ? !!rp.playing : sp.live && !sp.r.paused
             enabled: false                           // display only: tools are picked off pane 1's wheel
+            visible: false
         }
         Rectangle {                                  // the selected pane: VIEW NOW and WATCH put runs here
             anchors.fill: parent; color: "transparent"
@@ -1162,7 +1328,7 @@ Window {
                 }
                 Px {
                     anchors.verticalCenter: parent.verticalCenter
-                    text: (rd.r.op || "") + (rd.r.shown === rd.r.rev ? "" : "  loading...")
+                    text: (rd.r.say || rd.r.op || "") + (rd.r.shown === rd.r.rev ? "" : "  loading...")
                     maxWidth: stripCol.width - 330 - (rdRewind.visible ? rdRewind.width + 12 : 0); maxLines: 1; color: root.keyText
                 }
             }
@@ -1259,16 +1425,45 @@ Window {
         }
     }
 
-    // a panel popped out of the drawer: an ordinary window, as big as you like
+    // a panel popped out of the drawer: a window of its own, as big as you like. Frameless and
+    // see-through like the chest, so no desktop title bar and nothing but the panel shows: drag
+    // its top strip to move it (the panel's own keys at the right still work), pull the
+    // bottom-right corner to size it, its X key shuts it.
     component PopWindow: Window {
         id: pw
         property bool out: false
+        property int gripH: 28                   // the drag strip along the top
+        property int gripRight: 240              // left alone at the right: the panel's keys live there
         signal docked()
         transientParent: null                    // its own window, not stuck above the chest
         visible: out
-        color: root.panelFill
+        color: "transparent"
+        flags: Qt.Window | Qt.FramelessWindowHint
         minimumWidth: 360; minimumHeight: 360
         onClosing: function (close) { pw.docked() }
+        Shortcut { sequence: StandardKey.Close; onActivated: pw.docked() }
+        MouseArea {
+            z: 50
+            x: 0; y: 0; width: Math.max(40, pw.width - pw.gripRight); height: pw.gripH
+            cursorShape: Qt.SizeAllCursor
+            onPressed: pw.startSystemMove()
+        }
+        Item {
+            z: 50
+            x: pw.width - 18; y: pw.height - 18; width: 18; height: 18
+            Canvas {
+                anchors.fill: parent; opacity: 0.6
+                onPaint: {
+                    var c = getContext("2d"); c.clearRect(0, 0, width, height);
+                    c.strokeStyle = "#c9ccd0"; c.lineWidth = 1.5;
+                    for (var i = 0; i < 3; i++) { c.beginPath(); c.moveTo(width - 3 - i * 5, height - 3); c.lineTo(width - 3, height - 3 - i * 5); c.stroke() }
+                }
+            }
+            MouseArea {
+                anchors.fill: parent; cursorShape: Qt.SizeFDiagCursor
+                onPressed: pw.startSystemResize(Qt.RightEdge | Qt.BottomEdge)
+            }
+        }
     }
 
     // a drawer: baked art + a floor its contents lie on; slides between shut and open
@@ -1311,7 +1506,7 @@ Window {
         function toggle() { setOpen(open < 0.5) }
         NumberAnimation { id: anim; target: d; property: "open"; easing.type: Easing.OutQuad; onStopped: d.gliding = false }
 
-        Image { source: root.art + d.img; smooth: false }
+        Image { source: root.enamel(d.img); smooth: false }
         property int floorExtra: 0      // content may run this far over the floor's shadow line onto the wall
         Item { id: floor; x: d.g.floorX; y: d.g.floorY; width: d.g.floorW; height: d.g.floorH + floorExtra; clip: true }
 
@@ -1451,6 +1646,57 @@ Window {
                 }
             }
             Px { visible: !!host.refs.problems; text: host.refs.problems || ""; color: root.inkRed; maxWidth: 560 }
+        }
+    }
+
+    // ---- the intercom: the badge that calls up whichever model is picked (Claude, Grok, a local one).
+    // A cast aluminium badge with a black field, like the lid's nameplate: a lamp, TALK, and who answers.
+    component Intercom: Item {
+        id: ic
+        property bool lit: false
+        property string who: ""              // the picked model, as the window shows it
+        property string tip: ""
+        signal clicked()
+        width: root.g0.nameplate.w; height: root.g0.nameplate.h + 2
+        readonly property bool down: im.pressed && im.containsMouse
+        Image {                               // the drop shadow it sits on, gone when pressed
+            visible: !ic.down; x: 2; y: 2; width: ic.width; height: root.g0.nameplate.h
+            source: root.art + "shadow.png"; fillMode: Image.Tile; smooth: false
+        }
+        BorderImage {                          // the badge stretches to the row: its ends stay, the field repeats
+            x: ic.down ? 2 : 0; y: ic.down ? 2 : 0
+            width: ic.width; height: root.g0.nameplate.h
+            source: root.art + "nameplate.png"; smooth: false
+            border { left: 12; right: 12 }
+            horizontalTileMode: BorderImage.Repeat
+            Image {
+                x: 10; y: (parent.height - 14) / 2
+                source: root.art + (ic.lit ? "lamp_on.png" : "lamp_off.png"); smooth: false
+            }
+            Px {
+                id: icLabel; x: 30; y: 7
+                text: "TALK"; color: ic.lit ? root.amber : root.tapeText
+            }
+            Px {
+                x: icLabel.x + icLabel.width + 10; y: 7
+                maxWidth: parent.width - x - 8; maxLines: 1
+                text: ic.who.split(" ")[0].toUpperCase(); color: im.containsMouse || ic.lit ? root.keyText : "#8a8f96"
+            }
+        }
+        MouseArea {
+            id: im; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: ic.clicked()
+            onContainsMouseChanged: {
+                if (ic.tip) root.keyTip = containsMouse ? ic.tip : "";
+                ic.tipReady = false;
+                if (containsMouse) icWait.restart(); else icWait.stop();
+            }
+        }
+        property bool tipReady: false
+        Timer { id: icWait; interval: 450; onTriggered: ic.tipReady = true }
+        Tape {
+            visible: ic.tipReady && im.containsMouse && !im.pressed && ic.tip !== ""
+            z: 100; x: 0; y: -30
+            text: ic.tip
         }
     }
 
@@ -1879,15 +2125,13 @@ Window {
                 x: 6; width: parent.width - 12
                 spacing: 18
 
-                // ---- the chat window: talk to the local and the hosted models.
-                // It never grows: the transcript scrolls inside a fixed window.
-                // the chat is a crumpled ball of paper lying loose in the drawer: shove it about;
-                // tap it and it is tossed onto the viewport and opens out flat, the chat written on it
+                // the research is a crumpled ball of paper lying loose in the drawer: shove it about;
+                // tap it and it is tossed out and opens flat, the live run and the books written on it.
+                // the chat with the picked model is its own window (the TALK badge, Ctrl+L), not this paper
                 Item {
                     id: chatWell
                     objectName: "chatWell"
-                    visible: !root.chatOut
-                    width: parent.width - 8; height: visible ? root.g0.paperball.ball.bodyH + 24 : 0
+                    width: parent.width - 8; height: root.g0.paperball.ball.bodyH + 24
                     LooseWorld {
                         id: chatKit
                         drawer: research
@@ -1898,8 +2142,8 @@ Window {
                             readonly property var gb: root.g0.paperball.ball
                             readonly property var gr: root.g0.paperballRoll
                             ball: true; rollR: gb.radius; turns: gr.turns
-                            visible: !root.chatUnrolled && openNote.t === 0
-                            tip: "CHAT"
+                            visible: !root.paperOpen && openNote.t === 0
+                            tip: "RESEARCH"
                             shape: "circle"; rad: gb.radius
                             width: 2 * rad; height: 2 * rad
                             px: chatKit.width / 2; py: chatKit.height / 2
@@ -1910,19 +2154,50 @@ Window {
                                 smooth: false
                             }
                             onTapped: {
-                                var c = mapToItem(root.contentItem, width / 2, height / 2);
-                                root.ballFrom = Qt.point(c.x, c.y);
-                                root.ballHeading = heading; root.ballRoll = roll;
-                                root.chatUnrolled = true;
+                                root.ballFrom = paperBall.mapToItem(root.contentItem, paperBall.width / 2, paperBall.height / 2);
+                                root.ballHeading = paperBall.heading;
+                                root.ballRoll = paperBall.roll;
+                                root.paperOpen = true;
                             }
                         }
                     }
                 }
                 PoppedNote { visible: root.chatOut; label: "CHAT"; win: chatWin; onDock: root.chatOut = false }
-                ResearchPanel {
-                    id: researchPanel
-                    visible: !root.researchOut
+                Row {
+                    spacing: 8
+                    Intercom {
+                        objectName: "claudeKey"
+                        width: rsCol.width - root.g0.key.w - 8   // fills the row beside PANES
+                        lit: root.claudeOpen; who: claudePanel.who
+                        tip: "talk to " + claudePanel.who + ", in its own window (Ctrl+L)"
+                        onClicked: root.claudeOpen = !root.claudeOpen
+                    }
+                    Key {
+                        objectName: "panesKey"
+                        label: "PANES"
+                        tip: "tools, draw, put a model, how the panes split"
+                        onClicked: paneMenu.openFor(root.activePane, null)
+                    }
+                }
+                // one research column: in the drawer, or written on the open paper. The popped window
+                // builds its own copy. Hidden here while either of those has it
+                Item {
+                    id: researchDock
+                    objectName: "researchDock"
                     width: parent.width
+                    height: researchPanel.parent === researchDock && researchPanel.visible ? researchPanel.implicitHeight : 0
+                    ResearchPanel {
+                        id: researchPanel
+                        objectName: "researchPanel"
+                        visible: !root.researchOut
+                        width: parent === paperResearchScroll ? paperResearchScroll.width : researchDock.width
+                        popupParent: (root.paperOpen || openNote.t > 0) ? openNote : research.floorItem
+                        states: State {
+                            name: "onPaper"
+                            when: (root.paperOpen || openNote.t > 0) && !root.researchOut
+                            ParentChange { target: researchPanel; parent: paperResearchScroll; x: 0; y: 0 }
+                        }
+                    }
                 }
                 PoppedNote { visible: root.researchOut; label: "RESEARCH"; win: researchWin; onDock: root.researchOut = false }
             }
@@ -1939,10 +2214,30 @@ Window {
         openY: shutY
         // look again at what the drawing tool has made since the drawer was last open
         onIsOpenChanged: if (isOpen) host.refreshTools()
+        // the drawer is deeper than the chest's window on it: the wheel runs down the rest
+        Flickable {
+            id: toolScroll
+            objectName: "toolScroll"
+            anchors.fill: parent; anchors.margins: 6; anchors.topMargin: 14
+            anchors.leftMargin: root.tuck - tools.g.floorX + 8
+            clip: true
+            contentWidth: width
+            contentHeight: toolFloor.height
+            interactive: false
+            boundsBehavior: Flickable.StopAtBounds
+            WheelHandler {
+                onWheel: function (e) {
+                    if (rolodex.hovered) return
+                    var span = Math.max(0, toolScroll.contentHeight - toolScroll.height)
+                    toolScroll.contentY = Math.max(0, Math.min(span, toolScroll.contentY - e.angleDelta.y))
+                }
+            }
         Item {
             id: toolFloor
-            anchors.fill: parent; anchors.margins: 6; anchors.topMargin: 14
-            anchors.leftMargin: root.tuck - tools.g.floorX + 8      // clear of the chest edge
+            width: toolScroll.width
+            height: Math.max(toolScroll.height,
+                (toolWheel.shown || toolCard.open) ? toolWheel.y + toolWheel.height + 24
+                                                   : modelFolder.y + modelFolder.height + 16)
 
             // ---- the drawing kit: the pencil, lying loose in the drawer
             Tape { x: 6; y: -6; z: 20; text: "DRAWING" }
@@ -1974,8 +2269,102 @@ Window {
                         source: root.art + "pencil3d_" + pencil3d.pad2(pencil3d.turnFrame) + "_" + pencil3d.pad2(pencil3d.rollFrame(pencil3d.gp.frames)) + ".png"
                         smooth: false
                     }
-                    tip: host.drawingOpen ? "DRAW: the drawing tool is up" : "DRAW: click to open the drawing tool"
-                    onTapped: { hop(); host.openDrawingTool() }
+                    tip: sketchCarousel.open ? "SKETCH: pick a starting tool from the carousel" : "SKETCH: click for the starting tools"
+                    onTapped: { hop(); sketchCarousel.open = !sketchCarousel.open }
+                }
+            }
+
+            // ---- the rolodex: its spindle runs up the drawer, the cards turn sideways. Drag left to
+            // flip the next one over, the wheel does the same, and a click uses the card lying flat on the right.
+            Tape { x: 6; y: rolodex.y - 24; z: 20; text: "ROLODEX"; visible: rolodex.visible }
+            Item {
+                id: rolodex
+                objectName: "rolodex"
+                readonly property var gr: root.g0.rolodex
+                readonly property int frames: gr && gr.frames ? gr.frames : 1
+                readonly property int cards: gr && gr.cards ? gr.cards : 1
+                property real ang: 0
+                property int picked: 0
+                property bool hovered: false
+                readonly property int frame: { var n = frames, f = Math.round(ang / (2 * Math.PI / n)) % n; return f < 0 ? f + n : f }
+                readonly property int card: { var n = cards, f = Math.round(ang / (2 * Math.PI / n)) % n; return f < 0 ? f + n : f }
+                function pad2(n) { return (n < 10 ? "0" : "") + n }
+                function labelAt(i) {
+                    var names = ["DRAW", "WHEEL", "FILES", "MODEL", "FACE", "A", "B", "C", "D", "E", "F", "G"]
+                    var d = host.drawings
+                    if (i >= 5 && d && i - 5 < d.length && d[i - 5].name) return ("" + d[i - 5].name).toUpperCase()
+                    return i < names.length ? names[i] : ""
+                }
+                function pick() {
+                    picked = card
+                    var d = host.drawings
+                    if (card >= 5 && d && card - 5 < d.length) { host.openDrawingFile(d[card - 5].path); return }
+                    if (card === 0) host.openDrawingTool()
+                    else if (card === 1) { toolWheel.manual = !toolWheel.manual; if (toolWheel.manual) tools.setOpen(true) }
+                    else if (card === 2) host.openDrawingsFolder()
+                    else if (card === 3) folderView.open = !folderView.open
+                    else if (card === 4) host.faceOpen(host.facePane === root.activePane ? 0 : root.activePane)
+                    else host.say("ROLODEX " + labelAt(card))
+                }
+                function nudge(dir) {
+                    settleAnim.stop()
+                    var step = 2 * Math.PI / cards
+                    settleAnim.to = Math.round(ang / step) * step + dir * step
+                    settleAnim.start()
+                }
+                function settle() {
+                    var step = 2 * Math.PI / cards
+                    settleAnim.to = Math.round(ang / step) * step
+                    settleAnim.start()
+                }
+                visible: !!gr
+                x: Math.round((toolFloor.width - width) / 2)
+                y: kit.y + kit.height + 30
+                width: gr ? gr.w : 0
+                height: gr ? gr.h : 0
+                NumberAnimation {
+                    id: settleAnim; target: rolodex; property: "ang"; duration: 140; easing.type: Easing.OutCubic
+                    onFinished: rolodex.picked = rolodex.card
+                }
+                Image { anchors.fill: parent; source: root.art + "rolodex_" + rolodex.pad2(rolodex.frame) + ".png"; smooth: false }
+                Px {
+                    visible: rolodex.gr && rolodex.gr.labelW > 0
+                    x: rolodex.gr ? rolodex.gr.labelX + 6 : 0
+                    y: rolodex.gr ? rolodex.gr.labelY + Math.max(0, (rolodex.gr.labelH - height) / 2) : 0
+                    maxWidth: rolodex.gr ? Math.max(0, rolodex.gr.labelW - 12) : 0
+                    maxLines: 1; size: 6
+                    text: rolodex.labelAt(rolodex.card)
+                    color: root.ink
+                }
+                Rectangle {
+                    visible: rolodex.gr && rolodex.gr.labelW > 0 && rolodex.picked === rolodex.card && !roloMouse.pressed
+                    x: rolodex.gr ? rolodex.gr.labelX : 0; y: rolodex.gr ? rolodex.gr.labelY : 0
+                    width: rolodex.gr ? rolodex.gr.labelW : 0; height: rolodex.gr ? rolodex.gr.labelH : 0
+                    color: "transparent"; border.color: root.amber; border.width: 2
+                }
+                MouseArea {
+                    id: roloMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    preventStealing: true
+                    cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                    property real y0: 0
+                    property real ang0: 0
+                    property bool dragged: false
+                    onContainsMouseChanged: rolodex.hovered = containsMouse
+                    onPressed: function (m) { settleAnim.stop(); y0 = m.y; ang0 = rolodex.ang; dragged = false }
+                    onPositionChanged: function (m) {
+                        if (Math.abs(m.y - y0) > 5) dragged = true
+                        if (dragged) rolodex.ang = ang0 - (m.y - y0) / 26
+                    }
+                    onReleased: { if (dragged) rolodex.settle(); else rolodex.pick(); dragged = false }
+                    onCanceled: { if (dragged) rolodex.settle(); dragged = false }
+                }
+                WheelHandler {
+                    onWheel: function (e) {
+                        rolodex.nudge(e.angleDelta.y > 0 ? -1 : 1)
+                        e.accepted = true
+                    }
                 }
             }
 
@@ -1994,11 +2383,17 @@ Window {
                 objectName: "liveBuild"
                 property real open: runCtl.live ? 1 : 0
                 Behavior on open { NumberAnimation { duration: 360; easing.type: Easing.OutQuad } }
-                y: kit.y + kit.height + 22
+                y: (rolodex.visible ? rolodex.y + rolodex.height + 8 : kit.y + kit.height) + 22
                 width: toolFloor.width
                 height: Math.round(76 * open / 2) * 2
                 visible: open > 0.01
-                Tape { x: 6; y: -6; z: 2; text: runCtl.live ? "LIVE BUILD  REV " + runCtl.lr.latestRevision : "LIVE BUILD"; opacity: liveRow.open }
+                Tape {
+                    x: 6; y: -6; z: 2; opacity: liveRow.open
+                    text: !runCtl.live ? "LIVE BUILD"
+                          : (runCtl.lr.watch && runCtl.lr.watch.line
+                             ? "LIVE BUILD  " + runCtl.lr.watch.line + "/" + runCtl.lr.watch.total
+                             : "LIVE BUILD  REV " + runCtl.lr.latestRevision)
+                }
                 Image {                                  // lit while building, blinks while paused
                     x: toolFloor.width - 22; y: 2; opacity: liveRow.open
                     source: root.art + (runCtl.live && (!runCtl.paused || root.blinkOn) ? "lamp_on.png" : "lamp_off.png"); smooth: false
@@ -2008,18 +2403,27 @@ Window {
                     { label: ">|", tip: runCtl.paused ? "STEP: one change, then hold" : "STEP: pause first, then step", dim: !runCtl.paused, act: "step" },
                     { label: runCtl.lr.pace > 0 ? runCtl.lr.pace + "S" : "N", tip: "PACE: seconds between changes, click for the next", act: "pace" },
                     { label: "[]", tip: "STOP: end the run, keep the model", act: "stop" },
-                    { label: "EYE", tip: host.watchedRun === runCtl.dir ? "SHOW: this run is in the viewport" : "SHOW: put this run in the viewport", lit: host.watchedRun !== runCtl.dir, act: "show" }
+                    { label: "EYE", tip: host.watchedRun === runCtl.dir ? "SHOW: this run is in the viewport" : "SHOW: put this run in the viewport", lit: host.watchedRun !== runCtl.dir, act: "show" },
+                    { label: "NOTE", tip: (runCtl.lr.watch && runCtl.lr.watch.line ? "line " + runCtl.lr.watch.line + "/" + runCtl.lr.watch.total + " - " : "") + "the build note: the line, the part, the error, the steps", act: "note" }
                 ]
+                readonly property int keyCount: liveKeyRepeater.count
+                readonly property string noteProbe: {
+                    var s = "";
+                    for (var i = 0; i < keys.length; i++) s += keys[i].label + "/" + keys[i].act + ";";
+                    return s;
+                }
                 function run(k) {
                     if (k.act === "pause") host.togglePause(runCtl.dir);
                     else if (k.act === "step") { if (runCtl.paused) host.stepRun(runCtl.dir) }
                     else if (k.act === "pace") host.cyclePace(runCtl.dir);
                     else if (k.act === "stop") host.stopResearch(runCtl.dir);
                     else if (k.act === "show") host.watchRun(runCtl.dir);
+                    else if (k.act === "note") root.toggleBuildNote(runCtl.dir, root.activePane, null);
                 }
                 Row {
                     x: 4; y: 26; spacing: Math.max(0, Math.floor((toolFloor.width - 8 - liveRow.keys.length * root.g0.keyS.w) / (liveRow.keys.length - 1)))
                     Repeater {                           // each key pops up a beat after the last
+                        id: liveKeyRepeater
                         model: liveRow.keys
                         Item {
                             id: lk
@@ -2029,6 +2433,7 @@ Window {
                             width: kk.width; height: kk.height
                             Key {
                                 id: kk
+                                objectName: label === "NOTE" ? "liveNote" : ""
                                 small: true
                                 y: Math.round((1 - lk.t) * 24 / 2) * 2
                                 opacity: lk.t * (lk.modelData.dim ? 0.45 : 1)
@@ -2049,7 +2454,7 @@ Window {
                 x: toolFloor.width - width - 4; y: modelFolder.y - 36; z: 20
                 label: "WHEEL"; lamp: true; lit: toolWheel.manual || toolCard.open || materialRing.open
                 tip: toolWheel.manual ? "WHEEL: put it away" : "WHEEL: pick a tool and use it on the model"
-                onClicked: toolWheel.manual = !toolWheel.manual
+                onClicked: { toolWheel.manual = !toolWheel.manual; if (toolWheel.manual) tools.setOpen(true) }
             }
             Item {
                 id: modelFolder
@@ -2064,9 +2469,9 @@ Window {
                 function slipX(w) { return gf.pocketX + Math.round((gf.pocketW - w) / 2) }
                 function slipTop(h) { return gf.pocketY - h - 6 }
                 x: Math.round((toolFloor.width - gf.w) / 4) * 2
-                y: liveRow.y + liveRow.height + (liveRow.visible ? 22 : 0) + 58 + Math.round(bump)
+                y: camStrip.y + camStrip.height + (replayStrip.visible ? replayStrip.height + 8 : 0) + 36 + Math.round(bump)
                 width: gf.w; height: gf.h
-                Image { source: root.art + "modelfolder_back.png"; smooth: false }
+                Image { source: root.enamel("modelfolder_back.png"); smooth: false }
                 Item {                                  // clipped at the folder's foot: the slip never shows below it
                     width: modelFolder.width; height: modelFolder.gf.pocketY + modelFolder.gf.pocketH
                     clip: true
@@ -2170,7 +2575,7 @@ Window {
                     width: modelFolder.width; height: modelFolder.height
                     clip: true                          // it goes down behind the folder's foot
                     Image {
-                        source: root.art + "modelfolder_cover.png"; smooth: false
+                        source: root.enamel("modelfolder_cover.png"); smooth: false
                         y: Math.round(folderView.rise * (modelFolder.height - modelFolder.gf.pocketY - folderView.lip) / 2) * 2
                     }
                 }
@@ -2187,6 +2592,7 @@ Window {
                     NumberAnimation { target: modelFolder; property: "bump"; to: 0; duration: 240; easing.type: Easing.OutBounce }
                 }
             }
+        }
         }
     }
 
@@ -2925,7 +3331,7 @@ Window {
         onDocked: root.chatOut = false
         Loader {
             id: chatWinLoader
-            anchors.fill: parent; anchors.margins: 16; anchors.topMargin: 22
+            anchors.fill: parent; anchors.margins: 10; anchors.topMargin: 12
             active: chatWin.visible
             sourceComponent: ChatPanel {
                 tag: "chatWindow"; popped: true
@@ -2941,7 +3347,7 @@ Window {
         onDocked: root.researchOut = false
         Flickable {
             id: researchWinScroll
-            anchors.fill: parent; anchors.margins: 16; anchors.topMargin: 22
+            anchors.fill: parent; anchors.margins: 10; anchors.topMargin: 12
             contentHeight: researchWinLoader.height + 12
             boundsBehavior: Flickable.StopAtBounds
             clip: true
@@ -3043,40 +3449,47 @@ Window {
                 if (host.subMode === "body") root.camCmd(1, "frame");
             }
             onWheel: function (w) { if (viewFly.on) viewFly.wheel(w); else root.camCmd(1, "zoom " + (w.angleDelta.y > 0 ? 0.9 : 1.1)) }
+            // a face tool just took the view out of body mode: light whatever is already under the cursor
+            Connections {
+                target: host
+                function onSubSelectionChanged() {
+                    if (host.subMode === "body" || viewMouse.pressed) return
+                    Qt.callLater(function() {
+                        if (host.subMode !== "body" && viewMouse.containsMouse && !viewMouse.pressed)
+                            host.subHover(viewMouse.mouseX, viewMouse.mouseY)
+                    })
+                }
+            }
         }
         FlyStrip { fly: viewFly; z: 5 }
         PaneHeader {
-            visible: root.layoutN > 1; n: 1
+            n: 1
             who: host.watchedRun ? host.runWho(host.watchedRun) : ""
             owner: host.p1Owner
             what: host.watchedRun ? host.runScript(host.watchedRun) : ""
             state: host.replay && host.replay.dir ? "REPLAY" : root.p1Run ? (root.p1Run.paused ? "PAUSED" : "LIVE  REV " + root.p1Run.latestRevision) : ""
         }
         ReplayStrip {
+            id: replayStrip
             objectName: "replayStrip"
-            x: 12; y: root.layoutN > 1 ? 28 : 12; width: view.width - 24
+            parent: toolFloor
+            x: 4; y: camStrip.y + camStrip.height + 6
+            width: Math.max(80, toolFloor.width - 12)
         }
         RunBar {
             id: p1RunBar
             objectName: "p1RunBar"
             run: host.replay && host.replay.dir ? null : root.p1Run
-            x: 12; y: root.layoutN > 1 ? 28 : 12
-        }
-        WatchPanel {
-            objectName: "watchPanel1"
-            run: host.replay && host.replay.dir ? null : root.p1Run
-            x: 12; y: p1RunBar.visible ? p1RunBar.y + p1RunBar.height + 4 : p1RunBar.y
-            width: Math.min(view.width - 24, 480)
-            room: camStrip.y - y - 8
-            onPick: function (rev) { host.replayAt(root.p1Run.dir, rev) }
+            x: 12; y: 28
         }
         // ---- pick mode (keys 1-4 on the view) and what's picked, s&box style: tiny, top right, out of the way
         Column {
             id: subLabel
             objectName: "subSelLabel"
             property string tip: ""
-            anchors.right: parent.right; anchors.rightMargin: 12
-            y: 12 + (benchError.opacity > 0 ? benchError.height + 6 : 0)
+            parent: toolFloor
+            anchors.right: parent.right; anchors.rightMargin: 8
+            y: liveRow.y + liveRow.height + 8
             spacing: 3
             opacity: host.subMode !== "body" || subModeHover.hovered ? 0.95 : 0.35
             Behavior on opacity { NumberAnimation { duration: 150 } }
@@ -3129,9 +3542,10 @@ Window {
         Item {
             id: camStrip
             objectName: "cameraKeys"
-            x: 12; y: view.height - height - 10
-            width: camCol.width; height: camCol.height
-            opacity: camHover.hovered ? 1 : 0.4
+            parent: toolFloor
+            x: 4; y: subLabel.y + subLabel.height + 6
+            width: Math.max(camCol.width, toolFloor.width - 8); height: camCol.height
+            opacity: 1
             // the run these keys hold or stop: split, only the one in this pane
             readonly property var ctl: root.layoutN > 1
                 ? { live: !!root.p1Run, paused: !!root.p1Run && root.p1Run.paused, dir: root.p1Run ? root.p1Run.dir : "" } : runCtl
@@ -3143,7 +3557,7 @@ Window {
                 Px { text: root.keyTip; color: root.amber; visible: camHover.hovered && root.keyTip !== "" }
                 RefPanel { visible: root.refsOpen }
                 Flow {
-                    width: view.width - 24 - (root.layoutN > 1 ? toolWheel.width * toolWheel.fit : 0)
+                    width: Math.max(80, toolFloor.width - 16)
                     spacing: 4
                     // front, side and top are flat and square on, the way their reference pictures face;
                     // side looks from -y like the kernel's side render, so a side picture is not mirrored
@@ -3201,11 +3615,10 @@ Window {
         ToolWheel {
             id: toolWheel
             objectName: "toolWheel"
-            x: view.width - width - 18; y: view.height - height - 18
-            // shrinks to fit a short viewport (at most 60% of its height), held by its bottom-right corner
-            // split: a small wheel tucked in the corner, the same size as the other panes' wheels
-            readonly property real fit: root.layoutN > 1 ? Math.max(0.25, Math.min(0.5, view.height * 0.4 / height, view.width * 0.32 / width))
-                                                          : Math.max(0.3, Math.min(1, view.height * 0.6 / height, (view.width - 36) / width))
+            parent: toolFloor
+            x: toolFloor.width - width; y: modelFolder.y + modelFolder.height + 8
+            // in the drawer, scaled to the floor. the bottom-right corner stays put
+            readonly property real fit: Math.max(0.35, Math.min(0.58, (toolFloor.width - 8) / width))
             transform: Scale { origin.x: toolWheel.width; origin.y: toolWheel.height; xScale: toolWheel.fit; yScale: toolWheel.fit }
             // in step with the viewport: the op of the revision on screen (a run, a replay, your bench);
             // with nothing on screen, the latest change of whichever run is building
@@ -3230,50 +3643,49 @@ Window {
         ToolCard {
             id: toolCard
             objectName: "toolCard"
-            x: 10; y: 10
-            maxHeight: view.height * 0.45
+            parent: toolFloor
+            x: 4; y: modelFolder.y + modelFolder.height + 8
+            maxHeight: 360
             bench: host.bench
             onApply: line => host.benchApply(line)
             onUndo: host.benchUndo()
             onKeep: host.benchKeep("")
             onWheel: { open = false; toolWheel.manual = true }
             onClosed: open = false
+            onOpenChanged: host.toolPicking(open)   // a face tool lights the face under the cursor; closing puts the old mode back
         }
         // the CLAUDE card, bottom-left over the model: Claude's replies, the tools it runs, ALLOW/DENY, PAUSE/STOP
         ClaudePanel {
             id: claudePanel
             objectName: "claudePanel"
-            x: 10; y: view.height - height - 52       // clear of the FIT / SPIN / TIME keys
-            maxHeight: Math.min(440, view.height * 0.55)
-            bigHeight: view.height - 62
+            parent: claudeWin.contentItem
+            anchors.fill: parent                // the card is the whole window: size the window, not the card
+            popupParent: claudeWin.contentItem
             open: root.claudeOpen
             onClosed: root.claudeOpen = false
             onPictureClicked: path => claudePicture.pop(path, false)
         }
-        // the FACE POSER card, top-right over the model: GMod-style flex sliders for the posed pane
+        // the FACE POSER, in its own window: flex sliders for the posed pane
         FacePoser {
             id: facePoser
             objectName: "facePoser"
-            // over the whole viewport frame (not just pane 1), on the side away from the pane it poses
-            readonly property bool onLeft: root.layoutN > 1 && host.facePane > 0 && (host.facePane - 1) % 2 === 1
-            x: -view.cell.x + (onLeft ? 10 : root.g0.view.w - width - 10); y: -view.cell.y + 10
-            maxHeight: root.g0.view.h - 20
+            parent: faceWin.contentItem
+            anchors.fill: parent                // likewise: the poser fills its window
         }
         // a picture Claude just looked at or sent you: pops large on the right (clear of the red
         // errors top-right), holds ~4 s, then shrinks away into the CLAUDE card's strip
         Item {
             id: claudePicture
             objectName: "claudePicture"
+            parent: claudeWin.contentItem
             property string path: ""
             property bool held: false                 // popped by a click: stays until clicked away
-            // clear of the CLAUDE card when there's room for it
-            readonly property real room: view.width - (claudePanel.visible ? claudePanel.x + claudePanel.width + 10 : 0) - 10
-            readonly property real bigW: Math.max(Math.min(view.width * 0.42, 520, room), Math.min(200, view.width - 20))
-            readonly property real bigH: Math.min(view.height * 0.55, 420)
+            readonly property real bigW: Math.max(160, claudeWin.width - 24)
+            readonly property real bigH: Math.max(120, claudeWin.height * 0.45)
             z: 45
             visible: path !== "" && opacity > 0
             opacity: 0
-            x: view.width - width - 10; y: 60
+            x: 8; y: 36
             width: bigW; height: bigH
             transformOrigin: Item.BottomLeft
             function pop(p, timed) {
@@ -3312,6 +3724,7 @@ Window {
         Rectangle {
             id: benchError
             objectName: "benchError"
+            parent: toolFloor
             property string shown: toolCard.problem
             onShownChanged: if (shown) { errFade.stop(); opacity = 0.94; errFade.start() } else opacity = 0
             visible: shown !== "" && opacity > 0
@@ -3322,8 +3735,8 @@ Window {
                 PauseAnimation { duration: 6000 }
                 NumberAnimation { target: benchError; property: "opacity"; to: 0; duration: 900 }
             }
-            anchors.top: parent.top; anchors.right: parent.right; anchors.margins: 10
-            width: Math.min(420, view.width * 0.42); height: errText.implicitHeight + 16
+            anchors.top: parent.top; anchors.right: parent.right; anchors.margins: 6
+            width: Math.min(420, Math.max(80, toolFloor.width - 12)); height: errText.implicitHeight + 16
             radius: 4; color: "#2a0f0c"; border.color: "#e0604a"; border.width: 2
             Text {
                 id: errText
@@ -3338,6 +3751,7 @@ Window {
         MaterialRing {
             id: materialRing
             objectName: "materialRing"
+            parent: toolFloor
             anchors.fill: parent
             cx: toolWheel.x + toolWheel.width - toolWheel.fit * toolWheel.width / 2
             cy: toolWheel.y + toolWheel.height - toolWheel.fit * toolWheel.height / 2
@@ -3350,7 +3764,7 @@ Window {
         // status over the viewport: shows on each change, holds a moment, then fades out
         Px {
             id: viewStatus
-            visible: !root.ready && opacity > 0
+            visible: false
             anchors.centerIn: parent
             text: host.status.toUpperCase(); color: root.amber
             Connections {
@@ -3364,6 +3778,20 @@ Window {
                 PauseAnimation { duration: 2500 }
                 NumberAnimation { target: viewStatus; property: "opacity"; to: 0; duration: 800 }
             }
+        }
+    }
+    // the pencil's carousel: the starting tools fanned along the bottom of the viewport
+    SketchCarousel {
+        id: sketchCarousel
+        objectName: "sketchCarousel"
+        // over the whole viewport area, whatever split or solo is up
+        x: root.cabX + root.g0.view.x; y: root.cabY + root.g0.view.y
+        width: root.g0.view.w; height: root.g0.view.h
+        z: 6
+        onPicked: (key, label) => {
+            toolWheel.manual = false
+            materialRing.open = false
+            toolCard.label = label; toolCard.open = true; host.benchDescribe(key)
         }
     }
     // pane 1 in a split view: the selected-pane edge, and the glow when a dragged run is over it
@@ -3382,7 +3810,7 @@ Window {
     // ---- the chest, over the viewport's edges ----------------------------------------------
     Image {
         x: root.cabX; y: root.cabY
-        source: root.art + "frame.png"; smooth: false
+        source: root.enamel("frame.png"); smooth: false
     }
     Plate {
         text: "RESEARCH"; vertical: true; drawer: research
@@ -3400,9 +3828,9 @@ Window {
         y: root.cabY + root.frameH - root.g0.frame.border + (root.g0.frame.border - height) / 2
     }
 
-    // ---- the chat note, open: the paper ball flies out of the drawer onto the viewport and opens out
-    // flat (the unfold frames baked from model/paperball); click the paper round the chat to crumple
-    // it back up and toss it home
+    // ---- the research note, open: the paper ball flies out of the drawer and opens flat (the unfold
+    // frames baked from model/paperball). The one research column is written on it. Click the paper
+    // around it, or X, and it crumples and the column goes back in the drawer. Claude stays its own window
     property point ballFrom: Qt.point(cabX, cabY + frameH / 2)    // where the ball was when it was tapped
     property real ballHeading: 0                                     // and how it lay
     property real ballRoll: 0
@@ -3410,7 +3838,7 @@ Window {
         id: openNote
         objectName: "openNote"
         readonly property var gp: root.g0.paperball
-        property real t: root.chatUnrolled ? 1 : 0
+        property real t: root.paperOpen ? 1 : 0
         Behavior on t { NumberAnimation { duration: 820; easing.type: Easing.InOutSine } }
         readonly property real fly: Math.min(1, t / 0.3)          // the toss, then the unfolding
         readonly property real unfold: Math.max(0, (t - 0.3) / 0.7)
@@ -3468,18 +3896,95 @@ Window {
                     grab = p;
                 }
                 onReleased: if (moved) root.maskLater()
-                onClicked: if (!moved) root.chatUnrolled = false
+                onClicked: if (!moved) root.paperOpen = false
             }
-            ChatPanel {
-                id: chatPanel
-                tag: "chatNote"; bare: true; popped: true
-                closable: true
-                onClosed: root.chatUnrolled = false
-                popupParent: openNote
-                width: parent.width - 36; height: parent.height - 36
-                x: 18; y: 18
+            Flickable {
+                id: paperResearchScroll
+                objectName: "paperResearchScroll"
+                x: 8; y: 8
+                width: parent.width - 16; height: parent.height - 16
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                contentHeight: researchPanel.parent === paperResearchScroll ? researchPanel.implicitHeight : 0
                 opacity: Math.max(0, (openNote.unfold - 0.85) / 0.15)
-                enabled: openNote.t === 1
+                enabled: openNote.t === 1 && !root.researchOut
+                interactive: contentHeight > height
+            }
+            Key {
+                objectName: "paperClose"
+                z: 5; small: true; label: "X"
+                x: parent.width - width - 2; y: -2
+                visible: openNote.unfold > 0.9
+                onClicked: root.paperOpen = false
+            }
+        }
+    }
+
+    // ---- the build note: a sheet of the chat's paper that flies out of a run bar's NOTE key and opens
+    // out over that run's pane, with the whole watch written on it. Drag it by its paper; click the paper
+    // (or x, or NOTE again) to crumple it back. A run that ends takes its note with it
+    Item {
+        id: buildNote
+        objectName: "buildNote"
+        readonly property var gp: root.g0.paperball
+        readonly property var run: root.runOf(root.buildNoteDir)
+        property var shown: null                 // the run it last showed, so it can crumple with its words on
+        onRunChanged: if (run) shown = run; else if (root.buildNoteDir) root.buildNoteDir = ""
+        property real t: root.buildNoteDir && run ? 1 : 0
+        Behavior on t { NumberAnimation { duration: 700; easing.type: Easing.InOutSine } }
+        readonly property real fly: Math.min(1, t / 0.3)
+        readonly property real unfold: Math.max(0, (t - 0.3) / 0.7)
+        readonly property int frame: Math.min(gp.frames - 1, Math.floor(unfold * gp.frames))
+        // where it lies open: over its pane, to the right of the run bar's line, until it's dragged
+        readonly property var cell: root.paneRect(root.buildNotePane)
+        property real dx: 0
+        property real dy: 0
+        onShownChanged: { dx = 0; dy = 0 }
+        // off the model: the sheet's right edge stops at the chest, over the research side
+        readonly property real homeX: Math.max(8, root.cabX - gp.sheetW - gp.sheetX - 8) + dx
+        readonly property real homeY: Math.max(8, root.cabY + 8) + dy
+        readonly property real s0: gp.ball.bodyW / gp.firstW
+        visible: t > 0
+        z: 2300
+        width: gp.w; height: gp.h
+        x: Math.round(homeX + (root.buildNoteFrom.x - homeX - width / 2) * (1 - fly))
+        y: Math.round(homeY + (root.buildNoteFrom.y - homeY - height / 2) * (1 - fly) - Math.sin(fly * Math.PI) * 50)
+        scale: s0 + (1 - s0) * fly
+        onVisibleChanged: root.maskLater()
+        onFlyChanged: if (fly === 1 && visible) root.maskLater()
+        Image {
+            source: root.art + "paperball_unfold_" + (buildNote.frame < 10 ? "0" : "") + buildNote.frame + ".png"
+            smooth: false
+        }
+        Item {
+            x: buildNote.gp.sheetX; y: buildNote.gp.sheetY
+            width: buildNote.gp.sheetW; height: buildNote.gp.sheetH
+            MouseArea {
+                anchors.fill: parent
+                enabled: buildNote.t === 1
+                cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                property point grab
+                property bool moved: false
+                onPressed: (m) => { grab = mapToItem(root.contentItem, m.x, m.y); moved = false }
+                onPositionChanged: (m) => {
+                    var p = mapToItem(root.contentItem, m.x, m.y), ddx = p.x - grab.x, ddy = p.y - grab.y;
+                    if (!moved && Math.hypot(ddx, ddy) < 4) return;
+                    moved = true; buildNote.dx += ddx; buildNote.dy += ddy; grab = p;
+                }
+                onReleased: if (moved) root.maskLater()
+                onClicked: if (!moved) root.buildNoteDir = ""
+            }
+            BuildSheet {
+                objectName: "buildSheet"
+                run: buildNote.shown
+                x: 18; y: 16; width: parent.width - 36; height: parent.height - 32
+                opacity: Math.max(0, (buildNote.unfold - 0.85) / 0.15)
+                enabled: buildNote.t === 1
+                onShut: root.buildNoteDir = ""
+                onPick: function (rev) {
+                    if (root.buildNotePane === 1) host.replayAt(run.dir, rev);
+                    else host.paneList[root.buildNotePane - 2].replayAt(run.dir, rev);
+                }
             }
         }
     }
@@ -3490,7 +3995,7 @@ Window {
         x: root.cabX - (root.g0.bar.barW - root.frameW) / 2
         y: 0
         width: root.g0.bar.w; height: root.g0.bar.h
-        Image { source: root.art + "bar.png"; smooth: false }
+        Image { source: root.enamel("bar.png"); smooth: false }
         // drag anywhere on it to move the window
         MouseArea {
             width: root.g0.bar.barW; height: root.g0.bar.barH
@@ -3505,32 +4010,10 @@ Window {
         Px {
             x: nameplate.x + nameplate.width + 18
             y: root.g0.bar.faceY + 8
-            maxWidth: faceButton.x - x - 16
+            maxWidth: buttons.x - x - 16
             maxLines: 1
             text: host.status
             color: "#2a0608"
-        }
-        // ---- VIEWPORTS: how many panes the viewport splits into. AUTO gives each live run its own
-        // pane (one run: one pane, a second joins: side by side, a third or fourth: quad) and goes back
-        // down when they finish; 1/2/4 hold the split where you put it
-        Chip {
-            id: vpButton
-            objectName: "viewportsMenu"
-            x: buttons.x - width - 14; y: root.g0.bar.faceY + 5
-            label: "VIEWPORTS " + (root.solo ? "PANE " + root.solo + " ONLY" : host.autoLayout ? "AUTO " + root.layoutN : root.layoutN + " FIXED") + (vpMenu.open ? " ^" : " v")
-            lit: vpMenu.open
-            tip: "viewport layout: AUTO (a pane per live run, empty panes fold away, a pane frees itself when its session leaves), or a fixed 1, 2 or 4"
-            onClicked: vpMenu.open = !vpMenu.open
-        }
-        // FACE: the Face Poser on the pane you last clicked (host.py face / pane N face from a script)
-        Chip {
-            id: faceButton
-            objectName: "faceButton"
-            x: vpButton.x - width - 8; y: root.g0.bar.faceY + 5
-            label: "FACE"
-            lit: host.facePane > 0
-            tip: "Face Poser: Garry's Mod-style flex sliders, presets and visemes for the model in the active pane"
-            onClicked: host.faceOpen(host.facePane > 0 ? 0 : root.activePane)
         }
         Row {
             id: buttons
@@ -3603,88 +4086,121 @@ Window {
         }
     }
 
-    // ---- the VIEWPORTS menu dropped from the lid
+    // ---- a pane's menu, dropped from its header (click "PANE n v"): make something in it, put a
+    // model in it, how the panes split, clear it. One menu for every pane: it holds which pane it is for
     MouseArea {                                  // a click anywhere else puts it away
         anchors.fill: parent; z: 2400
-        visible: vpMenu.open
-        onPressed: vpMenu.open = false
+        visible: paneMenu.open
+        onPressed: paneMenu.open = false
     }
     Rectangle {
-        id: vpMenu
-        objectName: "viewportsList"
+        id: paneMenu
+        objectName: "paneMenu"
         property bool open: false
+        property int n: 1
+        property var rows: []
         z: 2500
         visible: open
-        // placed under the button each time it opens (a mapToItem binding goes stale before layout),
-        // right edges lined up, and added to the click mask so clicks land on it, not the desktop
-        function place() {
-            var p = vpButton.mapToItem(root.contentItem, vpButton.width, vpButton.height + 4);
-            x = Math.max(4, p.x - width); y = p.y;
+        // what pane n holds now: a run (live or done), a model file, or nothing
+        function holds(n) {
+            if (n === 1) return { run: host.watchedRun, model: host.myScene ? "your scene" : "" };
+            const p = host.paneList[n - 2];
+            return p ? { run: p.runDir || "", model: p.modelPath || "" } : { run: "", model: "" };
         }
-        onOpenChanged: { if (open) place(); root.maskLater() }
-        width: 330; height: vpCol.height + 12
+        property string page: ""                 // "" the four choices, "put" the runs, "panes" the split
+        function build() {
+            const n = paneMenu.n, h = holds(n), r = [];
+            if (page === "put") {
+                r.push({ k: "back", t: "< BACK" });
+                const runs = host.runs.filter(function (x) { return !x.bench && x.latestRevision > 0 }).slice(0, 8);
+                for (const x of runs)
+                    r.push({ k: "run", dir: x.dir, live: x.status === "running", on: x.dir === h.run,
+                             t: (x.status === "running" ? "LIVE " : "") + (x.title || x.name || x.dir.split("/").pop()) });
+                if (!runs.length) r.push({ k: "", t: "no runs yet" });
+                if (h.run || (n > 1 && h.model)) r.push({ k: "clear", t: "EMPTY THIS PANE" });
+            } else if (page === "panes") {
+                r.push({ k: "back", t: "< BACK" });
+                r.push(root.solo === n ? { k: "all", t: "SHOW ALL" } : { k: "solo", t: "ONLY THIS ONE" });
+                r.push({ k: "split0", t: "AUTO", on: host.autoLayout && !root.solo });
+                r.push({ k: "split2", t: "2", on: !host.autoLayout && !root.solo && root.layoutN === 2 });
+                r.push({ k: "split4", t: "4", on: !host.autoLayout && !root.solo && root.layoutN === 4 });
+            } else {
+                r.push({ k: "tools", t: "TOOLS" });
+                r.push({ k: "draw", t: "DRAW" });
+                r.push({ k: "page:put", t: "PUT A MODEL HERE  >" });
+                r.push({ k: "page:panes", t: "PANES  >" });
+            }
+            rows = r;
+        }
+        // the edit tools work on pane 1: a model picked in another pane is moved there first
+        function toPane1() {
+            const h = holds(paneMenu.n);
+            if (paneMenu.n === 1) return;
+            if (h.run) host.showRunIn(h.run, 1); else if (h.model) host.openModel(h.model);
+        }
+        function act(row) {
+            const n = paneMenu.n;
+            if (row.k === "back") { page = ""; build(); return }
+            if (row.k.indexOf("page:") === 0) { page = row.k.slice(5); build(); return }
+            switch (row.k) {
+            case "tools": toPane1(); materialRing.open = false; toolCard.open = false; toolWheel.manual = true; break;
+            case "material": toPane1(); toolCard.open = false; materialRing.open = true; host.benchStart(); break;
+            case "draw": host.openDrawingTool(); break;
+            case "face": host.faceOpen(host.facePane === n ? 0 : n); break;
+            case "run": if (row.live) host.showRunIn(row.dir, n); else host.replayIn(row.dir, n); break;
+            case "myscene": host.setMyScene(!host.myScene); break;
+            case "all": host.setViewLayout(0); break;
+            case "solo": host.setSolo(n); break;
+            case "split0": host.setViewLayout(0); break;
+            case "split2": host.setViewLayout(2); break;
+            case "split4": host.setViewLayout(4); break;
+            case "link": host.setLinkCameras(!host.linkCameras); break;
+            case "clear": host.clearPane(n); break;
+            default: return;
+            }
+            root.activePane = n;
+            paneMenu.open = false;
+        }
+        // under the header it was dropped from, kept inside the window
+        function openFor(n, header) {
+            paneMenu.n = n; page = ""; build();
+            tools.setOpen(true);
+            x = Math.max(4, Math.min(tools.x + 24, root.width - width - 4));
+            y = Math.max(4, Math.min(tools.y + 80, root.height - height - 4));
+            open = true;
+        }
+        onOpenChanged: root.maskLater()
+        width: 230; height: pmCol.height + 12
         radius: 4; color: "#16191c"; border.color: root.amber
         Column {
-            id: vpCol
-            x: 6; y: 6; width: vpMenu.width - 12
+            id: pmCol
+            x: 6; y: 6; width: paneMenu.width - 12
             Repeater {
-                model: [
-                    { m: 0, t: "AUTO", d: "a pane per live run: grows as runs join, shrinks when they end" },
-                    { m: 2, t: "2", d: "two panes side by side" },
-                    { m: 4, t: "4", d: "four panes (quad view)" },
-                    { m: -1, t: "1: P1", d: root.soloWho(1) },
-                    { m: -2, t: "1: P2", d: root.soloWho(2) },
-                    { m: -3, t: "1: P3", d: root.soloWho(3) },
-                    { m: -4, t: "1: P4", d: root.soloWho(4) }
-                ]
+                model: paneMenu.rows
                 Rectangle {
                     required property var modelData
-                    readonly property bool on: modelData.m < 0 ? root.solo === -modelData.m
-                        : modelData.m === 0 ? host.autoLayout && !root.solo : !host.autoLayout && !root.solo && root.layoutN === modelData.m
-                    width: vpCol.width; height: 26; radius: 2
-                    color: vpRow.containsMouse ? "#3a2f12" : "transparent"
+                    readonly property bool head: !!modelData.head
+                    width: pmCol.width; height: head ? 22 : 26; radius: 2
+                    color: !head && pmRow.containsMouse && modelData.k ? "#3a2f12" : "transparent"
                     Text {
-                        x: 8; anchors.verticalCenter: parent.verticalCenter
-                        text: (parent.on ? "* " : "  ") + parent.modelData.t
-                        color: parent.on ? root.amber : root.keyText; font.family: root.mono; font.bold: true; font.pixelSize: 12
+                        x: parent.head ? 4 : 8; anchors.verticalCenter: parent.verticalCenter
+                        width: parent.width - 16; elide: Text.ElideRight
+                        text: parent.head ? parent.modelData.head : (parent.modelData.on ? "* " : "  ") + parent.modelData.t
+                        color: parent.head ? "#8a8f96" : parent.modelData.on ? root.amber : parent.modelData.k ? root.keyText : "#6b6f75"
+                        font.family: root.mono; font.bold: true; font.pixelSize: parent.head ? 10 : 12
                     }
                     Text {
-                        x: 70; width: parent.width - 76; anchors.verticalCenter: parent.verticalCenter; elide: Text.ElideRight
-                        text: parent.modelData.d; color: "#8a8f96"; font.family: root.mono; font.pixelSize: 11
+                        visible: !parent.head && !!parent.modelData.d
+                        x: 164; width: parent.width - x - 6; anchors.verticalCenter: parent.verticalCenter; elide: Text.ElideRight
+                        text: parent.modelData.d || ""; color: "#8a8f96"; font.family: root.mono; font.pixelSize: 11
                     }
-                    MouseArea { id: vpRow; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: { if (parent.modelData.m < 0) host.setSolo(-parent.modelData.m); else host.setViewLayout(parent.modelData.m); vpMenu.open = false } }
+                    Rectangle { visible: parent.head; x: 4; y: 0; width: parent.width - 8; height: 1; color: "#3a3f45" }
+                    MouseArea {
+                        id: pmRow; anchors.fill: parent; enabled: !parent.head
+                        hoverEnabled: true; cursorShape: parent.modelData.k ? Qt.PointingHandCursor : Qt.ArrowCursor
+                        onClicked: paneMenu.act(parent.modelData)
+                    }
                 }
-            }
-            Rectangle { width: vpCol.width; height: 1; color: "#3a3f45" }
-            Rectangle {
-                objectName: "myScene"
-                width: vpCol.width; height: 26; radius: 2
-                color: msRow.containsMouse ? "#3a2f12" : "transparent"
-                Text {
-                    x: 8; anchors.verticalCenter: parent.verticalCenter
-                    text: (host.myScene ? "[x] " : "[ ] ") + "MY SCENE"
-                    color: host.myScene ? root.amber : root.keyText; font.family: root.mono; font.bold: true; font.pixelSize: 12
-                }
-                Text {
-                    anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter
-                    text: host.myScene ? "pane 1 is yours: runs stay out" : "pane 1 open to any run"
-                    color: "#8a8f96"; font.family: root.mono; font.pixelSize: 11
-                }
-                MouseArea { id: msRow; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: host.setMyScene(!host.myScene) }
-            }
-            Rectangle {
-                width: vpCol.width; height: 26; radius: 2
-                color: lcRow.containsMouse ? "#3a2f12" : "transparent"
-                Text {
-                    x: 8; anchors.verticalCenter: parent.verticalCenter
-                    text: (host.linkCameras ? "[x] " : "[ ] ") + "LINK CAMERAS"
-                    color: host.linkCameras ? root.amber : root.keyText; font.family: root.mono; font.bold: true; font.pixelSize: 12
-                }
-                Text {
-                    anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter
-                    text: "one camera turns all"; color: "#8a8f96"; font.family: root.mono; font.pixelSize: 11
-                }
-                MouseArea { id: lcRow; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: host.setLinkCameras(!host.linkCameras) }
             }
         }
     }
@@ -3795,14 +4311,40 @@ Window {
 
     // ---- a research run's model sheet over the viewport (click its book; click again or X to shut)
     property string sheetDir: ""
+    PopWindow {
+        id: sheetWin
+        objectName: "sheetWin"
+        title: "Geppetto: sheet"
+        width: 720; height: 820
+        out: root.sheetDir !== ""
+        onDocked: root.sheetDir = ""
+    }
+    PopWindow {
+        id: claudeWin
+        objectName: "claudeWin"
+        title: "Geppetto: " + claudePanel.who
+        width: claudePanel.big ? 600 : 420
+        height: 680
+        out: root.claudeOpen
+        onDocked: root.claudeOpen = false
+    }
+    PopWindow {
+        id: faceWin
+        objectName: "faceWin"
+        title: "Geppetto: face"
+        width: 380; height: 680
+        out: host.facePane > 0
+        onDocked: if (host.facePane > 0) host.faceOpen(0)
+    }
     Rectangle {
         id: sheetPanel
         objectName: "sheetPanel"
+        parent: sheetWin.contentItem
         readonly property var run: root.runOf(root.sheetDir)
         z: 2850
         visible: run !== null
-        x: root.cabX + root.g0.view.x + 8; y: root.cabY + root.g0.view.y + 8
-        width: root.g0.view.w - 16; height: root.g0.view.h - 16
+        x: 0; y: 0
+        width: sheetWin.width; height: sheetWin.height
         color: "#e8eddc"; border.width: 3; border.color: "#1d2318"
         Flickable {
             id: sheetFlick
@@ -3865,6 +4407,54 @@ Window {
     }
 
     // ---- Space on the viewport: type to find a command (layout, link cameras, views), Enter runs it
+    // A live run the chest just put in a pane you are not in. Nobody gets moved and nobody's pane gets
+    // taken without asking: a YES/NO sheet over the viewport. YES puts the run in your pane when that pane
+    // is free, or takes you to its pane when yours is busy; NO leaves everything as it is. It goes away
+    // by itself after a while, so an unanswered question never sits over the model.
+    Item {
+        id: joinAsk
+        objectName: "joinAsk"
+        z: 2900
+        visible: false
+        property string dir: ""
+        property int pane: 0
+        property string who: ""
+        property string what: ""
+        property int mine: 1                  // the pane you are in, when the run landed
+        property bool mineBusy: false         // that pane shows a live run, a replay or your bench
+        readonly property string question: mineBusy
+            ? "It is building in pane " + pane + ". Go there?"
+            : "It is building in pane " + pane + ". Show it in your pane " + mine + " instead?"
+        x: root.cabX + root.g0.view.x + (root.g0.view.w - width) / 2; y: root.cabY + root.g0.view.y + 40
+        width: 420; height: askCol.height + 16
+        function ask(d, n) {
+            if (n === root.activePane) return                       // it landed where you are
+            let r = null; for (const x of host.runs) if (x.dir === d) r = x;
+            who = r && r.who ? r.who : "someone"; what = r ? (r.title || r.name) : d;
+            dir = d; pane = n; mine = root.activePane; mineBusy = host.paneBusy(root.activePane);
+            visible = true; askAway.restart()
+        }
+        function yes() {
+            if (mineBusy) { root.activePane = pane; if (root.solo) host.setSolo(pane) }
+            else host.showRunIn(dir, mine);
+            visible = false
+        }
+        function no() { visible = false }
+        Timer { id: askAway; interval: 45000; onTriggered: joinAsk.visible = false }
+        Rectangle { anchors.fill: parent; radius: 4; color: "#16191c"; border.color: root.amber; opacity: 0.95 }
+        Column {
+            id: askCol
+            x: 8; y: 8; width: joinAsk.width - 16; spacing: 6
+            Px { objectName: "joinAskWho"; text: joinAsk.who.toUpperCase() + " started: " + joinAsk.what; color: root.amber; maxWidth: askCol.width; maxLines: 2 }
+            Px { objectName: "joinAskText"; text: joinAsk.question; color: root.keyText; bold: false; maxWidth: askCol.width; maxLines: 2 }
+            Row {
+                spacing: 8
+                Key { objectName: "joinAskYes"; label: "YES"; lamp: true; lit: true; tip: joinAsk.mineBusy ? "select that pane" : "put the run in your pane"; onClicked: joinAsk.yes() }
+                Key { objectName: "joinAskNo"; label: "NO"; tip: "leave it where it is"; onClicked: joinAsk.no() }
+            }
+        }
+    }
+    Connections { target: host; function onRunLanded(d, n) { joinAsk.ask(d, n) } }
     Item {
         id: palette
         objectName: "commandPalette"
@@ -3886,6 +4476,8 @@ Window {
             { t: "Three-quarter view", k: "camera 3/4 three quarter perspective view", f: function () { root.camCmd(root.activePane, "view 35 18"); root.camCmd(root.activePane, "ortho 0") } }
         ].concat(host.runs.filter(function (r) { return !!r.sheet }).map(function (r) {   // every researched run's model sheet
             return { t: "Model sheet: " + r.sheet.object, k: "sheet model research reference sizes dimensions colours photos " + (r.prompt || ""), f: function () { root.sheetDir = r.dir } }
+        })).concat(Schemes.NAMES.map(function (n) {                                       // the chest's enamel colour
+            return { t: "Colour scheme: " + n + (n === root.scheme ? "  (now)" : ""), k: "colour color scheme theme enamel paint chest " + n, f: function () { host.setScheme(n) } }
         }))
         property var hits: all
         property int pick: 0

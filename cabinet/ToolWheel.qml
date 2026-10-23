@@ -135,13 +135,8 @@ Item {
     // would run behind the model); the same tool again presses in and the line moves on
     onOpChanged: {
         if (manual) return;                     // opened by hand: it's yours, the run's tools wait
-        if (op === "") { stepper.stop(); shown = false; return; }   // the model left the screen: so does the wheel
-        const p = parse(op);
-        if (!p) return;
-        const g = groupOf(p.key);
-        info = p; shown = true;
-        litGroup = g; openGroup = g;
-        if (tool === p.key) stroke(); else tool = p.key;   // a new tool strokes from onToolChanged
+        // the run's tool stays off the model. the wheel lives in the tools drawer, and only when opened
+        shown = false;
     }
     // each change: the core presses in, and the wheel stays up `hold` ms past the last one
     signal stroke()

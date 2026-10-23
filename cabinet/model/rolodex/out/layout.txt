@@ -1,0 +1,2 @@
+# part	model	pivot x	y	z	size x	y	z
+rolodex	./rolodex.vmdl	0	-0.041	0.105	6.36	4.954	5.824

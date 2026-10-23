@@ -81,6 +81,7 @@ class ClaudeLink:
         self.state_path = state_path
         self.cwd = cwd
         self.messages = []          # {"role": "you"|"claude"|"tool"|"note"|"ask", "text": ..., ...}
+        self.model = ""             # the Claude model (opus, sonnet, haiku); "" = the CLI's default
         self.status = "idle"        # idle | starting | working | paused | stopped | offline
         self.ask = None             # the permission question waiting on you: {"id", "tool", "text"}
         self.session = self._load().get("session", "")
@@ -143,6 +144,7 @@ class ClaudeLink:
                 "--permission-mode", "auto", "--permission-prompt-tool", "stdio",
                 "--append-system-prompt", PROMPT, "-n", "Geppetto chest"]
         args += ["--resume", self.session] if self.session else []
+        args += ["--model", self.model] if self.model else []
         env = dict(os.environ)
         for name in [k for k in env if k.startswith(("CLAUDE_CODE_", "CLAUDECODE"))]:
             env.pop(name)       # a chest started from inside a Claude session must not look like its child
@@ -359,6 +361,17 @@ class ClaudeLink:
                 except (OSError, ValueError):
                     pass
         self._set("working" if paused and self.proc is not None else ("idle" if paused else "paused"))
+
+    def set_model(self, model):
+        """Switch Claude models: the running process goes, the conversation stays (the next message
+        resumes the same session on the new model)."""
+        model = model or ""
+        if model == self.model:
+            return
+        self.model = model
+        if self.proc is not None:
+            self.close()
+            self._set("idle")
 
     def fresh(self):
         """NEW: forget this conversation; the next message starts another session."""

@@ -134,6 +134,67 @@ class SubSelectionHostTests(unittest.TestCase):
             time.sleep(0.005)
         self.assertEqual(self.sent, ["hover 5 5", "hover 7 5"])   # the last one still arrives
 
+    def bench_feed(self, ev):
+        """the bench printing @{json}: the describe reply, parsed by the same path as the real bench"""
+        p = FakeProc(self.host)
+        p.pending = b"@" + json.dumps(ev).encode() + b"\n"
+        self.host.bench_proc = p
+        self.host._bench_output(p)
+
+    def test_a_face_tool_lights_faces_and_a_body_tool_puts_the_mode_back(self):
+        self.host.toolPicking(True)
+        self.bench_feed({"ev": "describe", "key": "sketch", "kind": "add", "accepts": ["face"]})
+        self.assertEqual(self.host.subMode, "face")
+        self.assertEqual(self.sent, ["selmode face"])
+        self.sent.clear()
+        # the same kind of pick again must not re-send selmode: that would wipe the faces already picked
+        self.bench_feed({"ev": "describe", "key": "plane", "kind": "add", "accepts": ["face"]})
+        self.assertEqual(self.sent, [])
+        self.assertEqual(self.host.subMode, "face")
+        # fillet takes a face (its rim is the edge). The face under the cursor is what lights.
+        self.bench_feed({"ev": "describe", "key": "fillet", "kind": "add", "accepts": ["face", "edge", "body"]})
+        self.assertEqual(self.sent, [])
+        self.assertEqual(self.host.subMode, "face")
+        self.bench_feed({"ev": "describe", "key": "primitive", "kind": "add", "accepts": ["body"]})
+        self.assertEqual(self.host.subMode, "body")
+        self.assertEqual(self.sent, ["selmode body"])
+
+    def test_an_edge_only_tool_lights_edges(self):
+        self.host.toolPicking(True)
+        self.bench_feed({"ev": "describe", "key": "rim", "kind": "add", "accepts": ["edge"]})
+        self.assertEqual(self.host.subMode, "edge")
+        self.assertEqual(self.sent, ["selmode edge"])
+
+    def test_describe_with_the_card_shut_does_not_change_the_mode(self):
+        self.bench_feed({"ev": "describe", "key": "sketch", "kind": "add", "accepts": ["face"]})
+        self.assertEqual(self.host.subMode, "body")
+        self.assertEqual(self.sent, [])
+
+    def test_closing_the_card_restores_the_mode_unless_the_user_picked_one(self):
+        self.host.setSelMode("edge")
+        self.sent.clear()
+        self.host.toolPicking(True)
+        self.bench_feed({"ev": "describe", "key": "hole", "kind": "add", "accepts": ["face"]})
+        self.assertEqual(self.sent, ["selmode face"])
+        self.host.toolPicking(False)
+        self.assertEqual(self.host.subMode, "edge")
+        self.assertEqual(self.sent[-1], "selmode edge")
+        # they pressed 4 while the card was up: closing leaves vertex mode alone
+        self.host.toolPicking(True)
+        self.bench_feed({"ev": "describe", "key": "hole", "kind": "add", "accepts": ["face"]})
+        self.host.setSelMode("vertex")
+        self.sent.clear()
+        self.host.toolPicking(False)
+        self.assertEqual(self.sent, [])
+        self.assertEqual(self.host.subMode, "vertex")
+
+    def test_a_describe_that_arrives_after_the_card_closed_does_not_stick(self):
+        self.host.toolPicking(True)
+        self.host.toolPicking(False)
+        self.bench_feed({"ev": "describe", "key": "sketch", "kind": "add", "accepts": ["face"]})
+        self.assertEqual(self.host.subMode, "body")
+        self.assertEqual(self.sent, [])
+
     def test_clear(self):
         self.host.clearSubSelection()
         self.assertEqual(self.sent, ["selclear"])
