@@ -279,3 +279,191 @@ public sealed class SculptMask
 		return result;
 	}
 }
+
+/// <summary>
+/// Face sets: which faces belong to which sculptable region, and the selections that
+/// isolate one.
+///
+/// A face set is an <c>int[]</c>, one entry per face. It is auto-populated from whatever
+/// already partitions the mesh — <see cref="FromMaterials"/> reads <see cref="Face.Material"/>
+/// slots, so a head whose lips, eyelids and plates already live in different slots gets
+/// sets for free. Profile station ranges and MeshBranch child ids are the same shape
+/// (one int per face) and feed <see cref="MaskForSet"/> directly; there is no second
+/// representation to keep in sync.
+///
+/// Mask sense follows <see cref="SculptMask"/>: 1 means "brush me", 0 means "leave me
+/// alone". A set mask therefore keeps the stroke on the set and off everything else —
+/// a stroke on the upper jaw never pulls vertices on the lower jaw across a closed
+/// mouth seam, because the lower jaw's vertices are masked to zero.
+/// </summary>
+public static class FaceSets
+{
+	/// <summary>One set id per face, taken from the face's material slot.</summary>
+	public static int[] FromMaterials( PolyMesh mesh )
+	{
+		if ( mesh is null )
+			throw new ArgumentNullException( nameof( mesh ) );
+
+		var sets = new int[mesh.FaceCount];
+
+		for ( var f = 0; f < sets.Length; f++ )
+			sets[f] = mesh.Faces[f].Material;
+
+		return sets;
+	}
+
+	/// <summary>
+	/// Per-vertex brush mask for one set: vertices of faces in the set are 1, the rest 0.
+	///
+	/// With <paramref name="boundaryFalloff"/> rings (0 = a hard edge), vertices outside
+	/// the set but within that many rings of it get partial values decaying with distance
+	/// — ring 1 gets <c>1 - 1/(rings+1)</c>, ring 2 gets <c>1 - 2/(rings+1)</c> — so the
+	/// stroke feathers across the seam instead of stopping dead at it.
+	/// </summary>
+	public static float[] MaskForSet( PolyMesh mesh, int[] faceSets, int setId, float boundaryFalloff = 0f )
+	{
+		if ( mesh is null )
+			throw new ArgumentNullException( nameof( mesh ) );
+
+		if ( faceSets is null || faceSets.Length != mesh.FaceCount )
+			throw new ArgumentException(
+				$"Face sets need one entry per face: {faceSets?.Length ?? 0} for {mesh.FaceCount} faces." );
+
+		var mask = new float[mesh.VertexCount];
+		var inSet = new bool[mesh.VertexCount];
+
+		for ( var f = 0; f < mesh.FaceCount; f++ )
+		{
+			if ( faceSets[f] != setId )
+				continue;
+
+			foreach ( var v in mesh.Faces[f].Indices )
+				inSet[v] = true;
+		}
+
+		for ( var v = 0; v < mask.Length; v++ )
+			mask[v] = inSet[v] ? 1f : 0f;
+
+		var rings = (int)MathF.Ceiling( boundaryFalloff );
+
+		if ( rings > 0 )
+		{
+			var neighbours = mesh.BuildVertexEdges();
+			var distance = new int[mesh.VertexCount];
+			Array.Fill( distance, -1 );
+
+			for ( var v = 0; v < distance.Length; v++ )
+				if ( inSet[v] )
+					distance[v] = 0;
+
+			for ( var ring = 1; ring <= rings; ring++ )
+			{
+				for ( var v = 0; v < distance.Length; v++ )
+				{
+					if ( distance[v] != -1 )
+						continue;
+
+					foreach ( var key in neighbours[v] )
+					{
+						var other = key.A == v ? key.B : key.A;
+
+						if ( distance[other] == ring - 1 )
+						{
+							distance[v] = ring;
+							break;
+						}
+					}
+				}
+
+				for ( var v = 0; v < distance.Length; v++ )
+					if ( distance[v] == ring )
+						mask[v] = 1f - ring / (float)( rings + 1 );
+			}
+		}
+
+		return mask;
+	}
+
+	/// <summary>Write a face-set mask into a session mask, replacing what it held.</summary>
+	public static void ApplyToMask( SculptMask mask, PolyMesh mesh, int[] faceSets, int setId, float boundaryFalloff = 0f )
+	{
+		var values = MaskForSet( mesh, faceSets, setId, boundaryFalloff );
+
+		if ( mask is null || mask.Count != values.Length )
+			throw new ArgumentException( "The mask does not match this mesh's vertex count." );
+
+		for ( var v = 0; v < values.Length; v++ )
+			mask[v] = values[v];
+	}
+}
+
+/// <summary>
+/// Box and lasso selections as masks. A lasso in the kernel is a polygon on a plane —
+/// the editor projects its screen polygon onto the surface plane and hands that polygon
+/// here — because the kernel has no screen and must not learn what one is. Mask sense
+/// is the same as <see cref="SculptMask"/>: 1 inside the selection, 0 outside.
+/// </summary>
+public static class MaskSelection
+{
+	/// <summary>1 for vertices inside the axis-aligned box (inclusive), 0 outside it.</summary>
+	public static float[] Box( PolyMesh mesh, Vec3 min, Vec3 max )
+	{
+		if ( mesh is null )
+			throw new ArgumentNullException( nameof( mesh ) );
+
+		var mask = new float[mesh.VertexCount];
+
+		for ( var v = 0; v < mask.Length; v++ )
+		{
+			var p = mesh.Positions[v];
+			mask[v] = p.x >= min.x && p.x <= max.x && p.y >= min.y && p.y <= max.y && p.z >= min.z && p.z <= max.z ? 1f : 0f;
+		}
+
+		return mask;
+	}
+
+	/// <summary>
+	/// 1 for vertices whose projection onto the plane perpendicular to <paramref name="axis"/>
+	/// (0 = x, 1 = y, 2 = z) falls inside <paramref name="polygon"/>, 0 outside. Ray casting
+	/// in 2D: a point is inside when a ray from it crosses the polygon an odd number of times.
+	/// </summary>
+	public static float[] Polygon( PolyMesh mesh, Vec2[] polygon, int axis = 2 )
+	{
+		if ( mesh is null )
+			throw new ArgumentNullException( nameof( mesh ) );
+
+		if ( polygon is null || polygon.Length < 3 )
+			throw new ArgumentException( "A lasso polygon needs at least 3 points." );
+
+		var mask = new float[mesh.VertexCount];
+
+		for ( var v = 0; v < mask.Length; v++ )
+			mask[v] = Inside( Project( mesh.Positions[v], axis ), polygon ) ? 1f : 0f;
+
+		return mask;
+	}
+
+	static Vec2 Project( Vec3 p, int axis ) => axis switch
+	{
+		0 => new Vec2( p.y, p.z ),
+		1 => new Vec2( p.x, p.z ),
+		_ => new Vec2( p.x, p.y ),
+	};
+
+	static bool Inside( Vec2 point, Vec2[] polygon )
+	{
+		var inside = false;
+
+		for ( int i = 0, j = polygon.Length - 1; i < polygon.Length; j = i++ )
+		{
+			var a = polygon[i];
+			var b = polygon[j];
+
+			if ( ( a.y > point.y ) != ( b.y > point.y )
+				&& point.x < ( b.x - a.x ) * ( point.y - a.y ) / ( b.y - a.y ) + a.x )
+				inside = !inside;
+		}
+
+		return inside;
+	}
+}

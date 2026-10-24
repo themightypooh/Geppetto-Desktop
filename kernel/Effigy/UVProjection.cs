@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace Effigy;
 
@@ -119,5 +120,60 @@ public static partial class UVProjection
 		return normal.z >= 0f
 			? (new Vec3( 1, 0, 0 ), new Vec3( 0, 1, 0 ))        // cross(+X, +Y) = +Z
 			: (new Vec3( 0, 1, 0 ), new Vec3( 1, 0, 0 ));       // cross(+Y, +X) = -Z
+	}
+
+	/// <summary>
+	/// Map <paramref name="faces"/> onto one horizontal strip of a trim sheet: straps,
+	/// moldings, pipes and panel borders. U runs along the longest extent of the selected
+	/// faces (their length), at <paramref name="uScale"/> world units per UV unit, starting
+	/// at 0; V runs across the next-longest extent, normalised into
+	/// [<paramref name="vMin"/>, <paramref name="vMax"/>]. A flat strap therefore lands
+	/// exactly on one strip; a round pipe lands with its circumference as the V range,
+	/// which is the strip the trim texture's cross-section lives on. Writes UV1
+	/// (<see cref="Face.UVs"/>); UV2 is untouched.
+	/// </summary>
+	public static void TrimBand( PolyMesh mesh, IReadOnlyList<int> faces, float vMin, float vMax, float uScale )
+	{
+		if ( mesh is null )
+			throw new ArgumentNullException( nameof( mesh ) );
+		if ( faces is null || faces.Count == 0 )
+			throw new ArgumentException( "TrimBand needs at least one face.", nameof( faces ) );
+		if ( uScale <= 0f || !float.IsFinite( uScale ) )
+			throw new InvalidOperationException( "Trim uScale must be positive: world units per UV unit." );
+		if ( vMax < vMin )
+			throw new InvalidOperationException( "Trim vMax must not be below vMin." );
+
+		// Length axis = longest bounding-box axis of the selected faces' vertices; width
+		// axis = the next longest. Ties resolve X, then Y, then Z, deterministically.
+		var min = new Vec3( float.MaxValue, float.MaxValue, float.MaxValue );
+		var max = new Vec3( float.MinValue, float.MinValue, float.MinValue );
+		foreach ( var fi in faces )
+		{
+			if ( fi < 0 || fi >= mesh.FaceCount )
+				throw new ArgumentOutOfRangeException( nameof( faces ) );
+			foreach ( var vi in mesh.Faces[fi].Indices )
+			{
+				var p = mesh.Positions[vi];
+				min = new Vec3( MathF.Min( min.x, p.x ), MathF.Min( min.y, p.y ), MathF.Min( min.z, p.z ) );
+				max = new Vec3( MathF.Max( max.x, p.x ), MathF.Max( max.y, p.y ), MathF.Max( max.z, p.z ) );
+			}
+		}
+		var ext = max - min;
+		var axes = new[] { (ext.x, new Vec3( 1, 0, 0 ), min.x), (ext.y, new Vec3( 0, 1, 0 ), min.y), (ext.z, new Vec3( 0, 0, 1 ), min.z ) };
+		Array.Sort( axes, ( a, b ) => b.Item1.CompareTo( a.Item1 ) );
+		var (len, lenAxis, lenMin) = axes[0];
+		var (wid, widAxis, widMin) = axes[1];
+
+		foreach ( var fi in faces )
+		{
+			var face = mesh.Faces[fi];
+			for ( var c = 0; c < face.Count; c++ )
+			{
+				var p = mesh.Positions[face.Indices[c]];
+				var u = (Vec3.Dot( p, lenAxis ) - lenMin) / uScale;
+				var t = wid > 1e-9f ? (Vec3.Dot( p, widAxis ) - widMin) / wid : 0.5f;
+				face.UVs[c] = new Vec2( u, vMin + (vMax - vMin) * t );
+			}
+		}
 	}
 }

@@ -243,6 +243,179 @@ public static class PoseSpaceCorrective
 		return new MorphDriver { Morph = morph, Bone = bone, Channel = DriverChannel.Rotation, Axis = best, Rest = 0f, Target = bestDegrees };
 	}
 
+	/// <summary>What <see cref="AutoBuild"/> produced: the baked morph, its driver, and how strained the raw pose was.</summary>
+	public sealed class AutoBuildResult
+	{
+		public MeshMorph Morph;
+		public MorphDriver Driver;
+		public int Singular;
+
+		/// <summary>Largest edge-length change (|ratio - 1|) between bind and the raw posed mesh.</summary>
+		public float MaxStrain;
+
+		/// <summary>Mean edge-length change over the mesh.</summary>
+		public float MeanStrain;
+	}
+
+	/// <summary>
+	/// Automatic joint corrective (roadmap J3): bake the morph that repairs what linear blend
+	/// skinning loses when <paramref name="boneIndex"/> turns <paramref name="angleDeg"/>
+	/// degrees about <paramref name="axis"/>.
+	///
+	/// 1. Pose the rig with <see cref="PosedFor"/> and skin the mesh raw (no morphs).
+	/// 2. Relax the raw pose: neighbour-average smoothing for
+	/// <paramref name="relaxIterations"/> passes, confined to the driven bone's influence and
+	/// scaled by it — the delta-mush idea (smooth the deformation, keep the detail), applied
+	/// as a bounded relaxation rather than a full delta-mush solve, which the kernel has no
+	/// solver for. Vertices the bone does not influence do not move at all.
+	/// 3. <see cref="Bake"/> the relaxed pose into a morph driven by the bone at this angle,
+	/// masked by the bone's influence, named <c>bone_bendANGLE</c> like
+	/// <see cref="CorrectiveMorph.Name"/>.
+	///
+	/// The mesh's own positions are not changed; the morph is added to its Morphs, and when
+	/// the mesh was not rigged its heat weights are kept as its Skin so the corrective travels
+	/// with a bind. Strain is measured directly from edge-length change (bind vs raw pose);
+	/// the roadmap's "SkinStrain.Measure" does not exist under that name (SkinStrain offers
+	/// StrainField) and FlexReport.Run is a clash/volume diagnostic, not a corrective input,
+	/// so neither is called here — that naming gap is flagged for Argon, not papered over.
+	/// </summary>
+	public static AutoBuildResult AutoBuild( PolyMesh mesh, Skeleton rig, int boneIndex, DriverAxis axis,
+		float angleDeg, int relaxIterations = 8 )
+	{
+		if ( mesh is null )
+			throw new ArgumentNullException( nameof( mesh ) );
+
+		if ( rig is null )
+			throw new ArgumentNullException( nameof( rig ) );
+
+		if ( boneIndex < 0 || boneIndex >= rig.Count )
+			throw new ArgumentOutOfRangeException( nameof( boneIndex ), $"The rig has {rig.Count} bones; {boneIndex} is not one." );
+
+		if ( MathF.Abs( angleDeg ) < 1e-6f )
+			throw new ArgumentException( "A corrective needs a non-zero angle.", nameof( angleDeg ) );
+
+		var boneName = rig.Bones[boneIndex].Name;
+		var driver = new MorphDriver { Bone = boneName, Channel = DriverChannel.Rotation, Axis = axis, Rest = 0f, Target = angleDeg };
+
+		var weights = mesh.IsRigged ? mesh.Skin : AutoWeights.Heat( mesh, rig, out _ );
+
+		if ( weights.Count != mesh.VertexCount )
+			throw new ArgumentException( $"weights ({weights.Count}) and mesh ({mesh.VertexCount}) disagree" );
+
+		if ( !mesh.IsRigged )
+			mesh.Skin = weights;
+
+		var posed = PosedFor( rig, driver, angleDeg )
+			?? throw new InvalidOperationException( $"Bone '{boneName}' cannot be posed for a corrective." );
+
+		var bindWorld = World( rig );
+		var poseWorld = World( posed );
+		var raw = SkinBinder.Deform( mesh.Positions, weights, bindWorld, poseWorld );
+		var target = Relax( raw, mesh, weights, boneIndex, relaxIterations );
+
+		var mask = new float[mesh.VertexCount];
+
+		for ( var v = 0; v < mesh.VertexCount; v++ )
+			foreach ( var w in weights[v] )
+				if ( w.Bone == boneIndex )
+				{
+					mask[v] = w.Weight;
+					break;
+				}
+
+		var (morph, singular) = Bake( mesh, weights, bindWorld, poseWorld, target,
+			CorrectiveMorph.Name( boneName, angleDeg ), driver, mask );
+		var (maxStrain, meanStrain) = Strain( mesh, raw );
+
+		return new AutoBuildResult { Morph = morph, Driver = driver, Singular = singular, MaxStrain = maxStrain, MeanStrain = meanStrain };
+	}
+
+	static Vec3[] Relax( Vec3[] posed, PolyMesh mesh, SkinWeights weights, int bone, int iterations )
+	{
+		var current = (Vec3[])posed.Clone();
+
+		if ( iterations <= 0 )
+			return current;
+
+		var neighbours = mesh.BuildVertexEdges();
+
+		for ( var it = 0; it < iterations; it++ )
+		{
+			var next = (Vec3[])current.Clone();
+
+			for ( var v = 0; v < mesh.VertexCount; v++ )
+			{
+				var w = 0f;
+
+				foreach ( var bw in weights[v] )
+					if ( bw.Bone == bone )
+					{
+						w = bw.Weight;
+						break;
+					}
+
+				if ( w <= 0f || neighbours[v].Count == 0 )
+					continue;
+
+				var avg = Vec3.Zero;
+				var count = 0;
+
+				foreach ( var e in neighbours[v] )
+				{
+					var nb = e.A == v ? e.B : e.A;
+
+					if ( nb < 0 || nb >= mesh.VertexCount )
+						continue;
+
+					avg += current[nb];
+					count++;
+				}
+
+				if ( count == 0 )
+					continue;
+
+				avg /= count;
+				next[v] = current[v] + (avg - current[v]) * (0.5f * w);
+			}
+
+			current = next;
+		}
+
+		return current;
+	}
+
+	static (float Max, float Mean) Strain( PolyMesh mesh, IReadOnlyList<Vec3> deformed )
+	{
+		var neighbours = mesh.BuildVertexEdges();
+		var max = 0f;
+		var sum = 0f;
+		var count = 0;
+
+		for ( var v = 0; v < mesh.VertexCount; v++ )
+		{
+			foreach ( var e in neighbours[v] )
+			{
+				var nb = e.A == v ? e.B : e.A;
+
+				if ( nb <= v || nb >= mesh.VertexCount )
+					continue;
+
+				var rest = (mesh.Positions[v] - mesh.Positions[nb]).Length;
+
+			if ( rest < 1e-6f )
+				continue;
+
+				var s = MathF.Abs( (deformed[v] - deformed[nb]).Length / rest - 1f );
+
+				max = Math.Max( max, s );
+				sum += s;
+				count++;
+			}
+		}
+
+		return (max, count > 0 ? sum / count : 0f);
+	}
+
 	/// <summary>
 	/// How much of each vertex belongs to one side of the body (+1 left, -1 right): its weight on that
 	/// side's bones plus half its weight on middle bones. The left and right masks sum to 1 on every

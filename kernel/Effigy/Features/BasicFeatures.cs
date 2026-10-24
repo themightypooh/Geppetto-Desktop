@@ -224,7 +224,7 @@ public sealed class LinearPatternFeature : Feature
 				var copy = MeshTransform.Transformed( original, Xform.Translate( dir * (Spacing.Value * i) ) );
 
 				if ( Merge.Value )
-					MeshTransform.Append( source.Mesh, copy );
+					MeshWeldMerge.WeldInto( source.Mesh, copy );
 				else
 					ctx.Bodies.Add( new Body( ctx.NewBodyId(), $"{Name} {i}", copy ) );
 			}
@@ -281,7 +281,7 @@ public sealed class CircularPatternFeature : Feature
 				var copy = MeshTransform.Transformed( original, xform );
 
 				if ( Merge.Value )
-					MeshTransform.Append( source.Mesh, copy );
+					MeshWeldMerge.WeldInto( source.Mesh, copy );
 				else
 					ctx.Bodies.Add( new Body( ctx.NewBodyId(), $"{Name} {i}", copy ) );
 			}
@@ -325,12 +325,14 @@ public sealed class MirrorFeature : Feature
 			var copy = MeshTransform.Transformed( source.Mesh, xform );
 
 			if ( Merge.Value )
-				MeshTransform.Append( source.Mesh, copy );
+				MeshWeldMerge.WeldInto( source.Mesh, copy );
 			else
 				ctx.Bodies.Add( new Body( ctx.NewBodyId(), $"{Name}", copy ) );
 		}
 
-		if ( !KeepOriginal.Value )
+		// A merged mirror lives IN the source body, so removing the source would delete
+		// the result — the old code did exactly that for Merge + Keep original off.
+		if ( !KeepOriginal.Value && !Merge.Value )
 		{
 			foreach ( var source in sources )
 				ctx.Bodies.Remove( source );
@@ -515,5 +517,276 @@ public sealed class SubdivideFeature : Feature
 			all[i] = i;
 
 		return all;
+	}
+}
+
+/// <summary>
+/// Merge one mesh into another and weld the seam (Backlog B15, A6.2).
+///
+/// Plain <see cref="MeshTransform.Append"/> leaves the two halves topologically separate:
+/// a mirrored half-model keeps its own copy of every centreline vertex, the mirror-plane
+/// faces survive as interior duplicates, and a pattern's closing seam stays split. This
+/// appends, then welds within 1e-3, then drops the interior faces the weld makes
+/// coincident — a face pair with the same vertices in opposite windings is the wall
+/// between two halves of one solid, not a boundary, so both go.
+///
+/// What survives the weld, and what does not: positions, skin weights, vertex colours
+/// and paint ride <see cref="MeshWeld.Weld"/>; morphs and UV2 are remapped here because
+/// that weld drops them, and that drop is exactly the old "mirror drops morphs" bug.
+/// Per-corner UV2 mappings (FaceUV2) do not survive — their indices name the old UV2
+/// list — so the vertex UV2 list is kept and the corner mapping is dropped.
+/// Bone bindings are carried by index, not by name: a PolyMesh has no skeleton, so the
+/// _L/_R bone-name flip the roadmap asks for cannot happen here. It needs the skeleton
+/// that owns the bone names, which is a rigging-lane step, not a mesh merge — the
+/// weights themselves are carried faithfully, which is the part this merge owns.
+/// </summary>
+internal static class MeshWeldMerge
+{
+	public static void WeldInto( PolyMesh target, PolyMesh source )
+	{
+		var targetVerts = target.Positions.Count;
+		var targetUv2 = target.HasUV2 ? new List<Vec2>( target.UV2 ) : null;
+		var sourceUv2 = source.HasUV2 ? new List<Vec2>( source.UV2 ) : null;
+
+		MeshTransform.Append( target, source );
+
+		// Seams AFTER Append: Append already shifted the source's seams by the offset,
+		// so this snapshot is in post-append indices, the indices the weld map speaks.
+		var targetSeams = target.Seams is { Count: > 0 } ? new HashSet<EdgeKey>( target.Seams ) : null;
+
+		// Morphs as Append merged them (by name, padded with no offset on the side that
+		// lacks the key) — snapshot before the weld, which would drop them.
+		var morphs = target.Morphs.Select( m => (m.Name, Deltas: (Vec3[])m.Deltas?.Clone(), m.Driver) ).ToList();
+
+		var welded = MeshWeld.Weld( target, 1e-3f );
+
+		// Rebuild the old->welded index map from positions: the weld keeps each
+		// component's lowest-index vertex position exactly, so a spatial lookup on the
+		// welded positions recovers the map without the weld having to return one.
+		var map = WeldMap( target.Positions, welded.Positions, 1e-3f );
+
+		var faces = DropInteriorDuplicates( welded.Faces );
+
+		var used = new bool[welded.VertexCount];
+		foreach ( var f in faces )
+			foreach ( var i in f.Indices )
+				used[i] = true;
+
+		// Compact again after the interior faces go: vertices only those faces used are
+		// kept, in order, and every parallel array follows the same compaction.
+		var compact = new int[welded.VertexCount];
+		Array.Fill( compact, -1 );
+		var survivors = new List<int>();
+
+		for ( var v = 0; v < welded.VertexCount; v++ )
+		{
+			if ( used[v] )
+			{
+				compact[v] = survivors.Count;
+				survivors.Add( v );
+			}
+		}
+
+		var finalMap = new int[target.VertexCount];
+		for ( var v = 0; v < finalMap.Length; v++ )
+			finalMap[v] = map[v] >= 0 && compact[map[v]] >= 0 ? compact[map[v]] : -1;
+
+		target.Positions = survivors.Select( v => welded.Positions[v] ).ToList();
+		target.Faces = faces.Select( f => new Face(
+			f.Indices.Select( i => compact[i] ).ToArray(),
+			(Vec2[])f.UVs.Clone(), f.Material ) ).ToList();
+		target.Skin = welded.Skin is null ? null : new SkinWeights
+		{
+			Vertices = survivors.Select( v => (BoneWeight[])welded.Skin[v].Clone() ).ToList()
+		};
+		target.VertexColors = welded.VertexColors is null ? null
+			: survivors.Select( v => welded.VertexColors[v] ).ToArray();
+		target.Paint = welded.Paint;
+
+		// Morphs: first old vertex to claim a welded slot wins, which is the component's
+		// lowest index — the same survivor the weld kept for positions and weights.
+		var mergedMorphs = new List<MeshMorph>();
+
+		foreach ( var (name, deltas, driver) in morphs )
+		{
+			if ( deltas is null )
+				continue;
+
+			var merged = new Vec3[survivors.Count];
+			var claimed = new bool[survivors.Count];
+
+			for ( var v = 0; v < deltas.Length && v < finalMap.Length; v++ )
+			{
+				var to = finalMap[v];
+
+				if ( to >= 0 && !claimed[to] )
+				{
+					merged[to] = deltas[v];
+					claimed[to] = true;
+				}
+			}
+
+			mergedMorphs.Add( new MeshMorph { Name = name, Deltas = merged, Driver = driver?.Clone() } );
+		}
+
+		target.Morphs = mergedMorphs;
+
+		// UV2, vertex-mapped: target's list padded with the source's, then first-wins
+		// through the same map. The split is by VERTEX count, not by UV2 list length —
+		// a UV2 list may be shorter than its mesh. FaceUV2 (per-corner) cannot follow
+		// the remap, so it is dropped and the vertex list stands.
+		if ( targetUv2 is not null || sourceUv2 is not null )
+		{
+			var preCount = map.Length;
+			var pre = new List<Vec2>( preCount );
+
+			for ( var v = 0; v < preCount; v++ )
+			{
+				if ( v < targetVerts && targetUv2 is not null && v < targetUv2.Count )
+					pre.Add( targetUv2[v] );
+				else if ( v >= targetVerts && sourceUv2 is not null && v - targetVerts < sourceUv2.Count )
+					pre.Add( sourceUv2[v - targetVerts] );
+				else
+					pre.Add( Vec2.Zero );
+			}
+
+			var uv2 = new Vec2[survivors.Count];
+			var claimedUv = new bool[survivors.Count];
+
+			for ( var v = 0; v < pre.Count && v < finalMap.Length; v++ )
+			{
+				var to = finalMap[v];
+
+				if ( to >= 0 && !claimedUv[to] )
+				{
+					uv2[to] = pre[v];
+					claimedUv[to] = true;
+				}
+			}
+
+			target.UV2 = uv2.ToList();
+			target.FaceUV2 = null;
+		}
+
+		if ( targetSeams is not null )
+		{
+			var seams = new HashSet<EdgeKey>();
+
+			foreach ( var e in targetSeams )
+			{
+				var a = e.A < finalMap.Length ? finalMap[e.A] : -1;
+				var b = e.B < finalMap.Length ? finalMap[e.B] : -1;
+
+				if ( a >= 0 && b >= 0 && a != b )
+					seams.Add( new EdgeKey( a, b ) );
+			}
+
+			target.Seams = seams;
+		}
+	}
+
+	static int[] WeldMap( IReadOnlyList<Vec3> oldPositions, IReadOnlyList<Vec3> weldedPositions, float tol )
+	{
+		var cells = new Dictionary<(long, long, long), List<int>>();
+		var scale = 1f / tol;
+
+		for ( var v = 0; v < weldedPositions.Count; v++ )
+		{
+			var p = weldedPositions[v];
+			var key = ((long)MathF.Floor( p.x * scale ), (long)MathF.Floor( p.y * scale ), (long)MathF.Floor( p.z * scale ));
+
+			if ( !cells.TryGetValue( key, out var list ) )
+				cells[key] = list = new List<int>();
+
+			list.Add( v );
+		}
+
+		var map = new int[oldPositions.Count];
+		var tol2 = tol * tol;
+
+		for ( var v = 0; v < oldPositions.Count; v++ )
+		{
+			var p = oldPositions[v];
+			var cell = ((long)MathF.Floor( p.x * scale ), (long)MathF.Floor( p.y * scale ), (long)MathF.Floor( p.z * scale ));
+			map[v] = -1;
+
+			for ( var dx = -1; dx <= 1 && map[v] < 0; dx++ )
+			for ( var dy = -1; dy <= 1 && map[v] < 0; dy++ )
+			for ( var dz = -1; dz <= 1 && map[v] < 0; dz++ )
+			{
+				if ( !cells.TryGetValue( (cell.Item1 + dx, cell.Item2 + dy, cell.Item3 + dz), out var list ) )
+					continue;
+
+				foreach ( var u in list )
+				{
+					if ( (weldedPositions[u] - p).LengthSquared <= tol2 )
+					{
+						map[v] = u;
+						break;
+					}
+				}
+			}
+		}
+
+		return map;
+	}
+
+	/// <summary>
+	/// Drop faces the weld made coincident: within a group sharing one vertex set, a
+	/// pair in opposite windings is an interior wall and the whole group goes; a group
+	/// of same-winding copies keeps one face.
+	/// </summary>
+	static List<Face> DropInteriorDuplicates( IReadOnlyList<Face> faces )
+	{
+		var groups = new Dictionary<string, List<Face>>();
+
+		foreach ( var f in faces )
+		{
+			var key = string.Join( ",", f.Indices.OrderBy( i => i ) );
+			if ( !groups.TryGetValue( key, out var list ) )
+				groups[key] = list = new List<Face>();
+
+			list.Add( f );
+		}
+
+		var result = new List<Face>();
+
+		foreach ( var group in groups.Values )
+		{
+			if ( group.Count == 1 )
+			{
+				result.Add( group[0] );
+				continue;
+			}
+
+			var hasOpposite = false;
+
+			for ( var i = 0; i < group.Count && !hasOpposite; i++ )
+			for ( var j = i + 1; j < group.Count && !hasOpposite; j++ )
+				if ( IsReverseOf( group[i].Indices, group[j].Indices ) )
+					hasOpposite = true;
+
+			if ( !hasOpposite )
+				result.Add( group[0] );
+		}
+
+		return result;
+	}
+
+	static bool IsReverseOf( int[] a, int[] b )
+	{
+		if ( a.Length != b.Length )
+			return false;
+
+		var start = Array.IndexOf( b, a[0] );
+
+		if ( start < 0 )
+			return false;
+
+		for ( var k = 0; k < a.Length; k++ )
+			if ( b[(start - k + a.Length * 2) % a.Length] != a[k] )
+				return false;
+
+		return true;
 	}
 }

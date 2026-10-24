@@ -47,6 +47,12 @@ public static class UVPack
 
 		/// <summary>Place the islands at their present size instead of scaling them to fill the square.</summary>
 		public bool KeepScale;
+
+		/// <summary>Texel density PackAtlas normalises every mesh to, in pixels per world
+		/// unit at <see cref="TextureSize"/>. Zero (the default) means: use the median of the
+		/// meshes' own measured densities, so no mesh is arbitrarily resized and no caller
+		/// has to know a number in advance.</summary>
+		public float PixelsPerUnit;
 	}
 
 	public sealed class Result
@@ -76,7 +82,10 @@ public static class UVPack
 
 	sealed class Box
 	{
+		public int Mesh;
 		public int Island;
+		public Vec2 Centre;      // island bounds centre, for the density scale (Pack: unused)
+		public float DensityScale = 1f;
 		public float Angle;       // radians, applied first about the origin
 		public Vec2 Min;          // of the rotated island, at scale 1
 		public Vec2 Size;         // of the rotated island, at scale 1
@@ -177,13 +186,163 @@ public static class UVPack
 		return result;
 	}
 
+	/// <summary>Pack every island of every mesh in <paramref name="meshes"/> into ONE
+	/// shared [0,1] square, at one texel density — the fix for multi-body assets whose
+	/// bodies each packed independently into [0,1] and overlapped on shared textures
+	/// (Backlog G11). First every island is normalised to a common density (the option's
+	/// <see cref="Options.PixelsPerUnit"/>, or the median measured density when it is zero),
+	/// then all islands go through the same rotating-calipers + skyline packer once, with
+	/// <see cref="Options.MarginPixels"/>, and the packed UVs are written back to each
+	/// participating mesh. Writes nothing when the islands do not fit: the density
+	/// simulation runs on copies of the UV points, and the meshes are only touched after
+	/// a fitting scale is found. Returns the pack scale (1 with
+	/// <see cref="Options.KeepScale"/>) and the total coverage across all meshes.</summary>
+	public static Result PackAtlas( IReadOnlyList<PolyMesh> meshes, Options options = null )
+	{
+		if ( meshes is null )
+			throw new ArgumentNullException( nameof( meshes ) );
+		options ??= new Options();
+		if ( options.TextureSize <= 0 )
+			throw new InvalidOperationException( "The texture size has to be above zero pixels." );
+		if ( options.MarginPixels < 0f || !float.IsFinite( options.MarginPixels ) )
+			throw new InvalidOperationException( "The margin can't be negative: it is how many empty pixels to leave between islands." );
+		var margin = options.MarginPixels / options.TextureSize;
+		if ( margin >= 0.5f )
+			throw new InvalidOperationException( $"A {options.MarginPixels:0.#} px margin is half of a {options.TextureSize} px texture or more, which leaves no room for any island." );
+
+		var layouts = new List<UVIslands.Layout>();
+		var total = 0;
+		foreach ( var m in meshes )
+		{
+			if ( m is null )
+				throw new ArgumentNullException( nameof( meshes ) );
+			var layout = UVIslands.Find( m );
+			layouts.Add( layout );
+			total += layout.Count;
+		}
+		var result = new Result { Islands = total, Margin = margin, Scale = 1f, MarginPixels = options.MarginPixels, TextureSize = options.TextureSize };
+		if ( total == 0 )
+		{
+			result.Fits = true;
+			return result;
+		}
+
+		// Common density: explicit, else the median of the meshes' measured densities.
+		// (A mesh with no measurable area is skipped, not allowed to drag the median to 0.)
+		float target = options.PixelsPerUnit;
+		if ( !(target > 0f) )
+		{
+			var measured = new List<float>();
+			for ( var mi = 0; mi < meshes.Count; mi++ )
+			{
+				var ppu = UVDensity.Measure( meshes[mi], options.TextureSize, null, layouts[mi] ).PixelsPerUnit;
+				if ( ppu > 0f && float.IsFinite( ppu ) )
+					measured.Add( ppu );
+			}
+			if ( measured.Count > 0 )
+			{
+				measured.Sort();
+				target = measured[measured.Count / 2];
+			}
+		}
+
+		// Boxes from density-SIMULATED points (centre + scale), so nothing is written yet.
+		var boxes = new List<Box>();
+		for ( var mi = 0; mi < meshes.Count; mi++ )
+		{
+			var mesh = meshes[mi];
+			for ( var i = 0; i < layouts[mi].Count; i++ )
+			{
+				var islandFaces = layouts[mi].Islands[i];
+				var centre = UVIslands.Centre( mesh, islandFaces );
+				float k = 1f;
+				if ( target > 0f )
+				{
+					var now = UVDensity.PixelsPerUnit( mesh, islandFaces, options.TextureSize );
+					if ( now > 0f )
+						k = target / now;
+				}
+				var points = Points( mesh, islandFaces ).Select( p => centre + (p - centre) * k ).ToList();
+				var angle = options.Rotate ? TightestAngle( points ) : 0f;
+				var (min, max) = RotatedBounds( points, angle );
+				boxes.Add( new Box { Mesh = mi, Island = i, Centre = centre, DensityScale = k, Angle = angle, Min = min, Size = max - min } );
+			}
+		}
+
+		float scale;
+		if ( options.KeepScale )
+		{
+			scale = 1f;
+			if ( !TryPack( boxes, scale, margin, options.QuarterTurns, commit: true ) )
+				return result;
+		}
+		else
+		{
+			var largest = boxes.Max( b => MathF.Max( b.Size.x, b.Size.y ) );
+			if ( largest <= 1e-12f )
+				return result;
+			var low = 0f;
+			var high = 1f / largest;
+			while ( TryPack( boxes, high, margin, options.QuarterTurns, commit: false ) && high < 1e8f )
+				high *= 2f;
+			for ( var i = 0; i < 40; i++ )
+			{
+				var mid = (low + high) * 0.5f;
+				if ( TryPack( boxes, mid, margin, options.QuarterTurns, commit: false ) )
+					low = mid;
+				else
+					high = mid;
+			}
+			scale = low;
+			if ( scale <= 0f || !TryPack( boxes, scale, margin, options.QuarterTurns, commit: true ) )
+				return result;
+		}
+
+		// Commit: the write loop below does density + pack in one transform per
+		// corner (density-scale about the island centre, then the packer's rotate /
+		// scale / quarter-turn / place). Calling UVDensity.Set here as well would scale
+		// twice, so it is deliberately NOT called.
+		foreach ( var box in boxes )
+		{
+			var mesh = meshes[box.Mesh];
+			var cos = MathF.Cos( box.Angle );
+			var sin = MathF.Sin( box.Angle );
+			foreach ( var f in layouts[box.Mesh].Islands[box.Island] )
+			{
+				var uvs = mesh.Faces[f].UVs;
+				for ( var c = 0; c < uvs.Length; c++ )
+				{
+					var p = uvs[c];
+					// NOTE: box.Min was computed on density-scaled points, so the corner
+					// must be density-scaled about the centre BEFORE the same rotation
+					// is applied. Rotating first and scaling after would move the island
+					// off its packed box.
+					var scaled = box.Centre + (p - box.Centre) * box.DensityScale;
+					var rs = new Vec2( scaled.x * cos - scaled.y * sin, scaled.x * sin + scaled.y * cos );
+					var local = (rs - box.Min) * scale;
+					if ( box.Turned )
+						local = new Vec2( -local.y, local.x ) + new Vec2( box.Size.y * scale, 0f );
+					uvs[c] = box.At + local;
+				}
+			}
+		}
+
+		result.Fits = true;
+		result.Scale = scale;
+		var coverage = 0.0;
+		foreach ( var m in meshes )
+			coverage += Coverage( m );
+		result.Coverage = (float)Math.Min( 1.0, coverage );
+		return result;
+	}
+
 	/// <summary>Skyline bottom-left at one scale. Boxes are inflated by the margin, and the bin is
 	/// the square less half a margin all round, so inflated boxes that do not overlap leave a whole
 	/// margin between the islands and half of one at the edge.</summary>
 	static bool TryPack( List<Box> boxes, float scale, float margin, bool quarterTurns, bool commit )
 	{
 		var order = Enumerable.Range( 0, boxes.Count ).OrderByDescending( i => MathF.Max( boxes[i].Size.x, boxes[i].Size.y ) )
-			.ThenByDescending( i => boxes[i].Size.x * boxes[i].Size.y ).ThenBy( i => boxes[i].Island ).ToList();
+			.ThenByDescending( i => boxes[i].Size.x * boxes[i].Size.y ).ThenBy( i => boxes[i].Mesh ).ThenBy( i => boxes[i].Island ).ToList();
 
 		// Skyline segments: x, width, height. The usable square runs from 0 to 1 in inflated space.
 		var sky = new List<(float X, float W, float Y)> { (0f, 1f, 0f) };

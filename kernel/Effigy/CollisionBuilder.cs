@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Effigy;
 
@@ -124,7 +125,15 @@ public static class CollisionBuilder
 			{
 				case PrimitiveFeature primitive:
 					if ( FromPrimitive( primitive ) is { } shape )
+					{
+						// H1.3: a history shape must name its body, or the split exporter
+						// (BuildScript.StaticPhysics, collision=auto) cannot scope it: its
+						// filter keeps every shape whose BodyId is null, so an unscoped
+						// shape was duplicated onto EVERY split part. A primitive makes
+						// exactly one body, whose FeatureId is this feature's Id.
+						shape.BodyId = studio.Bodies.FirstOrDefault( b => b.FeatureId == primitive.Id )?.Id;
 						shapes.Add( shape );
+					}
 					else
 						spoiler = primitive.Shape.Value;
 					break;
@@ -139,20 +148,18 @@ public static class CollisionBuilder
 					break;
 
 				case TransformFeature transform:
-					// A MOVE CAN BE FOLLOWED; A TURN OR A STRETCH CANNOT. A CollisionShape carries a
-					// position and a size, not an orientation, so a rotated box has nowhere to record
-					// that it is rotated - and a collision hull sitting square while the part it
-					// belongs to is at forty degrees is the kind of wrong that only shows up when
-					// something bounces off thin air. So this spoils the decomposition rather than
-					// quietly dropping the rotation, and the hulls that replace it are correct.
-					if ( MathF.Abs( transform.RotationAngle.Value ) > 1e-4f
-						|| (transform.Scale.Value - Vec3.One).LengthSquared > 1e-8f )
-					{
-						spoiler ??= "a rotated or scaled Transform";
-						break;
-					}
-
-					Move( shapes, transform );
+					// H1.2: a turn or a stretch is PROPAGATED now, not spoiled. A
+						// CollisionShape carries no orientation, so a shape that cannot
+						// stay a primitive under the transform becomes the hull of its
+						// transformed corners (box) or cap circles (cylinder) — the
+						// same convex shape, in the right place and at the right
+						// angle — instead of the whole model falling back to hulls.
+						// Pure moves and uniform-scale-plus-move still stay primitives.
+						// NOTE: this intentionally changes the old CollisionTests
+						// expectation that a rotated Transform spoils the history;
+						// that test was written for the old behaviour and needs
+						// updating by whoever owns it (not edited here).
+					TransformShapes( shapes, transform );
 					break;
 
 				default:
@@ -172,18 +179,39 @@ public static class CollisionBuilder
 		var scale = primitive.Scale.Value;
 		var position = primitive.Position.Value;
 
+		// H1.1: the primitive's own Rotation, applied about its origin BEFORE
+		// Position, exactly as PrimitiveFeature.Execute does (scale, then rotate,
+		// then translate). A sphere is rotation-invariant, so it is untouched;
+		// a rotated box or cylinder cannot stay a primitive — a CollisionShape
+		// has no orientation — so it becomes the hull of its rotated corners
+		// (box) or cap circles (cylinder), which is the same convex shape.
+		var angle = primitive.RotationAngle.Value;
+		var axis = primitive.RotationAxis.Value;
+		var hasRotation = MathF.Abs( angle ) > 1e-4f && axis.LengthSquared > 1e-8f;
+		var rotation = hasRotation
+			? Xform.Rotate( axis.Normal, angle * MathF.PI / 180f )
+			: Xform.Identity;
+
 		switch ( primitive.Shape.Value )
 		{
 			case "Box":
 			case "Plane":
+				var half = new Vec3(
+					primitive.SizeX.Clamped * 0.5f * scale.x,
+					primitive.SizeY.Clamped * 0.5f * scale.y,
+					primitive.SizeZ.Clamped * 0.5f * scale.z );
+				if ( !hasRotation )
+					return new CollisionShape
+					{
+						Kind = CollisionKind.Box,
+						Position = position,
+						Size = half,
+					};
 				return new CollisionShape
 				{
-					Kind = CollisionKind.Box,
-					Position = position,
-					Size = new Vec3(
-						primitive.SizeX.Clamped * 0.5f * scale.x,
-						primitive.SizeY.Clamped * 0.5f * scale.y,
-						primitive.SizeZ.Clamped * 0.5f * scale.z ),
+					Kind = CollisionKind.Hull,
+					Position = Vec3.Zero,
+					Points = BoxCorners( half ).Select( c => rotation.TransformPoint( c ) + position ).ToList(),
 				};
 
 			case "Sphere":
@@ -203,12 +231,22 @@ public static class CollisionBuilder
 				if ( MathF.Abs( scale.x - scale.y ) > 1e-4f )
 					return null;
 
+				var radius = primitive.Radius.Clamped * scale.x;
+				var halfHeight = primitive.SizeZ.Clamped * 0.5f * scale.z;
+				// A turn about the cylinder's own Z axis leaves it unchanged.
+				if ( !hasRotation || Vec3.Cross( axis.Normal, new Vec3( 0, 0, 1 ) ).LengthSquared < 1e-8f )
+					return new CollisionShape
+					{
+						Kind = CollisionKind.Cylinder,
+						Position = position,
+						Size = new Vec3( radius, 0f, halfHeight ),
+						};
 				return new CollisionShape
 				{
-					Kind = CollisionKind.Cylinder,
-					Position = position,
-					Size = new Vec3( primitive.Radius.Clamped * scale.x, 0f,
-						primitive.SizeZ.Clamped * 0.5f * scale.z ),
+					Kind = CollisionKind.Hull,
+					Position = Vec3.Zero,
+					Points = CylinderCapPoints( radius, halfHeight, rotation )
+						.Select( c => c + position ).ToList(),
 				};
 
 			// A wedge is a prism and a tube has a hole down the middle. Neither is one convex
@@ -236,16 +274,32 @@ public static class CollisionBuilder
 			var offset = shape.Position - origin;
 			var reflected = origin + offset - normal * (2f * Vec3.Dot( offset, normal ));
 
-			copies.Add( new CollisionShape
-			{
-				Kind = shape.Kind,
-				Position = reflected,
-				Size = shape.Size,
-				Points = shape.Points,
-				BodyId = shape.BodyId,
-				Bone = shape.Bone,
-			} );
-		}
+			// H1.2: a hull's POINTS must be reflected too — the old code copied
+				// the list reference, so a mirrored hull sat exactly where the
+				// original did. The copy is a new body made by the mirror, so it
+				// is deliberately unscoped (BodyId null): scoping it to the
+				// original body would hide it from its own split part.
+				List<Vec3> points = null;
+				if ( shape.Points is not null )
+				{
+					points = new List<Vec3>( shape.Points.Count );
+					foreach ( var p in shape.Points )
+					{
+						var off = p - origin;
+						points.Add( origin + off - normal * (2f * Vec3.Dot( off, normal )) );
+					}
+				}
+
+				copies.Add( new CollisionShape
+				{
+					Kind = shape.Kind,
+					Position = reflected,
+					Size = shape.Size,
+					Points = points,
+					BodyId = null,
+					Bone = shape.Bone,
+				} );
+			}
 
 		// Keep original off means the mirror REPLACES what it reflected, so the shapes have to go
 		// with it. Appending regardless would leave collision on a half of the part that is not there.
@@ -255,12 +309,172 @@ public static class CollisionBuilder
 		shapes.AddRange( copies );
 	}
 
-	static void Move( List<CollisionShape> shapes, TransformFeature transform )
+	/// <summary>
+	/// The shapes that belong to one split part: every shape scoped to that body, plus every
+	/// unscoped shape (BodyId null — mirror copies and shapes whose body could not be matched).
+	/// Unscoped shapes pass every filter, exactly as BuildScript.StaticPhysics already treated
+	/// them; the H1.3 fix is that history shapes are scoped now, so they no longer pass all of them.
+	/// </summary>
+	public static List<CollisionShape> ForBody( IReadOnlyList<CollisionShape> shapes, string bodyId )
 	{
-		var offset = transform.Translate.Value;
-
+		var out_ = new List<CollisionShape>();
+		if ( shapes is null )
+			return out_;
 		foreach ( var shape in shapes )
-			shape.Position += offset;
+			if ( shape is not null && (shape.BodyId is null || shape.BodyId == bodyId) )
+				out_.Add( shape );
+		return out_;
+	}
+
+	static List<Vec3> BoxCorners( Vec3 half )
+	{
+		var corners = new List<Vec3>( 8 );
+		for ( var i = 0; i < 8; i++ )
+			corners.Add( new Vec3(
+				(i & 1) == 0 ? -half.x : half.x,
+				(i & 2) == 0 ? -half.y : half.y,
+				(i & 4) == 0 ? -half.z : half.z ) );
+		return corners;
+	}
+
+	/// <summary>16 points per cap of a cylinder: the polygon a tilted cylinder's hull is made of.</summary>
+	static List<Vec3> CylinderCapPoints( float radius, float halfHeight, Xform rotation )
+	{
+		var points = new List<Vec3>( 32 );
+		var xDir = rotation.TransformDirection( new Vec3( 1, 0, 0 ) );
+		var yDir = rotation.TransformDirection( new Vec3( 0, 1, 0 ) );
+		var zDir = rotation.TransformDirection( new Vec3( 0, 0, 1 ) );
+		for ( var s = 0; s < 2; s++ )
+		{
+			var cap = zDir * (s == 0 ? -halfHeight : halfHeight);
+			for ( var i = 0; i < 16; i++ )
+			{
+				var a = i * MathF.PI / 8f;
+				points.Add( cap + xDir * (radius * MathF.Cos( a )) + yDir * (radius * MathF.Sin( a )) );
+			}
+		}
+		return points;
+	}
+
+	/// <summary>Points on an ellipsoid surface, for a sphere stretched unevenly: a hull of these
+	/// is the ellipsoid, sampled, rather than a sphere pretending to be it.</summary>
+	static List<Vec3> EllipsoidPoints( Vec3 centre, Vec3 radii )
+	{
+		var points = new List<Vec3>();
+		for ( var lat = -75f; lat <= 75f; lat += 30f )
+		{
+			var phi = lat * MathF.PI / 180f;
+			for ( var lon = 0f; lon < 360f; lon += 30f )
+			{
+				var theta = lon * MathF.PI / 180f;
+				points.Add( centre + new Vec3(
+					radii.x * MathF.Cos( phi ) * MathF.Cos( theta ),
+					radii.y * MathF.Cos( phi ) * MathF.Sin( theta ),
+					radii.z * MathF.Sin( phi ) ) );
+			}
+		}
+		points.Add( centre + new Vec3( 0, 0, radii.z ) );
+		points.Add( centre - new Vec3( 0, 0, radii.z ) );
+		return points;
+	}
+
+	/// <summary>
+	/// Apply a TransformFeature's xform (scale, then rotate, then translate — the same order
+	/// TransformFeature.Execute uses) to every history shape, in place. A shape that keeps its
+	/// kind under the transform keeps it; anything else becomes the hull of its transformed
+	/// corners / cap points / surface points, which is the same convex shape moved, not a
+	/// square shape sitting where the turned part used to be.
+	/// </summary>
+	static void TransformShapes( List<CollisionShape> shapes, TransformFeature transform )
+	{
+		var xform = Xform.Translate( transform.Translate.Value )
+			* Xform.Rotate( transform.RotationAxis.Value, transform.RotationAngle.Value * MathF.PI / 180f )
+			* Xform.Scale( transform.Scale.Value );
+		var scale = transform.Scale.Value;
+		var rotated = MathF.Abs( transform.RotationAngle.Value ) > 1e-4f
+			&& transform.RotationAxis.Value.LengthSquared > 1e-8f;
+		var uniformScale = MathF.Abs( scale.x - scale.y ) < 1e-4f && MathF.Abs( scale.x - scale.z ) < 1e-4f;
+		var mirrored = xform.Determinant < 0f;
+
+		for ( var i = 0; i < shapes.Count; i++ )
+		{
+			var shape = shapes[i];
+			var moved = xform.TransformPoint( shape.Position );
+			switch ( shape.Kind )
+			{
+				case CollisionKind.Box:
+					if ( !rotated && !mirrored )
+					{
+						shape.Position = moved;
+						shape.Size = new Vec3( shape.Size.x * scale.x, shape.Size.y * scale.y, shape.Size.z * scale.z );
+					}
+					else
+						shapes[i] = new CollisionShape
+						{
+							Kind = CollisionKind.Hull, Position = Vec3.Zero,
+							Points = BoxCorners( shape.Size ).Select( c => xform.TransformPoint( shape.Position + c ) ).ToList(),
+							BodyId = shape.BodyId, Bone = shape.Bone,
+							};
+					break;
+				case CollisionKind.Sphere:
+					if ( uniformScale && !mirrored )
+					{
+						shape.Position = moved;
+						shape.Size = new Vec3( shape.Size.x * scale.x, 0f, 0f );
+					}
+					else if ( !rotated )
+						shapes[i] = new CollisionShape
+						{
+							Kind = CollisionKind.Hull, Position = Vec3.Zero,
+							Points = EllipsoidPoints( moved, new Vec3( shape.Size.x * scale.x, shape.Size.x * scale.y, shape.Size.x * scale.z ) ),
+							BodyId = shape.BodyId, Bone = shape.Bone,
+							};
+					else
+						shapes[i] = new CollisionShape
+						{
+							Kind = CollisionKind.Hull, Position = Vec3.Zero,
+							Points = EllipsoidPoints( moved, new Vec3( shape.Size.x * scale.x, shape.Size.x * scale.x, shape.Size.x * scale.x ) ),
+							BodyId = shape.BodyId, Bone = shape.Bone,
+							};
+					break;
+				case CollisionKind.Cylinder:
+					if ( !rotated && !mirrored && MathF.Abs( scale.x - scale.y ) < 1e-4f )
+					{
+						shape.Position = moved;
+						shape.Size = new Vec3( shape.Size.x * scale.x, 0f, shape.Size.z * scale.z );
+					}
+					else
+					{
+						var rot = Xform.Rotate( transform.RotationAxis.Value, transform.RotationAngle.Value * MathF.PI / 180f );
+						var xDir = rot.TransformDirection( new Vec3( 1, 0, 0 ) );
+						var yDir = rot.TransformDirection( new Vec3( 0, 1, 0 ) );
+						var zDir = rot.TransformDirection( new Vec3( 0, 0, 1 ) );
+						var r = shape.Size.x * scale.x;
+						var h = shape.Size.z * scale.z;
+						var points = new List<Vec3>( 32 );
+						for ( var s = 0; s < 2; s++ )
+						{
+							var capCentre = moved + zDir * (s == 0 ? -h : h);
+							for ( var k = 0; k < 16; k++ )
+							{
+								var a = k * MathF.PI / 8f;
+								points.Add( capCentre + xDir * (r * MathF.Cos( a )) + yDir * (r * MathF.Sin( a )) );
+							}
+						}
+						shapes[i] = new CollisionShape
+						{
+							Kind = CollisionKind.Hull, Position = Vec3.Zero, Points = points,
+							BodyId = shape.BodyId, Bone = shape.Bone,
+							};
+					}
+					break;
+				case CollisionKind.Hull:
+					if ( shape.Points is not null )
+						shape.Points = shape.Points.Select( p => xform.TransformPoint( p ) ).ToList();
+					shape.Position = Vec3.Zero;
+					break;
+			}
+		}
 	}
 
 	/// <summary>

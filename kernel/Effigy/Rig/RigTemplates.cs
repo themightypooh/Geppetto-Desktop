@@ -37,7 +37,7 @@ namespace Effigy;
 /// </summary>
 public static class RigTemplates
 {
-	public static readonly string[] Names = { "human", "citizen", "biped", "quadruped" };
+	public static readonly string[] Names = { "human", "citizen", "biped", "quadruped", "fish", "avian", "arachnid", "serpentine", "vehicle_wheeled", "weapon_firearm" };
 
 	public static readonly string[] Styles = { "realistic", "heroic", "fashion", "stylized", "chibi", "child", "human" };
 
@@ -484,5 +484,318 @@ public static class RigTemplates
 	{
 		if ( !(value > 0f) || float.IsInfinity( value ) )
 			throw new ArgumentOutOfRangeException( what, $"{what}={value}: it has to be a positive number." );
+	}
+
+
+	static Vec3 MinV( Vec3 a, Vec3 b ) => new( MathF.Min( a.x, b.x ), MathF.Min( a.y, b.y ), MathF.Min( a.z, b.z ) );
+	static Vec3 MaxV( Vec3 a, Vec3 b ) => new( MathF.Max( a.x, b.x ), MathF.Max( a.y, b.y ), MathF.Max( a.z, b.z ) );
+
+	// --- Lane G: new production templates -----------------------------------------------------
+
+	/// <summary>The six Lane G templates, plus the existing four: <see cref="Names"/> now lists
+	/// all ten. Aliases (piscine, winged, multipod, tentacle) are accepted by
+	/// <see cref="BuildTemplate"/> but the canonical names below are what a script should use.</summary>
+	public static readonly string[] NewTemplateNames = { "fish", "avian", "arachnid", "serpentine", "vehicle_wheeled", "weapon_firearm" };
+
+	/// <summary>Parameters for <see cref="BuildTemplate"/>: scale is a uniform multiplier on the
+	/// template's base size (1 = the sizes in the builders below, inches).</summary>
+	public sealed class TemplateOptions
+	{
+		public float Scale = 1f;
+		public int SpineCount = 6;
+		public int DorsalCount = 3;
+		public int SerpentineCount = 12;
+		public int LegPairs = 4;
+	}
+
+	/// <summary>Build one of the ten templates by name. Unknown names throw listing every name,
+	/// so a script typo fails loudly instead of silently producing a human.</summary>
+	public static Skeleton BuildTemplate( string name, TemplateOptions options = null )
+	{
+		options ??= new TemplateOptions();
+		RequirePositive( options.Scale, "scale" );
+
+		return (name ?? "").Trim().ToLowerInvariant() switch
+		{
+			"human" => Human(),
+			"citizen" => Citizen(),
+			"biped" => Biped(),
+			"quadruped" => Quadruped(),
+			"fish" or "piscine" => Fish( options.Scale, options.SpineCount, options.DorsalCount ),
+			"avian" or "winged" => Avian( options.Scale ),
+			"arachnid" or "multipod" => Arachnid( options.Scale, options.LegPairs ),
+			"serpentine" or "tentacle" => Serpentine( options.Scale, options.SerpentineCount ),
+			"vehicle_wheeled" or "vehicle" => VehicleWheeled( options.Scale ),
+			"weapon_firearm" or "weapon" => WeaponFirearm( options.Scale ),
+			_ => throw new ArgumentException( $"No rig template '{name}'. Templates: {string.Join( ", ", Names )}, {string.Join( ", ", NewTemplateNames )}." ),
+		};
+	}
+
+	/// <summary>Scale + centre a template onto a set of bodies, so a template rig fits the body it
+	/// was built for instead of the template's base size. Uniform scale only (a rig stretched
+	/// non-uniformly would shear its bones); the scale is set by the longest body dimension, and
+	/// the template's centre is moved onto the bodies' centre. Returns a new skeleton; the
+	/// template passed in is untouched.</summary>
+	public static Skeleton FitToBody( Skeleton template, IReadOnlyList<Body> bodies )
+	{
+		if ( template is null ) throw new ArgumentNullException( nameof( template ) );
+
+		var min = new Vec3( float.PositiveInfinity, float.PositiveInfinity, float.PositiveInfinity );
+		var max = new Vec3( float.NegativeInfinity, float.NegativeInfinity, float.NegativeInfinity );
+		var found = false;
+
+		foreach ( var body in bodies ?? Array.Empty<Body>() )
+		{
+			if ( body?.Mesh is null )
+				continue;
+
+			foreach ( var p in body.Mesh.Positions )
+			{
+				min = MinV( min, p );
+				max = MaxV( max, p );
+				found = true;
+			}
+		}
+
+		if ( !found )
+			throw new ArgumentException( "FitToBody needs at least one body with mesh positions." );
+
+		return FitToBounds( template, min, max );
+	}
+
+	/// <summary>The bounds form of <see cref="FitToBody"/>: uniform-scale the skeleton so its
+	/// longest bind dimension matches the bounds' longest dimension, then centre it on them.</summary>
+	public static Skeleton FitToBounds( Skeleton template, Vec3 min, Vec3 max )
+	{
+		if ( template is null ) throw new ArgumentNullException( nameof( template ) );
+
+		var clone = template.Clone();
+		var lo = new Vec3( float.PositiveInfinity, float.PositiveInfinity, float.PositiveInfinity );
+		var hi = new Vec3( float.NegativeInfinity, float.NegativeInfinity, float.NegativeInfinity );
+
+		for ( var i = 0; i < clone.Count; i++ )
+		{
+			lo = MinV( lo, clone.HeadWorld( i ) );
+			lo = MinV( lo, clone.TailWorld( i ) );
+			hi = MaxV( hi, clone.HeadWorld( i ) );
+			hi = MaxV( hi, clone.TailWorld( i ) );
+		}
+
+		var span = hi - lo;
+		var longest = MathF.Max( span.x, MathF.Max( span.y, span.z ) );
+
+		if ( longest < 1e-6f )
+			throw new ArgumentException( "FitToBounds needs a skeleton with a non-zero extent." );
+
+		var target = max - min;
+		var targetLongest = MathF.Max( target.x, MathF.Max( target.y, target.z ) );
+		var factor = targetLongest / longest;
+		var centre = (lo + hi) * 0.5f;
+		var delta = (min + max) * 0.5f - centre * factor;
+
+		foreach ( var bone in clone.Bones )
+		{
+			bone.Local = new Xform( bone.Local.X, bone.Local.Y, bone.Local.Z, bone.Local.Origin * factor );
+			bone.Length *= factor;
+
+			if ( bone.Parent < 0 )
+				bone.Local = new Xform( bone.Local.X, bone.Local.Y, bone.Local.Z, bone.Local.Origin + delta );
+		}
+
+		return clone;
+	}
+
+	static Skeleton Fish( float s, int spineCount, int dorsalCount )
+	{
+		if ( spineCount < 1 ) throw new ArgumentOutOfRangeException( nameof( spineCount ), "a fish needs at least 1 spine bone." );
+		if ( dorsalCount < 0 ) throw new ArgumentOutOfRangeException( nameof( dorsalCount ), "dorsal count cannot be negative." );
+
+		// Forward +x (head at +x, tail at -x), dorsal +z, lateral +-y. Body 24 in long at scale 1.
+		var length = 24f * s;
+		var headX = length * 0.5f;
+		var tailX = -length * 0.5f;
+		var halfWidth = 3f * s;
+		var halfDepth = 2.5f * s;
+		var k = new Skeleton();
+
+		int Add( string name, int parent, Vec3 head, Vec3 tail ) =>
+			k.AddBoneFromPoints( name, parent, head, tail, RigBuild.DefaultUp( tail - head ) );
+
+		var root = Add( "root", -1, new Vec3( 0, 0, 0 ), new Vec3( headX, 0, 0 ) );
+		var spine = new int[spineCount + 1];
+
+		for ( var i = 0; i <= spineCount; i++ )
+		{
+			var x0 = headX - length * i / (spineCount + 1);
+			var x1 = headX - length * (i + 1) / (spineCount + 1);
+			spine[i] = Add( $"spine_{i}", i == 0 ? root : spine[i - 1], new Vec3( x0, 0, 0 ), new Vec3( x1, 0, 0 ) );
+		}
+
+		var head = Add( "head", spine[0], new Vec3( headX, 0, 0 ), new Vec3( headX + 3f * s, 0, 0 ) );
+		Add( "jaw", head, new Vec3( headX - 1f * s, 0, -1f * s ), new Vec3( headX + 2f * s, 0, -1.5f * s ) );
+		Add( "eye_L", head, new Vec3( headX - 1f * s, halfWidth * 0.4f, 0.8f * s ), new Vec3( headX - 1f * s, halfWidth * 0.7f, 0.8f * s ) );
+		Add( "opercle_L", head, new Vec3( headX - 2f * s, halfWidth * 0.5f, 0 ), new Vec3( headX - 3f * s, halfWidth * 0.7f, -0.5f * s ) );
+		RigBuild.MirrorSide( k, 'L', out _ );
+
+		var lastSpine = spine[spineCount];
+		Add( "caudal_upper", lastSpine, new Vec3( tailX, 0, 0 ), new Vec3( tailX - 3f * s, 0, 1.5f * s ) );
+		Add( "caudal_lower", lastSpine, new Vec3( tailX, 0, 0 ), new Vec3( tailX - 3f * s, 0, -1.5f * s ) );
+		Add( "pectoral_L", spine[Math.Min( 1, spineCount )], new Vec3( headX * 0.5f, halfWidth, -0.5f * s ), new Vec3( headX * 0.5f - 1f * s, halfWidth + 2f * s, -1f * s ) );
+		Add( "pelvic_L", spine[Math.Min( 2, spineCount )], new Vec3( 0, halfWidth, -halfDepth ), new Vec3( -1f * s, halfWidth + 1.5f * s, -halfDepth - 1f * s ) );
+		RigBuild.MirrorSide( k, 'L', out _ );
+
+		var mid = spine[spineCount / 2];
+		var prev = mid;
+
+		for ( var i = 0; i < dorsalCount; i++ )
+		{
+			var x0 = -i * 2f * s;
+			var x1 = -(i + 1) * 2f * s;
+			var z0 = halfDepth + (i == 0 ? 0f : 1.5f * s);
+			var z1 = halfDepth + 1.5f * s;
+			prev = Add( $"dorsal_{i}", prev, new Vec3( x0, 0, z0 ), new Vec3( x1, 0, z1 ) );
+		}
+
+		Add( "anal", spine[Math.Max( 0, spineCount - 1 )], new Vec3( -length * 0.35f, 0, -halfDepth ), new Vec3( -length * 0.4f, 0, -halfDepth - 1.5f * s ) );
+		return SkeletonOrderByChains( k );
+	}
+
+	static Skeleton Avian( float s )
+	{
+		// Standing bird, forward +x, up +z, ground at z 0. Wings fold in three segments per side.
+		var k = new Skeleton();
+
+		int Add( string name, int parent, Vec3 head, Vec3 tail ) =>
+			k.AddBoneFromPoints( name, parent, head, tail, RigBuild.DefaultUp( tail - head ) );
+
+		var pelvis = Add( "pelvis", -1, new Vec3( 0, 0, 18f * s ), new Vec3( 0, 0, 24f * s ) );
+		var spine0 = Add( "spine_0", pelvis, new Vec3( 0, 0, 24f * s ), new Vec3( 0, 0, 28f * s ) );
+		var neck = Add( "neck", spine0, new Vec3( 0, 0, 28f * s ), new Vec3( 2f * s, 0, 32f * s ) );
+		var head = Add( "head", neck, new Vec3( 2f * s, 0, 32f * s ), new Vec3( 5f * s, 0, 33f * s ) );
+		Add( "beak", head, new Vec3( 5f * s, 0, 33f * s ), new Vec3( 8f * s, 0, 32.5f * s ) );
+		Add( "sternum", spine0, new Vec3( 0, 0, 20f * s ), new Vec3( 2f * s, 0, 16f * s ) );
+
+		var hip = Add( "leg_upper_L", pelvis, new Vec3( 0, 2.5f * s, 18f * s ), new Vec3( 0, 3f * s, 10f * s ) );
+		var shin = Add( "leg_lower_L", hip, new Vec3( 0, 3f * s, 10f * s ), new Vec3( 0, 3f * s, 2f * s ) );
+		var foot = Add( "talon_L", shin, new Vec3( 0, 3f * s, 2f * s ), new Vec3( 2f * s, 3f * s, 0 ) );
+		Add( "toe_L", foot, new Vec3( 2f * s, 3f * s, 0 ), new Vec3( 4f * s, 3f * s, 0 ) );
+
+		var shoulder = Add( "wing_shoulder_L", spine0, new Vec3( 0, 3f * s, 26f * s ), new Vec3( 0, 8f * s, 26f * s ) );
+		var elbow = Add( "wing_elbow_L", shoulder, new Vec3( 0, 8f * s, 26f * s ), new Vec3( 0, 14f * s, 24f * s ) );
+		var wrist = Add( "wing_wrist_L", elbow, new Vec3( 0, 14f * s, 24f * s ), new Vec3( 0, 20f * s, 22f * s ) );
+		var pri = wrist;
+
+		for ( var i = 1; i <= 4; i++ )
+			pri = Add( $"feather_pri_{i}", pri, new Vec3( -2f * (i - 1) * s, (20f + 4f * (i - 1)) * s, 22f * s ), new Vec3( -2f * i * s, (20f + 4f * i) * s, 22f * s ) );
+
+		var sec = elbow;
+
+		for ( var i = 1; i <= 3; i++ )
+			sec = Add( $"feather_sec_{i}", sec, new Vec3( -2f * (i - 1) * s, (14f + 4f * (i - 1)) * s, (24f - i) * s ), new Vec3( -2f * i * s, (14f + 4f * i) * s, (24f - i) * s ) );
+
+		var tail0 = Add( "tail_0", pelvis, new Vec3( -2f * s, 0, 18f * s ), new Vec3( -6f * s, 0, 18f * s ) );
+		var tail1 = Add( "tail_1", tail0, new Vec3( -6f * s, 0, 18f * s ), new Vec3( -10f * s, 0, 18f * s ) );
+		Add( "tail_fan_L", tail1, new Vec3( -10f * s, 0, 18f * s ), new Vec3( -13f * s, 2f * s, 18f * s ) );
+		RigBuild.MirrorSide( k, 'L', out _ );
+		return SkeletonOrderByChains( k );
+	}
+
+	static Skeleton Arachnid( float s, int pairs )
+	{
+		if ( pairs < 3 || pairs > 5 ) throw new ArgumentOutOfRangeException( nameof( pairs ), $"arachnid leg pairs must be 3, 4 or 5, not {pairs}." );
+
+		var k = new Skeleton();
+
+		int Add( string name, int parent, Vec3 head, Vec3 tail ) =>
+			k.AddBoneFromPoints( name, parent, head, tail, RigBuild.DefaultUp( tail - head ) );
+
+		var body = Add( "cephalothorax", -1, new Vec3( 0, 0, 6f * s ), new Vec3( 3f * s, 0, 6f * s ) );
+		Add( "abdomen", body, new Vec3( -1f * s, 0, 6f * s ), new Vec3( -5f * s, 0, 6f * s ) );
+		Add( "chelicera_L", body, new Vec3( 3f * s, 1f * s, 5f * s ), new Vec3( 5f * s, 1.5f * s, 4f * s ) );
+		Add( "pedipalp_L", body, new Vec3( 2f * s, 2f * s, 5f * s ), new Vec3( 4f * s, 3f * s, 3f * s ) );
+
+		for ( var p = 1; p <= pairs; p++ )
+		{
+			var fx = (2f - (p - 1) * 1.5f) * s;
+			var back = p > pairs / 2 ? -0.5f : 0.5f;
+			var coxa = Add( $"leg{p}_coxa_L", body, new Vec3( fx, 2f * s, 5f * s ), new Vec3( fx, 3.5f * s, 5f * s ) );
+			var femur = Add( $"leg{p}_femur_L", coxa, new Vec3( fx, 3.5f * s, 5f * s ), new Vec3( fx + back * s, 6f * s, 3f * s ) );
+			var patella = Add( $"leg{p}_patella_L", femur, new Vec3( fx + back * s, 6f * s, 3f * s ), new Vec3( fx, 7f * s, 2f * s ) );
+			var tibia = Add( $"leg{p}_tibia_L", patella, new Vec3( fx, 7f * s, 2f * s ), new Vec3( fx, 8f * s, 0.5f * s ) );
+			var tarsus = Add( $"leg{p}_tarsus_L", tibia, new Vec3( fx, 8f * s, 0.5f * s ), new Vec3( fx + 0.5f * s, 8.5f * s, 0 ) );
+			// IK targets: bones at the feet, parented to the body so an IK solve can aim at them
+			// without them inheriting the leg chain's own motion.
+			Add( $"leg{p}_ik_L", body, new Vec3( fx + 0.5f * s, 8.5f * s, 0 ), new Vec3( fx + 0.5f * s, 8.5f * s, 0.5f * s ) );
+			_ = tarsus;
+		}
+
+		RigBuild.MirrorSide( k, 'L', out _ );
+		return SkeletonOrderByChains( k );
+	}
+
+	static Skeleton Serpentine( float s, int count )
+	{
+		if ( count < 8 || count > 24 ) throw new ArgumentOutOfRangeException( nameof( count ), $"serpentine count must be 8..24, not {count}." );
+
+		var k = new Skeleton();
+
+		int Add( string name, int parent, Vec3 head, Vec3 tail ) =>
+			k.AddBoneFromPoints( name, parent, head, tail, RigBuild.DefaultUp( tail - head ) );
+
+		var prev = Add( "root", -1, new Vec3( 0, 0, 2f * s ), new Vec3( 2f * s, 0, 2f * s ) );
+		var segLen = 2f * s;
+
+		for ( var i = 0; i < count; i++ )
+		{
+			var x0 = 2f * s + i * segLen;
+			var y0 = MathF.Sin( i * 0.7f ) * 1.5f * s;
+			var x1 = x0 + segLen;
+			var y1 = MathF.Sin( (i + 1) * 0.7f ) * 1.5f * s;
+			prev = Add( $"seg_{i}", prev, new Vec3( x0, y0, 2f * s ), new Vec3( x1, y1, 2f * s ) );
+			// SoftBone tag: the chain is meant to be spring-simulated, not keyed stiff.
+			k.Bones[prev].Soft = new SoftBone { Stiffness = 60f, Damping = 0.5f, Weight = 0f, MaxAngle = 80f };
+		}
+
+		return k;
+	}
+
+	static Skeleton VehicleWheeled( float s )
+	{
+		var k = new Skeleton();
+
+		int Add( string name, int parent, Vec3 head, Vec3 tail ) =>
+			k.AddBoneFromPoints( name, parent, head, tail, RigBuild.DefaultUp( tail - head ) );
+
+		var chassis = Add( "chassis", -1, new Vec3( 0, 0, 3f * s ), new Vec3( 4f * s, 0, 3f * s ) );
+		var roll = Add( "body_roll", chassis, new Vec3( 0, 0, 3f * s ), new Vec3( 0, 0, 5f * s ) );
+		Add( "steer_L", chassis, new Vec3( 3.5f * s, 2.5f * s, 1.5f * s ), new Vec3( 3.5f * s, 3.5f * s, 1.5f * s ) );
+		Add( "steer_R", chassis, new Vec3( 3.5f * s, -2.5f * s, 1.5f * s ), new Vec3( 3.5f * s, -3.5f * s, 1.5f * s ) );
+		Add( "wheel_FL", chassis, new Vec3( 3.5f * s, 2f * s, 1.5f * s ), new Vec3( 3.5f * s, 3.2f * s, 1.5f * s ) );
+		Add( "wheel_FR", chassis, new Vec3( 3.5f * s, -2f * s, 1.5f * s ), new Vec3( 3.5f * s, -3.2f * s, 1.5f * s ) );
+		Add( "wheel_RL", chassis, new Vec3( -3.5f * s, 2f * s, 1.5f * s ), new Vec3( -3.5f * s, 3.2f * s, 1.5f * s ) );
+		Add( "wheel_RR", chassis, new Vec3( -3.5f * s, -2f * s, 1.5f * s ), new Vec3( -3.5f * s, -3.2f * s, 1.5f * s ) );
+		Add( "door_L", roll, new Vec3( 0, 3f * s, 3f * s ), new Vec3( 0, 3.2f * s, 4f * s ) );
+		Add( "door_R", roll, new Vec3( 0, -3f * s, 3f * s ), new Vec3( 0, -3.2f * s, 4f * s ) );
+		Add( "hood", chassis, new Vec3( 4f * s, 0, 4f * s ), new Vec3( 6f * s, 0, 4f * s ) );
+		Add( "trunk", chassis, new Vec3( -4f * s, 0, 4f * s ), new Vec3( -6f * s, 0, 4f * s ) );
+		return k;
+	}
+
+	static Skeleton WeaponFirearm( float s )
+	{
+		var k = new Skeleton();
+
+		int Add( string name, int parent, Vec3 head, Vec3 tail ) =>
+			k.AddBoneFromPoints( name, parent, head, tail, RigBuild.DefaultUp( tail - head ) );
+
+		var root = Add( "weapon_root", -1, new Vec3( 0, 0, 0 ), new Vec3( 4f * s, 0, 0 ) );
+		Add( "muzzle", root, new Vec3( 6f * s, 0, 0 ), new Vec3( 8f * s, 0, 0 ) );
+		Add( "slide_bolt", root, new Vec3( 2f * s, 0, 1f * s ), new Vec3( 5f * s, 0, 1f * s ) );
+		Add( "trigger", root, new Vec3( 1f * s, 0, -1f * s ), new Vec3( 1f * s, 0, -2f * s ) );
+		Add( "magazine", root, new Vec3( 1.5f * s, 0, -1f * s ), new Vec3( 1f * s, 0, -3f * s ) );
+		Add( "ChargingHandle", root, new Vec3( -1f * s, 0, 1f * s ), new Vec3( -2f * s, 0, 1f * s ) );
+		Add( "eject_port", root, new Vec3( 3f * s, 1f * s, 0.5f * s ), new Vec3( 4f * s, 1f * s, 0.5f * s ) );
+		Add( "hand_ik_L", root, new Vec3( 3f * s, 0, -2f * s ), new Vec3( 3.5f * s, 0, -2f * s ) );
+		return k;
 	}
 }

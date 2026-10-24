@@ -205,6 +205,22 @@ public sealed class BakeOptions
 	public bool SixteenBit;
 
 	/// <summary>
+	/// Rounded-edge radius for normal baking (`round=`), in model units. Zero (the
+	/// default) bakes the sculpt's normals exactly, so a hard low-poly edge stays hard.
+	/// Above zero, a texel within this distance of a hard edge blends in the adjacent
+	/// face's normal, with weight fading from 1 at the edge to 0 at this radius and
+	/// only for neighbours within 110 degrees of the centre normal — the adjacent
+	/// faces of a bevel, not the far side of the model. The result reads as a baked
+	/// fillet along sharp hard-surface edges, without needing a high-poly subdivided
+	/// source. (Offset rays were tried first and do not work here: a ray cast along
+	/// the centre normal runs parallel to a perpendicular adjacent face and can
+	/// never hit it.) Works with
+	/// <see cref="SixteenBit"/> (the blend happens before encoding, so the 16-bit map
+	/// carries the rounded normals too).
+	/// </summary>
+	public float BevelRadius;
+
+	/// <summary>
 	/// What the ID map (<see cref="BakeMaps.MaterialId"/>) colours by: one id per face of the high
 	/// mesh. Null means each face's material slot (<see cref="Face.Material"/>). A by-name or
 	/// multi-high bake (<see cref="NormalBake.BakeGroups"/>) can colour by which high body was hit
@@ -1308,6 +1324,7 @@ public static class NormalBake
 		public MeshBVH Bvh, LowBvh;
 		public int[] Ids;
 		public float Front, Back;
+		public Dictionary<EdgeKey, List<int>> EdgeFaces; // lazy, built on first bevelled texel
 	}
 
 	/// <summary>One fan triangle of the cage with everything a sample needs from its corners.</summary>
@@ -1673,6 +1690,50 @@ public static class NormalBake
 				tg = AnyPerpendicular( sn.Normal );
 
 			var bt = Vec3.Cross( sn, tg ) * t.Sign;
+
+			// Rounded-edge blend (BevelRadius > 0). NOTE on mechanism, because the
+			// roadmap's literal prescription does not work: four offset rays cast along
+			// the centre normal run parallel to a perpendicular adjacent face, so they
+			// can never hit it — a hard cube edge stays hard no matter the radius.
+			// What does round a hard edge is the adjacent face's normal itself, so:
+			// for each hard edge of the hit face (a neighbour whose flat normal is
+			// within 110 degrees of the centre normal), blend that normal in with a
+			// weight fading from 1 at the edge to 0 at BevelRadius from it. At the
+			// edge the normal is the average of the two faces (45 degrees on a cube:
+			// exactly the baked-fillet look), and a face centre is untouched.
+			if ( _normal is not null && _o.BevelRadius > 0f && hit.FaceIndex >= 0 && hit.FaceIndex < g.High.Faces.Count )
+			{
+				g.EdgeFaces ??= g.High.BuildEdgeFaces();
+				var face = g.High.Faces[hit.FaceIndex];
+				var acc = hn;
+				var wSum = 1f;
+				for ( var e = 0; e < face.Count; e++ )
+				{
+					var a = g.High.Positions[face.Indices[e]];
+					var b = g.High.Positions[face.Indices[(e + 1) % face.Count]];
+					if ( !g.EdgeFaces.TryGetValue( new EdgeKey( face.Indices[e], face.Indices[(e + 1) % face.Count] ), out var adj ) )
+						continue;
+					foreach ( var other in adj )
+					{
+						if ( other == hit.FaceIndex )
+							continue;
+						var on = g.High.FaceNormal( g.High.Faces[other] ).Normal;
+						if ( on.LengthSquared < 1e-12f || Vec3.Dot( on, hn ) < -0.342f )
+							continue; // past 110 degrees: a different surface, not this edge's bevel
+						var ab = b - a;
+						var denom = ab.LengthSquared;
+						var tt = denom > 1e-18f ? Math.Clamp( Vec3.Dot( hit.Point - a, ab ) / denom, 0f, 1f ) : 0f;
+						var dist = (hit.Point - (a + ab * tt)).Length;
+						if ( dist >= _o.BevelRadius )
+							continue;
+						var w = 1f - dist / _o.BevelRadius;
+						acc += on * w;
+						wSum += w;
+					}
+				}
+				if ( wSum > 1f && acc.LengthSquared > 1e-12f )
+					hn = acc.Normal;
+			}
 
 			if ( _normal is not null )
 				result.Normal = TangentSpace( hn, tg, bt, sn );

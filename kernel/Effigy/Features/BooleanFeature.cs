@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -56,12 +57,24 @@ public sealed class BooleanFeature : Feature
 	/// <summary>The voxel boolean's cell size; 0 picks one from the parts' size.</summary>
 	public readonly FloatParam Voxel = new( "Voxel", 0f, 0f, 50f, "in" );
 
+	/// <summary>
+	/// Bevel after an exact Union or Subtract (roadmap B1.3): the weld line left by the cut
+	/// is filleted in the same feature, so a bolted joint or a window cut does not need a
+	/// second pass to look welded. 0 means no bevel. Only the newly created intersection
+	/// seam edges are filleted — never every sharp edge of the part — and only when the
+	/// result came from the exact boolean; a voxel skin has no seam to fillet.
+	/// </summary>
+	public readonly FloatParam Bevel = new( "Bevel", 0f, 0f, 10f, "in" );
+
+	/// <summary>Arc segments for the post-boolean bevel (1 = a flat chamfer).</summary>
+	public readonly IntParam BevelSegments = new( "Bevel segments", 2, 1, 8 );
+
 	public const int MethodAuto = 0, MethodExact = 1, MethodVoxel = 2;
 
 	public override IReadOnlyList<IParam> Parameters =>
 		Operation.Index == 0
-			? new IParam[] { Operation, Targets, Tools, Method, Voxel }
-			: new IParam[] { Operation, Targets, Tools, KeepTools, Method, Voxel };
+			? new IParam[] { Operation, Targets, Tools, Method, Voxel, Bevel, BevelSegments }
+			: new IParam[] { Operation, Targets, Tools, KeepTools, Method, Voxel, Bevel, BevelSegments };
 
 	public override IReadOnlyList<IParam> AdvancedParameters => new IParam[] { Method, Voxel };
 
@@ -73,13 +86,37 @@ public sealed class BooleanFeature : Feature
 	{
 		var voxel = Method.Index == MethodVoxel || (Method.Index == MethodAuto && !MeshBoolean.Available);
 
-		if ( !voxel )
-			return MeshBoolean.Apply( op, target, tool );
+		if ( voxel )
+		{
+			var result = VoxelBoolean.Apply( op, target, tool, Voxel.Clamped, out var used );
+			_usedVoxel = true;
+			_voxelUsed = used;
+			return result;
+		}
 
-		var result = VoxelBoolean.Apply( op, target, tool, Voxel.Clamped, out var used );
-		_usedVoxel = true;
-		_voxelUsed = used;
-		return result;
+		var exact = MeshBoolean.Apply( op, target, tool );
+
+		// Bevel only on Union/Subtract, only on an exact result, only on the seam: a
+		// bevel on an Intersect would fillet the kept overlap's own rim, which is not a
+		// weld line, and a bevel that cannot be cut must not fail the boolean itself.
+		if ( op != BooleanOp.Intersect && Bevel.Clamped > 0f )
+		{
+			var seams = ExactMeshBoolean.SeamEdges( exact, target, tool );
+
+			if ( seams.Count > 0 )
+			{
+				var report = EdgeBlend.FilletReport( exact, Bevel.Clamped, Math.Max( 1, BevelSegments.Clamped ), seams );
+
+				if ( report.Failure is null )
+					return report.Mesh;
+
+				Warn( "The post-boolean bevel could not be cut, so the sharp seam stands",
+					report.Failure.Problem ?? "The seam edges could not be filleted.",
+					"Lower the bevel", "Or set Bevel to 0 and fillet the seam by hand" );
+			}
+		}
+
+		return exact;
 	}
 
 	BooleanOp Op => Operation.Index switch

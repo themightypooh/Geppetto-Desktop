@@ -197,6 +197,266 @@ public static class FbxWriter
 		return w.ToString();
 	}
 
+	// --- multi-body export (Lane H, Backlog G10) -------------------------------------------------
+	//
+	// WHY NOT JUST `splitByBody` ON Write(PolyMesh). A PolyMesh carries no bodies: it is one
+	// merged mesh, and its faces do not know which body they came from. The roadmap's flag
+	// therefore lives on the PartStudio overload below, where the bodies exist — and on
+	// WriteSplit, which takes the bodies directly. With splitByBody off, the studio overload
+	// merges exactly as before, so existing callers change nothing.
+	//
+	// WHAT SPLIT MEANS. One Geometry + one Model per body, each geometry carrying its own
+	// material indices (its own material table, in FBX terms: the connections from that
+	// model's materials to that model), one Skin + one Cluster set per body when rigged,
+	// sharing one skeleton and one BindPose. The single-mesh Write above is untouched, so a
+	// merged export is byte-identical to before — a test holds that.
+	//
+	// WHAT SPLIT DOES NOT CARRY: blend shapes. FbxBlendShapes plans ids and connections per
+	// single mesh; splitting its plans across bodies is a second job, and silently dropping
+	// morphs would be worse than refusing. A body with morphs throws, loudly, instead.
+
+	/// <summary>
+	/// Write a whole studio: merged into one mesh node, or — with
+	/// <paramref name="splitByBody"/> — one Geometry + Model per body. Reference bodies are
+	/// skipped in both cases, as <see cref="PartStudio.ToMeshWithBodies"/> skips them.
+	/// </summary>
+	public static string Write( PartStudio studio,
+		Skeleton skeleton = null,
+		float smoothingAngleDegrees = MeshNormals.DefaultSmoothingAngleDegrees,
+		Func<int, string> materialName = null,
+		string modelName = null,
+		double unitScale = 1,
+		bool skeletonless = false,
+		bool triangulate = false,
+		bool tangents = true,
+		bool splitByBody = false )
+	{
+		if ( studio is null )
+			throw new ArgumentNullException( nameof( studio ) );
+		if ( !splitByBody )
+			return Write( studio.ToMeshWithBodies().Mesh, skeleton, smoothingAngleDegrees, materialName,
+				modelName, unitScale, skeletonless, triangulate, tangents );
+		return WriteSplit( studio.Bodies, skeleton, smoothingAngleDegrees, materialName, modelName,
+			unitScale, skeletonless, triangulate, tangents );
+	}
+
+	/// <summary>Write a studio's bodies to a file, split or merged — see <see cref="Write(PartStudio, Skeleton, float, Func{int, string}, string, double, bool, bool, bool, bool)"/>.</summary>
+	public static void WriteFile( PartStudio studio, string path,
+		Skeleton skeleton = null,
+		float smoothingAngleDegrees = MeshNormals.DefaultSmoothingAngleDegrees,
+		Func<int, string> materialName = null,
+		string modelName = null,
+		bool triangulate = false,
+		bool tangents = true,
+		bool splitByBody = false ) =>
+		File.WriteAllText( path, Write( studio, skeleton, smoothingAngleDegrees, materialName, modelName,
+			1, false, triangulate, tangents, splitByBody ) );
+
+	/// <summary>
+	/// One Geometry + Model per body, each with its own material table, sharing one skeleton
+	/// and one BindPose. Bodies that are references (a wearer, not a shipped part) are skipped.
+	/// </summary>
+	public static string WriteSplit( IReadOnlyList<Body> bodies,
+		Skeleton skeleton = null,
+		float smoothingAngleDegrees = MeshNormals.DefaultSmoothingAngleDegrees,
+		Func<int, string> materialName = null,
+		string modelName = null,
+		double unitScale = 1,
+		bool skeletonless = false,
+		bool triangulate = false,
+		bool tangents = true )
+	{
+		if ( bodies is null )
+			throw new ArgumentNullException( nameof( bodies ) );
+		var parts = new List<Body>();
+		foreach ( var b in bodies )
+			if ( b is not null && !b.IsReference && b.Mesh is not null )
+				parts.Add( b );
+		if ( parts.Count == 0 )
+			throw new ArgumentException( "no exportable bodies (all null, reference, or meshless)", nameof( bodies ) );
+		foreach ( var b in parts )
+			if ( b.Mesh.HasMorphs )
+				throw new InvalidOperationException(
+					$"split FBX does not carry blend shapes (body '{b.Name}'); export merged, or bake the morphs first" );
+
+		var rigged = !skeletonless;
+		skeleton = skeletonless ? new Skeleton() : skeleton ?? Skeleton.SingleRoot();
+		if ( rigged && skeleton.Count == 0 )
+			throw new InvalidOperationException( "FBX needs at least one bone; use Skeleton.SingleRoot for a static model" );
+
+		materialName ??= slot => $"material_{slot}";
+		modelName ??= "effigy_model";
+
+		var bodyNames = new List<string>( parts.Count );
+		var seenNames = new HashSet<string>();
+		for ( var i = 0; i < parts.Count; i++ )
+		{
+			var name = string.IsNullOrWhiteSpace( parts[i].Name ) ? $"{modelName}_{i}" : parts[i].Name;
+			if ( !seenNames.Add( name ) )
+				name = $"{name}_{i}";
+			bodyNames.Add( name );
+		}
+
+		var perBodyNormals = new (int[][] CornerNormals, List<Vec3> Normals, Vec4[][] Tangents, List<int> Slots)[parts.Count];
+		var allSlots = new SortedSet<int>();
+		for ( var i = 0; i < parts.Count; i++ )
+		{
+			var mesh = parts[i].Mesh;
+			var (cornerNormals, normals) = MeshNormals.ComputeCornerNormals( mesh, smoothingAngleDegrees );
+			var cornerTangents = tangents && mesh.Faces.Exists( f => f.UVs is not null && f.UVs.Length == f.Count )
+				? NormalBake.ExportTangents( mesh, cornerNormals, normals ) : null;
+			var slots = MaterialSlots( mesh );
+			foreach ( var slot in slots )
+				allSlots.Add( slot );
+			perBodyNormals[i] = (cornerNormals, normals, cornerTangents, slots);
+		}
+		var slotList = new List<int>( allSlots );
+		var slotId = new Dictionary<int, long>();
+		var slotIndex = new Dictionary<int, int>();
+		for ( var i = 0; i < slotList.Count; i++ )
+			slotIndex[slotList[i]] = i;
+
+		var w = new FbxText();
+		var geometryIds = new long[parts.Count];
+		var meshModelIds = new long[parts.Count];
+		for ( var i = 0; i < parts.Count; i++ )
+		{
+			geometryIds[i] = w.NextId();
+			meshModelIds[i] = w.NextId();
+		}
+		var materialIds = new long[slotList.Count];
+		for ( var i = 0; i < slotList.Count; i++ )
+		{
+			materialIds[i] = w.NextId();
+			slotId[slotList[i]] = materialIds[i];
+		}
+		var boneModelIds = new long[skeleton.Count];
+		var boneAttrIds = new long[skeleton.Count];
+		for ( var i = 0; i < skeleton.Count; i++ )
+		{
+			boneModelIds[i] = w.NextId();
+			boneAttrIds[i] = w.NextId();
+		}
+		var skinIds = new long[parts.Count];
+		var clusterIds = new long[parts.Count][];
+		for ( var i = 0; i < parts.Count; i++ )
+		{
+			skinIds[i] = w.NextId();
+			clusterIds[i] = new long[skeleton.Count];
+			for ( var b = 0; b < skeleton.Count; b++ )
+				clusterIds[i][b] = w.NextId();
+		}
+		var idPose = w.NextId();
+
+		WriteHeader( w );
+		WriteGlobalSettings( w, unitScale );
+		WriteDocuments( w );
+		WriteDefinitionsMulti( w, slotList.Count, skeleton.Count, parts.Count, rigged );
+
+		w.Open( "Objects: " );
+		{
+			for ( var i = 0; i < parts.Count; i++ )
+			{
+				var (cornerNormals, normals, cornerTangents, slots) = perBodyNormals[i];
+				WriteGeometry( w, geometryIds[i], parts[i].Mesh, cornerNormals, normals, slots, cornerTangents, triangulate );
+				WriteMeshModel( w, meshModelIds[i], bodyNames[i] );
+			}
+			for ( var i = 0; i < slotList.Count; i++ )
+				WriteMaterial( w, materialIds[i], materialName( slotList[i] ) );
+			for ( var i = 0; i < skeleton.Count; i++ )
+			{
+				WriteLimbAttribute( w, boneAttrIds[i], skeleton.Bones[i] );
+				WriteLimbModel( w, boneModelIds[i], skeleton.Bones[i] );
+			}
+			if ( rigged )
+			{
+				for ( var i = 0; i < parts.Count; i++ )
+				{
+					var mesh = parts[i].Mesh;
+					var skin = mesh.IsRigged ? mesh.Skin : SkinWeights.AllTo( mesh.VertexCount, 0 );
+					WriteSkinDeformer( w, skinIds[i], bodyNames[i] );
+					var clusterVertices = ClusterVertices( mesh, skin, skeleton );
+					for ( var b = 0; b < skeleton.Count; b++ )
+						WriteCluster( w, clusterIds[i][b], skeleton, b, clusterVertices[b] );
+				}
+				WriteBindPose( w, idPose, meshModelIds, boneModelIds, skeleton );
+			}
+		}
+		w.Close();
+
+		WriteConnectionsMulti( w, geometryIds, meshModelIds, perBodyNormals, slotId, boneModelIds,
+			boneAttrIds, skinIds, clusterIds, skeleton, rigged );
+
+		return w.ToString();
+	}
+
+	static void WriteDefinitionsMulti( FbxText w, int materialCount, int boneCount, int bodyCount, bool rigged )
+	{
+		// Same accounting as WriteDefinitions, with bodyCount meshes, bodyCount models, and
+		// one Skin + one Cluster set per body when rigged.
+		var deformers = rigged ? bodyCount * (boneCount + 1) : 0;
+		var poses = rigged ? 1 : 0;
+		var total = 1 + (boneCount + bodyCount) + boneCount + materialCount + deformers + bodyCount + poses;
+
+		w.Open( "Definitions: " );
+		w.Line( "Version: 100" );
+		w.Line( $"Count: {total}" );
+
+		ObjectType( w, "GlobalSettings", 1 );
+		ObjectType( w, "Model", boneCount + bodyCount );
+		ObjectType( w, "NodeAttribute", boneCount );
+		ObjectType( w, "Geometry", bodyCount );
+		ObjectType( w, "Material", materialCount );
+		if ( deformers > 0 )
+			ObjectType( w, "Deformer", deformers );
+		if ( rigged )
+			ObjectType( w, "Pose", poses );
+
+		w.Close();
+		w.Raw( "" );
+	}
+
+	static void WriteConnectionsMulti( FbxText w, long[] geometryIds, long[] meshModelIds,
+		(int[][] CornerNormals, List<Vec3> Normals, Vec4[][] Tangents, List<int> Slots)[] perBody,
+		Dictionary<int, long> slotId, long[] boneModelIds, long[] boneAttrIds,
+		long[] skinIds, long[][] clusterIds, Skeleton skeleton, bool rigged )
+	{
+		w.Open( "Connections: " );
+
+		for ( var i = 0; i < meshModelIds.Length; i++ )
+		{
+			Connect( w, meshModelIds[i], 0, "Model -> scene root" );
+			Connect( w, geometryIds[i], meshModelIds[i], "Geometry -> Model" );
+			foreach ( var slot in perBody[i].Slots )
+				Connect( w, slotId[slot], meshModelIds[i], "Material -> Model" );
+		}
+
+		for ( var i = 0; i < skeleton.Count; i++ )
+		{
+			Connect( w, boneAttrIds[i], boneModelIds[i], "NodeAttribute -> Model" );
+			var parent = skeleton.Bones[i].Parent;
+			Connect( w, boneModelIds[i], parent < 0 ? 0 : boneModelIds[parent], "Model -> parent" );
+		}
+
+		if ( !rigged )
+		{
+			w.Close();
+			return;
+		}
+
+		for ( var i = 0; i < meshModelIds.Length; i++ )
+		{
+			Connect( w, skinIds[i], geometryIds[i], "Deformer -> Geometry" );
+			for ( var b = 0; b < skeleton.Count; b++ )
+			{
+				Connect( w, clusterIds[i][b], skinIds[i], "SubDeformer -> Deformer" );
+				Connect( w, boneModelIds[b], clusterIds[i][b], "Model -> SubDeformer" );
+			}
+		}
+
+		w.Close();
+	}
+
 	// --- header and scene-level blocks ------------------------------------------------------------
 
 	static void WriteHeader( FbxText w )
@@ -705,17 +965,23 @@ public static class FbxWriter
 	/// read cluster matrices read this instead, and the two disagreeing is a classic source of a
 	/// model that binds correctly in one tool and folds in half in another.
 	/// </summary>
-	static void WriteBindPose( FbxText w, long id, long meshModelId, long[] boneModelIds, Skeleton skeleton )
+	static void WriteBindPose( FbxText w, long id, long meshModelId, long[] boneModelIds, Skeleton skeleton ) =>
+		WriteBindPose( w, id, new[] { meshModelId }, boneModelIds, skeleton );
+
+	static void WriteBindPose( FbxText w, long id, IReadOnlyList<long> meshModelIds, long[] boneModelIds, Skeleton skeleton )
 	{
 		w.Open( $"Pose: {id}, \"Pose::BIND_POSES\", \"BindPose\" " );
 		w.Line( "Type: \"BindPose\"" );
 		w.Line( "Version: 100" );
-		w.Line( $"NbPoseNodes: {skeleton.Count + 1}" );
+		w.Line( $"NbPoseNodes: {skeleton.Count + meshModelIds.Count}" );
 
-		w.Open( "PoseNode: " );
-		w.Line( $"Node: {meshModelId}" );
-		w.NumberArray( "Matrix", MatrixValues( Xform.Identity ) );
-		w.Close();
+		foreach ( var meshModelId in meshModelIds )
+		{
+			w.Open( "PoseNode: " );
+			w.Line( $"Node: {meshModelId}" );
+			w.NumberArray( "Matrix", MatrixValues( Xform.Identity ) );
+			w.Close();
+		}
 
 		for ( var i = 0; i < skeleton.Count; i++ )
 		{

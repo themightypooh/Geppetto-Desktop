@@ -405,3 +405,122 @@ static class BrdfLut
 		return (L( p00.A, p10.A, p01.A, p11.A ), L( p00.B, p10.B, p01.B, p11.B ));
 	}
 }
+
+/// <summary>
+/// Lane C: the cartoony-to-realistic look spectrum, headless side. This is the per-sample look
+/// math, not a second renderer: <see cref="ShadedRender"/> is still the physical renderer, and
+/// it does not yet call this (its material is <see cref="ShadeMaterial"/>, which has no
+/// Toon/Stylized/Outline/Opacity fields — wiring that is a follow-up, not a silent edit to a
+/// file outside Lane C). Everything here is pure arithmetic over one sample, so a test can
+/// prove the three roadmap looks really differ, and a future wiring can call it per pixel/vertex
+/// without re-deriving the formulas.
+/// Inputs: <paramref name="albedo"/> linear, <paramref name="nl"/> = N·L, <paramref name="nv"/> = N·V,
+/// <paramref name="nh"/> = N·H, <paramref name="vl"/> = V·L (negative when backlit),
+/// <paramref name="cavity"/> normalised -1 (ridge) .. +1 (crease), <paramref name="ao"/> 0..1.
+/// </summary>
+public static class LookSpectrum
+{
+	public readonly record struct Shaded( Vec3 Colour, float Alpha, float Roughness );
+
+	/// <summary>Stepped N·L with an anti-aliased edge at each band jump (the roadmap's smoothstep edge).</summary>
+	public static float Quantize( float nl, int bands, float edge = 0.08f )
+	{
+		if ( bands <= 1 ) return Math.Clamp( nl, 0f, 1f );
+		var scaled = Math.Clamp( nl, 0f, 1f ) * bands;
+		var level = MathF.Floor( scaled );
+		var frac = scaled - level;
+		var lo = level / bands;
+		if ( frac < edge ) return Vec3Lerp( Math.Max( level - 1f, 0f ) / bands, lo, Smooth( 0f, edge, frac ) );
+		if ( frac > 1f - edge ) return Vec3Lerp( lo, Math.Min( level + 1f, bands ) / bands, Smooth( 1f - edge, 1f, frac ) );
+		return lo;
+	}
+
+	/// <summary>Back-face outline extrusion: the roadmap's pos + normal * OutlineWidth pass.</summary>
+	public static Vec3 OutlineOffset( Vec3 pos, Vec3 normal, SlotLook look ) =>
+		look is null || look.OutlineWidth <= 0f ? pos : pos + normal.Normal * look.OutlineWidth;
+
+	/// <summary>Dithered transparency for Opacity &lt; 1: a 4x4 Bayer threshold decides whether this
+	/// pixel survives, so a translucent fin reads as a stipple instead of a flat wash.</summary>
+	public static float DitheredAlpha( float opacity, int x, int y )
+	{
+		if ( opacity >= 1f ) return 1f;
+		if ( opacity <= 0f ) return 0f;
+		int[] bayer = { 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5 };
+		var t = bayer[(y & 3) * 4 + (x & 3)] / 16f;
+		return opacity > t ? 1f : 0f;
+	}
+
+	/// <summary>One sample through the whole spectrum, in roadmap order.</summary>
+	public static Shaded Shade( Vec3 albedo, float nl, float nv, float nh, float vl, float roughness, SlotLook look, float cavity, float ao )
+	{
+		if ( look is null ) return new Shaded( albedo * Math.Max( nl, 0f ), 1f, Math.Clamp( roughness, 0f, 1f ) );
+		nv = Math.Clamp( nv, 0f, 1f );
+		var diffuse = Math.Max( nl, 0f );
+		var rough = Math.Clamp( roughness, 0f, 1f );
+		var colour = albedo;
+		var spec = 0f;
+
+		// Toon: stepped diffuse, a stepped highlight when the base is glossy, a stepped rim.
+		if ( look.Toon > 0f )
+		{
+			var bands = Math.Clamp( look.ToonBands, 2, 8 );
+			diffuse = Vec3Lerp( diffuse, Quantize( diffuse, bands ), look.Toon );
+			if ( rough < 0.4f )
+			{
+				var h = MathF.Pow( Math.Max( nh, 0f ), MathF.Max( 1f, 8f * (1f - rough) ) );
+				spec = Vec3Lerp( h, Quantize( h, bands ), look.Toon );
+			}
+			var fres = MathF.Pow( 1f - nv, 4f );
+			colour += Vec3.One * (Smooth( 0.62f, 0.68f, fres ) * look.ToonRim * look.Toon * 0.5f);
+		}
+		else
+		{
+			spec = MathF.Pow( Math.Max( nh, 0f ), 1f / (rough * rough + 0.02f) ) * 0.25f;
+		}
+
+		// Stylized: ridge brightens and saturates (+0.18 per unit, the roadmap's number),
+		// creases shift warm and darken with AO, and the lobe broadens in creases.
+		if ( look.Stylized > 0f )
+		{
+			var ridge = Math.Clamp( -cavity, 0f, 1f );
+			var crease = Math.Clamp( cavity, 0f, 1f );
+			var st = look.Stylized;
+			colour *= 1f + 0.18f * st * ridge;
+			var lum = (colour.x + colour.y + colour.z) / 3f;
+			colour = Vec3.Lerp( new Vec3( lum, lum, lum ), colour, 1f + 0.2f * st * ridge );
+			colour = Vec3.Lerp( colour, new Vec3( colour.x, colour.y * 0.85f, colour.z * 0.65f ), st * crease * 0.5f );
+			colour *= 1f - 0.25f * st * Math.Clamp( ao, 0f, 1f ) * crease;
+			rough = Math.Clamp( rough + 0.25f * st * crease, 0f, 1f );
+		}
+
+		colour = colour * (0.25f + 0.75f * diffuse) + Vec3.One * spec * diffuse;
+
+		// Clearcoat: a second dielectric GGX-ish lobe, F0 = 0.04, on top of the base.
+		if ( look.Clearcoat > 0f )
+		{
+			var cr = Math.Clamp( look.ClearcoatRoughness, 0.01f, 1f );
+			var fresnel = 0.04f + 0.96f * MathF.Pow( 1f - nv, 5f );
+			colour += Vec3.One * (look.Clearcoat * MathF.Pow( Math.Max( nh, 0f ), 1f / (cr * cr + 0.02f) ) * fresnel * 0.5f);
+		}
+
+		// Subsurface: wrap diffuse plus back-scatter through thin parts, tinted by the look's colour.
+		if ( look.Subsurface > 0f )
+		{
+			var sss = new Vec3( ShadedRender.SrgbToLinear( look.SubsurfaceColor.x ), ShadedRender.SrgbToLinear( look.SubsurfaceColor.y ), ShadedRender.SrgbToLinear( look.SubsurfaceColor.z ) );
+			var wrap = 0.5f * look.Subsurface;
+			var wrapDiff = Math.Max( 0f, (nl + wrap) / (1f + wrap) );
+			var back = MathF.Pow( Math.Max( 0f, -vl ), 3f ) * (1f - 0.5f * Math.Clamp( ao, 0f, 1f ));
+			colour += sss * (look.Subsurface * (wrapDiff * 0.5f + back * 0.75f));
+		}
+
+		return new Shaded( colour, Math.Clamp( look.Opacity, 0f, 1f ), rough );
+	}
+
+	static float Smooth( float a, float b, float x )
+	{
+		var t = Math.Clamp( (x - a) / (b - a), 0f, 1f );
+		return t * t * (3f - 2f * t);
+	}
+
+	static float Vec3Lerp( float a, float b, float t ) => a + (b - a) * t;
+}

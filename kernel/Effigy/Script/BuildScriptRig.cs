@@ -19,10 +19,13 @@ namespace Effigy;
 ///   rig from=rigging_cables.json [right=cable3,cable4] [counts=cable0:12] [replace=1|merge=1]
 ///   bind Body[,Body]|all [method=smooth|envelope|rigid|heat] [falloff=2] [smooth=3] [twist=1] [max=4]
 ///   skin [Name] [radii="spine_1 4; arm_* 1.5; * 1"] [levels=2]
+///   play clip.riganim    (validate + report a clip against the rig; the desktop's
+///                         ServeMode `clip` command is what actually plays it in a pane)
+///   play off             (back to the rest pose)
 /// </summary>
 public static partial class BuildScript
 {
-	const string RigVerbs = "bone, chain, subdivide, twist, mirror bones, rig, bind, skin";
+	const string RigVerbs = "bone, chain, subdivide, twist, mirror bones, rig, bind, skin, play";
 
 	static bool RigCommand( PartStudio studio, string verb, List<string> args, string baseDir, Result r, out bool ok )
 	{
@@ -38,8 +41,67 @@ public static partial class BuildScript
 			case "rig": ok = RigVerb( studio, args, baseDir, r ); return true;
 			case "bind": ok = BindVerb( studio, args, r ); return true;
 			case "skin": ok = SkinVerb( studio, args, r ); return true;
+			case "play": ok = PlayVerb( studio, args, baseDir, r ); return true;
+		case "cables":
+			if ( args.Count == 0 ) { ok = Fail( r, "cables needs a file: cables rigging_cables.json [right=...] [counts=...]" ); return true; }
+			var cablesArgs = new List<string> { "from=" + args[0] };
+			cablesArgs.AddRange( args.Skip( 1 ) );
+			ok = RigVerb( studio, cablesArgs, baseDir, r ); return true;
 			default: return false;
 		}
+	}
+
+	/// <summary>
+	/// Lane E `play`: a clip is animation, not model, so it is deliberately NOT stored
+	/// in the document (PartStudio documents store the model definition, not clips —
+	/// see ExportService's own note). What this verb does headlessly is bind-check it:
+	/// the file must exist and parse, the model must have bones, and every bone track
+	/// must name a bone that exists. A clip for another rig is refused rather than
+	/// played half-bound. The desktop side that actually shows it is ServeMode's
+	/// `clip` / `rest` commands, which build a MarionettePlayer on the pane's rig
+	/// (including a live-run pane, where there was no player before) and keep it
+	/// across live revisions until `rest` is sent.
+	/// </summary>
+	static bool PlayVerb( PartStudio studio, List<string> args, string baseDir, Result r )
+	{
+		if ( args.Count == 0 )
+			return Fail( r, "play needs a clip: play flop.riganim, or play off for the rest pose." );
+
+		var first = args[0].ToLowerInvariant();
+		if ( first is "off" or "none" or "rest" )
+		{
+			r.Log.Add( "play off: rest pose (no clip)" );
+			return true;
+		}
+
+		var pathText = args[0].Contains( '=' ) ? Pairs( args ).GetValueOrDefault( "clip" ) : args[0];
+		if ( string.IsNullOrWhiteSpace( pathText ) )
+			return Fail( r, "play needs a clip: play flop.riganim, or play clip=flop.riganim." );
+
+		var path = Resolve( baseDir, pathText );
+		if ( !File.Exists( path ) )
+			return Fail( r, $"play {pathText}: no clip at {path}." );
+
+		if ( studio.Rig is not { Count: > 0 } )
+			return Fail( r, $"play {pathText}: the model has no bones to play a clip on. Build a rig first." );
+
+		RigAnimFile clip;
+		try { clip = RigAnimFile.ReadFile( path ); }
+		catch ( Exception e ) { return Fail( r, $"play {pathText}: the clip does not parse: {e.Message}" ); }
+
+		var boneTracks = clip.BoneTracks.ToList();
+		if ( boneTracks.Count == 0 )
+			return Fail( r, $"play {pathText}: the clip has no bone tracks." );
+
+		var missing = boneTracks.Select( t => t.Name ).Where( n => studio.Rig.IndexOf( n ) < 0 ).Distinct().ToList();
+		if ( missing.Count > 0 )
+			return Fail( r, $"play {pathText}: the clip keys bone(s) this rig does not have: {string.Join( ", ", missing )}. "
+				+ $"Rig bones: {string.Join( ", ", studio.Rig.Bones.Select( b => b.Name ) )}." );
+
+		var seconds = clip.FrameRate > 0 ? clip.LastFrame / (float)clip.FrameRate : 0f;
+		r.Log.Add( $"play {Path.GetFileName( pathText )}: {boneTracks.Count} bone track(s) on {studio.Rig.Count} bone(s), "
+			+ $"{clip.LastFrame} frames at {clip.FrameRate} fps ({seconds:0.##}s). In the cabinet, ServeMode `clip {pathText}` plays it on this rig; `rest` returns to the bind pose." );
+		return true;
 	}
 
 	static string BoneList( Skeleton rig ) =>

@@ -159,6 +159,49 @@ public static class SculptReprojection
 		return result;
 	}
 
+	/// <summary>
+	/// One-command reprojection: transfer a high-poly sculpt onto a clean low-poly cage
+	/// as a multi-level <see cref="MultiresSculpt"/> — <c>reproject LowCage HighSculpt</c>.
+	///
+	/// The cage is subdivided <paramref name="levels"/> times empty, then shrinkwrapped
+	/// onto the high sculpt at the top level and recorded there, so the result is a real
+	/// multires stack (cage edits below still propagate) rather than a baked dense mesh.
+	/// What is lost is what the existing <see cref="Reproject(MultiresSculpt, PolyMesh, out ReprojectionReport, int, float)"/>
+	/// already states: detail finer than the cage can carry, and anything the search rays
+	/// missed stays at the cage's own shape. The script verb itself lives in BuildScript
+	/// and is a follow-up — this is the kernel command it will call.
+	/// </summary>
+	public static MultiresSculpt ProjectOntoMultires( PolyMesh lowCage, PolyMesh highSculpt, int levels ) =>
+		ProjectOntoMultires( lowCage, highSculpt, levels, out _ );
+
+	/// <summary>As <see cref="ProjectOntoMultires(PolyMesh, PolyMesh, int)"/>, plus how much of the cage found the sculpt.</summary>
+	public static MultiresSculpt ProjectOntoMultires( PolyMesh lowCage, PolyMesh highSculpt, int levels, out ReprojectionReport report )
+	{
+		if ( lowCage is null )
+			throw new ArgumentNullException( nameof( lowCage ) );
+
+		if ( highSculpt is null )
+			throw new ArgumentNullException( nameof( highSculpt ) );
+
+		if ( levels < 0 || levels > 5 )
+			throw new ArgumentOutOfRangeException( nameof( levels ),
+				$"Reprojection levels {levels} are outside 0..5." );
+
+		var result = new MultiresSculpt( lowCage );
+
+		for ( var i = 0; i < levels; i++ )
+			result.AddLevel();
+
+		var target = result.Rest( levels );
+		var reach = DefaultReach( lowCage );
+		var fitted = MeshShrinkwrap.Apply( target, highSculpt, reach, 0f, out var hits );
+		result.Record( levels, fitted );
+		result.ViewLevel = levels;
+
+		report = new ReprojectionReport( target.VertexCount, hits, reach );
+		return result;
+	}
+
 	/// <summary>A tenth of the cage's diagonal, the same figure the bake uses and for the same
 	/// reason: far enough for ordinary relief, near enough that a ray rarely reaches an unrelated
 	/// part of the model.</summary>

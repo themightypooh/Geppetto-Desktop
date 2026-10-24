@@ -23,10 +23,10 @@ public enum BooleanOp
 /// and wrote down: robust mesh CSG is a decades-old problem — coplanar faces, floating-point
 /// robustness, self-intersection — and a half-working one is worse than none, because it fails on
 /// the interesting cases and does so by producing a mesh rather than an error. s&amp;box ships
-/// PolygonMesh.PerformBoolean, so the plan of record is an engine-backed implementation there, and
-/// a portable one only if it is ever genuinely needed.
+/// PolygonMesh.PerformBoolean, so the plan of record was an engine-backed implementation there; Lane B (New) added the kernel's own exact boolean as the default, and
+/// a portable one is now the default, and the engine's is an override.
 ///
-/// The kernel therefore knows what a boolean IS without knowing how to do one. That keeps the
+/// The kernel therefore still routes every boolean through this interface. That keeps the
 /// engine-free promise intact — nothing in here references an engine type — while letting a cut
 /// work wherever a provider has been installed.
 /// </summary>
@@ -53,9 +53,22 @@ public interface IMeshBoolean
 /// </summary>
 public static class MeshBoolean
 {
-	/// <summary>The installed provider, or null where there is none — a bare console runner, or
-	/// the test project. Set once at startup by whatever host knows how to do a boolean.</summary>
-	public static IMeshBoolean Provider { get; set; }
+	/// <summary>
+	/// The installed provider. Until anyone sets it, this is the kernel's own exact boolean
+	/// (<see cref="ExactMeshBoolean"/>), added by Lane B (New): headless runs finally have a
+	/// sharp-edged boolean without the engine. An EXPLICIT null is different from never
+	/// setting it — it means "deliberately no boolean", which is what the tests that prove
+	/// the unavailable path need, and what a host sets when it wants cuts to refuse rather
+	/// than run. A host that installs the engine provider overrides the default entirely.
+	/// </summary>
+	static IMeshBoolean _provider;
+	static bool _providerSet;
+
+	public static IMeshBoolean Provider
+	{
+		get => _providerSet ? _provider : ExactMeshBoolean.Instance;
+		set { _provider = value; _providerSet = true; }
+	}
 
 	public static bool Available => Provider is not null;
 
@@ -92,8 +105,7 @@ public static class MeshBoolean
 		{
 			var problem = UnavailableReason is { Length: > 0 } reason
 				? $"{Name( op )} needs a mesh boolean. {reason}"
-				: $"{Name( op )} needs a mesh boolean, and none is installed in this build. The kernel does "
-					+ "not carry its own — see MeshBoolean for why.";
+				: $"{Name( op )} needs a mesh boolean, and none is installed in this build (the provider was explicitly cleared).";
 
 			throw new FeatureException( new FeatureDiagnostic(
 				DiagnosticSeverity.Error,

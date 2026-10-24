@@ -469,6 +469,111 @@ public static class SurfaceDetail
 		return ao;
 	}
 
+	/// <summary>
+	/// Lane C: <see cref="Grain"/> with a per-vertex weight array instead of a function.
+	/// <paramref name="mask"/> is 0..1 per vertex (short arrays read as 0 past their end, null
+	/// means everywhere). Same pass as the Func form; the array form is what a script hands over
+	/// after <see cref="RegionMask"/> builds it.
+	/// </summary>
+	public static void Grain( PolyMesh mesh, float lumps, float lumpFrequency, float cell, float crease, int seed, float[] mask )
+	{
+		if ( mask is null ) { Grain( mesh, lumps, lumpFrequency, cell, crease, seed, (Func<int, float>)null ); return; }
+		Grain( mesh, lumps, lumpFrequency, cell, crease, seed, v => v < mask.Length ? Math.Clamp( mask[v], 0f, 1f ) : 0f );
+	}
+
+	/// <summary>
+	/// Lane C: <see cref="SagFolds"/> with a per-vertex weight array multiplying
+	/// <paramref name="looseness"/> (a masked fold field is a fold field that only hangs where
+	/// the mask says). Null mask means the unmasked pass.
+	/// </summary>
+	public static void SagFolds( PolyMesh mesh, float[] looseness, FoldOptions o, float[] mask )
+	{
+		if ( mask is null ) { SagFolds( mesh, looseness, o ); return; }
+		var eff = new float[mesh.VertexCount];
+		for ( var v = 0; v < eff.Length; v++ )
+			eff[v] = (v < looseness.Length ? looseness[v] : 0f) * (v < mask.Length ? Math.Clamp( mask[v], 0f, 1f ) : 0f);
+		SagFolds( mesh, eff, o );
+	}
+
+	/// <summary>
+	/// Lane C: <see cref="AnchoredFolds"/> with a per-vertex weight array. Implemented as
+	/// run-then-blend (new position = old + delta * mask), which is exactly scaling the
+	/// fold height per vertex, since the pass only adds a displacement per vertex.
+	/// </summary>
+	public static void AnchoredFolds( PolyMesh mesh, float[] distance, Func<int, bool> hanging, AnchoredFoldOptions o, float[] mask )
+	{
+		if ( mask is null ) { AnchoredFolds( mesh, distance, hanging, o ); return; }
+		var before = mesh.Positions.ToArray();
+		AnchoredFolds( mesh, distance, hanging, o );
+		for ( var v = 0; v < mesh.VertexCount; v++ )
+			mesh.Positions[v] = before[v] + (mesh.Positions[v] - before[v]) * (v < mask.Length ? Math.Clamp( mask[v], 0f, 1f ) : 0f);
+	}
+
+	/// <summary>
+	/// Lane C: <see cref="Stamps"/> with a per-vertex weight array, same run-then-blend
+	/// reasoning as <see cref="AnchoredFolds(PolyMesh, float[], Func{int, bool}, AnchoredFoldOptions, float[])"/>.
+	/// </summary>
+	public static void Stamps( PolyMesh mesh, IEnumerable<SurfaceStamp> stamps, float[] mask )
+	{
+		if ( mask is null ) { Stamps( mesh, stamps ); return; }
+		var before = mesh.Positions.ToArray();
+		Stamps( mesh, stamps );
+		for ( var v = 0; v < mesh.VertexCount; v++ )
+			mesh.Positions[v] = before[v] + (mesh.Positions[v] - before[v]) * (v < mask.Length ? Math.Clamp( mask[v], 0f, 1f ) : 0f);
+	}
+
+	/// <summary>
+	/// Lane C: a per-vertex 0..1 weight that keeps detail to one region of a mesh, so a script
+	/// can say `mask_z=-0.5..2.2` (a zone along an axis) or a side or a slot instead of
+	/// detailing the whole body. <paramref name="axis"/> is the direction the zone is measured
+	/// along (normalised here; a zero axis reads as Z). Inside [min, max] the weight is 1,
+	/// feathered to 0 over <paramref name="falloff"/> on either side (0 = a hard step).
+	/// <paramref name="cavityWeight"/> (0..1) blends the weight toward crevices: at 1, only
+	/// vertices <see cref="Cavity"/> calls creases keep their weight. <paramref name="materialSlot"/>
+	/// (-1 = any) keeps only vertices on a face wearing that slot.
+	/// </summary>
+	public static float[] RegionMask( PolyMesh mesh, Vec3 axis, float min, float max, float falloff, float cavityWeight = 0f, int materialSlot = -1 )
+	{
+		var n = mesh.VertexCount;
+		var outp = new float[n];
+		if ( n == 0 ) return outp;
+		if ( min > max ) (min, max) = (max, min);
+		var ax = axis.LengthSquared > 1e-12f ? axis.Normal : new Vec3( 0, 0, 1 );
+		var f = Math.Max( falloff, 0f );
+		float[] cav = null;
+		float cavScale = 1f;
+		if ( cavityWeight > 0f )
+		{
+			cav = Cavity( mesh, 4 );
+			foreach ( var c in cav ) cavScale = Math.Max( cavScale, MathF.Abs( c ) );
+		}
+		HashSet<int> inSlot = null;
+		if ( materialSlot >= 0 )
+		{
+			inSlot = new HashSet<int>();
+			foreach ( var face in mesh.Faces )
+				if ( face.Material == materialSlot )
+					foreach ( var v in face.Indices ) inSlot.Add( v );
+		}
+		for ( var v = 0; v < n; v++ )
+		{
+			var t = Vec3.Dot( mesh.Positions[v], ax );
+			float w;
+			if ( f <= 0f ) w = t >= min && t <= max ? 1f : 0f;
+			else if ( t < min ) w = Smooth( min - f, min, t );
+			else if ( t > max ) w = 1f - Smooth( max, max + f, t );
+			else w = 1f;
+			if ( cav is not null )
+			{
+				var cn = Math.Clamp( cav[v] / cavScale, 0f, 1f );
+				w *= 1f - Math.Clamp( cavityWeight, 0f, 1f ) * (1f - cn);
+			}
+			if ( inSlot is not null && !inSlot.Contains( v ) ) w = 0f;
+			outp[v] = Math.Clamp( w, 0f, 1f );
+		}
+		return outp;
+	}
+
 	// --- helpers ---------------------------------------------------------------------------------
 
 	public static Vec3[] VertexNormals( PolyMesh mesh ) => SkinStrain.VertexNormals( mesh.Positions, mesh.Faces );

@@ -1122,3 +1122,93 @@ public sealed class FabricFeature : Feature
 			.Where( s => !ctx.ShellSlots.Contains( s ) ).Distinct().OrderBy( s => s ).ToList();
 	}
 }
+
+/// <summary>Script: <c>add Drape name=CapeDrape bodies=Cape pin=top steps=60 clearance=0.05
+/// stiffness=0.8</c>. A standalone deterministic drape bake for any cloth body already in the
+/// studio — a cape, apron, bandage or torn flap — without it having to be a garment recipe.
+/// It mutates the selected bodies in place (the SimpleDeform precedent): a rebuild remakes
+/// the bodies from scratch first, so the drape never compounds on itself. Colliders are every
+/// other body in the studio; pins are <c>top</c> (the top 14% of the cloth's height, the
+/// GarmentFit collar rule), <c>none</c>, or <c>@BodyName</c> (cloth vertices within half a
+/// unit of that body's surface). The settle itself is <see cref="GarmentHang.Settle"/>.</summary>
+public sealed class DrapeFeature : Feature
+{
+	public override string TypeName => "Drape";
+
+	public readonly BodySelectionParam Bodies = new( "Bodies" );
+	public readonly StringParam Pin = new( "Pin", "top" );
+	public readonly IntParam Steps = new( "Steps", 60, 1, 300 );
+	public readonly FloatParam Clearance = new( "Clearance", 0.05f, 0f, 2f, unit: "u" );
+	public readonly FloatParam Stiffness = new( "Stiffness", 0.8f, 0f, 1f );
+
+	public override IReadOnlyList<IParam> Parameters => new IParam[] { Bodies, Pin, Steps, Clearance, Stiffness };
+
+	protected override void Execute( FeatureContext ctx )
+	{
+		var cloth = RequireBodies( ctx, Bodies );
+		var clothSet = new HashSet<Body>( cloth );
+		var colliders = ctx.Bodies.Where( b => !clothSet.Contains( b ) && b.Mesh is not null ).Select( b => b.Mesh ).ToList();
+
+		foreach ( var body in cloth )
+		{
+			var mesh = body.Mesh;
+
+			if ( mesh is null || mesh.VertexCount == 0 )
+				continue;
+
+			var pinned = ResolvePins( ctx, body, mesh );
+			GarmentHang.Settle( mesh, colliders, pinned,
+				new GarmentHang.SettleOptions { Steps = Steps.Clamped, Clearance = Clearance.Clamped, Stiffness = Stiffness.Clamped } );
+		}
+	}
+
+	List<int> ResolvePins( FeatureContext ctx, Body clothBody, PolyMesh mesh )
+	{
+		var pin = (Pin.Value ?? "").Trim();
+
+		if ( string.Equals( pin, "none", StringComparison.OrdinalIgnoreCase ) )
+			return new List<int>();
+
+		if ( string.Equals( pin, "top", StringComparison.OrdinalIgnoreCase ) )
+		{
+			var minZ = mesh.Positions.Min( p => p.z );
+			var maxZ = mesh.Positions.Max( p => p.z );
+			var threshold = maxZ - 0.14f * (maxZ - minZ);
+			var pinned = new List<int>();
+
+			for ( var i = 0; i < mesh.VertexCount; i++ )
+				if ( mesh.Positions[i].z >= threshold )
+					pinned.Add( i );
+
+			return pinned;
+		}
+
+		if ( pin.StartsWith( "@", StringComparison.Ordinal ) )
+		{
+			var name = pin[1..].Trim();
+			var source = ctx.Bodies.FirstOrDefault( b => string.Equals( b.Name, name, StringComparison.OrdinalIgnoreCase ) || b.Id == name );
+
+			if ( source is null || source.Mesh is null )
+				Fail( $"No body called '{name}' to pin to.", "Pin names a body with @, like pin=@Body.collar.", "Give pin=top, pin=none, or pin=@an existing body" );
+
+			var pinned = new List<int>();
+
+			for ( var i = 0; i < mesh.VertexCount; i++ )
+			{
+				foreach ( var p in source.Mesh.Positions )
+				{
+					if ( (mesh.Positions[i] - p).Length <= 0.5f )
+					{
+						pinned.Add( i );
+						break;
+					}
+				}
+			}
+
+			return pinned;
+		}
+
+		Fail( $"Pin '{pin}' is not top, none, or @Body.", "Pin says which cloth vertices stay put while the rest settles.", "Write pin=top, pin=none, or pin=@Collar" );
+		return new List<int>();
+	}
+}

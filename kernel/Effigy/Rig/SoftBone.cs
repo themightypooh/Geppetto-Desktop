@@ -337,3 +337,86 @@ public static class SoftSolver
 		}
 	}
 }
+
+/// <summary>
+/// Aquatic / creature starting points for <see cref="SoftBone"/>, one per body the swarm
+/// keeps making: a fin membrane, a barbel whisker, a jelly bell, a heavy tail.
+///
+/// STARTING POINTS, NOT MEASURED PHYSICS. These numbers were picked to sit in the same
+/// neighbourhoods as the solver's own defaults (stiffness in the tens-to-hundreds, damping a
+/// few percent of speed kept per second, cone in the tens of degrees) with the character each
+/// name promises: membranes light and fluttery, whiskers springy, jelly soft and heavy, tails
+/// heavy and slow. Tune them on the creature, and if one lands, name it after the creature.
+///
+/// Every accessor returns a fresh <see cref="SoftBone"/>, never a shared instance: a preset
+/// you edit on one bone must not silently edit every other bone that took the same preset.
+/// The live runtime's <c>RigSoftPreset</c> values of the same names carry the same character
+/// in that solver's own numbers (its damping scale runs far smaller than this solver's), so
+/// the two are alike in behaviour, not numerically identical — do not copy numbers across.
+/// </summary>
+public static class SoftBonePresets
+{
+	public static SoftBone FinMembrane => new()
+	{
+		Stiffness = 80f,
+		Damping = 0.03f,
+		Weight = 0.6f,
+		MaxAngle = 30f,
+	};
+
+	/// <summary>Thin, springy, barely any weight: a barbel or whisker that flicks and settles.</summary>
+	public static SoftBone BarbelWhisker => new()
+	{
+		Stiffness = 200f,
+		Damping = 0.01f,
+		Weight = 0.3f,
+		MaxAngle = 60f,
+	};
+
+	/// <summary>Soft and heavy: a jelly bell that sags under its own weight and wobbles wide.</summary>
+	public static SoftBone JellyBell => new()
+	{
+		Stiffness = 25f,
+		Damping = 0.08f,
+		Weight = 1.5f,
+		MaxAngle = 75f,
+	};
+
+	/// <summary>Heavy and slow: a tail that lags behind the body and never snaps.</summary>
+	public static SoftBone HeavyTail => new()
+	{
+		Stiffness = 40f,
+		Damping = 0.02f,
+		Weight = 2f,
+		MaxAngle = 35f,
+	};
+
+	public static readonly string[] Names = { "FinMembrane", "BarbelWhisker", "JellyBell", "HeavyTail" };
+
+	/// <summary>The preset by name (case-insensitive), or null when there is no such preset.</summary>
+	public static SoftBone TryGet( string name ) => name?.Trim().ToLowerInvariant() switch
+	{
+		"finmembrane" => FinMembrane,
+		"barbelwhisker" => BarbelWhisker,
+		"jellybell" => JellyBell,
+		"heavytail" => HeavyTail,
+		_ => null,
+	};
+
+	/// <summary>
+	/// Hang <paramref name="preset"/> on every bone in <paramref name="skeleton"/> whose name
+	/// is in <paramref name="boneNames"/>. Names that are not bones are ignored, so a preset
+	/// list written for one creature does not fail on another that lacks a bone.
+	/// </summary>
+	public static void Apply( Skeleton skeleton, IEnumerable<string> boneNames, SoftBone preset )
+	{
+		if ( skeleton is null ) throw new ArgumentNullException( nameof( skeleton ) );
+		if ( preset is null ) throw new ArgumentNullException( nameof( preset ) );
+
+		var wanted = new HashSet<string>( boneNames ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase );
+
+		foreach ( var bone in skeleton.Bones )
+			if ( wanted.Contains( bone.Name ) )
+				bone.Soft = preset.Clone();
+	}
+}

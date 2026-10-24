@@ -35,6 +35,9 @@ public sealed class EditOpFeature : Feature
 	{
 		"Extrude", "Extrude individual", "Extrude along normals", "Inset", "Bevel", "Loop cut", "Bridge",
 		"Symmetrize", "Dissolve", "Limited dissolve", "Delete",
+		// Appended, never inserted: the choice index is what saved documents hold, so the
+		// first eleven operations keep their indices and old documents keep their meaning.
+		"Knife", "Spin", "Slide", "Poke", "Tris to quads", "Grid fill",
 	};
 
 	public static readonly string[] Elements = { "Auto", "Faces", "Edges", "Vertices" };
@@ -49,7 +52,7 @@ public sealed class EditOpFeature : Feature
 	/// extrudes (extruding everything has no one direction), everything for the rest.</summary>
 	public readonly StringParam Select = new( "Select", "" );
 
-	string Rule => !string.IsNullOrWhiteSpace( Select.Value ) ? Select.Value : Op.Index <= 2 ? "normal:up" : "all";
+	string Rule => !string.IsNullOrWhiteSpace( Select.Value ) ? Select.Value : Op.Index <= 2 ? "normal:up" : Op.Index == 16 ? "boundary" : "all";
 	public readonly ChoiceParam Element = new( "Element", Elements );
 	public readonly FloatParam Distance = new( "Distance", 1f );
 	public readonly IntParam Segments = new( "Segments", 1, 1, 32 );
@@ -207,6 +210,62 @@ public sealed class EditOpFeature : Feature
 			case 9: // Limited dissolve
 				s.ClearNotice();
 				s.LimitedDissolve();
+				return s;
+
+			case 11: // Knife: planar cut across the selected faces (Backlog: Knife).
+				// The session's stroke Knife needs a screen line a feature cannot express;
+				// the feature form is its planar twin, Bisect, through At along Axis, and
+				// it cuts only the selected faces when any are selected.
+				SelectFaces( s, selector, name );
+				s.Bisect( At.Value, AxisVector( Axis.Index ) );
+				return s;
+
+			case 12: // Spin: lathe the selected edges round the up axis through At.
+				// Distance is the angle in degrees, Segments the band count. The session's
+				// Spin turns about Z only, so Axis is honoured by failing loudly rather
+				// than by silently spinning about the wrong axis — a session Spin with
+				// an axis parameter is the follow-up, in MeshAdjacency, not this file.
+				if ( Axis.Index != 2 )
+					FailOn( "Axis", $"Spin turns about Z; {Axes[Axis.Index]} is not supported yet",
+						"The spin in the edit session only knows the up axis.",
+						"Set axis=Z", "Turn the body so the lathe axis is Z first" );
+
+				SelectEdges( s, selector, name );
+				s.Pivot = At.Value;
+				s.Spin( Distance.Value, Segments.Clamped );
+				return s;
+
+			case 13: // Slide: edge loop along its rails, or vertices along their edges.
+				// Distance is -1..1, the fraction of the way to the neighbouring loop.
+				if ( ElementFor( EditElement.Edge ) == EditElement.Vertex )
+				{
+					SelectVertices( s, selector, name );
+					s.VertexSlide( Distance.Value, AxisVector( Axis.Index ) );
+				}
+				else
+				{
+					SelectEdges( s, selector, name );
+					s.EdgeSlide( Distance.Value );
+				}
+
+				return s;
+
+			case 14: // Poke: fan-split each selected face to its centroid.
+				SelectFaces( s, selector, name );
+				s.PokeFaces();
+				return s;
+
+			case 15: // Tris to quads: dissolve the diagonal across triangle pairs.
+				SelectFaces( s, selector, name );
+				s.TrisToQuads();
+				return s;
+
+			case 16: // Grid fill: all-quad patch over the selected open boundary loop.
+				// The session's GridFill builds the grid itself; MeshHoleRepairCurved is
+				// the curved-closure variant for holes that are not grid-shaped, and it
+				// stays available to the editor for those.
+				SelectEdges( s, selector, name );
+				s.GridFill();
 				return s;
 
 			case 10: // Delete

@@ -101,6 +101,62 @@ public sealed class FaceRig
 		return rig;
 	}
 
+	/// <summary>Landmarks <see cref="GenerateStandardFlexes"/> fitted this rig to, if any.</summary>
+	[JsonIgnore] public FaceBounds Bounds { get; set; }
+
+	/// <summary>
+	/// Procedurally generate the standard face rig for a head (roadmap J3): the full HL2-style
+	/// FACS controller set from <see cref="Default"/> — 32 controllers covering the 24 standard
+	/// stereo/bipolar flexes and more — plus the 15 s&amp;box <c>viseme_*</c> lip-sync presets,
+	/// trimmed to what <paramref name="landmarks"/> says the head actually has. Eyes and brows
+	/// need eyes, cheeks and nose need a nose, mouth needs a mouth, jaw needs a mouth to move.
+	/// Presets are pruned to the surviving controllers, the way <see cref="Trim"/> prunes them
+	/// to existing morphs, so a viseme never drives a controller the head does not have.
+	/// The rig itself is morph-driven, so <paramref name="rig"/> is validated but its bone
+	/// names do not gate any controller; the jaw bone, when present, is what a jaw flex drives.
+	/// </summary>
+	public static FaceRig GenerateStandardFlexes( PolyMesh headMesh, Skeleton rig, FaceBounds landmarks )
+	{
+		if ( headMesh is null )
+			throw new ArgumentNullException( nameof( headMesh ) );
+
+		if ( rig is null )
+			throw new ArgumentNullException( nameof( rig ) );
+
+		var result = Default();
+
+		result.Bounds = landmarks;
+
+		bool Keep( Controller c ) => c.Group switch
+		{
+			"Eyes" or "Brows" => landmarks.HasEyes,
+			"Cheeks & Nose" => landmarks.HasNose,
+			"Mouth" => landmarks.HasMouth,
+			"Jaw" => landmarks.HasJaw,
+			_ => true,
+		};
+
+		result.Controllers = result.Controllers.Where( Keep ).ToList();
+
+		var names = new HashSet<string>( result.Controllers.Select( c => c.Name ) );
+
+		foreach ( var (preset, settings) in result.Presets.ToList() )
+			result.Presets[preset] = settings.Where( kv => names.Contains( kv.Key ) ).ToDictionary( kv => kv.Key, kv => kv.Value );
+
+		return result;
+	}
+
+	/// <summary>GenerateStandardFlexes with landmarks estimated from the head mesh's bounds (Y up, +Z forward).</summary>
+	public static FaceRig GenerateStandardFlexes( PolyMesh headMesh, Skeleton rig )
+	{
+		if ( headMesh is null )
+			throw new ArgumentNullException( nameof( headMesh ) );
+
+		var (min, max) = ModelMeasure.Bounds( headMesh );
+
+		return GenerateStandardFlexes( headMesh, rig, FaceBounds.FromHeadBounds( min, max ) );
+	}
+
 	/// <summary>Every key the full rig expects, for a sculpting checklist.</summary>
 	public IEnumerable<string> ExpectedKeys() => Controllers.SelectMany( c => c.Keys() ).Distinct();
 
@@ -242,5 +298,43 @@ public sealed class FaceRig
 		rig.Presets["viseme_O"] = P( ("jaw_drop", 0.4f), ("funneler", 0.65f) );
 		rig.Presets["viseme_U"] = P( ("jaw_drop", 0.4f), ("puckerer", 0.9f) );
 		return rig;
+	}
+}
+
+/// <summary>
+/// Landmarks a generated face rig is fitted to: the points a photo fit or a modeller picks
+/// for the eyes, nose, mouth and jaw. The Has* flags say which regions exist; a zero point
+/// with its flag false means "not present", not "at the origin". FromHeadBounds estimates
+/// them from a head mesh's bounds (Y up, +Z forward) when no landmarks were picked: eyes at
+/// 72% of the height and 18% of the width off centre, nose at 55%, mouth at 30%, jaw at 15%.
+/// An estimate, not a measurement — it keeps every region, which is the safe default for a
+/// head mesh that has all of them.
+/// </summary>
+public struct FaceBounds
+{
+	public Vec3 LeftEye, RightEye, NoseTip, MouthLeft, MouthRight, MouthCenter, Jaw;
+	public bool HasEyes, HasNose, HasMouth, HasJaw;
+
+	public static FaceBounds FromHeadBounds( Vec3 min, Vec3 max )
+	{
+		var w = max.x - min.x;
+		var h = max.y - min.y;
+		var cx = (min.x + max.x) / 2f;
+		var front = max.z;
+
+		return new FaceBounds
+		{
+			LeftEye = new Vec3( cx - 0.18f * w, min.y + 0.72f * h, front ),
+			RightEye = new Vec3( cx + 0.18f * w, min.y + 0.72f * h, front ),
+			NoseTip = new Vec3( cx, min.y + 0.55f * h, front ),
+			MouthLeft = new Vec3( cx - 0.12f * w, min.y + 0.30f * h, front ),
+			MouthRight = new Vec3( cx + 0.12f * w, min.y + 0.30f * h, front ),
+			MouthCenter = new Vec3( cx, min.y + 0.30f * h, front ),
+			Jaw = new Vec3( cx, min.y + 0.15f * h, front ),
+			HasEyes = true,
+			HasNose = true,
+			HasMouth = true,
+			HasJaw = true,
+		};
 	}
 }

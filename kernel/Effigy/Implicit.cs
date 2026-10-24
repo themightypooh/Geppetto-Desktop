@@ -1246,6 +1246,214 @@ public sealed class SdfSubtract : Sdf
 	}
 }
 
+// --- Lane C (v4 roadmap): onion shell, gyroid lattice, domain operators ------------------
+// These are field NODES, not warps: they wrap a whole Sdf the way SdfOffset/SdfBlend do, so
+// a Blob or a SurfaceNets mesh can use them without touching SdfInstance's warp list. The
+// domain operators (twist/bend/mirror) only ever EVALUATE the child through an inverse map,
+// which is all a signed-distance mesher needs: it samples Eval, never Forward.
+
+/// <summary>
+/// A hollow shell of <see cref="Thickness"/> around the child's surface: the set where the
+/// child's distance is within half the thickness. Onion a sphere and you get a bubble wall, not
+/// a ball; onion a Blob creature and you get a skin you can cut open. Material/Bone/Tag are
+/// the child's, so the shell still labels and weights like the thing it wraps.
+/// </summary>
+public sealed class SdfOnion : Sdf
+{
+	public readonly Sdf Child;
+	public readonly float Thickness;
+
+	public SdfOnion( Sdf child, float thickness )
+	{
+		Child = child;
+		Thickness = MathF.Max( 0f, thickness );
+		Material = child.Material;
+		Bone = child.Bone;
+		Tag = child.Tag;
+	}
+
+	public override float Eval( Vec3 p ) => MathF.Abs( Child.Eval( p ) ) - Thickness * 0.5f;
+	public override Vec3 Min => Child.Min - Vec3.One * (Thickness * 0.5f);
+	public override Vec3 Max => Child.Max + Vec3.One * (Thickness * 0.5f);
+	public override void Prepare( float pad ) => Child.Prepare( pad + Thickness );
+
+	// Labelling reads the child, widened by the shell: a vertex on the shell is near the
+	// child's surface by at most half the thickness plus the band.
+	public override void Collect( Vec3 p, float band, List<(Sdf Leaf, float Distance)> into ) =>
+		Child.Collect( p, band + Thickness, into );
+}
+
+/// <summary>
+/// A gyroid lattice: the triply-periodic surface sin(sx)cos(sy) + sin(sy)cos(sz) +
+/// sin(sz)cos(sx) = 0, thickened into struts of <see cref="Thickness"/>. Porous trabecular
+/// bone, coral, alien hive. The field is periodic and unbounded, so the constructor takes
+/// the box it is allowed to fill — a gyroid with no bounds would mesh forever.
+/// Distance is the field value divided by its analytic gradient length, which is the
+/// first-order distance to the surface and exact enough at voxel scale.
+/// </summary>
+public sealed class SdfGyroid : SdfLeaf
+{
+	public readonly float Scale;
+	public readonly float Thickness;
+	readonly Vec3 _min, _max;
+
+	public SdfGyroid( float scale, float thickness, Vec3 min, Vec3 max )
+	{
+		Scale = MathF.Max( 1e-3f, scale );
+		Thickness = MathF.Max( 0f, thickness );
+		_min = min;
+		_max = max;
+	}
+
+	public override Vec3 Min => _min;
+	public override Vec3 Max => _max;
+
+	public override float Eval( Vec3 p )
+	{
+		var s = Scale;
+		var sx = s * p.x; var sy = s * p.y; var sz = s * p.z;
+		var g = MathF.Sin( sx ) * MathF.Cos( sy ) + MathF.Sin( sy ) * MathF.Cos( sz ) + MathF.Sin( sz ) * MathF.Cos( sx );
+		// Analytic gradient of g, so the distance is not a guessed constant.
+		var gx = s * (MathF.Cos( sx ) * MathF.Cos( sy ) - MathF.Sin( sz ) * MathF.Sin( sx ));
+		var gy = s * (-MathF.Sin( sx ) * MathF.Sin( sy ) + MathF.Cos( sy ) * MathF.Cos( sz ));
+		var gz = s * (-MathF.Sin( sy ) * MathF.Sin( sz ) + MathF.Cos( sz ) * MathF.Cos( sx ));
+		var grad = MathF.Sqrt( gx * gx + gy * gy + gz * gz );
+		var d = grad < 1e-6f ? MathF.Abs( g ) : g / grad;
+		return MathF.Abs( d ) - Thickness * 0.5f;
+	}
+}
+
+/// <summary>
+/// Twist a field about an axis: a point at distance t along the axis is read from the child
+/// rotated by -t * <see cref="DegreesPerUnit"/> degrees, so the meshed shape twists by that
+/// rate along its length. <see cref="Length"/> clamps the twisted span (0 = whole axis).
+/// This is the Sdf-node twin of WarpTwist, for fields that never pass through SdfInstance.
+/// </summary>
+public sealed class SdfTwist : Sdf
+{
+	public readonly Sdf Child;
+	public readonly Vec3 Center, Axis;
+	public readonly float DegreesPerUnit, Length;
+
+	public SdfTwist( Sdf child, Vec3 center, Vec3 axis, float degreesPerUnit, float length = 0f )
+	{
+		Child = child;
+		Center = center;
+		Axis = axis.LengthSquared > 1e-12f ? axis.Normal : new Vec3( 0, 0, 1 );
+		DegreesPerUnit = degreesPerUnit;
+		Length = MathF.Max( 0f, length );
+		Material = child.Material;
+		Bone = child.Bone;
+		Tag = child.Tag;
+	}
+
+	Vec3 Inverse( Vec3 p )
+	{
+		var t = Vec3.Dot( p - Center, Axis );
+		if ( Length > 0f ) t = Math.Clamp( t, -Length, Length );
+		return Xform.RotateAbout( Center, Axis, -t * DegreesPerUnit * MathF.PI / 180f ).TransformPoint( p );
+	}
+
+	public override float Eval( Vec3 p ) => Child.Eval( Inverse( p ) );
+
+	// A twist never moves a point off its circle about the axis, but the axis-aligned box of
+	// a twisted shape is still the box of the untwisted one rotated through the twist range,
+	// so pad by half the child's diagonal rather than claim a tight box and clip a corner.
+	float Pad => (Child.Max - Child.Min).Length * 0.5f;
+	public override Vec3 Min => Child.Min - Vec3.One * Pad;
+	public override Vec3 Max => Child.Max + Vec3.One * Pad;
+	public override void Prepare( float pad ) => Child.Prepare( pad + Pad );
+	public override void Collect( Vec3 p, float band, List<(Sdf Leaf, float Distance)> into ) =>
+		Child.Collect( Inverse( p ), band, into );
+}
+
+/// <summary>
+/// Bend a field about an axis: a point offset <c>along</c> along <see cref="BendDirection"/>
+/// from <see cref="Center"/> is read from the child rotated by -along/<see cref="Radius"/>
+/// radians about the axis, so a straight limb curls into an arc of that radius. BendDirection
+/// is orthogonalised against the axis at construction; a radius of zero would be a fold, so
+/// it clamps to a hair above zero instead of dividing by it.
+/// </summary>
+public sealed class SdfBend : Sdf
+{
+	public readonly Sdf Child;
+	public readonly Vec3 Center, Axis, BendDirection;
+	public readonly float Radius;
+
+	public SdfBend( Sdf child, Vec3 center, Vec3 axis, Vec3 bendDirection, float radius )
+	{
+		Child = child;
+		Center = center;
+		Axis = axis.LengthSquared > 1e-12f ? axis.Normal : new Vec3( 0, 0, 1 );
+		var d = bendDirection - Axis * Vec3.Dot( bendDirection, Axis );
+		BendDirection = d.LengthSquared > 1e-12f ? d.Normal : new Vec3( 1, 0, 0 );
+		Radius = MathF.Max( 1e-3f, radius );
+		Material = child.Material;
+		Bone = child.Bone;
+		Tag = child.Tag;
+	}
+
+	Vec3 Inverse( Vec3 p )
+	{
+		var along = Vec3.Dot( p - Center, BendDirection );
+		return Xform.RotateAbout( Center, Axis, -along / Radius ).TransformPoint( p );
+	}
+
+	public override float Eval( Vec3 p ) => Child.Eval( Inverse( p ) );
+	float Pad => (Child.Max - Child.Min).Length * 0.5f;
+	public override Vec3 Min => Child.Min - Vec3.One * Pad;
+	public override Vec3 Max => Child.Max + Vec3.One * Pad;
+	public override void Prepare( float pad ) => Child.Prepare( pad + Pad );
+	public override void Collect( Vec3 p, float band, List<(Sdf Leaf, float Distance)> into ) =>
+		Child.Collect( Inverse( p ), band, into );
+}
+
+/// <summary>
+/// Mirror a field across a plane: the field on the far side is the child's reflection. This
+/// is a DOMAIN operator, not a union — blend the original with its mirror to get the pair.
+/// A mirrored shape's box is the child's box reflected, computed from its eight corners so a
+/// diagonal plane does not clip a corner.
+/// </summary>
+public sealed class SdfMirror : Sdf
+{
+	public readonly Sdf Child;
+	public readonly Vec3 PlanePoint, PlaneNormal;
+
+	public SdfMirror( Sdf child, Vec3 planePoint, Vec3 planeNormal )
+	{
+		Child = child;
+		PlanePoint = planePoint;
+		PlaneNormal = planeNormal.LengthSquared > 1e-12f ? planeNormal.Normal : new Vec3( 1, 0, 0 );
+		Material = child.Material;
+		Bone = child.Bone;
+		Tag = child.Tag;
+	}
+
+	Vec3 Reflect( Vec3 p ) => p - PlaneNormal * (2f * Vec3.Dot( p - PlanePoint, PlaneNormal ));
+	public override float Eval( Vec3 p ) => Child.Eval( Reflect( p ) );
+
+	(Vec3 Lo, Vec3 Hi) ReflectedBounds()
+	{
+		var lo = new Vec3( float.MaxValue, float.MaxValue, float.MaxValue );
+		var hi = new Vec3( float.MinValue, float.MinValue, float.MinValue );
+		var cmin = Child.Min; var cmax = Child.Max;
+		for ( var i = 0; i < 8; i++ )
+		{
+			var c = new Vec3( (i & 1) == 0 ? cmin.x : cmax.x, (i & 2) == 0 ? cmin.y : cmax.y, (i & 4) == 0 ? cmin.z : cmax.z );
+			var r = Reflect( c );
+			lo = new Vec3( MathF.Min( lo.x, r.x ), MathF.Min( lo.y, r.y ), MathF.Min( lo.z, r.z ) );
+			hi = new Vec3( MathF.Max( hi.x, r.x ), MathF.Max( hi.y, r.y ), MathF.Max( hi.z, r.z ) );
+		}
+		return (lo, hi);
+	}
+
+	public override Vec3 Min => ReflectedBounds().Lo;
+	public override Vec3 Max => ReflectedBounds().Hi;
+	public override void Prepare( float pad ) => Child.Prepare( pad );
+	public override void Collect( Vec3 p, float band, List<(Sdf Leaf, float Distance)> into ) =>
+		Child.Collect( Reflect( p ), band, into );
+}
+
 // --- noise -----------------------------------------------------------------------------------
 
 /// <summary>Perlin gradient noise in three dimensions, seeded, in -1..1.</summary>
@@ -1378,6 +1586,8 @@ public static class SurfaceNets
 		public PolyMesh Mesh;
 		/// <summary>The leaf nearest each vertex, parallel to the mesh's positions.</summary>
 		public Sdf[] Nearest;
+		/// <summary>Auto-computed skin weights, or null when no leaf in the field carries a bone.</summary>
+		public SkinWeights Skin;
 		public int VoxelsSampled;
 		public TimeSpan Sampling, Building;
 	}
@@ -1630,10 +1840,31 @@ public static class SurfaceNets
 			nearest[i] = leaf;
 		} );
 
+		// AUTO-SKIN, Lane C: when the field's leaves carry bones, the meshed surface comes
+		// out pre-weighted instead of making the caller remember to call Weights() — and
+		// forgetting it was exactly how fused Blob creatures used to arrive unrigged. The
+		// fallback is the bone most vertices already belong to, never -1, so no vertex ends
+		// up weighted to a bone that does not exist. A boneless field is untouched: Skin
+		// stays null, exactly as every existing caller expects.
+		SkinWeights skin = null;
+		{
+			var counts = new Dictionary<int, int>();
+			foreach ( var leaf in nearest )
+				if ( leaf is not null && leaf.Bone >= 0 )
+					counts[leaf.Bone] = counts.TryGetValue( leaf.Bone, out var c ) ? c + 1 : 1;
+			if ( counts.Count > 0 )
+			{
+				var fallback = counts.OrderByDescending( kv => kv.Value ).First().Key;
+				skin = Weights( sdf, mesh, band, fallback );
+				mesh.Skin = skin;
+			}
+		}
+
 		return new Result
 		{
 			Mesh = mesh,
 			Nearest = nearest,
+			Skin = skin,
 			VoxelsSampled = nx * ny * nz,
 			Sampling = sampling,
 			Building = clock.Elapsed,

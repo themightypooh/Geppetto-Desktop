@@ -64,6 +64,12 @@ public static class VariableResolver
 		if ( variables is null || variables.Count == 0 )
 			return;
 
+		// Lane E (Backlog B23): one memo for the whole pass, so a variable shared by
+		// many others (a diamond: a→b,c; b→d; c→d) is evaluated once, not once per
+		// path to it. The table does not change during the pass, so a memoised
+		// value stays true for the whole pass.
+		var memo = new Dictionary<string, float>( StringComparer.OrdinalIgnoreCase );
+
 		foreach ( var variable in variables )
 		{
 			if ( variable is null || string.IsNullOrWhiteSpace( variable.Name ) )
@@ -71,21 +77,38 @@ public static class VariableResolver
 
 			var visiting = new HashSet<string>( StringComparer.OrdinalIgnoreCase );
 
-			if ( TryResolve( variables, variable.Name, visiting, out var value ) )
+			if ( TryResolve( variables, variable.Name, visiting, memo, out var value ) )
 				variable.Value = value;
 		}
 	}
 
 	public static bool TryResolve( IReadOnlyList<StudioVariable> variables, string name, out float value ) =>
-		TryResolve( variables, name, new HashSet<string>( StringComparer.OrdinalIgnoreCase ), out value );
+		TryResolve( variables, name, new HashSet<string>( StringComparer.OrdinalIgnoreCase ),
+			new Dictionary<string, float>( StringComparer.OrdinalIgnoreCase ), out value );
 
 	public static bool TryResolve( IReadOnlyList<StudioVariable> variables, string name,
-		HashSet<string> visiting, out float value )
+		HashSet<string> visiting, out float value ) =>
+		TryResolve( variables, name, visiting,
+			new Dictionary<string, float>( StringComparer.OrdinalIgnoreCase ), out value );
+
+	public static bool TryResolve( IReadOnlyList<StudioVariable> variables, string name,
+		HashSet<string> visiting, Dictionary<string, float> memo, out float value )
 	{
 		value = 0f;
 
 		if ( variables is null || string.IsNullOrWhiteSpace( name ) )
 			return false;
+
+		// Memoised first: a cycle check still has to run, so a name already on the
+		// current visiting path is a cycle even when a memo entry exists for it
+		// (a memo entry can only exist for a completed, cycle-free evaluation, and
+		// a name on the path is by definition not completed).
+		if ( memo is not null && memo.TryGetValue( name, out var cached )
+			&& (visiting is null || !visiting.Contains( name )) )
+		{
+			value = cached;
+			return true;
+		}
 
 		StudioVariable match = null;
 
@@ -111,12 +134,13 @@ public static class VariableResolver
 		{
 			value = match.Value;
 			visiting.Remove( match.Name );
+			memo?.TryAdd( match.Name, value );
 			return true;
 		}
 
 		float? Resolve( string asked )
 		{
-			if ( !TryResolve( variables, asked, visiting, out var found ) )
+			if ( !TryResolve( variables, asked, visiting, memo, out var found ) )
 				return null;
 
 			return found;
@@ -124,6 +148,7 @@ public static class VariableResolver
 
 		var ok = Expression.TryEvaluate( match.Expr, null, Resolve, out value );
 		visiting.Remove( match.Name );
+		if ( ok ) memo?.TryAdd( match.Name, value );
 		return ok;
 	}
 

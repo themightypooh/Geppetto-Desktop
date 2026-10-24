@@ -265,7 +265,6 @@ public static class StudioCache
 			}
 
 			File.Move( temporary, path, overwrite: true );
-			Trim( directory, path );
 
 			note = $"wrote {studio.Bodies.Count} body(ies)";
 			return true;
@@ -275,36 +274,6 @@ public static class StudioCache
 			note = e.Message;
 			return false;
 		}
-	}
-
-	/// <summary>Size cap for the whole cache folder (default 5 GB, override with EFFIGY_CACHE_MAX_GB).
-	/// After each save the oldest entries are deleted until the folder is under the cap.</summary>
-	public static long MaxBytes
-	{
-		get
-		{
-			var v = Environment.GetEnvironmentVariable( "EFFIGY_CACHE_MAX_GB" );
-			return (long)((double.TryParse( v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var gb ) && gb > 0 ? gb : 5.0) * 1024 * 1024 * 1024);
-		}
-	}
-
-	static void Trim( string directory, string keep )
-	{
-		try
-		{
-			if ( string.IsNullOrWhiteSpace( directory ) || !System.IO.Directory.Exists( directory ) ) return;
-			var files = new DirectoryInfo( directory ).GetFiles( "*", SearchOption.AllDirectories )
-				.OrderBy( f => f.LastWriteTimeUtc ).ToList();
-			long total = files.Sum( f => f.Length );
-			var cap = MaxBytes;
-			foreach ( var f in files )
-			{
-				if ( total <= cap ) break;
-				if ( string.Equals( f.FullName, Path.GetFullPath( keep ), StringComparison.Ordinal ) ) continue;
-				try { var len = f.Length; f.Delete(); total -= len; } catch { }
-			}
-		}
-		catch { }
 	}
 
 	/// <summary>Forget one document's entry. The answer to "this cache is wrong and I want it gone"

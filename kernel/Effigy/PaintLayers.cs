@@ -418,3 +418,98 @@ public static class PaintLayers
 		return opaque;
 	}
 }
+/// <summary>
+/// One entry in a <see cref="PaintLayerStack"/>: a layer's own content, how it combines, how
+/// much of it shows, and the mask that confines it.
+///
+/// This is the layer a <see cref="PaintFeature"/> already is, as data: <see cref="PaintFeature"/>
+/// composites one <see cref="PaintLayerMaps"/> over the paint below it with a blend mode, an
+/// opacity and a final mask. A stack is just that operation repeated, in order, so paint built
+/// outside the feature tree — a scripted stack, a generated stack, a test — composites exactly
+/// like paint built inside it. <see cref="Maps"/> is the layer's own content (fill and strokes),
+/// NOT the composite below it; <see cref="Mask"/> is the final mask (generator, mask paint,
+/// invert already applied), or null for "show everywhere".
+/// </summary>
+public sealed class PaintLayer
+{
+	public string Name = "";
+	public PaintLayerMaps Maps;
+	public PaintBlendMode Blend = PaintBlendMode.Normal;
+	public float Opacity = 1f;
+	public float[] Mask;
+	public bool Enabled = true;
+
+	public PaintLayer( string name, PaintLayerMaps maps, PaintBlendMode blend = PaintBlendMode.Normal,
+		float opacity = 1f, float[] mask = null )
+	{
+		Name = name; Maps = maps; Blend = blend; Opacity = opacity; Mask = mask;
+	}
+
+	/// <summary>A solid-colour layer: every texel covered with one colour, for stacking tests and
+	/// for generated fills. Scalar channels can be added afterwards with <see cref="SetChannel"/>.</summary>
+	public static PaintLayer Solid( string name, int size, byte r, byte g, byte b, float[] mask = null,
+		PaintBlendMode blend = PaintBlendMode.Normal, float opacity = 1f ) =>
+		new( name, new PaintLayerMaps { Size = size, Color = PaintLayers.Solid( size, size, r, g, b ) }, blend, opacity, mask );
+
+	/// <summary>Set one channel's content on this layer, creating its maps if needed.</summary>
+	public void SetChannel( PaintChannel channel, PaintCanvas canvas )
+	{
+		Maps ??= new PaintLayerMaps();
+		Maps.Set( channel, canvas );
+		if ( canvas is not null ) Maps.Size = canvas.Width;
+	}
+}
+
+/// <summary>
+/// An ordered stack of paint layers, bottom to top: the first layer added is the bottom, each
+/// later layer composites over everything below it, exactly as PaintFeatures stack in tree order.
+///
+/// <c>Composite(below)</c> walks the enabled layers in order through
+/// <see cref="PaintLayers.CompositeSet"/>, so a stack and a feature tree with the same layers,
+/// blends, opacities and masks produce the same canvas. Disabled layers and layers with no
+/// surface content are skipped (CompositeSet already hands a content-free layer's backdrop back).
+/// The stack never mutates its layers' maps: CompositeSet returns a new canvas per layer.
+/// </summary>
+public sealed class PaintLayerStack
+{
+	public List<PaintLayer> Layers = new();
+
+	public int Count => Layers.Count;
+
+	public PaintLayer this[int index] => Layers[index];
+
+	public void Add( PaintLayer layer ) => Layers.Add( layer );
+
+	public void Insert( int index, PaintLayer layer ) => Layers.Insert( Math.Clamp( index, 0, Layers.Count ), layer );
+
+	public void RemoveAt( int index ) => Layers.RemoveAt( index );
+
+	/// <summary>Move the layer at <paramref name="from"/> to <paramref name="to"/> (both clamped),
+	/// so reordering a stack is one call, not a remove-and-reinsert that can drop the layer.</summary>
+	public void Move( int from, int to )
+	{
+		if ( Layers.Count == 0 ) return;
+		from = Math.Clamp( from, 0, Layers.Count - 1 );
+		to = Math.Clamp( to, 0, Layers.Count - 1 );
+		if ( from == to ) return;
+		var layer = Layers[from];
+		Layers.RemoveAt( from );
+		Layers.Insert( to, layer );
+	}
+
+	/// <summary>Composite the whole stack over <paramref name="below"/> (null for a bare surface),
+	/// bottom to top. Returns <paramref name="below"/> itself when nothing enabled has content.</summary>
+	public PaintCanvas Composite( PaintCanvas below )
+	{
+		var result = below;
+		foreach ( var layer in Layers )
+		{
+			if ( !layer.Enabled || layer.Maps is null ) continue;
+			result = PaintLayers.CompositeSet( result, layer.Maps, layer.Blend, layer.Opacity, layer.Mask );
+		}
+		return result;
+	}
+
+	/// <summary>Composite the whole stack over a bare surface.</summary>
+	public PaintCanvas Composite() => Composite( null );
+}

@@ -234,6 +234,167 @@ public sealed class RigTrack
 	}
 
 	static ReadOnlySpan<float> Tangent( float[] t ) => t is { Length: RigHermite.Channels } ? t : ReadOnlySpan<float>.Empty;
+	/// <summary>
+	/// Lane K: per-channel scalar curves, keyed by <see cref="RigChannel"/>. A channel that is
+	/// present OVERRIDES that one component of <see cref="Evaluate(float)"/> at the same frame;
+	/// channels that are absent leave the keyed pose alone, so a track can carry keys for the
+	/// body and a curve for one wobbling finger without re-keying the rest. Empty by default,
+	/// so every clip written before Lane K evaluates exactly as it did.
+	/// </summary>
+	public Dictionary<RigChannel, List<ScalarKey>> ChannelCurves = new();
+
+	/// <summary>Lane K: non-destructive modifiers, applied in list order by <see cref="EvaluateWithChannels"/>.</summary>
+	public List<FCurveModifier> Modifiers = new();
+
+	/// <summary>
+	/// Lane K: the keyed pose at a frame with every present channel curve applied over it.
+	/// Euler channels are the pose rotation's XYZ Euler angles in degrees (see
+	/// <see cref="Xform.ToEulerXyz"/> / <see cref="Xform.FromEulerXyz"/>): that round-trips
+	/// exactly through this path, which is what matters here - it is NOT s&amp;box's
+	/// pitch/yaw/roll Angles order, so do not mix a channel curve with an Angles value
+	/// and expect the same numbers.
+	/// </summary>
+	public RigPose EvaluateWithChannels( float frame )
+	{
+		var pose = Evaluate( frame );
+
+		if ( ChannelCurves.Count == 0 )
+			return pose;
+
+		var pos = pose.Position;
+		var scale = pose.Scale;
+		var euler = pose.Rotation.ToXform( Vec3.Zero, Vec3.One ).ToEulerXyz() * (180f / MathF.PI);
+		var hasEuler = false;
+
+		foreach ( var (channel, keys) in ChannelCurves )
+		{
+			if ( keys is null || keys.Count == 0 )
+				continue;
+
+			var value = SampleChannel( keys, frame );
+
+			switch ( channel )
+			{
+				case RigChannel.PosX: pos = new Vec3( value, pos.y, pos.z ); break;
+				case RigChannel.PosY: pos = new Vec3( pos.x, value, pos.z ); break;
+				case RigChannel.PosZ: pos = new Vec3( pos.x, pos.y, value ); break;
+				case RigChannel.EulerX: euler = new Vec3( value, euler.y, euler.z ); hasEuler = true; break;
+				case RigChannel.EulerY: euler = new Vec3( euler.x, value, euler.z ); hasEuler = true; break;
+				case RigChannel.EulerZ: euler = new Vec3( euler.x, euler.y, value ); hasEuler = true; break;
+				case RigChannel.ScaleX: scale = new Vec3( value, scale.y, scale.z ); break;
+				case RigChannel.ScaleY: scale = new Vec3( scale.x, value, scale.z ); break;
+				case RigChannel.ScaleZ: scale = new Vec3( scale.x, scale.y, value ); break;
+			}
+		}
+
+		var rotation = hasEuler
+			? Quat.FromXform( Xform.FromEulerXyz( euler * (MathF.PI / 180f) ) )
+			: pose.Rotation;
+
+		return new RigPose( pos, rotation, scale );
+	}
+
+	float SampleChannel( List<ScalarKey> keys, float frame )
+	{
+		// Time-warping modifiers first (they move the playhead), value modifiers after.
+		var t = frame;
+
+		foreach ( var m in Modifiers )
+		{
+			if ( m is null )
+				continue;
+
+			if ( m.Kind == FCurveModifierKind.Cycle && m.Period > 0f )
+				t = t % m.Period;
+			else if ( m.Kind == FCurveModifierKind.SteppedQuantize && m.Steps >= 1 )
+				t = MathF.Floor( t / m.Steps ) * m.Steps;
+		}
+
+		var ordered = keys.OrderBy( k => k.Frame ).ToList();
+
+		if ( ordered.Count == 1 || t <= ordered[0].Frame )
+			return ApplyValueModifiers( ordered[0].Value, ordered[0].Value, t );
+
+		if ( t >= ordered[^1].Frame )
+			return ApplyValueModifiers( ordered[^1].Value, ordered[0].Value, t );
+
+		for ( var i = 0; i < ordered.Count - 1; i++ )
+		{
+			var a = ordered[i];
+			var b = ordered[i + 1];
+
+			if ( t < a.Frame || t > b.Frame )
+				continue;
+
+			var span = b.Frame - a.Frame;
+			var u = span > 0 ? (t - a.Frame) / span : 0f;
+			return ApplyValueModifiers( a.Value + (b.Value - a.Value) * u, ordered[0].Value, t );
+		}
+
+		return ordered[0].Value;
+	}
+
+	float ApplyValueModifiers( float value, float firstValue, float frame )
+	{
+		foreach ( var m in Modifiers )
+		{
+			if ( m is null )
+				continue;
+
+			switch ( m.Kind )
+			{
+				case FCurveModifierKind.SinWave:
+					// Period in frames; Phase in radians.
+					value += m.Amplitude * MathF.Sin( 2f * MathF.PI * frame / MathF.Max( m.Period, 1e-6f ) + m.Phase );
+					break;
+
+				case FCurveModifierKind.PerlinNoise:
+					// Deterministic smooth value noise (hash lattice + smoothstep), NOT gradient
+					// Perlin - the name is the roadmap's, the function is documented here.
+					// Period in frames is the noise feature size; Phase shifts it in frames.
+					value += m.Amplitude * (2f * ValueNoise( frame / MathF.Max( m.Period, 1e-6f ) + m.Phase ) - 1f);
+					break;
+
+				case FCurveModifierKind.SpringOvershoot:
+					// A settle wobble that starts at zero on frame 0 and decays: the curve
+					// itself is untouched at its first key and rings around the sampled value
+					// afterwards. Amplitude is the peak wobble, Period the ring length.
+					value += m.Amplitude * MathF.Exp( -frame / MathF.Max( m.Period, 1e-6f ) )
+						* MathF.Sin( 2f * MathF.PI * frame / MathF.Max( m.Period, 1e-6f ) );
+					break;
+			}
+		}
+
+		return value;
+	}
+
+	static float ValueNoise( float x )
+	{
+		var i = MathF.Floor( x );
+		var f = x - i;
+		var u = f * f * (3f - 2f * f);
+		return Hash( (int)i ) + (Hash( (int)i + 1 ) - Hash( (int)i )) * u;
+	}
+
+	static float Hash( int n )
+	{
+		var v = MathF.Sin( n * 127.1f ) * 43758.5453f;
+		return v - MathF.Floor( v );
+	}
+
+	/// <summary>
+	/// Lane K: one channel's sampled value at a frame (keys + this track's modifiers),
+	/// or null when the track carries no curve for that channel. <see cref="ClipKeys"/>
+	/// and <see cref="BuildScriptAnim"/> read curves through this rather than
+	/// re-implementing the sampling, so the two can never drift apart.
+	/// </summary>
+	public float? ChannelValue( RigChannel channel, float frame )
+	{
+		if ( !ChannelCurves.TryGetValue( channel, out var keys ) || keys is null || keys.Count == 0 )
+			return null;
+
+		return SampleChannel( keys, frame );
+	}
 }
 
 /// <summary>
@@ -511,6 +672,166 @@ public sealed class RigAnimFile
 	/// </summary>
 	public int LastFrame => Math.Min( LastKeyFrame, Math.Max( FrameCount - 1, 0 ) );
 
+	/// <summary>
+	/// Lane K: non-IK constraints, applied by <see cref="SolveConstraints"/> in list order.
+	/// They are NOT applied by <see cref="SampleLocal"/> - a clip that never opted in keeps
+	/// Marionette's playback exactly - only by <see cref="SampleConstrained"/> and by
+	/// <see cref="BuildScriptAnim"/> when it bakes. Empty by default.
+	/// </summary>
+	public List<RigConstraint> Constraints = new();
+
+	/// <summary>
+	/// Lane K: like <see cref="SampleLocal"/>, but each bone's track is read through
+	/// <see cref="RigTrack.EvaluateWithChannels"/> so channel curves and modifiers play.
+	/// IK solving, limits and root-motion handling are the same as <see cref="SampleLocal"/>.
+	/// </summary>
+	public Xform[] SampleLocalChannels( Skeleton skeleton, float frame )
+	{
+		var pose = new Xform[skeleton.Count];
+
+		for ( var b = 0; b < skeleton.Count; b++ )
+		{
+			var track = Find( skeleton.Bones[b].Name );
+			pose[b] = track is { Keys.Count: > 0 } or { ChannelCurves.Count: > 0 }
+				? track.EvaluateWithChannels( frame ).ToXform()
+				: skeleton.Bones[b].Local;
+			pose[b] = RigLimit.Clamp( Limits, skeleton.Bones[b].Name, pose[b] );
+		}
+
+		var solved = SolveIk( skeleton, pose, frame );
+		return PlayInPlace && RootMotion is { Enabled: true } ? Effigy.RootMotion.InPlace( this, skeleton, solved, frame ) : solved;
+	}
+
+	/// <summary>
+	/// Lane K: channel curves + IK + non-IK constraints, in that order. A clip with no
+	/// <see cref="Constraints"/> returns <see cref="SampleLocalChannels"/> unchanged.
+	/// </summary>
+	public Xform[] SampleConstrained( Skeleton skeleton, float frame ) =>
+		SolveConstraints( skeleton, SampleLocalChannels( skeleton, frame ) );
+
+	/// <summary>
+	/// Lane K: non-IK bone constraints, evaluated in model space and converted back to
+	/// local space - except <see cref="RigConstraintKind.LimitRotation"/> and
+	/// <see cref="RigConstraintKind.StretchTo"/>, which are parent-space / rest-length
+	/// ideas and are applied on the local poses after the conversion, in that order.
+	/// A constraint naming a bone the skeleton does not have, or a target it does not
+	/// have, is skipped, never an error: a clip retargeted onto a smaller rig keeps
+	/// playing, it just loses the constraints it cannot resolve.
+	/// </summary>
+	public Xform[] SolveConstraints( Skeleton skeleton, Xform[] local )
+	{
+		if ( Constraints is null || Constraints.Count == 0 || skeleton is null || local is null )
+			return local;
+
+		var world = ModelSpace( skeleton, local );
+
+		foreach ( var c in Constraints )
+		{
+			if ( c is null || c.Kind is RigConstraintKind.LimitRotation or RigConstraintKind.StretchTo )
+				continue;
+
+			var b = skeleton.IndexOf( c.Bone );
+
+			if ( b < 0 || b >= world.Length )
+				continue;
+
+			var t = string.IsNullOrWhiteSpace( c.Target ) ? -1 : skeleton.IndexOf( c.Target );
+
+			if ( t < 0 || t >= world.Length )
+				continue;
+
+			var w = Math.Clamp( c.Weight, 0f, 1f );
+			var cur = world[b];
+			var curRot = Quat.FromXform( cur );
+			var curScale = Quat.ScaleOf( cur );
+
+			switch ( c.Kind )
+			{
+				case RigConstraintKind.CopyRotation:
+					world[b] = Quat.Slerp( curRot, Quat.FromXform( world[t] ), w ).ToXform( cur.Origin, curScale );
+					break;
+
+				case RigConstraintKind.CopyLocation:
+					world[b] = curRot.ToXform( Vec3.Lerp( cur.Origin, world[t].Origin, w ), curScale );
+					break;
+
+				case RigConstraintKind.TrackTo:
+					// Aim the bone's +Z axis at the target. Weight blends toward the aim.
+					var dir = world[t].Origin - cur.Origin;
+
+					if ( dir.LengthSquared < 1e-12f )
+						break;
+
+					dir = dir.Normal;
+					var axis = cur.Z.Normal;
+					var dot = Math.Clamp( Vec3.Dot( axis, dir ), -1f, 1f );
+					Quat aim;
+
+					if ( dot > 0.9999f )
+					{
+						aim = Quat.Identity;
+					}
+					else if ( dot < -0.9999f )
+					{
+						// Antiparallel: any perpendicular axis gives a half turn.
+						var perp = Math.Abs( axis.x ) < 0.9f ? Vec3.Cross( axis, new Vec3( 1, 0, 0 ) ) : Vec3.Cross( axis, new Vec3( 0, 1, 0 ) );
+						aim = Quat.FromAxisAngle( perp.Normal, MathF.PI );
+					}
+					else
+					{
+						aim = Quat.FromAxisAngle( Vec3.Cross( axis, dir ).Normal, MathF.Acos( dot ) );
+					}
+
+					world[b] = Quat.Slerp( curRot, aim * curRot, w ).ToXform( cur.Origin, curScale );
+					break;
+			}
+		}
+
+		var result = LocalSpace( skeleton, world );
+
+		foreach ( var c in Constraints )
+		{
+			if ( c is null )
+				continue;
+
+			var b = skeleton.IndexOf( c.Bone );
+
+			if ( b < 0 || b >= result.Length )
+				continue;
+
+			if ( c.Kind == RigConstraintKind.LimitRotation )
+			{
+				var limit = new RigLimit { Bone = c.Bone, Min = c.Min, Max = c.Max, Weight = Math.Clamp( c.Weight, 0f, 1f ), Enabled = true };
+				result[b] = RigLimit.Clamp( new[] { limit }, c.Bone, result[b] );
+			}
+			else if ( c.Kind == RigConstraintKind.StretchTo )
+			{
+				var t = string.IsNullOrWhiteSpace( c.Target ) ? -1 : skeleton.IndexOf( c.Target );
+
+				if ( t < 0 || t >= world.Length )
+					continue;
+
+				var rest = skeleton.Bones[b].Length;
+
+				if ( rest <= 0f )
+					continue;
+
+				var stretch = (world[t].Origin - world[b].Origin).Length / rest;
+
+				if ( !float.IsFinite( stretch ) || stretch <= 0f )
+					continue;
+
+				// Volume-preserving cartoon squash & stretch: scaleXZ = 1 / sqrt(stretchY).
+				var sxz = 1f / MathF.Sqrt( stretch );
+				var target = new Vec3( sxz, stretch, sxz );
+				var cur = result[b];
+				var blended = Vec3.Lerp( Quat.ScaleOf( cur ), target, Math.Clamp( c.Weight, 0f, 1f ) );
+				result[b] = Quat.FromXform( cur ).ToXform( cur.Origin, blended );
+			}
+		}
+
+		return result;
+	}
 	public RigTrack Find( string boneName ) => Tracks.FirstOrDefault( t => t.Kind == RigTrackKind.Bone && t.Name == boneName );
 
 	public static RigAnimFile ReadFile( string path ) => Read( File.ReadAllText( path ) );
@@ -958,5 +1279,94 @@ public sealed class RigAnimFile
 			values[i] = float.Parse( parts[i].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture );
 
 		return values;
+	}
+}
+/// <summary>Lane K: one scalar component of a bone's pose, for per-channel curves.</summary>
+public enum RigChannel
+{
+	PosX, PosY, PosZ,
+	EulerX, EulerY, EulerZ,
+	ScaleX, ScaleY, ScaleZ
+}
+
+/// <summary>Lane K: one point on a scalar channel curve. Frame is a whole frame, like <see cref="RigKey"/>.</summary>
+public sealed class ScalarKey
+{
+	public int Frame;
+	public float Value;
+
+	public ScalarKey() { }
+	public ScalarKey( int frame, float value ) { Frame = frame; Value = value; }
+}
+
+/// <summary>Lane K: what a <see cref="FCurveModifier"/> does. See that class for each kind's units.</summary>
+public enum FCurveModifierKind
+{
+	/// <summary>Repeat the curve every <see cref="FCurveModifier.Period"/> frames (frame mod period).</summary>
+	Cycle,
+
+	/// <summary>Add <see cref="FCurveModifier.Amplitude"/> * sin(2π frame / Period + Phase).</summary>
+	SinWave,
+
+	/// <summary>Add Amplitude * deterministic smooth value noise (feature size = Period frames).</summary>
+	PerlinNoise,
+
+	/// <summary>Add a decaying settle wobble: Amplitude * exp(-frame/Period) * sin(2π frame/Period).</summary>
+	SpringOvershoot,
+
+	/// <summary>Hold the curve still for <see cref="FCurveModifier.Steps"/> frames at a time
+	/// (on-2s when Steps is 2, on-3s when 3) - the cartoon hold, as a time warp.</summary>
+	SteppedQuantize
+}
+
+/// <summary>
+/// Lane K: a non-destructive modifier on a track's channel curves. Cycle and SteppedQuantize
+/// move the playhead before sampling; SinWave, PerlinNoise and SpringOvershoot change the
+/// sampled value after. Period is in frames for every kind; Phase is radians for SinWave
+/// and a frame offset for PerlinNoise; Steps is only read by SteppedQuantize.
+/// </summary>
+public sealed class FCurveModifier
+{
+	public FCurveModifierKind Kind;
+	public float Amplitude;
+	public float Period = 30f;
+	public float Phase;
+	public int Steps = 2;
+
+	public FCurveModifier() { }
+	public FCurveModifier( FCurveModifierKind kind, float amplitude = 0f, float period = 30f, float phase = 0f, int steps = 2 )
+	{
+		Kind = kind; Amplitude = amplitude; Period = period; Phase = phase; Steps = steps;
+	}
+}
+
+/// <summary>Lane K: a non-IK constraint kind, for <see cref="RigConstraint"/>.</summary>
+public enum RigConstraintKind
+{
+	CopyRotation,
+	CopyLocation,
+	TrackTo,
+	LimitRotation,
+	StretchTo
+}
+
+/// <summary>
+/// Lane K: one non-IK constraint. Bone and Target are skeleton bone names. Weight blends
+/// 0 (off) to 1 (full). Min/Max are pitch/yaw/roll degrees and are only read by
+/// LimitRotation. StretchTo reads the bone's rest <see cref="Bone.Length"/>.
+/// </summary>
+public sealed class RigConstraint
+{
+	public RigConstraintKind Kind;
+	public string Bone = "";
+	public string Target = "";
+	public float Weight = 1f;
+	public Vec3 Min = new( -45, -45, -45 );
+	public Vec3 Max = new( 45, 45, 45 );
+
+	public RigConstraint() { }
+	public RigConstraint( RigConstraintKind kind, string bone, string target = "", float weight = 1f )
+	{
+		Kind = kind; Bone = bone; Target = target; Weight = weight;
 	}
 }

@@ -228,4 +228,79 @@ public static class FeatureRemedy
 
 		return new( false, $"Unknown remedy kind {action.Kind}.", null );
 	}
+	// --- Lane P: automatic remedies ---------------------------------------------------------------
+	// `remedy all` applies every unambiguous fix in the studio in one command. It
+	// deliberately does NOT do the ambiguous ones: a ChooseFolder action with no
+	// folder, and OpenWorkspace actions (the kernel cannot switch workspaces), are
+	// reported and skipped. It also does NOT invent features that do not exist:
+	// the roadmap's "UVProject + UVUnwrap + UVPack" triple is, in this tree, a
+	// single UVProject feature (UVPack is a static utility, UVUnwrap is not a
+	// feature type), so the UV remedy inserts UVProject only. Sculpt levels are
+	// NOT auto-bumped: v3 sculpt deliberately defaults Levels to 0 so existing
+	// sculpts are not silently densified on rebuild, and `remedy all` must not
+	// undo that decision behind the user's back.
+
+	/// <summary>Unambiguous remedies for one feature, beyond its own diagnostic actions.</summary>
+	public static List<RemedyAction> AutoRemedies( PartStudio studio, Feature feature )
+	{
+		var actions = new List<RemedyAction>();
+		if ( studio is null || feature is null )
+			return actions;
+		// Missing UVs before Paint: a UVProject above the paint feature.
+		if ( feature.TypeName is "Paint" or "Bake" )
+		{
+			var hasUv = studio.Features.Any( f => f is UVProjectFeature );
+			if ( !hasUv )
+				actions.Add( RemedyAction.InsertFeatureAbove( "UV project above", "UVProject" ) );
+		}
+		return actions;
+	}
+
+	/// <summary>Apply every unambiguous remedy in the studio. Returns (applied, skipped, log).</summary>
+	public static (int Applied, int Skipped, List<string> Log) RemedyAll( PartStudio studio )
+	{
+		var log = new List<string>();
+		var applied = 0;
+		var skipped = 0;
+		if ( studio is null )
+			return (0, 0, log);
+		// Snapshot: applying a remedy inserts features, which must not re-enter the loop.
+		foreach ( var feature in studio.Features.ToList() )
+		{
+			studio.Rebuild();
+			var actions = ( feature.Diagnostic?.Actions ?? new List<RemedyAction>() )
+				.Concat( AutoRemedies( studio, feature ) ).ToList();
+			foreach ( var action in actions )
+			{
+				if ( action.Kind is RemedyKind.OpenWorkspace )
+				{
+					log.Add( $"{feature.Name}: skipped '{action.Label}' (needs the editor workspace)." );
+					skipped++;
+					continue;
+				}
+				if ( action.Kind is RemedyKind.ChooseFolder )
+				{
+					log.Add( $"{feature.Name}: skipped '{action.Label}' (needs a folder; use remedy {feature.Name} folder=out/tex)." );
+					skipped++;
+					continue;
+				}
+				var outcome = Apply( studio, feature, action );
+				log.Add( $"{feature.Name}: {outcome.Message}" );
+				if ( outcome.Ok ) applied++; else skipped++;
+			}
+		}
+		// Unrigged garments: a garment feature with no rig at all gets a citizen rig.
+		// A rig is not a feature, so this is a script verb, not an insertion — and it
+		// only runs when the studio has a garment and zero bones, never otherwise.
+		var hasGarment = studio.Features.Any( f => f.TypeName.Contains( "Garment", StringComparison.OrdinalIgnoreCase )
+			|| f.TypeName.Contains( "Clothing", StringComparison.OrdinalIgnoreCase )
+			|| f.TypeName.Contains( "Drape", StringComparison.OrdinalIgnoreCase ) );
+		if ( hasGarment && studio.Rig.Bones.Count == 0 )
+		{
+			var result = BuildScript.Run( studio, "rig citizen" );
+			if ( result.Ok ) { applied++; log.Add( "unrigged garment: rig citizen applied." ); }
+			else { skipped++; log.Add( $"unrigged garment: rig citizen failed: {result.Error}" ); }
+		}
+		return (applied, skipped, log);
+	}
 }

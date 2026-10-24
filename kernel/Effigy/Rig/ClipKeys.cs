@@ -308,4 +308,132 @@ public static class ClipKeys
 
 		return values;
 	}
+	/// <summary>
+	/// Lane K: key one scalar channel curve on a bone track, replacing any key already
+	/// on that frame. The track is created when the bone has none. This is how
+	/// <see cref="BuildScriptAnim"/> and the cabinet's channel editor write curves;
+	/// sampling stays in <see cref="RigTrack.ChannelValue(RigChannel, float)"/>.
+	/// </summary>
+	public static void SetChannelKey( RigAnimFile clip, string bone, RigChannel channel, int frame, float value )
+	{
+		if ( clip is null ) throw new ArgumentNullException( nameof( clip ) );
+		if ( string.IsNullOrWhiteSpace( bone ) ) throw new ArgumentException( "no bone", nameof( bone ) );
+		if ( frame < 0 ) throw new ArgumentOutOfRangeException( nameof( frame ) );
+		if ( !float.IsFinite( value ) ) throw new ArgumentException( "channel value must be finite", nameof( value ) );
+
+		var track = clip.Tracks.FirstOrDefault( t => t.Kind == RigTrackKind.Bone && t.Name == bone )
+			?? new RigTrack { Kind = RigTrackKind.Bone, Name = bone };
+
+		if ( !clip.Tracks.Contains( track ) )
+			clip.Tracks.Add( track );
+
+		if ( !track.ChannelCurves.TryGetValue( channel, out var keys ) || keys is null )
+			track.ChannelCurves[channel] = keys = new List<ScalarKey>();
+
+		var idx = keys.FindIndex( k => k.Frame == frame );
+
+		if ( idx >= 0 )
+			keys[idx] = new ScalarKey( frame, value );
+		else
+			keys.Add( new ScalarKey( frame, value ) );
+
+		keys.Sort( ( a, b ) => a.Frame.CompareTo( b.Frame ) );
+
+		if ( frame >= clip.FrameCount )
+			clip.FrameCount = frame + 1;
+	}
+
+	/// <summary>
+	/// Lane K: channel keys as text, ';' between them: <c>frame:value;frame:value</c>.
+	/// Null and an error on anything it cannot read.
+	/// </summary>
+	public static List<ScalarKey> ParseChannelKeys( string text, out string error )
+	{
+		error = null;
+		var list = new List<ScalarKey>();
+
+		foreach ( var item in (text ?? "").Split( ';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries ) )
+		{
+			var parts = item.Split( ':' );
+
+			if ( parts.Length != 2
+				|| !int.TryParse( parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var frame )
+				|| !float.TryParse( parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var value ) )
+			{
+				error = $"'{item}' is not frame:value";
+				return null;
+			}
+
+			list.Add( new ScalarKey( frame, value ) );
+		}
+
+		if ( list.Count == 0 )
+			error = "no channel keys";
+
+		return list.Count == 0 ? null : list.OrderBy( k => k.Frame ).ToList();
+	}
+
+	/// <summary>
+	/// Lane K: one channel's sampled value at a frame, or null when the bone's track
+	/// carries no curve for that channel.
+	/// </summary>
+	public static float? ChannelAt( RigAnimFile clip, string bone, RigChannel channel, float frame )
+	{
+		if ( clip is null )
+			return null;
+
+		var track = clip.Tracks.FirstOrDefault( t => t.Kind == RigTrackKind.Bone && t.Name == bone );
+		return track?.ChannelValue( channel, frame );
+	}
+
+	/// <summary>
+	/// Lane K: bake a bone's channel curves (and its modifiers) into ordinary keys,
+	/// one per frame across the union of the key span and the channel span, then clear
+	/// the curves and modifiers - their effect is now in the keys, so keeping them
+	/// would apply them twice. Returns the number of keys written.
+	/// </summary>
+	public static int BakeChannels( RigAnimFile clip, string bone )
+	{
+		if ( clip is null ) throw new ArgumentNullException( nameof( clip ) );
+
+		var track = clip.Tracks.FirstOrDefault( t => t.Kind == RigTrackKind.Bone && t.Name == bone );
+
+		if ( track is null || track.ChannelCurves.Count == 0 )
+			return 0;
+
+		var first = int.MaxValue;
+		var last = int.MinValue;
+
+		foreach ( var k in track.Keys )
+		{
+			first = Math.Min( first, k.Frame );
+			last = Math.Max( last, k.Frame );
+		}
+
+		foreach ( var keys in track.ChannelCurves.Values )
+		{
+			foreach ( var k in keys )
+			{
+				first = Math.Min( first, k.Frame );
+				last = Math.Max( last, k.Frame );
+			}
+		}
+
+		if ( last < first )
+			return 0;
+
+		var baked = new List<RigKey>();
+
+		for ( var f = first; f <= last; f++ )
+			baked.Add( new RigKey { Frame = f, Local = track.EvaluateWithChannels( f ), Ease = RigEase.Smooth } );
+
+		track.Keys = baked;
+		track.ChannelCurves.Clear();
+		track.Modifiers.Clear();
+
+		if ( last >= clip.FrameCount )
+			clip.FrameCount = last + 1;
+
+		return baked.Count;
+	}
 }

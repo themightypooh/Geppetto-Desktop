@@ -93,6 +93,70 @@ public sealed class PolyMesh
 	public List<Face> Faces = new();
 
 	/// <summary>
+	/// Second UV channel (UV2, lightmap): per-vertex UVs, parallel to <see cref="Positions"/>
+	/// when used. UV1 stays per corner on <see cref="Face.UVs"/> because seams need that; UV2
+	/// is per vertex on purpose, because a lightmap must not overlap and must not seam — one UV
+	/// per vertex is the whole point. Empty when unused. <see cref="FaceUV2"/>, when non-null,
+	/// maps each face corner to an index into UV2, so a face can still disagree at a seam if a
+	/// caller really needs it; null means corner c of a face reads UV2[face.Indices[c]].
+	/// </summary>
+	public List<Vec2> UV2 = new();
+
+	/// <summary>Per-face, per-corner indices into <see cref="UV2"/>, or null for the default
+	/// vertex-index mapping. Null when UV2 is unused.</summary>
+	public int[][] FaceUV2;
+
+	/// <summary>True once any UV2 data has been written.</summary>
+	public bool HasUV2 => UV2 is not null && UV2.Count > 0;
+
+	/// <summary>UV2 for one corner: the FaceUV2 mapping when present, else the vertex's own
+	/// UV2, else Zero. Never throws for a well-formed face.</summary>
+	public Vec2 GetUV2( int face, int corner )
+	{
+		if ( UV2 is null || UV2.Count == 0 || face < 0 || face >= Faces.Count )
+			return Vec2.Zero;
+		var f = Faces[face];
+		if ( corner < 0 || corner >= f.Count )
+			return Vec2.Zero;
+		if ( FaceUV2 is not null && face < FaceUV2.Length && FaceUV2[face] is not null
+			&& corner < FaceUV2[face].Length && FaceUV2[face][corner] >= 0 && FaceUV2[face][corner] < UV2.Count )
+			return UV2[FaceUV2[face][corner]];
+		var vi = f.Indices[corner];
+		return vi >= 0 && vi < UV2.Count ? UV2[vi] : Vec2.Zero;
+	}
+
+	/// <summary>Set UV2 for one vertex (the FaceUV2 mapping stays null, so every face corner
+	/// on that vertex reads it). Grows UV2 with Zero padding to <see cref="Positions"/>.</summary>
+	public void SetUV2Vertex( int vertex, Vec2 uv )
+	{
+		if ( vertex < 0 || vertex >= Positions.Count )
+			throw new ArgumentOutOfRangeException( nameof( vertex ) );
+		while ( UV2.Count <= vertex )
+			UV2.Add( Vec2.Zero );
+		UV2[vertex] = uv;
+	}
+
+	/// <summary>Set UV2 for one face corner only: appends a dedicated UV2 entry and points
+	/// that corner at it, so neighbouring faces on the same vertex keep their own value.
+	/// This is what creates a seam in UV2, and it is the only way to do it.</summary>
+	public void SetUV2Corner( int face, int corner, Vec2 uv )
+	{
+		if ( face < 0 || face >= Faces.Count || corner < 0 || corner >= Faces[face].Count )
+			throw new ArgumentOutOfRangeException( nameof( face ) );
+		if ( FaceUV2 is null || FaceUV2.Length != Faces.Count )
+		{
+			var fresh = new int[Faces.Count][];
+			for ( var i = 0; i < Faces.Count; i++ )
+				fresh[i] = (int[])Faces[i].Indices.Clone();
+			FaceUV2 = fresh;
+		}
+		if ( FaceUV2[face] is null || FaceUV2[face].Length != Faces[face].Count )
+			FaceUV2[face] = (int[])Faces[face].Indices.Clone();
+		UV2.Add( uv );
+		FaceUV2[face][corner] = UV2.Count - 1;
+	}
+
+	/// <summary>
 	/// Bone influences, parallel to Positions. Null until something rigs the mesh, which is the
 	/// normal state for a prop.
 	///
@@ -487,6 +551,11 @@ public sealed class PolyMesh
 
 		m.Morphs = Morphs.Where( x => x is not null ).Select( x => x.Clone() ).ToList();
 		m.Seams = Seams is null ? new HashSet<EdgeKey>() : new HashSet<EdgeKey>( Seams );
+
+		if ( UV2 is not null && UV2.Count > 0 )
+			m.UV2 = new List<Vec2>( UV2 );
+		if ( FaceUV2 is not null )
+			m.FaceUV2 = FaceUV2.Select( row => row is null ? null : (int[])row.Clone() ).ToArray();
 
 		foreach ( var f in Faces )
 			m.Faces.Add( new Face( (int[])f.Indices.Clone(), (Vec2[])f.UVs.Clone(), f.Material ) );

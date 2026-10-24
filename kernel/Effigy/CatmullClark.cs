@@ -174,6 +174,19 @@ public static class CatmullClark
 		var newWeights = rigged ? new BoneWeight[newPositions.Length][] : null;
 		var facePointWeights = rigged ? new BoneWeight[faceCount][] : null;
 
+		// Vertex colours ride the same way skin weights do, minus the sum-to-one rule: a colour
+		// belongs to its vertex, so an original vertex keeps its colour, a face point takes the
+		// average of its corners, and an edge point takes the same affine mix as its position
+		// (smooth rule, lerped toward the plain midpoint by the crease sharpness). Before this,
+		// subdivision silently dropped VertexColors altogether (backlog BL1).
+		var hasColors = mesh.HasVertexColors;
+		var newColors = hasColors ? new Vec4[newPositions.Length] : null;
+		var facePointColors = hasColors ? new Vec4[faceCount] : null;
+
+		if ( hasColors )
+			for ( var vi = 0; vi < vertCount; vi++ )
+				newColors[vi] = mesh.VertexColors[vi];
+
 		// --- face points -------------------------------------------------------------------
 		var facePoints = new Vec3[faceCount];
 
@@ -181,6 +194,17 @@ public static class CatmullClark
 		{
 			facePoints[fi] = mesh.FaceCentroid( mesh.Faces[fi] );
 			newPositions[vertCount + edgeCount + fi] = facePoints[fi];
+
+			if ( hasColors )
+			{
+				var faceColor = Vec4.Zero;
+
+				foreach ( var ci in mesh.Faces[fi].Indices )
+					faceColor += mesh.VertexColors[ci];
+
+				facePointColors[fi] = faceColor * (1f / mesh.Faces[fi].Count);
+				newColors[vertCount + edgeCount + fi] = facePointColors[fi];
+			}
 
 			if ( !rigged )
 				continue;
@@ -210,6 +234,9 @@ public static class CatmullClark
 				// would drag the border inward, which is exactly the "my open mesh shrank" bug.
 				newPositions[vertCount + ei] = (a + b) * 0.5f;
 
+				if ( hasColors )
+					newColors[vertCount + ei] = (mesh.VertexColors[key.A] + mesh.VertexColors[key.B]) * 0.5f;
+
 				if ( rigged )
 					newWeights[vertCount + ei] = SkinWeights.Blend(
 						(mesh.Skin[key.A], 0.5f), (mesh.Skin[key.B], 0.5f) );
@@ -230,6 +257,17 @@ public static class CatmullClark
 			var sharp = Sharp( key );
 			var smooth = (a + b + faceSum / faces.Count * 2f) * 0.25f;
 			newPositions[vertCount + ei] = Vec3.Lerp( smooth, (a + b) * 0.5f, sharp );
+
+			if ( hasColors )
+			{
+				var faceColorSum = Vec4.Zero;
+
+				foreach ( var fi in faces )
+					faceColorSum += facePointColors[fi];
+
+				var smoothColor = (mesh.VertexColors[key.A] + mesh.VertexColors[key.B] + faceColorSum * (1f / faces.Count) * 2f) * 0.25f;
+				newColors[vertCount + ei] = Vec4.Lerp( smoothColor, (mesh.VertexColors[key.A] + mesh.VertexColors[key.B]) * 0.5f, sharp );
+			}
 
 			if ( creases is not null && creases.TryGetValue( key, out var carried ) && carried > 1f )
 			{
@@ -408,6 +446,28 @@ public static class CatmullClark
 		if ( rigged )
 			result.Skin = new SkinWeights { Vertices = new List<BoneWeight[]>( newWeights ) };
 
+		if ( hasColors )
+			result.VertexColors = newColors;
+
+		// Marked seams split with the edge they sit on: a seam edge (a,b) becomes (a,mid) and
+		// (mid,b). Before this, subdivision dropped the Seams set altogether (backlog BL1), so
+		// an unwrap after a subdivide no longer knew where to cut. Per-corner UVs already
+		// survived (they are local to each face); this is the marked-seam set catching up.
+		if ( mesh.Seams is { Count: > 0 } )
+		{
+			result.Seams = new HashSet<EdgeKey>();
+
+			foreach ( var seam in mesh.Seams )
+			{
+				if ( !edgeIndex.TryGetValue( seam, out var ei ) )
+					continue;
+
+				var mid = vertCount + ei;
+				result.Seams.Add( new EdgeKey( seam.A, mid ) );
+				result.Seams.Add( new EdgeKey( mid, seam.B ) );
+			}
+		}
+
 		for ( var fi = 0; fi < faceCount; fi++ )
 		{
 			var face = mesh.Faces[fi];
@@ -532,6 +592,8 @@ public static class CatmullClark
 		} );
 
 		var rigged = mesh.IsRigged;
+		var hasColors = mesh.HasVertexColors;
+		var newColors = hasColors ? new List<Vec4>( mesh.VertexColors ) : null;
 
 		// Originals are COPIED UNMOVED. See the summary: this is the property the whole operation
 		// is for, and it is also what lets the untouched half of the mesh keep its exact positions.
@@ -546,6 +608,9 @@ public static class CatmullClark
 		{
 			splitIndex[key] = result.Positions.Count;
 			result.Positions.Add( (mesh.Positions[key.A] + mesh.Positions[key.B]) * 0.5f );
+
+			if ( hasColors )
+				newColors.Add( (mesh.VertexColors[key.A] + mesh.VertexColors[key.B]) * 0.5f );
 
 			if ( rigged )
 				result.Skin.Vertices.Add( SkinWeights.Blend(
@@ -567,6 +632,16 @@ public static class CatmullClark
 
 			var centre = result.Positions.Count;
 			result.Positions.Add( mesh.FaceCentroid( face ) );
+
+			if ( hasColors )
+			{
+				var centreColor = Vec4.Zero;
+
+				foreach ( var ci in face.Indices )
+					centreColor += mesh.VertexColors[ci];
+
+				newColors.Add( centreColor * (1f / face.Count) );
+			}
 
 			if ( rigged )
 			{
@@ -608,6 +683,27 @@ public static class CatmullClark
 					face.Material );
 
 				nextSelected.Add( result.FaceCount - 1 );
+			}
+		}
+
+		if ( hasColors )
+			result.VertexColors = newColors.ToArray();
+
+		if ( mesh.Seams is { Count: > 0 } )
+		{
+			result.Seams = new HashSet<EdgeKey>();
+
+			foreach ( var seam in mesh.Seams )
+			{
+				if ( splitIndex.TryGetValue( seam, out var ep ) )
+				{
+					result.Seams.Add( new EdgeKey( seam.A, ep ) );
+					result.Seams.Add( new EdgeKey( ep, seam.B ) );
+				}
+				else
+				{
+					result.Seams.Add( seam );
+				}
 			}
 		}
 

@@ -139,7 +139,7 @@ public static class VmdlAnimation
 		+ "\t\t\t\t\t\tdisable_compression = false\n"
 		+ "\t\t\t\t\t\tdisable_interpolation = false\n"
 		+ "\t\t\t\t\t\tenable_scale = false\n"
-		+ $"\t\t\t\t\t\tsource_filename = \"{clip.SourceFilename}\"\n"
+		+ $"\t\t\t\t\t\tsource_filename = \"{VmdlDocument.NormalizeAssetPath( clip.SourceFilename )}\"\n"
 		+ "\t\t\t\t\t\tstart_frame = -1\n"
 		+ "\t\t\t\t\t\tend_frame = -1\n"
 		+ "\t\t\t\t\t\tframerate = -1.0\n"

@@ -636,4 +636,190 @@ public sealed class MotionLint
 
 		return parts[^1].Length == 0 || name.EndsWith( parts[^1], StringComparison.Ordinal );
 	}
+
+	// --- Lane G: AutoFix --------------------------------------------------------------------
+	// AutoFix works on baked AnimClip frames, not on RigAnimFile tracks: a baked frame list is
+	// what the generators produce, and fixing there means the repaired clip is exactly what
+	// plays back. It mutates the clip in place and reports every change, so a fix is never
+	// silent. Anything it cannot repair safely (NaN poses, a clip that fails Validate) is left
+	// alone and reported by the caller via Validate, not papered over.
+
+	/// <summary>One repair AutoFix made, so the caller can show or undo it.</summary>
+	public sealed class Fix
+	{
+		public string Kind;
+		public string Bone;
+		public int Frame;
+		public string Detail;
+	}
+
+	/// <summary>Everything AutoFix changed, in the order it changed it.</summary>
+	public sealed class AutoFixResult
+	{
+		public List<Fix> Fixes = new();
+		public int ChangedFrames;
+	}
+
+	static float RotationAngleDeg( Quat a, Quat b )
+	{
+		var dot = MathF.Abs( a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w );
+		return 2f * MathF.Acos( MathF.Min( dot, 1f ) ) * 180f / MathF.PI;
+	}
+
+	static bool Finite( Xform t ) =>
+		float.IsFinite( t.Origin.x ) && float.IsFinite( t.Origin.y ) && float.IsFinite( t.Origin.z )
+		&& float.IsFinite( t.X.x ) && float.IsFinite( t.Y.x ) && float.IsFinite( t.Z.x );
+
+	/// <summary>Repair a baked clip in place and report what changed:
+	/// loop-seam closure (last 4 frames blended into frame 0 when options.Loop),
+	/// 1-frame rotational spikes and hemisphere flips replaced by neighbour interpolation,
+	/// and planted contact bones locked to their span centroid while slow
+	/// (speed &lt; options.PlantSpeed per frame, spans of 3+ frames).
+	/// Stretch, reach, hold and twin findings are NOT auto-fixed: they need an animator's
+	/// decision, not a silent rewrite. Returns the fix list; an empty list means the clip was
+	/// already clean under these rules.</summary>
+	public static AutoFixResult AutoFix( AnimClip clip, Skeleton skeleton, Options options = null )
+	{
+		if ( clip is null ) throw new ArgumentNullException( nameof( clip ) );
+		if ( skeleton is null ) throw new ArgumentNullException( nameof( skeleton ) );
+
+		var error = clip.Validate( skeleton );
+
+		if ( error is not null )
+			throw new ArgumentException( $"AutoFix refuses a clip that fails validation: {error}" );
+
+		options ??= new Options();
+		var result = new AutoFixResult();
+		var changed = new HashSet<int>();
+		var n = clip.FrameCount;
+
+		// 1. Loop seam: blend the last 4 frames into frame 0, hardest at the seam itself.
+		if ( options.Loop && n >= 8 )
+		{
+			for ( var j = 0; j < 4; j++ )
+			{
+				var frame = n - 4 + j;
+				var w = (j + 1) / 4f;
+
+				for ( var b = 0; b < skeleton.Count; b++ )
+				{
+					var from = clip.Frames[frame][b];
+					var to = clip.Frames[0][b];
+					var rot = Quat.Slerp( Quat.FromXform( from ), Quat.FromXform( to ), w );
+					clip.Frames[frame][b] = rot.ToXform( Vec3.Lerp( from.Origin, to.Origin, w ) );
+					result.Fixes.Add( new Fix { Kind = "loop", Bone = skeleton.Bones[b].Name, Frame = frame, Detail = $"blended {w:0.00} toward frame 0" } );
+					changed.Add( frame );
+				}
+			}
+		}
+
+		// 2. Pops and flips, bone by bone, on local rotations (a turning body must not make
+		// every child look popped, so this stays in parent space like CheckPops' relative turn).
+		for ( var b = 0; b < skeleton.Count; b++ )
+		{
+			var name = skeleton.Bones[b].Name;
+
+			if ( Matches( name, options.Ignore ) )
+				continue;
+
+			for ( var f = 1; f < n - 1; f++ )
+			{
+				var prev = clip.Frames[f - 1][b];
+				var cur = clip.Frames[f][b];
+				var next = clip.Frames[f + 1][b];
+
+				if ( !Finite( prev ) || !Finite( cur ) || !Finite( next ) )
+					continue;
+
+				var qp = Quat.FromXform( prev );
+				var qc = Quat.FromXform( cur );
+				var qn = Quat.FromXform( next );
+
+				// Hemisphere flip: the middle key sits on the opposite hemisphere from both
+				// neighbours, which agree with each other. Negating the quaternion is the exact
+				// same rotation, so this fix changes nothing the eye sees — it only stops the
+				// sampler from slerping the long way round.
+				var dotPC = qp.x * qc.x + qp.y * qc.y + qp.z * qc.z + qp.w * qc.w;
+				var dotCN = qc.x * qn.x + qc.y * qn.y + qc.z * qn.z + qc.w * qn.w;
+				var dotPN = qp.x * qn.x + qp.y * qn.y + qp.z * qn.z + qp.w * qn.w;
+
+				if ( dotPC < 0f && dotCN < 0f && dotPN > 0.5f )
+				{
+					var flipped = new Quat( -qc.x, -qc.y, -qc.z, -qc.w );
+					clip.Frames[f][b] = flipped.ToXform( cur.Origin );
+					result.Fixes.Add( new Fix { Kind = "flip", Bone = name, Frame = f, Detail = "negated antipodal quaternion (same rotation, correct hemisphere)" } );
+					changed.Add( f );
+					cur = clip.Frames[f][b];
+					qc = Quat.FromXform( cur );
+				}
+
+				// 1-frame spike: big turns into and out of this frame, small turn straight
+				// across it. Replace with the neighbours' midpoint, not an average over a
+				// window — the neighbours are the motion, this frame is the glitch.
+				var a1 = RotationAngleDeg( qp, qc );
+				var a2 = RotationAngleDeg( qc, qn );
+				var a0 = RotationAngleDeg( qp, qn );
+
+				if ( a1 > options.PopDegrees && a2 > options.PopDegrees && a0 < 0.5f * MathF.Min( a1, a2 ) )
+				{
+					var mid = Quat.Slerp( qp, qn, 0.5f );
+					clip.Frames[f][b] = mid.ToXform( Vec3.Lerp( prev.Origin, next.Origin, 0.5f ) );
+					result.Fixes.Add( new Fix { Kind = "pop", Bone = name, Frame = f, Detail = $"1-frame spike {a1:0}° in / {a2:0}° out replaced by neighbour midpoint" } );
+					changed.Add( f );
+				}
+			}
+		}
+
+		// 3. Planted contact slide: lock a slow contact bone to its span centroid. Bones are
+		// processed in skeleton order with world poses recomputed after each bone, so a locked
+		// parent's children are measured against the locked parent, not the drifting one.
+		for ( var b = 0; b < skeleton.Count; b++ )
+		{
+			var name = skeleton.Bones[b].Name;
+
+			if ( Matches( name, options.Ignore ) || !options.Contacts.Any( c => Matches( name, new[] { c } ) ) )
+				continue;
+
+			var worlds = clip.Frames.Select( frame => RigAnimFile.ModelSpace( skeleton, frame ) ).ToArray();
+			var parent = skeleton.Bones[b].Parent;
+			var f = 0;
+
+			while ( f < n - 1 )
+			{
+				var start = f;
+
+				while ( f < n - 1 && (worlds[f + 1][b].Origin - worlds[f][b].Origin).Length < options.PlantSpeed )
+					f++;
+
+				var end = f;
+
+				if ( end - start + 1 >= 3 )
+				{
+					var centroid = Vec3.Zero;
+
+					for ( var k = start; k <= end; k++ )
+						centroid += worlds[k][b].Origin;
+
+					centroid *= 1f / (end - start + 1);
+					var drift = 0f;
+
+					for ( var k = start; k <= end; k++ )
+					{
+						drift = MathF.Max( drift, (worlds[k][b].Origin - centroid).Length );
+						var locked = worlds[k][b];
+						locked = new Xform( locked.X, locked.Y, locked.Z, centroid );
+						clip.Frames[k][b] = parent >= 0 ? worlds[k][parent].Inverse * locked : locked;
+						changed.Add( k );
+					}
+
+					result.Fixes.Add( new Fix { Kind = "slide", Bone = name, Frame = start, Detail = $"planted span frames {start}-{end} locked to centroid (drift was {drift:0.###})" } );
+				}
+
+				f = Math.Max( f + 1, start + 1 );
+			}
+		}
+
+		result.ChangedFrames = changed.Count;
+		return result;
+	}
 }

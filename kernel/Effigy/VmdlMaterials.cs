@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Globalization;
 using System.Text;
 
 namespace Effigy;
@@ -277,6 +278,97 @@ public static class VmdlMaterials
 			? name[..^5]
 			: name;
 	}
+
+	/// <summary>
+	/// Lane C: the .vmat parameter lines a <see cref="SlotLook"/> adds to its complex.vfx material.
+	/// Called by <see cref="SlotLook.Vmat"/> so the mapping lives here, beside the other .vmdl/.vmat
+	/// knowledge, instead of being duplicated in the look. The shader stays complex.vfx: these are
+	/// the shared complex/skin parameters the roadmap names, so no custom .shader is needed.
+	/// Empty when the look uses none of them.
+	/// </summary>
+	public static string LookParameters( SlotLook look )
+	{
+		if ( look is null ) return "";
+		var sb = new StringBuilder();
+		if ( look.Clearcoat > 0f )
+		{
+			sb.Append( "\tF_CLEARCOAT 1\n" );
+			sb.Append( $"\tg_flClearcoat \"{F( look.Clearcoat )}\"\n" );
+			sb.Append( $"\tg_flClearcoatRoughness \"{F( look.ClearcoatRoughness )}\"\n" );
+		}
+		if ( look.Subsurface > 0f )
+		{
+			sb.Append( "\tF_SUBSURFACE_SCATTERING 1\n" );
+			sb.Append( $"\tg_flSubsurfaceScale \"{F( look.Subsurface )}\"\n" );
+			sb.Append( $"\tg_vSubsurfaceColor \"[{F6( look.SubsurfaceColor.x )} {F6( look.SubsurfaceColor.y )} {F6( look.SubsurfaceColor.z )} 0.000000]\"\n" );
+		}
+		if ( look.Opacity < 1f )
+		{
+			sb.Append( "\tF_TRANSLUCENT 1\n" );
+			sb.Append( $"\tg_flOpacityScale \"{F( look.Opacity )}\"\n" );
+		}
+		return sb.ToString();
+	}
+
+	/// <summary>
+	/// Lane C: bake the stylized look into a colour sample so it survives in s&amp;box's standard
+	/// shader when `bake ... vmat=1` runs. <paramref name="cavity"/> is normalised: -1 on a ridge,
+	/// +1 in a crease (scale <see cref="SurfaceDetail.Cavity"/> inches into that range first);
+	/// <paramref name="ao"/> is 0 (open) to 1 (shut in). Ridges get brighter (+0.18 per unit of
+	/// stylized strength, the roadmap's number), creases shift warm and darken with AO, and
+	/// roughness broadens in creases and tightens on ridges. When only Toon is on (no Stylized),
+	/// the bake still runs at 0.5 strength: cel bands themselves are lighting and cannot be baked
+	/// into a colour map, but the ridge/cavity tint is what keeps the hand-painted read.
+	/// </summary>
+	public static Vec3 BakeColour( Vec3 colour, float cavity, float ao, SlotLook look )
+	{
+		if ( look is null ) return colour;
+		var strength = look.Stylized > 0f ? look.Stylized : look.Toon > 0f ? 0.5f : 0f;
+		if ( strength <= 0f ) return colour;
+		var ridge = Math.Clamp( -cavity, 0f, 1f );
+		var crease = Math.Clamp( cavity, 0f, 1f );
+		var c = colour * (1f + 0.18f * strength * ridge);
+		c = Vec3.Lerp( c, new Vec3( c.x, c.y * 0.85f, c.z * 0.65f ), strength * crease * 0.5f );
+		c *= 1f - 0.25f * strength * Math.Clamp( ao, 0f, 1f ) * crease;
+		return c;
+	}
+
+	/// <summary>The roughness half of <see cref="BakeColour"/>: same strength rule, same inputs.</summary>
+	public static float BakeRoughness( float roughness, float cavity, float ao, SlotLook look )
+	{
+		if ( look is null ) return roughness;
+		var strength = look.Stylized > 0f ? look.Stylized : look.Toon > 0f ? 0.5f : 0f;
+		if ( strength <= 0f ) return roughness;
+		var ridge = Math.Clamp( -cavity, 0f, 1f );
+		var crease = Math.Clamp( cavity, 0f, 1f );
+		_ = ao;
+		return Math.Clamp( roughness + 0.15f * strength * crease - 0.10f * strength * ridge, 0f, 1f );
+	}
+
+	/// <summary>Array form of <see cref="BakeColour"/> for a whole _color.png worth of samples.</summary>
+	public static Vec3[] BakeColours( Vec3[] colours, float[] cavity, float[] ao, SlotLook look )
+	{
+		if ( colours is null ) return null;
+		if ( cavity is null || ao is null || cavity.Length != colours.Length || ao.Length != colours.Length )
+			throw new ArgumentException( "BakeColours needs one cavity and one AO value per colour." );
+		var outp = new Vec3[colours.Length];
+		for ( var i = 0; i < outp.Length; i++ ) outp[i] = BakeColour( colours[i], cavity[i], ao[i], look );
+		return outp;
+	}
+
+	/// <summary>Array form of <see cref="BakeRoughness"/> for a whole _rough.png worth of samples.</summary>
+	public static float[] BakeRoughnesses( float[] roughnesses, float[] cavity, float[] ao, SlotLook look )
+	{
+		if ( roughnesses is null ) return null;
+		if ( cavity is null || ao is null || cavity.Length != roughnesses.Length || ao.Length != roughnesses.Length )
+			throw new ArgumentException( "BakeRoughnesses needs one cavity and one AO value per roughness." );
+		var outp = new float[roughnesses.Length];
+		for ( var i = 0; i < outp.Length; i++ ) outp[i] = BakeRoughness( roughnesses[i], cavity[i], ao[i], look );
+		return outp;
+	}
+
+	static string F( float v ) => v.ToString( "0.###", CultureInfo.InvariantCulture );
+	static string F6( float v ) => v.ToString( "0.000000", CultureInfo.InvariantCulture );
 
 	static string Quote( string value )
 	{

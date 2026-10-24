@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -68,6 +69,76 @@ public static class Playermodel
 			Unmapped = fit.Unmapped.ToList(),
 			VerticesStranded = fit.VerticesStranded,
 		};
+	}
+
+	/// <summary>
+	/// The headless playermodel entry point the roadmap's <c>effigy.sh playermodel</c> verb calls:
+	/// <see cref="Build"/> (bind, fit Citizen's skeleton, spread twist weights, depth-first order),
+	/// then <see cref="Check"/> over the result, then write the pair the editor compiles.
+	///
+	/// WHAT IT WRITES. <c>name.dmx</c> from the kernel <c>DmxWriter</c> (fitted mesh + fitted
+	/// skeleton + skin) and <c>name.vmdl</c> from <see cref="Vmdl"/> pointing at that DMX with
+	/// Citizen's animation graph, plus <c>name.playermodel-check.txt</c> with every finding.
+	/// Compiling that pair into a spawnable model is still the editor/ModelDoc step — this writes
+	/// the source pair, not a compiled model, and does not pretend otherwise.
+	///
+	/// READINESS. <see cref="ExportResult.Ready"/> is true only when <see cref="Check"/> found no
+	/// <see cref="Severity.Problem"/> findings; warnings and notes do not block. The files are
+	/// written even when not ready, so the caller can inspect what failed — check
+	/// <see cref="ExportResult.Ready"/> (or <see cref="ExportResult.Problems"/>) before spawning.
+	/// </summary>
+	public sealed class ExportResult
+	{
+		public Result Build;
+		public IReadOnlyList<Finding> Findings;
+		public int Problems;
+		public bool Ready => Problems == 0;
+		public string VmdlPath;
+		public string DmxPath;
+		public string CheckPath;
+	}
+
+	public static ExportResult ExportVmdl( PartStudio studio, string outDir, string name )
+	{
+		ArgumentNullException.ThrowIfNull( studio );
+		if ( string.IsNullOrWhiteSpace( outDir ) ) throw new ArgumentException( "ExportVmdl needs an output directory.", nameof( outDir ) );
+		if ( string.IsNullOrWhiteSpace( name ) || name.IndexOfAny( Path.GetInvalidFileNameChars() ) >= 0 )
+			throw new ArgumentException( $"ExportVmdl needs a plain file name, not '{name}'.", nameof( name ) );
+
+		var result = Build( studio );
+		var findings = Check( result );
+		var problems = findings.Count( f => f.Severity == Severity.Problem );
+
+		Directory.CreateDirectory( outDir );
+		var dmxPath = Path.Combine( outDir, name + ".dmx" );
+		var vmdlPath = Path.Combine( outDir, name + ".vmdl" );
+		var checkPath = Path.Combine( outDir, name + ".playermodel-check.txt" );
+
+		DmxWriter.WriteFile( result.Mesh, dmxPath, result.Skeleton, modelName: name );
+		File.WriteAllText( vmdlPath, Vmdl( name + ".dmx", result.Skeleton ) );
+		File.WriteAllText( checkPath, CheckReport( name, result, findings, problems ) );
+
+		return new ExportResult
+		{
+			Build = result,
+			Findings = findings,
+			Problems = problems,
+			VmdlPath = vmdlPath,
+			DmxPath = dmxPath,
+			CheckPath = checkPath,
+		};
+	}
+
+	static string CheckReport( string name, Result result, IReadOnlyList<Finding> findings, int problems )
+	{
+		var lines = new List<string>
+		{
+			$"playermodel {name}: {(problems == 0 ? "READY" : $"NOT READY — {problems} problem(s)")}",
+			$"bones: {result.Skeleton.Count}, unmapped source bones: {result.Unmapped.Count}, stranded vertices: {result.VerticesStranded}",
+			$"unmapped: {string.Join( ", ", result.Unmapped )}",
+		};
+		lines.AddRange( findings.Select( f => f.ToString() ) );
+		return string.Join( "\n", lines ) + "\n";
 	}
 
 	/// <summary>How much a <see cref="Check"/> finding matters.</summary>

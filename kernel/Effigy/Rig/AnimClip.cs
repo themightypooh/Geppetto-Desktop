@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Effigy;
 
@@ -186,5 +187,109 @@ public sealed class AnimClip
 		}
 
 		return null;
+	}
+
+	// --- Lane G: stackable procedural layers --------------------------------------------------
+	// Every generator below returns a NEW clip and leaves its input untouched, so layers compose:
+	// ApplyLocomotion(base) -> ApplyThrash(...) -> BakeSecondary(...) -> ApplyBreathing(...).
+	// The one signature deviation from the roadmap is deliberate: the roadmap's generator
+	// signatures name no skeleton, but a baked frame list is meaningless without one (bone
+	// indices are positions in Skeleton.Bones), so every generator takes the skeleton explicitly.
+
+	/// <summary>Copy a clip's metadata onto a new frame list. Scales and morphs are deep-copied
+	/// so a layer never mutates the clip it was stacked on.</summary>
+	internal static AnimClip WithFrames( AnimClip clip, List<Xform[]> frames )
+	{
+		var copy = new AnimClip { Name = clip.Name, FrameRate = clip.FrameRate, Looping = clip.Looping, Frames = frames };
+
+		if ( clip.Scales is not null )
+			copy.Scales = clip.Scales.Select( s => s is null ? null : (float[])s.Clone() ).ToList();
+
+		foreach ( var (name, list) in clip.Morphs )
+			copy.Morphs[name] = new List<float>( list );
+
+		return copy;
+	}
+
+	/// <summary>Travelling S-wave propulsion; see <see cref="ChainWave.ApplyLocomotion"/>.</summary>
+	public static AnimClip ApplyLocomotion( AnimClip clip, Skeleton skeleton, IReadOnlyList<int> chainBones,
+		float freqHz, float amplitudeDeg, float wavelength, float[] envelopeCurve = null,
+		float recoilHeadDeg = 0f, int headBone = -1 ) =>
+		ChainWave.ApplyLocomotion( clip, skeleton, chainBones, freqHz, amplitudeDeg, wavelength, envelopeCurve, recoilHeadDeg, headBone );
+
+	/// <summary>Flop / trick / spike / dazed motion; see <see cref="ChainWave.ApplyThrash"/>.</summary>
+	public static AnimClip ApplyThrash( AnimClip clip, Skeleton skeleton, IReadOnlyList<int> chainBones,
+		int jawBone, IReadOnlyList<int> opercleBones, IReadOnlyList<int> finBones, string style ) =>
+		ChainWave.ApplyThrash( clip, skeleton, chainBones, jawBone, opercleBones, finBones, style );
+
+	/// <summary>Spring follow-through; see <see cref="ChainSpring.BakeSecondary"/>.</summary>
+	public static AnimClip BakeSecondary( AnimClip clip, Skeleton skeleton, IReadOnlyList<int> springBones,
+		float stiffness, float damping, float gravityFactor = 1f ) =>
+		ChainSpring.BakeSecondary( clip, skeleton, springBones, stiffness, damping, gravityFactor );
+
+	/// <summary>Subtle alive idle: ribs expand by <paramref name="depth"/> (a fraction, e.g. 0.03
+	/// for 3%) at <paramref name="rateHz"/>, the jaw opens by up to <paramref name="depth"/>
+	/// radians in phase, and gill bones flutter at half that. A full period returns every bone
+	/// to its base pose, so breathing loops cleanly. Returns a new clip.</summary>
+	public static AnimClip ApplyBreathing( AnimClip clip, Skeleton skeleton, IReadOnlyList<int> ribBones,
+		int jawBone, IReadOnlyList<int> gillBones, float rateHz, float depth )
+	{
+		if ( clip is null ) throw new ArgumentNullException( nameof( clip ) );
+		if ( skeleton is null ) throw new ArgumentNullException( nameof( skeleton ) );
+		if ( rateHz <= 0f ) throw new ArgumentOutOfRangeException( nameof( rateHz ), "breathing rate must be positive." );
+
+		var rotations = new List<IReadOnlyDictionary<int, (Vec3, float)>>();
+
+		for ( var f = 0; f < clip.FrameCount; f++ )
+		{
+			var phase = 2f * MathF.PI * rateHz * f / MathF.Max( clip.FrameRate, 0.0001f );
+			var map = new Dictionary<int, (Vec3, float)>();
+
+			if ( jawBone >= 0 )
+				map[jawBone] = (new Vec3( 0, 1, 0 ), depth * MathF.Sin( phase ));
+
+			if ( gillBones is not null )
+			{
+				foreach ( var gill in gillBones )
+					map[gill] = (new Vec3( 0, 0, 1 ), depth * 0.5f * MathF.Sin( phase ));
+			}
+
+			rotations.Add( map );
+		}
+
+		var breathed = ChainWave.ApplyWorldRotations( skeleton, clip.Frames, rotations );
+		var result = WithFrames( clip, breathed );
+
+		if ( ribBones is not null && ribBones.Count > 0 )
+		{
+			if ( result.Scales is null )
+			{
+				result.Scales = new List<float[]>();
+
+				for ( var f = 0; f < clip.FrameCount; f++ )
+					result.Scales.Add( null );
+			}
+
+			for ( var f = 0; f < clip.FrameCount; f++ )
+			{
+				var phase = 2f * MathF.PI * rateHz * f / MathF.Max( clip.FrameRate, 0.0001f );
+				var scales = result.Scales[f];
+
+				if ( scales is null )
+				{
+					scales = new float[skeleton.Count];
+
+					for ( var b = 0; b < skeleton.Count; b++ )
+						scales[b] = 1f;
+
+					result.Scales[f] = scales;
+				}
+
+				foreach ( var rib in ribBones )
+					scales[rib] *= 1f + depth * MathF.Sin( phase );
+			}
+		}
+
+		return result;
 	}
 }

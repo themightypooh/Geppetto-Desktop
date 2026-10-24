@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text;
 
@@ -466,4 +467,222 @@ public static class ReferenceMatch
 
 		return sb.ToString().TrimEnd();
 	}
+
+	// --- Lane I-delta (roadmap Lane K2 in the 12-lane rewrite): auto-fit from a reference ---
+	//
+	// ExtractProfileCurves turns ONE reference picture into ready-to-paste ProfileFeature
+	// curve strings. It reuses ReferenceSilhouette's own cleaning (largest blob, filled
+	// outline), so a pencil sketch, a cut-out, or a photo on a plain ground all read the same.
+	//
+	// FORMAT, AND THE ONE DEVIATION FROM THE ROADMAP'S NOTATION. The roadmap writes curves
+	// as "s:value" (for example top="0:0.08;0.08:0.62"). The kernel's actual grammar — see
+	// ProfileFeature.Parse and every script in the tree — is "s,value" pairs separated by
+	// ';' (for example top=0,5;10,3.2). These strings use the kernel grammar, so they parse
+	// as-is in `add Profile ... top=...`; a colon form would be silently skipped by Parse.
+	// NORMALISATION. s runs 0..1 along the silhouette's major axis, and every extent is
+	// divided by that axis's length, so one scale factor converts the whole set to inches:
+	// multiply every s AND every extent by the desired model length. Top is the extent on
+	// the image-up side of the centreline, Bottom the image-down side (for a vertical
+	// major axis: image-left / image-right instead). Spine is the centreline's offset from
+	// the straight chord between its endpoints, in the same units, positive toward the
+	// Bottom side. Front is empty from a single side view — a side picture cannot know the
+	// width — and is filled only by ExtractProfileCurvesFromViews, from a top view, as the
+	// half-span (half the width) at each station.
+	public sealed class ProfileCurves
+	{
+		public string Top = "";
+		public string Bottom = "";
+		public string Front = "";
+		public string Spine = "";
+		public int Stations;
+		public float Aspect;
+		public float MajorLengthPx;
+	}
+
+	/// <summary>Profile curves from one reference picture (a side view, normally).</summary>
+	public static ProfileCurves ExtractProfileCurves( int width, int height, int[] rgb, byte[] alpha, int stations = 16 )
+	{
+		var points = ExtractPoints( width, height, rgb, alpha, stations, out var aspect, out var majorLen );
+		return new ProfileCurves
+		{
+			Top = CurveString( points, p => p.top ),
+			Bottom = CurveString( points, p => p.bottom ),
+			Front = "",
+			Spine = CurveString( points, p => p.spine ),
+			Stations = points.Count,
+			Aspect = aspect,
+			MajorLengthPx = majorLen,
+		};
+	}
+
+	/// <summary>Profile curves from a side view plus a top view: Front comes from the top
+	/// view's half-span at the side view's stations. Both views must show the same subject
+	/// with its long axis horizontal (or both vertical); the stations are the side's.</summary>
+	public static ProfileCurves ExtractProfileCurvesFromViews( int sideWidth, int sideHeight, int[] sideRgb, byte[] sideAlpha,
+		int topWidth, int topHeight, int[] topRgb, byte[] topAlpha, int stations = 16 )
+	{
+		var side = ExtractProfileCurves( sideWidth, sideHeight, sideRgb, sideAlpha, stations );
+		var sidePoints = ExtractPoints( sideWidth, sideHeight, sideRgb, sideAlpha, stations, out _, out _ );
+		var topFitted = ReferenceSilhouette( topWidth, topHeight, topRgb, topAlpha, 256, out _ );
+		var (tMinX, tMaxX, tMinY, tMaxY) = Bounds( topFitted, 256 );
+		if ( tMaxX < 0 )
+			return side;
+		var topHorizontal = tMaxX - tMinX >= tMaxY - tMinY;
+		DenseSeries( topFitted, 256, topHorizontal, out var tMinMajor, out var tMaxMajor, out var tTop, out var tBottom, out _ );
+		var topMajorLen = Math.Max( 1, tMaxMajor - tMinMajor + 1 );
+		var front = new List<(float s, float v)>();
+		foreach ( var p in sidePoints )
+		{
+			var half = ( SampleDense( tTop, tMinMajor, tMaxMajor, p.s ) + SampleDense( tBottom, tMinMajor, tMaxMajor, p.s ) ) * 0.5f;
+			front.Add( (p.s, half / topMajorLen) );
+		}
+		side.Front = string.Join( ";", front.Select( f => F( f.s ) + "," + F( f.v ) ) );
+		return side;
+	}
+
+	static string F( float v ) => v.ToString( "0.000", CultureInfo.InvariantCulture );
+
+	static string CurveString( List<(float s, float top, float bottom, float spine)> points, Func<(float s, float top, float bottom, float spine), float> pick )
+		=> string.Join( ";", points.Select( p => F( p.s ) + "," + F( pick( p ) ) ) );
+
+	/// <summary>Sampled (s, top, bottom, spine) points, s in 0..1, extents normalised by major length.</summary>
+	static List<(float s, float top, float bottom, float spine)> ExtractPoints( int width, int height, int[] rgb, byte[] alpha, int stations, out float aspect, out float majorLen )
+	{
+		if ( width <= 0 || height <= 0 )
+			throw new ArgumentException( "ExtractProfileCurves needs a picture with width and height above 0." );
+		if ( rgb is null || alpha is null || rgb.Length != width * height || alpha.Length != width * height )
+			throw new ArgumentException( "ExtractProfileCurves needs rgb and alpha arrays of exactly width*height." );
+		if ( stations < 2 )
+			throw new ArgumentException( "ExtractProfileCurves needs at least 2 stations." );
+		stations = Math.Min( stations, 128 );
+
+		var fitted = ReferenceSilhouette( width, height, rgb, alpha, 256, out aspect );
+		var (minX, maxX, minY, maxY) = Bounds( fitted, 256 );
+		var points = new List<(float s, float top, float bottom, float spine)>();
+		majorLen = 0;
+		if ( maxX < 0 )
+			return points;
+
+		var horizontal = maxX - minX >= maxY - minY;
+		DenseSeries( fitted, 256, horizontal, out var minMajor, out var maxMajor, out var top, out var bottom, out var centre );
+		majorLen = maxMajor - minMajor + 1;
+		var centre0 = centre[0];
+		var centre1 = centre[centre.Length - 1];
+
+		// Even stations, plus curvature inflection points: places where the span or the
+		// centreline bends sharply (a jaw step, a fin root, a waist). A second difference
+		// above 2% of the major length, at a local maximum, earns an extra station.
+		var sVals = new List<float>();
+		for ( var i = 0; i < stations; i++ )
+			sVals.Add( i / (float)(stations - 1) );
+		var span = new float[top.Length];
+		for ( var i = 0; i < span.Length; i++ )
+			span[i] = top[i] + bottom[i];
+		var thresh = 0.02f * majorLen;
+		var candidates = new List<(float s, float score)>();
+		for ( var i = 1; i < span.Length - 1; i++ )
+		{
+			var dSpan = MathF.Abs( span[i - 1] - 2 * span[i] + span[i + 1] );
+			var dCentre = MathF.Abs( centre[i - 1] - 2 * centre[i] + centre[i + 1] );
+			var score = Math.Max( dSpan, dCentre );
+			if ( score <= thresh )
+				continue;
+			var prev = i >= 2 ? Math.Max( MathF.Abs( span[i - 2] - 2 * span[i - 1] + span[i] ), MathF.Abs( centre[i - 2] - 2 * centre[i - 1] + centre[i] ) ) : 0f;
+			var next = i + 2 < span.Length ? Math.Max( MathF.Abs( span[i] - 2 * span[i + 1] + span[i + 2] ), MathF.Abs( centre[i] - 2 * centre[i + 1] + centre[i + 2] ) ) : 0f;
+			if ( score >= prev && score >= next )
+				candidates.Add( (i / (float)(span.Length - 1), score) );
+		}
+		candidates.Sort( (a, b) => b.score.CompareTo( a.score ) );
+		foreach ( var c in candidates )
+		{
+			if ( sVals.Count >= stations * 2 )
+				break;
+			if ( sVals.Any( s => MathF.Abs( s - c.s ) <= 0.01f ) )
+				continue;
+			sVals.Add( c.s );
+		}
+		sVals.Sort();
+
+		foreach ( var s in sVals )
+		{
+			var t = SampleDense( top, minMajor, maxMajor, s );
+			var b = SampleDense( bottom, minMajor, maxMajor, s );
+			var c = SampleDense( centre, minMajor, maxMajor, s );
+			var chord = centre0 + s * (centre1 - centre0);
+			points.Add( (s, t / majorLen, b / majorLen, (c - chord) / majorLen) );
+		}
+		return points;
+	}
+
+	static (int minX, int maxX, int minY, int maxY) Bounds( bool[] mask, int size )
+	{
+		int minX = size, minY = size, maxX = -1, maxY = -1;
+		for ( var y = 0; y < size; y++ )
+			for ( var x = 0; x < size; x++ )
+				if ( mask[y * size + x] )
+				{
+					minX = Math.Min( minX, x ); maxX = Math.Max( maxX, x );
+					minY = Math.Min( minY, y ); maxY = Math.Max( maxY, y );
+				}
+		return (minX, maxX, minY, maxY);
+	}
+
+	/// <summary>Per-major-coordinate top/bottom extents and centre, gaps interpolated, in fitted pixels.</summary>
+	static void DenseSeries( bool[] fitted, int size, bool horizontal, out int minMajor, out int maxMajor, out float[] top, out float[] bottom, out float[] centre )
+	{
+		var mn = new float[size];
+		var mx = new float[size];
+		for ( var i = 0; i < size; i++ ) { mn[i] = float.MaxValue; mx[i] = float.MinValue; }
+		for ( var y = 0; y < size; y++ )
+			for ( var x = 0; x < size; x++ )
+			{
+				if ( !fitted[y * size + x] )
+					continue;
+				var major = horizontal ? x : y;
+				var cross = horizontal ? y : x;
+				mn[major] = Math.Min( mn[major], cross );
+				mx[major] = Math.Max( mx[major], cross );
+			}
+		minMajor = -1; maxMajor = -1;
+		for ( var i = 0; i < size; i++ )
+			if ( mx[i] >= mn[i] ) { if ( minMajor < 0 ) minMajor = i; maxMajor = i; }
+		var n = Math.Max( 1, maxMajor - minMajor + 1 );
+		top = new float[n]; bottom = new float[n]; centre = new float[n];
+		for ( var k = 0; k < n; k++ )
+		{
+			var m = minMajor + k;
+			float lo, hi;
+			if ( mx[m] >= mn[m] ) { lo = mn[m]; hi = mx[m]; }
+			else
+			{
+				// A gap inside the span (a narrow neck the cleaning left open): bridge it
+				// from the nearest filled neighbours, or the nearest end outside the span.
+				var prev = m - 1;
+				while ( prev >= minMajor && mx[prev] < mn[prev] ) prev--;
+				var next = m + 1;
+				while ( next <= maxMajor && mx[next] < mn[next] ) next++;
+				if ( prev >= minMajor && next <= maxMajor )
+				{
+					var t = (m - prev) / (float)(next - prev);
+					lo = mn[prev] + t * (mn[next] - mn[prev]);
+					hi = mx[prev] + t * (mx[next] - mx[prev]);
+				}
+				else if ( prev >= minMajor ) { lo = mn[prev]; hi = mx[prev]; }
+				else { lo = mn[next]; hi = mx[next]; }
+			}
+			var c = (lo + hi) * 0.5f;
+			centre[k] = c; top[k] = c - lo; bottom[k] = hi - c;
+		}
+	}
+
+	static float SampleDense( float[] arr, int minMajor, int maxMajor, float s )
+	{
+		if ( arr.Length == 1 )
+			return arr[0];
+		var pos = s * (arr.Length - 1);
+		var i = Math.Clamp( (int)MathF.Floor( pos ), 0, arr.Length - 2 );
+		var t = pos - i;
+		return arr[i] + t * (arr[i + 1] - arr[i]);
+	}
+
 }

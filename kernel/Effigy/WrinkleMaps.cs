@@ -102,6 +102,12 @@ public static class WrinkleMaps
 
 		/// <summary>Texels of padding round each island.</summary>
 		public int Padding = 4;
+
+		/// <summary>Also keep a 16-bit copy of the squish maps, so <see cref="WriteForExport"/>
+		/// writes true 16-bit PNGs (PngWriter writes 16-bit whenever Rgb16 is present, exactly
+		/// like NormalBake's SixteenBit option). Off by default: an 8-bit PNG is what every
+		/// existing material and test expects.</summary>
+		public bool SixteenBit = false;
 	}
 
 	/// <summary>A bake's result. Null maps when the mesh has no UVs (or UVs covering no area).</summary>
@@ -201,6 +207,8 @@ public static class WrinkleMaps
 		var normal = new BakedMap( size, size );
 		var ao = new BakedMap( size, size );
 
+		if ( settings.SixteenBit ) { normal.EnableSixteenBit(); ao.EnableSixteenBit(); }
+
 		float H( int x, int y, int i ) =>
 			x < 0 || y < 0 || x >= size || y >= size || !covered[y * size + x] ? height[i] : height[y * size + x];
 
@@ -218,11 +226,19 @@ public static class WrinkleMaps
 				normal.Rgb[o] = Byte( nrm.x );
 				normal.Rgb[o + 1] = Byte( -nrm.y );
 				normal.Rgb[o + 2] = Byte( nrm.z );
+				if ( normal.Rgb16 is not null )
+				{
+					normal.Rgb16[o] = Word( ( nrm.x + 1f ) * 0.5f );
+					normal.Rgb16[o + 1] = Word( ( -nrm.y + 1f ) * 0.5f );
+					normal.Rgb16[o + 2] = Word( ( nrm.z + 1f ) * 0.5f );
+				}
 
 				// The valley between two folds is where the light does not reach.
 				var fold = weight[i] > 0f ? height[i] / weight[i] : 1f;
 				var shade = (byte)Math.Clamp( MathF.Round( (1f - settings.Occlusion * weight[i] * (1f - fold)) * 255f ), 0f, 255f );
 				ao.Rgb[o] = ao.Rgb[o + 1] = ao.Rgb[o + 2] = shade;
+				if ( ao.Rgb16 is not null )
+					ao.Rgb16[o] = ao.Rgb16[o + 1] = ao.Rgb16[o + 2] = Word( shade / 255f );
 
 				normal.Filled[i] = ao.Filled[i] = covered[i];
 
@@ -243,6 +259,9 @@ public static class WrinkleMaps
 	}
 
 	static byte Byte( float v ) => (byte)Math.Clamp( MathF.Round( (v + 1f) * 127.5f ), 0f, 255f );
+
+	/// <summary>0..1 to the full 16-bit range, like NormalBake.Word.</summary>
+	static ushort Word( float v ) => (ushort)Math.Clamp( (int)MathF.Round( v * 65535f ), 0, 65535 );
 
 	// --- the material ----------------------------------------------------------------------------
 

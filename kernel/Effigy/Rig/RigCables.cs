@@ -359,4 +359,94 @@ public static class RigCables
 
 		return map;
 	}
+
+	/// <summary>
+	/// What <see cref="Build"/> would create for one cable, without touching a <see cref="Skeleton"/>:
+	/// the stump, the chain bones (named exactly as <see cref="RigBuild.ChainBoneName"/> spells
+	/// them), and the hand + fingers or foot + toes. <see cref="Build"/> additionally ensures the
+	/// shared <c>root</c> and <c>heap</c> bones, which are not per-cable and so are not listed here.
+	/// </summary>
+	public sealed class PlannedCable
+	{
+		public string Name;
+		public string Role;
+		public int ChainBones;
+		public IReadOnlyList<string> BoneNames;
+		public bool IsFoot;
+	}
+
+	/// <summary>
+	/// Every problem with a cable list, at once, instead of <see cref="Build"/> throwing on the
+	/// first one. Empty means the list is well-formed; it does not promise <see cref="Build"/>
+	/// succeeds (a chain can still clash with bones already on the skeleton).
+	/// </summary>
+	public static List<string> Validate( IReadOnlyList<Cable> cables, IEnumerable<string> rightHands = null, IReadOnlyDictionary<string, int> counts = null )
+	{
+		ArgumentNullException.ThrowIfNull( cables );
+		var problems = new List<string>();
+		if ( cables.Count == 0 ) { problems.Add( "No cables." ); return problems; }
+
+		var names = new HashSet<string>( StringComparer.OrdinalIgnoreCase );
+		foreach ( var c in cables )
+		{
+			if ( c is null ) { problems.Add( "A cable entry is null." ); continue; }
+			if ( string.IsNullOrWhiteSpace( c.Name ) ) problems.Add( "A cable has no name." );
+			else if ( !names.Add( c.Name ) ) problems.Add( $"Two cables are called '{c.Name}'." );
+			if ( c.Points is null || c.Points.Count < 2 )
+				problems.Add( $"Cable '{c.Name}' has {(c.Points?.Count ?? 0)} point(s); a centreline needs at least two." );
+			else
+			{
+				if ( c.Points.Any( pt => !float.IsFinite( pt.x ) || !float.IsFinite( pt.y ) || !float.IsFinite( pt.z ) ) )
+					problems.Add( $"Cable '{c.Name}' has a non-finite centreline point." );
+				var total = 0f;
+				for ( var i = 1; i < c.Points.Count; i++ ) total += (c.Points[i] - c.Points[i - 1]).Length;
+				if ( total <= 1e-6f ) problems.Add( $"Cable '{c.Name}' has a zero-length centreline." );
+			}
+			if ( c.Radii.Count != 0 && c.Radii.Count != c.Points.Count )
+				problems.Add( $"Cable '{c.Name}' has {c.Points.Count} points but {c.Radii.Count} radii; they go one per point." );
+			if ( c.Radii.Any( r => !float.IsFinite( r ) || r < 0f ) )
+				problems.Add( $"Cable '{c.Name}' has a negative or non-finite radius." );
+			if ( c.Hand is not null && !string.Equals( c.Hand, "left", StringComparison.OrdinalIgnoreCase ) && !string.Equals( c.Hand, "right", StringComparison.OrdinalIgnoreCase ) )
+				problems.Add( $"Cable '{c.Name}' has hand '{c.Hand}'; use 'left', 'right', or leave it out." );
+		}
+		foreach ( var n in rightHands ?? Array.Empty<string>() )
+			if ( cables.All( c => c is null || !string.Equals( c.Name, n, StringComparison.OrdinalIgnoreCase ) ) )
+				problems.Add( $"right= names '{n}', which the cable list does not have." );
+		if ( counts is not null )
+			foreach ( var n in counts.Keys )
+				if ( cables.All( c => c is null || !string.Equals( c.Name, n, StringComparison.OrdinalIgnoreCase ) ) )
+					problems.Add( $"counts= names '{n}', which the cable list does not have." );
+		return problems;
+	}
+
+	public static List<PlannedCable> Plan( IReadOnlyList<Cable> cables, IEnumerable<string> rightHands = null, IReadOnlyDictionary<string, int> counts = null )
+	{
+		ArgumentNullException.ThrowIfNull( cables );
+		var right = new HashSet<string>( rightHands ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase );
+		var plan = new List<PlannedCable>();
+		foreach ( var cable in cables )
+		{
+			ArgumentNullException.ThrowIfNull( cable );
+			var count = counts is not null && counts.TryGetValue( cable.Name, out var n ) ? n : ChainLength( cable );
+			var bones = new List<string> { $"{cable.Name}_stump" };
+			for ( var k = 0; k < count; k++ ) bones.Add( RigBuild.ChainBoneName( cable.Name, k, count ) );
+			if ( cable.IsFoot )
+			{
+				bones.Add( $"{cable.Name}_foot" );
+				bones.Add( $"{cable.Name}_toes" );
+			}
+			else
+			{
+				var isRight = string.Equals( cable.Hand, "right", StringComparison.OrdinalIgnoreCase )
+					|| (cable.Hand is null && right.Contains( cable.Name ));
+				_ = isRight; // handedness changes finger placement in Build, not the bone names
+				bones.Add( $"{cable.Name}_hand" );
+				for ( var k = 1; k < Fingers.Length; k++ )
+					for ( var j = 0; j < 3; j++ ) bones.Add( $"{cable.Name}_{Fingers[k]}_{j}" );
+				for ( var j = 0; j < 3; j++ ) bones.Add( $"{cable.Name}_thumb_{j}" );
+			}
+			plan.Add( new PlannedCable { Name = cable.Name, Role = cable.Role, ChainBones = count, BoneNames = bones, IsFoot = cable.IsFoot } );
+		}
+		return plan;
+	}
 }

@@ -18,7 +18,7 @@ namespace Effigy;
 /// </summary>
 public static class PartLibrary
 {
-	public static readonly string[] Names = { "Cog", "Bolt", "Hex bolt", "Rivet", "Knob", "Hinge", "Panel", "Pipe elbow", "Strap", "Buckle" };
+	public static readonly string[] Names = { "Cog", "Bolt", "Hex bolt", "Rivet", "Knob", "Hinge", "Panel", "Pipe elbow", "Strap", "Buckle", "Louvre", "Grille", "Picatinny", "SpringCoil", "CableTie", "Flange", "ToggleSwitch", "HandleBar", "WeldBead", "Piston", "EyeBall", "ToothCone", "Claw", "ScalePlate", "SuckerDisc", "HornSpiral" };
 
 	/// <summary>What each part reads from the dials, so a dialog and a script can say it.</summary>
 	public static string Uses( string part ) => part switch
@@ -32,6 +32,22 @@ public static class PartLibrary
 		"Pipe elbow" => "Size = pipe radius, Length = bend radius, Angle = bend, Count = sides",
 		"Strap" => "Size = width, Length = length, Thickness = thickness; along=SplineName lays it on that curve instead (Length is the curve's)",
 		"Buckle" => "Size = width, Length = height, Thickness = bar thickness",
+		"Louvre" => "Size = width, Length = height, Thickness = depth, Count = slats, Angle = slat tilt",
+		"Grille" => "Size = width, Length = height, Thickness = bar depth, Count = vertical bars",
+		"Picatinny" => "Size = rail width, Length = rail length, Thickness = rail height, Count = teeth",
+		"SpringCoil" => "Size = coil radius, Length = coil height, Thickness = wire radius, Count = turns",
+		"CableTie" => "Size = strap width, Length = strap length, Thickness = strap thickness",
+		"Flange" => "Size = flange radius, Length = hub length, Thickness = flange thickness",
+		"ToggleSwitch" => "Size = base radius, Length = lever length, Thickness = base thickness, Count = sides, Angle = lever tilt",
+		"HandleBar" => "Size = tube radius, Length = bar width",
+		"WeldBead" => "Size = bead radius, Length = seam length",
+		"Piston" => "Size = barrel radius, Length = total length, Thickness = rod radius",
+		"EyeBall" => "Size = radius, Thickness = iris radius, Count = sides",
+		"ToothCone" => "Size = base radius, Length = height, Thickness = flatten, Angle = curve, Count = sides",
+		"Claw" => "Size = base radius, Length = length, Thickness = flatten, Angle = curve, Count = sides",
+		"ScalePlate" => "Size = half-width, Length = plate length, Thickness = dome height",
+		"SuckerDisc" => "Size = radius, Thickness = cup depth",
+		"HornSpiral" => "Size = base radius, Length = horn length, Angle = sweep, Count = growth rings and sides",
 		_ => "",
 	};
 
@@ -54,6 +70,22 @@ public static class PartLibrary
 			"Pipe elbow" => PipeElbow( size, length, angle, count, material ),
 			"Strap" => Standing( Primitives.Box( length, size, thickness, material ), thickness ),
 			"Buckle" => Buckle( size, length, thickness, material ),
+		"Louvre" => Louvre( size, length, thickness, count, angle, material ),
+		"Grille" => Grille( size, length, thickness, count, material ),
+		"Picatinny" => Picatinny( size, length, thickness, count, material ),
+		"SpringCoil" => SpringCoil( size, length, thickness, count, material ),
+		"CableTie" => CableTie( size, length, thickness, material ),
+		"Flange" => Flange( size, length, thickness, material ),
+		"ToggleSwitch" => ToggleSwitch( size, length, thickness, count, angle, material ),
+		"HandleBar" => HandleBar( size, length, material ),
+		"WeldBead" => WeldBead( size, length, material ),
+		"Piston" => Piston( size, length, thickness, material ),
+		"EyeBall" => EyeBall( size, thickness, count, material ),
+		"ToothCone" => ToothCone( size, length, thickness, angle, count, material ),
+		"Claw" => Claw( size, length, thickness, angle, count, material ),
+		"ScalePlate" => ScalePlate( size, length, thickness, material ),
+		"SuckerDisc" => SuckerDisc( size, thickness, material ),
+		"HornSpiral" => HornSpiral( size, length, angle, count, Math.Max( count, 10 ), material ),
 			_ => throw new ArgumentException( $"No part called '{part}'. Parts are {string.Join( ", ", Names )}.", nameof( part ) ),
 		};
 	}
@@ -240,6 +272,382 @@ public static class PartLibrary
 		Piece( width - bar * 2f, bar * 0.7f, 0f, 0f );
 
 		return mesh;
+	}
+	static PolyMesh Louvre( float width, float height, float depth, int slats, float tiltDegrees, int material )
+	{
+		var mesh = new PolyMesh();
+		var rail = depth;
+
+		void Piece( PolyMesh piece, Vec3 at )
+		{
+			MeshTransform.Apply( piece, Xform.Translate( at ) );
+			MeshTransform.Append( mesh, piece );
+		}
+
+		// Frame: two stiles, top and bottom rails, all standing on z = 0.
+		Piece( Primitives.Box( rail, rail, height, material ), new Vec3( -width * 0.5f + rail * 0.5f, 0f, height * 0.5f ) );
+		Piece( Primitives.Box( rail, rail, height, material ), new Vec3( width * 0.5f - rail * 0.5f, 0f, height * 0.5f ) );
+		Piece( Primitives.Box( width, rail, rail, material ), new Vec3( 0f, 0f, rail * 0.5f ) );
+		Piece( Primitives.Box( width, rail, rail, material ), new Vec3( 0f, 0f, height - rail * 0.5f ) );
+
+		var innerH = height - rail * 2f;
+		var tilt = tiltDegrees * MathF.PI / 180f;
+
+		for ( var i = 0; i < slats; i++ )
+		{
+			var z = rail + innerH * (slats == 1 ? 0.5f : (i + 0.5f) / slats);
+			var slat = Primitives.Box( width - rail * 2f, rail * 0.6f, innerH / Math.Max( 1, slats ) * 0.9f, material );
+			MeshTransform.Apply( slat, Xform.Rotate( new Vec3( 1, 0, 0 ), tilt ) );
+			Piece( slat, new Vec3( 0f, 0f, z ) );
+		}
+
+		return Grounded( mesh );
+	}
+
+	static PolyMesh Grille( float width, float height, float depth, int bars, int material )
+	{
+		var mesh = new PolyMesh();
+		var bar = depth * 0.5f;
+
+		void Piece( PolyMesh piece, Vec3 at )
+		{
+			MeshTransform.Apply( piece, Xform.Translate( at ) );
+			MeshTransform.Append( mesh, piece );
+		}
+
+		Piece( Primitives.Box( width, bar, bar, material ), new Vec3( 0f, 0f, bar * 0.5f ) );
+		Piece( Primitives.Box( width, bar, bar, material ), new Vec3( 0f, 0f, height - bar * 0.5f ) );
+		Piece( Primitives.Box( bar, bar, height, material ), new Vec3( -width * 0.5f + bar * 0.5f, 0f, height * 0.5f ) );
+		Piece( Primitives.Box( bar, bar, height, material ), new Vec3( width * 0.5f - bar * 0.5f, 0f, height * 0.5f ) );
+
+		// Bar grate (the roadmap also names honeycomb; bars are the grate half of that
+		// name, and a true hex honeycomb is a separate part, not a silent substitution).
+		for ( var i = 1; i < bars; i++ )
+		{
+			var x = -width * 0.5f + width * i / bars;
+			Piece( Primitives.Box( bar, bar, height - bar * 2f, material ), new Vec3( x, 0f, height * 0.5f ) );
+		}
+
+		var rows = Math.Max( 2, bars / 2 );
+
+		for ( var i = 1; i < rows; i++ )
+		{
+			var z = height * i / rows;
+			Piece( Primitives.Box( width - bar * 2f, bar, bar, material ), new Vec3( 0f, 0f, z ) );
+		}
+
+		return Grounded( mesh );
+	}
+
+	static PolyMesh Picatinny( float width, float length, float height, int teeth, int material )
+	{
+		var mesh = new PolyMesh();
+		var baseH = height * 0.55f;
+		var toothH = height - baseH;
+		var pitch = length / Math.Max( 1, teeth );
+
+		var bar = Primitives.Box( length, width, baseH, material );
+		MeshTransform.Apply( bar, Xform.Translate( new Vec3( 0f, 0f, baseH * 0.5f ) ) );
+		MeshTransform.Append( mesh, bar );
+
+		for ( var i = 0; i < teeth; i++ )
+		{
+			var x = -length * 0.5f + pitch * (i + 0.5f);
+			var tooth = Primitives.Box( pitch * 0.55f, width, toothH, material );
+			MeshTransform.Apply( tooth, Xform.Translate( new Vec3( x, 0f, baseH + toothH * 0.5f ) ) );
+			MeshTransform.Append( mesh, tooth );
+		}
+
+		return Grounded( mesh );
+	}
+
+	static PolyMesh SpringCoil( float radius, float length, float wire, int turns, int material )
+	{
+		var path = new List<Vec3>();
+		var steps = Math.Max( 16, turns * 16 );
+
+		for ( var i = 0; i <= steps; i++ )
+		{
+			var a = turns * MathF.PI * 2f * i / steps;
+			path.Add( new Vec3( MathF.Cos( a ) * radius, MathF.Sin( a ) * radius, length * i / steps ) );
+		}
+
+		return Grounded( SplineTube.Build( path, false, wire, wire, 8, 0f, material ) );
+	}
+
+	static PolyMesh CableTie( float width, float length, float thickness, int material )
+	{
+		var mesh = new PolyMesh();
+
+		var strap = Primitives.Box( length, width, thickness, material );
+		MeshTransform.Apply( strap, Xform.Translate( new Vec3( length * 0.5f, 0f, thickness * 0.5f ) ) );
+		MeshTransform.Append( mesh, strap );
+
+		var head = Primitives.Box( width * 1.8f, width * 1.3f, thickness * 2.6f, material );
+		MeshTransform.Apply( head, Xform.Translate( new Vec3( length, 0f, thickness * 1.3f ) ) );
+		MeshTransform.Append( mesh, head );
+
+		return Grounded( mesh );
+	}
+
+	static PolyMesh Flange( float radius, float pipeLength, float thickness, int material ) =>
+		Lathe( new (float, float)[]
+		{
+			(0.01f, 0f),
+			(radius, 0f),
+			(radius, thickness),
+			(radius * 0.55f, thickness),
+			(radius * 0.55f, thickness + pipeLength),
+			(0.01f, thickness + pipeLength),
+		}, 24, material );
+
+	static PolyMesh ToggleSwitch( float radius, float leverLength, float baseThickness, int sides, float tiltDegrees, int material )
+	{
+		var mesh = new PolyMesh();
+
+		var bas = Lathe( new (float, float)[]
+		{
+			(0.01f, 0f),
+			(radius, 0f),
+			(radius, baseThickness),
+			(0.01f, baseThickness),
+		}, Math.Max( sides, 12 ), material );
+		MeshTransform.Append( mesh, bas );
+
+		var leverR = radius * 0.32f;
+		var lever = Lathe( new (float, float)[]
+		{
+			(0.01f, 0f),
+			(leverR, 0f),
+			(leverR * 0.85f, leverLength * 0.7f),
+			(leverR * 0.5f, leverLength),
+			(0.01f, leverLength),
+		}, Math.Max( sides, 8 ), material );
+		MeshTransform.Apply( lever, Xform.Translate( new Vec3( 0f, 0f, baseThickness ) ) );
+		MeshTransform.Apply( lever, Xform.RotateAbout( new Vec3( 0f, 0f, baseThickness ), new Vec3( 1, 0, 0 ), tiltDegrees * MathF.PI / 180f ) );
+		MeshTransform.Append( mesh, lever );
+
+		return Grounded( mesh );
+	}
+
+	static PolyMesh HandleBar( float radius, float width, int material )
+	{
+		var rise = width * 0.18f;
+		var back = width * 0.12f;
+		var path = new List<Vec3>
+		{
+			new( -width * 0.5f, -back, 0f ),
+			new( -width * 0.28f, 0f, rise ),
+			new( 0f, 0f, rise ),
+			new( width * 0.28f, 0f, rise ),
+			new( width * 0.5f, -back, 0f ),
+		};
+
+		var mesh = SplineTube.Build( path, false, radius, radius, 10, 0f, material );
+
+		// Grip sleeves over both ends, fatter than the bar itself.
+		var left = SplineTube.Build( new List<Vec3> { path[0], path[1] }, false, radius * 1.45f, radius * 1.45f, 10, 0f, material );
+		MeshTransform.Append( mesh, left );
+		var right = SplineTube.Build( new List<Vec3> { path[3], path[4] }, false, radius * 1.45f, radius * 1.45f, 10, 0f, material );
+		MeshTransform.Append( mesh, right );
+
+		return Grounded( mesh );
+	}
+
+	static PolyMesh WeldBead( float radius, float length, int material )
+	{
+		var mesh = new PolyMesh();
+		var count = Math.Max( 3, (int)MathF.Ceiling( length / (radius * 1.1f) ) );
+
+		for ( var i = 0; i < count; i++ )
+		{
+			var x = count == 1 ? length * 0.5f : length * i / (count - 1);
+			var bead = Primitives.QuadSphere( radius, 2, material );
+			MeshTransform.Apply( bead, Xform.Scale( new Vec3( 1f, 1f, 0.62f ) ) );
+			MeshTransform.Apply( bead, Xform.Translate( new Vec3( x, 0f, radius * 0.62f ) ) );
+			MeshTransform.Append( mesh, bead );
+		}
+
+		return Grounded( mesh );
+	}
+
+	static PolyMesh Piston( float barrelRadius, float totalLength, float rodRadius, int material )
+	{
+		var mesh = new PolyMesh();
+		var barrelH = totalLength * 0.6f;
+
+		var barrel = Lathe( new (float, float)[]
+		{
+			(0.01f, 0f),
+			(barrelRadius, 0f),
+			(barrelRadius, barrelH),
+			(0.01f, barrelH),
+		}, 20, material );
+		MeshTransform.Append( mesh, barrel );
+
+		var rod = Lathe( new (float, float)[]
+		{
+			(0.01f, barrelH * 0.5f),
+			(rodRadius, barrelH * 0.5f),
+			(rodRadius, totalLength),
+			(0.01f, totalLength),
+		}, 16, material );
+		MeshTransform.Append( mesh, rod );
+
+		return mesh;
+	}
+
+	static PolyMesh EyeBall( float radius, float irisRadius, int sides, int material )
+	{
+		var mesh = new PolyMesh();
+		var r = radius;
+
+		// Sclera: a lathed sphere standing on z = 0, centre at z = r.
+		var profile = new List<(float, float)>();
+
+		for ( var i = 0; i <= 8; i++ )
+		{
+			var a = -MathF.PI * 0.5f + i / 8f * MathF.PI;
+			profile.Add( (MathF.Max( 0.01f, r * MathF.Cos( a ) ), r + r * MathF.Sin( a )) );
+		}
+
+		MeshTransform.Append( mesh, Lathe( profile, Math.Max( sides, 16 ), material ) );
+
+		// Iris: a shallow disc set into the top pole, slightly proud of the sphere.
+		var irisTop = r + MathF.Sqrt( MathF.Max( 0.01f, r * r - irisRadius * irisRadius ) );
+		var iris = Lathe( new (float, float)[]
+		{
+			(0.01f, irisTop - r * 0.08f),
+			(irisRadius, irisTop - r * 0.08f),
+			(irisRadius, irisTop + r * 0.04f),
+			(0.01f, irisTop + r * 0.04f),
+		}, Math.Max( sides, 16 ), material );
+		MeshTransform.Append( mesh, iris );
+
+		// Cornea: a squashed sphere cap over the iris, convex and proud of it.
+		var cornea = Primitives.QuadSphere( irisRadius * 0.95f, 2, material );
+		MeshTransform.Apply( cornea, Xform.Scale( new Vec3( 1f, 1f, 0.45f ) ) );
+		MeshTransform.Apply( cornea, Xform.Translate( new Vec3( 0f, 0f, irisTop + r * 0.02f ) ) );
+		MeshTransform.Append( mesh, cornea );
+
+		return Grounded( mesh );
+	}
+
+	static PolyMesh RingLoft( List<List<Vec3>> rings, int material ) =>
+		Skinner.Skin( rings, capEnds: true, material );
+
+	static PolyMesh ToothCone( float baseRadius, float length, float flatten, float curveDegrees, int sides, int material )
+	{
+		var rings = new List<List<Vec3>>();
+		var stations = 9;
+		var tipOffset = length * (curveDegrees / 90f) * 0.5f;
+
+		for ( var i = 0; i < stations; i++ )
+		{
+			var f = i / (float)(stations - 1);
+			var radius = baseRadius * MathF.Pow( MathF.Max( 0f, 1f - f ), 0.8f );
+			radius *= 1f + 0.4f * MathF.Max( 0f, 1f - f / 0.3f );
+			radius = MathF.Max( radius, 0.01f );
+
+			var ring = new List<Vec3>();
+
+			for ( var k = 0; k < sides; k++ )
+			{
+				var a = k * MathF.PI * 2f / sides;
+				ring.Add( new Vec3( tipOffset * f * f + MathF.Cos( a ) * radius, MathF.Sin( a ) * radius * flatten, f * length ) );
+			}
+
+			rings.Add( ring );
+		}
+
+		return RingLoft( rings, material );
+	}
+
+	static PolyMesh Claw( float baseRadius, float length, float flatten, float curveDegrees, int sides, int material )
+	{
+		var rings = new List<List<Vec3>>();
+		var stations = 9;
+		var tipOffset = length * (0.3f + curveDegrees / 90f);
+
+		for ( var i = 0; i < stations; i++ )
+		{
+			var f = i / (float)(stations - 1);
+			var radius = baseRadius * MathF.Pow( MathF.Max( 0f, 1f - f ), 1.2f );
+			radius *= 1f + 0.25f * MathF.Max( 0f, 1f - f / 0.3f );
+			radius = MathF.Max( radius, 0.01f );
+
+			var ring = new List<Vec3>();
+
+			for ( var k = 0; k < sides; k++ )
+			{
+				var a = k * MathF.PI * 2f / sides;
+				// Ventral blood groove, approximated as a pinch on the -y side of each
+				// ring: a true channelled groove would need a second surface, and this
+				// reads as the groove at kitbash scale without doubling the part.
+				var pinch = 1f - 0.3f * MathF.Max( 0f, -MathF.Sin( a ) ) * (1f - f * 0.5f);
+				ring.Add( new Vec3( tipOffset * f * f + MathF.Cos( a ) * radius * pinch, MathF.Sin( a ) * radius * flatten * pinch, f * length ) );
+			}
+
+			rings.Add( ring );
+		}
+
+		return RingLoft( rings, material );
+	}
+
+	static PolyMesh ScalePlate( float radius, float length, float domeHeight, int material )
+	{
+		var plate = Lathe( new (float, float)[]
+		{
+			(0.01f, 0f),
+			(radius, 0f),
+			(radius * 0.8f, domeHeight * 0.7f),
+			(radius * 0.4f, domeHeight),
+			(0.01f, domeHeight),
+		}, 20, material );
+
+		// Elongate along x: Length is the plate's long side, Size its half-width.
+		MeshTransform.Apply( plate, Xform.Scale( new Vec3( MathF.Max( length, 0.01f ) / (2f * radius), 1f, 1f ) ) );
+		return plate;
+	}
+
+	static PolyMesh SuckerDisc( float radius, float cupDepth, int material ) =>
+		Lathe( new (float, float)[]
+		{
+			(0.01f, 0f),
+			(radius, 0f),
+			(radius, cupDepth * 0.4f),
+			(radius * 0.9f, cupDepth),
+			(radius * 0.6f, cupDepth * 0.9f),
+			(radius * 0.55f, cupDepth * 0.35f),
+			(0.01f, cupDepth * 0.35f),
+		}, 24, material );
+
+	static PolyMesh HornSpiral( float baseRadius, float length, float sweepDegrees, int rings, int sides, int material )
+	{
+		var stations = 13;
+		var sweep = sweepDegrees * MathF.PI / 180f;
+		var ringsOut = new List<List<Vec3>>();
+
+		for ( var i = 0; i < stations; i++ )
+		{
+			var f = i / (float)(stations - 1);
+			var centre = new Vec3( MathF.Sin( f * sweep ) * length * 0.45f, 0f, f * length );
+			var radius = baseRadius * MathF.Pow( MathF.Max( 0f, 1f - f ), 0.7f );
+			radius *= 1f + 0.18f * MathF.Sin( f * rings * MathF.PI * 2f );
+			radius = MathF.Max( radius, 0.01f );
+
+			var ring = new List<Vec3>();
+
+			for ( var k = 0; k < sides; k++ )
+			{
+				var a = k * MathF.PI * 2f / sides;
+				ring.Add( centre + new Vec3( MathF.Cos( a ) * radius, MathF.Sin( a ) * radius, 0f ) );
+			}
+
+			ringsOut.Add( ring );
+		}
+
+		return RingLoft( ringsOut, material );
 	}
 }
 

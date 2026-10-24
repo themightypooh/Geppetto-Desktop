@@ -115,4 +115,125 @@ public static class WeightRamp
 	}
 
 	static byte ToByte( float v ) => (byte)Math.Clamp( MathF.Round( v * 255f ), 0f, 255f );
+
+	/// <summary>
+	/// Gradient ramp (roadmap J2): set <paramref name="bone"/>'s influence by projection onto
+	/// <paramref name="direction"/> from <paramref name="origin"/>, where <paramref name="from"/>
+	/// and <paramref name="to"/> are distances along that direction (not 0..1). A vertex at
+	/// <paramref name="from"/> gets 0, at <paramref name="to"/> gets 1, linearly between, clamped
+	/// outside. The other influences rescale proportionally, so the partition of unity survives;
+	/// a vertex with no other influence becomes wholly this bone when the ramp is above 0.
+	/// Returns a new <see cref="SkinWeights"/>; the input is not mutated.
+	/// </summary>
+	public static SkinWeights ApplyLinear( PolyMesh mesh, SkinWeights weights, int bone,
+		Vec3 origin, Vec3 direction, float from = 0f, float to = 1f )
+	{
+		RequireWeights( mesh, weights, bone );
+
+		if ( direction.Length < 1e-6f )
+			throw new ArgumentException( "A linear ramp needs a non-zero direction.", nameof( direction ) );
+
+		if ( from == to )
+			throw new ArgumentException( "A linear ramp needs from != to.", nameof( from ) );
+
+		var dir = direction.Normal;
+		var values = new float[mesh.VertexCount];
+
+		for ( var v = 0; v < mesh.VertexCount; v++ )
+			values[v] = (Vec3.Dot( mesh.Positions[v] - origin, dir ) - from) / (to - from);
+
+		return SetInfluence( mesh, weights, bone, values );
+	}
+
+	/// <summary>
+	/// Radial ramp (roadmap J2): set <paramref name="bone"/>'s influence by distance from
+	/// <paramref name="center"/>. With <paramref name="feather"/> 0 the edge is hard (1 inside
+	/// <paramref name="radius"/>, 0 outside); with a feather the ramp is 1 within
+	/// radius - feather and falls linearly to 0 at the radius. Same rescaling and
+	/// non-mutating contract as <see cref="ApplyLinear"/>.
+	/// </summary>
+	public static SkinWeights ApplyRadial( PolyMesh mesh, SkinWeights weights, int bone,
+		Vec3 center, float radius, float feather = 0f )
+	{
+		RequireWeights( mesh, weights, bone );
+
+		if ( radius <= 0f )
+			throw new ArgumentOutOfRangeException( nameof( radius ), "A radial ramp needs a positive radius." );
+
+		feather = Math.Clamp( feather, 0f, radius );
+
+		var values = new float[mesh.VertexCount];
+
+		for ( var v = 0; v < mesh.VertexCount; v++ )
+		{
+			var d = (mesh.Positions[v] - center).Length;
+
+			if ( feather <= 0f )
+				values[v] = d < radius ? 1f : 0f;
+			else if ( d <= radius - feather )
+				values[v] = 1f;
+			else if ( d >= radius )
+				values[v] = 0f;
+			else
+				values[v] = 1f - (d - (radius - feather)) / feather;
+		}
+
+		return SetInfluence( mesh, weights, bone, values );
+	}
+
+	static void RequireWeights( PolyMesh mesh, SkinWeights weights, int bone )
+	{
+		if ( mesh is null )
+			throw new ArgumentNullException( nameof( mesh ) );
+
+		if ( weights is null )
+			throw new ArgumentNullException( nameof( weights ) );
+
+		if ( weights.Count != mesh.VertexCount )
+			throw new ArgumentException( $"weights ({weights.Count}) and mesh ({mesh.VertexCount}) disagree" );
+
+		if ( bone < 0 )
+			throw new ArgumentOutOfRangeException( nameof( bone ), "A ramp paints a bone; -1 is nothing." );
+	}
+
+	static SkinWeights SetInfluence( PolyMesh mesh, SkinWeights weights, int bone, float[] values )
+	{
+		var result = new SkinWeights( mesh.VertexCount );
+
+		for ( var v = 0; v < mesh.VertexCount; v++ )
+		{
+			var t = Math.Clamp( values[v], 0f, 1f );
+			var others = new Dictionary<int, float>();
+			var sum = 0f;
+
+			foreach ( var w in weights[v] )
+			{
+				if ( w.Bone == bone )
+					continue;
+
+				others[w.Bone] = w.Weight;
+				sum += w.Weight;
+			}
+
+			if ( sum <= 0f )
+			{
+				result[v] = t > 0f ? new[] { new BoneWeight( bone, 1f ) } : Array.Empty<BoneWeight>();
+				continue;
+			}
+
+			var acc = new Dictionary<int, float>();
+
+			if ( t > 0f )
+				acc[bone] = t;
+
+			var scale = (1f - t) / sum;
+
+			foreach ( var (b, w) in others )
+				acc[b] = w * scale;
+
+			result[v] = SkinWeights.Finish( acc );
+		}
+
+		return result;
+	}
 }

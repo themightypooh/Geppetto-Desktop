@@ -464,3 +464,66 @@ public sealed class MultiresSculpt
 			_frames.RemoveRange( level, _frames.Count - level );
 	}
 }
+
+/// <summary>
+/// The non-destructive target a script stroke or detail pass writes into.
+///
+/// WHY THIS EXISTS AS A SEPARATE TYPE. The roadmap puts a <c>Level</c> parameter on
+/// <c>StrokeFeature</c> and <c>DetailFeature</c>, but those live in OrganicFeatures.cs,
+/// which is frozen for its original owner — this lane may not edit it. So the target
+/// logic lives here, where it can be tested on its own, and the OrganicFeatures hook is
+/// a small follow-up: resolve the level, call <see cref="ApplyStroke"/> or
+/// <see cref="ApplyMeshPass"/> instead of brushing <c>body.Mesh</c> directly, and write
+/// the result back through the sculpt instead of leaving it in the evaluated mesh (where
+/// the next rebuild would throw it away). Until that hook lands, a script stroke on a
+/// sculpted body still mutates the evaluated mesh directly — this type is the tested
+/// path it will switch to, not a claim that the switch has happened.
+/// </summary>
+public static class SculptTarget
+{
+	/// <summary>
+	/// Resolve a script level: <c>-1</c> means the top level, anything else must exist.
+	/// Throws <see cref="ArgumentOutOfRangeException"/> naming the valid range.
+	/// </summary>
+	public static int ResolveLevel( MultiresSculpt sculpt, int level )
+	{
+		if ( sculpt is null )
+			throw new ArgumentNullException( nameof( sculpt ) );
+
+		if ( level < 0 )
+			return sculpt.TopLevel;
+
+		if ( level > sculpt.TopLevel )
+			throw new ArgumentOutOfRangeException( nameof( level ),
+				$"Sculpt level {level} does not exist; this sculpt has levels 0 to {sculpt.TopLevel}." );
+
+		return level;
+	}
+
+	/// <summary>
+	/// Run a brush stroke at one level of the stack and store it there, so an upstream
+	/// cage edit propagates underneath it. Returns the stroke's sparse undo.
+	/// </summary>
+	public static BrushUndo ApplyStroke( MultiresSculpt sculpt, int level, BrushStroke stroke, float[] mask = null )
+	{
+		var resolved = ResolveLevel( sculpt, level );
+		return sculpt.Stroke( resolved, stroke, mask );
+	}
+
+	/// <summary>
+	/// Run a mesh pass — a detail pass that displaces vertices in place, the way
+	/// <c>DetailFeature</c>'s grain/pustule/scatter passes do — at one level of the stack
+	/// and store it there. The pass must move vertices only, never add or remove them;
+	/// <see cref="MultiresSculpt.Record"/> enforces that.
+	/// </summary>
+	public static void ApplyMeshPass( MultiresSculpt sculpt, int level, Action<PolyMesh> pass )
+	{
+		if ( pass is null )
+			throw new ArgumentNullException( nameof( pass ) );
+
+		var resolved = ResolveLevel( sculpt, level );
+		var mesh = sculpt.Evaluate( resolved );
+		pass( mesh );
+		sculpt.Record( resolved, mesh );
+	}
+}

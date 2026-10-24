@@ -486,4 +486,241 @@ public static class SkeletonRetarget
 			swing.TransformDirection( source.Z.Normal ),
 			target.Origin );
 	}
+	/// <summary>Lane K: what <see cref="RetargetClip"/> produced, and what did not survive it.</summary>
+	public sealed class ClipResult
+	{
+		/// <summary>The clip on the target rig, baked at the source's key frames.</summary>
+		public RigAnimFile Clip;
+
+		/// <summary>Source bone names with a track that had nowhere to go: no map entry,
+		/// or an entry naming a bone the target does not have.</summary>
+		public List<string> Unmapped = new();
+
+		/// <summary>Root-motion scale applied: target height / source height, 1 when either is 0.</summary>
+		public float RootMotionScale = 1f;
+
+		/// <summary>Frames baked (the union of the source's bone key frames).</summary>
+		public int Frames;
+	}
+
+	/// <summary>
+	/// Lane K: transfer a <see cref="RigAnimFile"/> from one skeleton onto another.
+	///
+	/// ROTATIONS transfer as a change from bind pose, not as raw angles: for each bone,
+	/// delta = sourceBindWorld^-1 * sourceWorldAtFrame, and the target plays
+	/// targetBindWorld * delta, converted back into the target's parent space. That is
+	/// what keeps a walk cycle from bending a T-posed rig by its A-pose difference -
+	/// the same reason <see cref="To"/> refuses to just rename bones.
+	///
+	/// POSITIONS transfer as a scaled delta from bind pose (sourceLocal - sourceBind,
+	/// times <see cref="ClipResult.RootMotionScale"/>), added to the target's bind
+	/// position. A rotation-only clip therefore lands exactly on the target's bind
+	/// positions, and a travelling root travels by the target's stride.
+	///
+	/// The result is BAKED at the union of the source's bone key frames: one key per
+	/// baked frame per transferred bone. Key easing is not preserved - a baked frame
+	/// list has no segments to ease - and channel curves, modifiers and constraints
+	/// are evaluated into the bake (the source is sampled through
+	/// <see cref="RigAnimFile.SampleLocal"/>, which is the clip as it plays).
+	/// IK goal tracks are copied under their mapped name with positions scaled;
+	/// morph tracks are copied unchanged (morph names are not bones).
+	/// Several source bones naming one target: the first in skeleton order wins and
+	/// the rest are simply not transferred (they are mapped, so they are not in
+	/// <see cref="ClipResult.Unmapped"/> - that list is only bones with no map entry
+	/// at all, or an entry naming a bone the target does not have).
+	/// </summary>
+	public static ClipResult RetargetClip( RigAnimFile sourceClip, Skeleton sourceRig, Skeleton targetRig,
+		IReadOnlyDictionary<string, string> boneMap )
+	{
+		ArgumentNullException.ThrowIfNull( sourceClip );
+		ArgumentNullException.ThrowIfNull( sourceRig );
+		ArgumentNullException.ThrowIfNull( targetRig );
+		ArgumentNullException.ThrowIfNull( boneMap );
+
+		var result = new ClipResult();
+
+		var sourceBind = sourceRig.Bones.Select( b => b.Local ).ToArray();
+		var targetBind = targetRig.Bones.Select( b => b.Local ).ToArray();
+		var sourceBindWorld = RigAnimFile.ModelSpace( sourceRig, sourceBind );
+		var targetBindWorld = RigAnimFile.ModelSpace( targetRig, targetBind );
+
+		// Stride-length root-motion scaling: skeleton height is the furthest bind
+		// origin from the root's bind origin. A character twice as tall travels
+		// twice as far on the same root keys.
+		float Height( Skeleton rig, Xform[] world )
+		{
+			if ( rig.Count == 0 )
+				return 0f;
+
+			var root = world[0].Origin;
+			var max = 0f;
+
+			foreach ( var w in world )
+				max = Math.Max( max, (w.Origin - root).Length );
+
+			return max;
+		}
+
+		var sh = Height( sourceRig, sourceBindWorld );
+		var th = Height( targetRig, targetBindWorld );
+		result.RootMotionScale = sh > 0f && th > 0f && float.IsFinite( th / sh ) ? th / sh : 1f;
+
+		// First source bone (skeleton order) naming each target bone.
+		var sourceForTarget = new Dictionary<string, int>( StringComparer.Ordinal );
+
+		foreach ( var (sourceName, targetName) in boneMap )
+		{
+			var si = sourceRig.IndexOf( sourceName );
+
+			if ( si < 0 || string.IsNullOrWhiteSpace( targetName ) || targetRig.IndexOf( targetName ) < 0 )
+				continue;
+
+			if ( !sourceForTarget.ContainsKey( targetName ) )
+				sourceForTarget[targetName] = si;
+		}
+
+		var frames = new SortedSet<int>();
+
+		foreach ( var track in sourceClip.Tracks.Where( t => t.Kind == RigTrackKind.Bone ) )
+			foreach ( var k in track.Keys )
+				frames.Add( k.Frame );
+
+		result.Frames = frames.Count;
+
+		var clip = new RigAnimFile
+		{
+			SourceModel = sourceClip.SourceModel,
+			RigAsset = sourceClip.RigAsset,
+			FrameRate = sourceClip.FrameRate,
+			FrameCount = sourceClip.FrameCount,
+		};
+
+		var tracks = new Dictionary<string, RigTrack>( StringComparer.Ordinal );
+
+		RigTrack TrackFor( string targetName )
+		{
+			if ( !tracks.TryGetValue( targetName, out var t ) )
+			{
+				t = new RigTrack { Kind = RigTrackKind.Bone, Name = targetName };
+				tracks[targetName] = t;
+				clip.Tracks.Add( t );
+			}
+
+			return t;
+		}
+
+		foreach ( var frame in frames )
+		{
+			var sourceLocal = sourceClip.SampleLocal( sourceRig, frame );
+			var sourceWorld = RigAnimFile.ModelSpace( sourceRig, sourceLocal );
+			var targetWorldRot = new Quat[targetRig.Count];
+			var targetLocal = new Xform[targetRig.Count];
+
+			for ( var tj = 0; tj < targetRig.Count; tj++ )
+			{
+				var targetName = targetRig.Bones[tj].Name;
+
+				if ( !sourceForTarget.TryGetValue( targetName, out var si ) )
+				{
+					targetLocal[tj] = targetBind[tj];
+					targetWorldRot[tj] = Quat.FromXform( targetBindWorld[tj] );
+					continue;
+				}
+
+				var delta = Conj( Quat.FromXform( sourceBindWorld[si] ) ) * Quat.FromXform( sourceWorld[si] );
+				var worldRot = Quat.FromXform( targetBindWorld[tj] ) * delta;
+				targetWorldRot[tj] = worldRot;
+
+				var parent = targetRig.Bones[tj].Parent;
+				var parentRot = parent >= 0 ? targetWorldRot[parent] : Quat.Identity;
+				var localRot = Conj( parentRot ) * worldRot;
+
+				var posDelta = (sourceLocal[si].Origin - sourceBind[si].Origin) * result.RootMotionScale;
+				var localPos = targetBind[tj].Origin + posDelta;
+
+				targetLocal[tj] = localRot.ToXform( localPos, Quat.ScaleOf( targetBind[tj] ) );
+			}
+
+			foreach ( var (targetName, si) in sourceForTarget )
+			{
+				var sourceTrack = sourceClip.Tracks.FirstOrDefault( t => t.Kind == RigTrackKind.Bone && t.Name == sourceRig.Bones[si].Name );
+
+				if ( sourceTrack is null || sourceTrack.Keys.Count == 0 )
+					continue;
+
+				var tj = targetRig.IndexOf( targetName );
+				TrackFor( targetName ).Keys.Add( new RigKey
+				{
+					Frame = frame,
+					Local = RigPose.FromXform( targetLocal[tj] ),
+					Ease = RigEase.Smooth,
+				} );
+			}
+		}
+
+		foreach ( var track in sourceClip.Tracks )
+		{
+			if ( track.Kind == RigTrackKind.IkGoal )
+			{
+				if ( !boneMap.TryGetValue( track.Name, out var targetName ) || targetRig.IndexOf( targetName ) < 0 )
+				{
+					if ( !result.Unmapped.Contains( track.Name ) )
+						result.Unmapped.Add( track.Name );
+
+					continue;
+				}
+
+				var copy = new RigTrack { Kind = RigTrackKind.IkGoal, Name = targetName };
+
+				foreach ( var k in track.Keys )
+				{
+					copy.Keys.Add( new RigKey
+					{
+						Frame = k.Frame,
+						Local = new RigPose( k.Local.Position * result.RootMotionScale, k.Local.Rotation, k.Local.Scale ),
+						Ease = k.Ease,
+					} );
+				}
+
+				clip.Tracks.Add( copy );
+			}
+			else if ( track.Kind == RigTrackKind.Morph )
+			{
+				var copy = new RigTrack { Kind = RigTrackKind.Morph, Name = track.Name };
+
+				foreach ( var k in track.Keys )
+					copy.Keys.Add( new RigKey { Frame = k.Frame, Local = k.Local, Ease = k.Ease } );
+
+				clip.Tracks.Add( copy );
+			}
+		}
+
+		foreach ( var track in sourceClip.Tracks.Where( t => t.Kind == RigTrackKind.Bone && t.Keys.Count > 0 ) )
+		{
+			if ( !boneMap.TryGetValue( track.Name, out var targetName ) || targetRig.IndexOf( targetName ) < 0 )
+			{
+				if ( !result.Unmapped.Contains( track.Name ) )
+					result.Unmapped.Add( track.Name );
+			}
+		}
+
+		if ( clip.Tracks.Count > 0 )
+		{
+			var last = clip.Tracks.Max( t => t.Keys.Count == 0 ? 0 : t.Keys[^1].Frame );
+			clip.FrameCount = Math.Max( clip.FrameCount, last + 1 );
+		}
+
+		result.Clip = clip;
+		return result;
+	}
+
+	static Quat Conj( Quat q )
+	{
+		var len = MathF.Sqrt( q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w );
+
+		if ( len <= 0f || !float.IsFinite( len ) )
+			return Quat.Identity;
+
+		return new Quat( -q.x / len, -q.y / len, -q.z / len, q.w / len );
+	}
 }

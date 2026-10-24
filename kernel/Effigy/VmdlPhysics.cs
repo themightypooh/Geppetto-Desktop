@@ -21,7 +21,7 @@ namespace Effigy;
 /// - `PhysicsShapeBox` is placed by `origin` — NOT by `center`, `translation` or `position`, all
 ///   three of which compile happily and leave the box at the model origin. `angles` works on it too,
 ///   and is written for completeness even though nothing reaches this with a rotated box: a rotated
-///   Transform spoils the whole decomposition upstream (see CollisionBuilder).
+///   box or Transform becomes a hull upstream (see CollisionBuilder), so a box here is axis-aligned.
 /// - `PhysicsShapeSphere` is placed by `center`, and by nothing else. It is the one shape whose
 ///   placement key is not the box's.
 /// - `PhysicsShapeCapsule` and `PhysicsShapeCylinder` carry `point0`/`point1` plus a `radius`, and
@@ -257,5 +257,201 @@ public static class VmdlPhysics
 
 		// "-0.0" is a valid float and an eyesore in a file people read.
 		return text == "-0.0" ? "0.0" : text;
+	}
+
+	// --- H2.4: ragdoll shapes and joints (Lane H) -------------------------------------------
+	//
+	// SCHEMA HONESTY. Unlike ShapeList above, whose keys were engine-probed, these node and
+	// key names follow the roadmap's stated ModelDoc schema (PhysicsShapeCapsule with
+	// point0/point1/radius, PhysicsHullFile with a filename, PhysicsJointConical /
+	// PhysicsJointRevolute with parent_bone / child_bone / min_angles / max_angles). They
+	// have NOT been compiled against s&box here — there is no sbox-dev on this machine — so
+	// a compiled-model check is still owed before anyone calls a ragdoll "working". What the
+	// tests do prove is the round-trip: every field written here is read back out of the text.
+
+	/// <summary>A bone-bound capsule for a ragdoll: two endpoints in model space and a radius.</summary>
+	public sealed class RagdollCapsule
+	{
+		public string Bone = "";
+		public Vec3 Point0;
+		public Vec3 Point1;
+		public float Radius;
+	}
+
+	/// <summary>A bone-bound hull read from a file, for a part whose shape is not a capsule.</summary>
+	public sealed class RagdollHull
+	{
+		public string Bone = "";
+		public string Filename = "";
+	}
+
+	/// <summary>One ragdoll joint: a parent bone, a child bone, a type, and its swing limits in
+	/// degrees. Type must be "conical" or "revolute"; anything else throws in JointList rather
+	/// than writing a node the compiler silently ignores.</summary>
+	public sealed class PhysicsJoint
+	{
+		public string ParentBone = "";
+		public string ChildBone = "";
+		public string Type = "conical";
+		public Vec3 MinAngles;
+		public Vec3 MaxAngles;
+	}
+
+	/// <summary>
+	/// Ragdoll shapes as their own PhysicsShapeList: capsules first, then hull files. Empty
+	/// in, empty out, same rule as ShapeList — a list that declares physics and has none is
+	/// worse than no list at all.
+	/// </summary>
+	public static string RagdollShapeList( IReadOnlyList<RagdollCapsule> capsules, IReadOnlyList<RagdollHull> hulls,
+		string surfaceProp = "default", string collisionTags = "solid" )
+	{
+		if ( (capsules is null || capsules.Count == 0) && (hulls is null || hulls.Count == 0) )
+			return "";
+
+		var body = new StringBuilder();
+		if ( capsules is not null )
+			foreach ( var cap in capsules )
+			{
+				if ( cap is null || cap.Radius <= 0f )
+					continue;
+				body.Append( "\t\t\t\t\t{\n" );
+				body.Append( "\t\t\t\t\t\t_class = \"PhysicsShapeCapsule\"\n" );
+				body.Append( $"\t\t\t\t\t\tparent_bone = \"{cap.Bone}\"\n" );
+				body.Append( $"\t\t\t\t\t\tsurface_prop = \"{surfaceProp}\"\n" );
+				body.Append( $"\t\t\t\t\t\tcollision_tags = \"{collisionTags}\"\n" );
+				body.Append( $"\t\t\t\t\t\tpoint0 = {Vector( cap.Point0 )}\n" );
+				body.Append( $"\t\t\t\t\t\tpoint1 = {Vector( cap.Point1 )}\n" );
+				body.Append( $"\t\t\t\t\t\tradius = {Number( cap.Radius )}\n" );
+				body.Append( "\t\t\t\t\t},\n" );
+			}
+		if ( hulls is not null )
+			foreach ( var hull in hulls )
+			{
+				if ( hull is null || string.IsNullOrWhiteSpace( hull.Filename ) )
+					continue;
+				body.Append( "\t\t\t\t\t{\n" );
+				body.Append( "\t\t\t\t\t\t_class = \"PhysicsHullFile\"\n" );
+				body.Append( $"\t\t\t\t\t\tparent_bone = \"{hull.Bone}\"\n" );
+				body.Append( $"\t\t\t\t\t\tsurface_prop = \"{surfaceProp}\"\n" );
+				body.Append( $"\t\t\t\t\t\tcollision_tags = \"{collisionTags}\"\n" );
+				body.Append( $"\t\t\t\t\t\tfilename = \"{VmdlDocument.NormalizeAssetPath( hull.Filename )}\"\n" );
+				body.Append( "\t\t\t\t\t},\n" );
+			}
+		if ( body.Length == 0 )
+			return "";
+
+		var sb = new StringBuilder();
+		sb.Append( "\t\t\t{\n" );
+		sb.Append( "\t\t\t\t_class = \"PhysicsShapeList\"\n" );
+		sb.Append( "\t\t\t\tchildren = \n" );
+		sb.Append( "\t\t\t\t[\n" );
+		sb.Append( body );
+		sb.Append( "\t\t\t\t]\n" );
+		sb.Append( "\t\t\t},\n" );
+		return sb.ToString();
+	}
+
+	/// <summary>The PhysicsJointList node, or empty when there is nothing to join.</summary>
+	public static string JointList( IReadOnlyList<PhysicsJoint> joints )
+	{
+		if ( joints is null || joints.Count == 0 )
+			return "";
+
+		var body = new StringBuilder();
+		foreach ( var joint in joints )
+		{
+			if ( joint is null || string.IsNullOrWhiteSpace( joint.ParentBone ) || string.IsNullOrWhiteSpace( joint.ChildBone ) )
+				continue;
+			var cls = joint.Type switch
+			{
+				"conical" => "PhysicsJointConical",
+				"revolute" => "PhysicsJointRevolute",
+				_ => throw new ArgumentException( $"physics joint type must be 'conical' or 'revolute', not '{joint.Type}'", nameof( joints ) ),
+			};
+			body.Append( "\t\t\t\t\t{\n" );
+			body.Append( $"\t\t\t\t\t\t_class = \"{cls}\"\n" );
+			body.Append( $"\t\t\t\t\t\tparent_bone = \"{joint.ParentBone}\"\n" );
+			body.Append( $"\t\t\t\t\t\tchild_bone = \"{joint.ChildBone}\"\n" );
+			body.Append( $"\t\t\t\t\t\tmin_angles = {Vector( joint.MinAngles )}\n" );
+			body.Append( $"\t\t\t\t\t\tmax_angles = {Vector( joint.MaxAngles )}\n" );
+			body.Append( "\t\t\t\t\t},\n" );
+		}
+		if ( body.Length == 0 )
+			return "";
+
+		var sb = new StringBuilder();
+		sb.Append( "\t\t\t{\n" );
+		sb.Append( "\t\t\t\t_class = \"PhysicsJointList\"\n" );
+		sb.Append( "\t\t\t\tchildren = \n" );
+		sb.Append( "\t\t\t\t[\n" );
+		sb.Append( body );
+		sb.Append( "\t\t\t\t]\n" );
+		sb.Append( "\t\t\t},\n" );
+		return sb.ToString();
+	}
+
+	/// <summary>
+	/// One joint per enabled RigLimit whose bone has a parent in the skeleton: parent bone to
+	/// that bone, with the limit's Min/Max as the joint's swing. A limit that moves on exactly
+	/// one axis is a revolute (hinge) joint; anything wider is conical. A root bone gets no
+	/// joint — a joint needs a parent to hang off.
+	/// </summary>
+	public static List<PhysicsJoint> JointsFromLimits( Skeleton skeleton, IReadOnlyList<RigLimit> limits )
+	{
+		var joints = new List<PhysicsJoint>();
+		if ( skeleton is null || limits is null )
+			return joints;
+		foreach ( var limit in limits )
+		{
+			if ( limit is null || !limit.Enabled || string.IsNullOrWhiteSpace( limit.Bone ) )
+				continue;
+			var index = skeleton.IndexOf( limit.Bone );
+			if ( index < 0 )
+				continue;
+			var parent = skeleton.Bones[index].Parent;
+			if ( parent < 0 )
+				continue;
+			var moving = 0;
+			if ( limit.Max.x > limit.Min.x ) moving++;
+			if ( limit.Max.y > limit.Min.y ) moving++;
+			if ( limit.Max.z > limit.Min.z ) moving++;
+			joints.Add( new PhysicsJoint
+			{
+				ParentBone = skeleton.Bones[parent].Name,
+				ChildBone = limit.Bone,
+				Type = moving == 1 ? "revolute" : "conical",
+				MinAngles = limit.Min,
+				MaxAngles = limit.Max,
+			} );
+		}
+		return joints;
+	}
+
+	/// <summary>
+	/// One ragdoll capsule per bone, head to tail in bind space, radius a fifth of the bone's
+	/// length (never under 0.25). This is a starting envelope, not a SkinBinder measurement:
+	/// a bone with no vertices near it still gets a capsule it can be traced against, and a
+	/// caller with a skinned mesh should prefer VmdlDocument.HitboxesFromSkin.
+	/// </summary>
+	public static List<RagdollCapsule> CapsulesFromSkeleton( Skeleton skeleton )
+	{
+		var capsules = new List<RagdollCapsule>();
+		if ( skeleton is null )
+			return capsules;
+		for ( var i = 0; i < skeleton.Count; i++ )
+		{
+			var head = skeleton.HeadWorld( i );
+			var tail = skeleton.TailWorld( i );
+			if ( (tail - head).LengthSquared < 1e-8f )
+				continue;
+			capsules.Add( new RagdollCapsule
+			{
+				Bone = skeleton.Bones[i].Name,
+				Point0 = head,
+				Point1 = tail,
+				Radius = MathF.Max( 0.25f, skeleton.Bones[i].Length * 0.2f ),
+			} );
+		}
+		return capsules;
 	}
 }

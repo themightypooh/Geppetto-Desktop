@@ -520,4 +520,24 @@ public static class ChainSpring
 
 		return result;
 	}
+
+	/// <summary>Follow-through jiggle/drag over any base clip: the spring bones in
+	/// <paramref name="springBones"/> are simulated with <see cref="Bake"/> (stiffness, damping,
+	/// gravity scaled by <paramref name="gravityFactor"/>) while every other bone keeps the base
+	/// clip exactly. Returns a new clip; the input is untouched, so this layer stacks after
+	/// locomotion or thrash without destroying the base.</summary>
+	public static AnimClip BakeSecondary( AnimClip clip, Skeleton skeleton, IReadOnlyList<int> springBones,
+		float stiffness, float damping, float gravityFactor = 1f )
+	{
+		if ( clip is null ) throw new ArgumentNullException( nameof( clip ) );
+		if ( springBones is null || springBones.Count == 0 ) throw new ArgumentException( "BakeSecondary needs at least one spring bone." );
+
+		var soft = new Dictionary<int, SoftBone>();
+
+		foreach ( var bone in springBones )
+			soft[bone] = new SoftBone { Stiffness = stiffness, Damping = damping, Weight = 0f, MaxAngle = 80f };
+
+		var baked = Bake( skeleton, clip.Frames, soft, clip.FrameRate, SoftSolver.DefaultGravity * gravityFactor, 4, clip.Looping );
+		return AnimClip.WithFrames( clip, baked );
+	}
 }

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -106,6 +106,146 @@ internal static class Skinner
 
 		mesh.AddFace( farIndices, farUVs, material );
 		mesh.AddFace( nearIndices, nearUVs, material );
+
+		return mesh;
+	}
+
+	/// <summary>
+	/// Skin, then check the result is not inside out (Backlog B3). A profile wound the other
+	/// way, or a loft whose sections all face backwards, skins into a negative-volume solid
+	/// that renders black and breaks every boolean downstream. Flipping every ring and
+	/// re-skinning is the whole fix: the caps are built from the rings, so they flip too.
+	/// A degenerate (zero-volume) skin is left alone — its sign is noise, not a winding.
+	/// </summary>
+	public static PolyMesh SkinChecked( IReadOnlyList<List<Vec3>> rings, bool capEnds, int material, bool wrap = false )
+	{
+		var mesh = Skin( rings, capEnds, material, wrap );
+
+		if ( mesh.SignedVolume() < -1e-9f )
+		{
+			foreach ( var ring in rings )
+				ring.Reverse();
+
+			mesh = Skin( rings, capEnds, material, wrap );
+		}
+
+		return mesh;
+	}
+
+	/// <summary>
+	/// Skin a tube whose section has one hole (Backlog: profile holes, A5.3). The outer wall
+	/// and the hole wall are skinned as two tubes in one mesh, and the two ends are closed
+	/// with annular quad bands between the outer ring and the hole ring — not fan caps, which
+	/// would pave over the hole. The hole wall's quads are wound backwards relative to the
+	/// outer wall, so its normals point INTO the void (out of the material), and the hole
+	/// ring's point order pairs index-for-index with the outer ring's, which is what makes
+	/// the annular band tile without twist. Callers must prepare the hole ring that way:
+	/// same traversal direction as the outer ring, same point count, start angles matched.
+	/// When <paramref name="wrap"/> is set the tubes close on themselves and no caps are built.
+	/// </summary>
+	public static PolyMesh SkinWithHole( IReadOnlyList<List<Vec3>> outerRings, IReadOnlyList<List<Vec3>> holeRings, int material, bool wrap = false )
+	{
+		var mesh = BuildHoled( outerRings, holeRings, material, wrap );
+
+		if ( mesh.SignedVolume() < -1e-9f )
+		{
+			foreach ( var ring in outerRings )
+				ring.Reverse();
+
+			foreach ( var ring in holeRings )
+				ring.Reverse();
+
+			mesh = BuildHoled( outerRings, holeRings, material, wrap );
+		}
+
+		return mesh;
+	}
+
+	static PolyMesh BuildHoled( IReadOnlyList<List<Vec3>> outerRings, IReadOnlyList<List<Vec3>> holeRings, int material, bool wrap )
+	{
+		var count = outerRings[0].Count;
+		var mesh = new PolyMesh();
+
+		var outerStarts = new int[outerRings.Count];
+		var holeStarts = new int[holeRings.Count];
+
+		for ( var r = 0; r < outerRings.Count; r++ )
+		{
+			outerStarts[r] = mesh.Positions.Count;
+			foreach ( var p in outerRings[r] )
+				mesh.AddVertex( p );
+
+			holeStarts[r] = mesh.Positions.Count;
+			foreach ( var p in holeRings[r] )
+				mesh.AddVertex( p );
+		}
+
+		var spans = wrap ? outerRings.Count : outerRings.Count - 1;
+		var along = new float[spans + 1];
+
+		for ( var r = 1; r <= spans; r++ )
+			along[r] = along[r - 1] + (outerRings[r % outerRings.Count][0] - outerRings[r - 1][0]).Length;
+
+		var total = along[^1] > 0f ? along[^1] : 1f;
+		var around = new float[count + 1];
+
+		for ( var i = 0; i < count; i++ )
+			around[i + 1] = around[i] + (outerRings[0][(i + 1) % count] - outerRings[0][i]).Length;
+
+		var perimeter = around[^1] > 0f ? around[^1] : 1f;
+
+		void Tube( int[] starts, bool flip )
+		{
+			for ( var r = 0; r < spans; r++ )
+			{
+				var next = (r + 1) % outerRings.Count;
+
+				for ( var i = 0; i < count; i++ )
+				{
+					var j = (i + 1) % count;
+					var v0 = along[r] / total;
+					var v1 = along[r + 1] / total;
+					var u0 = around[i] / perimeter;
+					var u1 = around[i + 1] / perimeter;
+
+					// The hole wall is the same quad with its corners walked backwards, so its
+					// normal points into the tunnel instead of into the material.
+					mesh.AddFace(
+						flip
+							? new[] { starts[r] + i, starts[next] + i, starts[next] + j, starts[r] + j }
+							: new[] { starts[r] + i, starts[r] + j, starts[next] + j, starts[next] + i },
+						flip
+							? new[] { new Vec2( u0, v0 ), new Vec2( u0, v1 ), new Vec2( u1, v1 ), new Vec2( u1, v0 ) }
+							: new[] { new Vec2( u0, v0 ), new Vec2( u1, v0 ), new Vec2( u1, v1 ), new Vec2( u0, v1 ) },
+						material );
+				}
+			}
+		}
+
+		Tube( outerStarts, flip: false );
+		Tube( holeStarts, flip: true );
+
+		if ( wrap )
+			return mesh;
+
+		// Annular caps: one quad band per end, outer ring to hole ring, index for index.
+		// The near cap walks the band one way and the far cap the other, so both normals
+		// point out of the solid, matching Skin's plain-cap convention.
+		var last = outerRings.Count - 1;
+
+		for ( var i = 0; i < count; i++ )
+		{
+			var j = (i + 1) % count;
+
+			mesh.AddFace(
+				new[] { outerStarts[last] + i, outerStarts[last] + j, holeStarts[last] + j, holeStarts[last] + i },
+				new[] { new Vec2( around[i] / perimeter, 0f ), new Vec2( around[j] / perimeter, 0f ), new Vec2( around[j] / perimeter, 0f ), new Vec2( around[i] / perimeter, 0f ) },
+				material );
+			mesh.AddFace(
+				new[] { outerStarts[0] + j, outerStarts[0] + i, holeStarts[0] + i, holeStarts[0] + j },
+				new[] { new Vec2( around[j] / perimeter, 0f ), new Vec2( around[i] / perimeter, 0f ), new Vec2( around[i] / perimeter, 0f ), new Vec2( around[j] / perimeter, 0f ) },
+				material );
+		}
 
 		return mesh;
 	}
@@ -253,9 +393,14 @@ public sealed class SweepFeature : SketchConsumingFeature
 	public string PathSplineId = "";
 
 	public readonly FloatParam Twist = new( "Twist", 0f, unit: "deg" );
+
+	/// <summary>Scale along the sweep as "t:scale,…" pairs, t in 0..1 along the path — e.g.
+	/// "0:1,0.5:1.4,1:0.2" swells mid-sweep and tapers to a point. Empty means no taper.</summary>
+	public readonly StringParam Taper = new( "Taper (t:scale,…)", "" );
+
 	public readonly IntParam Material = new( "Material slot", 0, 0, 63 ) { Slider = false };
 
-	public override IReadOnlyList<IParam> Parameters => new IParam[] { Twist, Result, Material };
+	public override IReadOnlyList<IParam> Parameters => new IParam[] { Twist, Taper, Result, Material };
 
 	public override IReadOnlyList<IParam> AdvancedParameters => new IParam[] { Material };
 
@@ -292,6 +437,8 @@ public sealed class SweepFeature : SketchConsumingFeature
 					"Leave the path open" );
 		}
 
+		var taper = ParseTaper( Taper.Value );
+
 		foreach ( var profile in profiles )
 		{
 			// A twist cannot be carried round a closed path: the last ring has to be the first
@@ -300,12 +447,28 @@ public sealed class SweepFeature : SketchConsumingFeature
 			if ( closed && Twist.Value != 0f )
 				Warning = "Twist was ignored: a closed path has to meet itself, so it cannot end turned.";
 
-			var rings = BuildRings( sketch, profile.Outer, path, closed ? 0f : Twist.Value );
+			var frames = BuildFrames( sketch, path, closed, out var holonomy );
+			var centre = CentreOf( profile.Outer );
+			var rings = RingsForLoop( profile.Outer, centre, path, frames, holonomy, closed ? 0f : Twist.Value, taper, closed );
 
-			var mesh = Skinner.Skin( rings, !closed, Material.Clamped, wrap: closed );
+			PolyMesh mesh;
 
-			if ( profile.HasHoles )
-				Warning = "The path was swept round this profile's outer loop only — holes in a swept profile are not carried through yet.";
+			if ( !profile.HasHoles )
+			{
+				mesh = Skinner.SkinChecked( rings, !closed, Material.Clamped, wrap: closed );
+			}
+			else
+			{
+				// One hole is carried through as a tunnel with annular end caps; extra holes
+				// are still dropped, but said out loud rather than silently.
+				if ( profile.Holes.Count > 1 )
+					Warning = $"Only the first of {profile.Holes.Count} holes was carried through the sweep; the rest were dropped.";
+
+				var holeLoop = PrepareHoleLoop( profile.Outer, profile.Holes[0], profile.Outer.Count );
+				var holeRings = RingsForLoop( holeLoop, centre, path, frames, holonomy, closed ? 0f : Twist.Value, taper, closed );
+
+				mesh = Skinner.SkinWithHole( rings, holeRings, Material.Clamped, wrap: closed );
+			}
 
 			Emit( ctx, mesh );
 		}
@@ -321,28 +484,27 @@ public sealed class SweepFeature : SketchConsumingFeature
 		return MathF.Max( total, 1e-6f );
 	}
 
-	/// <summary>
-	/// One ring of world points per path station, the profile carried along in a
-	/// rotation-minimising frame.
-	/// </summary>
-	static List<List<Vec3>> BuildRings( Sketch sketch, List<Vec2> loop, List<Vec3> path, float twistDegrees )
+	internal static Vec2 CentreOf( List<Vec2> loop )
 	{
-		var rings = new List<List<Vec3>>( path.Count );
-
-		// The profile's own centre, so the path threads through the middle of the shape rather than
-		// through wherever the sketch origin happened to be.
 		var centre = Vec2.Zero;
 
 		foreach ( var p in loop )
 			centre += p;
 
-		centre /= loop.Count;
+		return centre / loop.Count;
+	}
 
+	/// <summary>
+	/// The rotation-minimising frame at every path station, plus the closed-loop holonomy
+	/// (Backlog B16): after the last station the frame is turned back onto the first
+	/// station's tangent, and the angle between that closing frame and frame 0 is the twist
+	/// a naive closed sweep would leave as a kink at the seam. It is 0 for a planar loop
+	/// and non-zero for a loop that leaves its plane — exactly the case that used to kink.
+	/// </summary>
+	internal static List<(Vec3 U, Vec3 V, Vec3 Tangent)> BuildFrames( Sketch sketch, List<Vec3> path, bool closed, out float holonomy )
+	{
+		var frames = new List<(Vec3 U, Vec3 V, Vec3 Tangent)>( path.Count );
 		var tangent = (path[1] - path[0]).Normal;
-
-		// Start by turning the profile's plane so its normal points down the path. Any rotation
-		// that does that will do — the twist is then whatever this happens to give, and the Twist
-		// parameter exists so it can be corrected.
 		var u = sketch.Plane.XAxis;
 		var v = sketch.Plane.YAxis;
 
@@ -360,27 +522,162 @@ public sealed class SweepFeature : SketchConsumingFeature
 				tangent = next;
 			}
 
+			frames.Add( (u, v, tangent) );
+		}
+
+		holonomy = 0f;
+
+		if ( closed )
+		{
+			var cu = u;
+			var cv = v;
+
+			Rotate( ref cu, ref cv, tangent, frames[0].Tangent );
+
+			holonomy = MathF.Atan2( Vec3.Dot( frames[0].V, cu ), Vec3.Dot( frames[0].U, cu ) );
+		}
+
+		return frames;
+	}
+
+	/// <summary>
+	/// Rings for one loop (outer or hole) from shared frames. A closed sweep distributes
+	/// -holonomy * i/N across the rings, so the ring beside the seam meets ring 0 with no
+	/// twist kink; an open sweep distributes the Twist parameter instead. The taper scale,
+	/// when given, sizes each ring about its path station.
+	/// </summary>
+	internal static List<List<Vec3>> RingsForLoop( List<Vec2> loop, Vec2 centre, List<Vec3> path,
+		List<(Vec3 U, Vec3 V, Vec3 Tangent)> frames, float holonomy, float twistDegrees,
+		List<(float T, float Scale)> taper, bool closed )
+	{
+		var rings = new List<List<Vec3>>( path.Count );
+
+		for ( var i = 0; i < path.Count; i++ )
+		{
 			// Twist accumulates along the path rather than being applied at the end, so a swept
 			// square with 90 degrees of twist turns steadily instead of shearing at the last ring.
-			var angle = twistDegrees * MathF.PI / 180f * (path.Count > 1 ? i / (float)(path.Count - 1) : 0f);
+			var frac = closed ? i / (float)path.Count : (path.Count > 1 ? i / (float)(path.Count - 1) : 0f);
+			var angle = twistDegrees * MathF.PI / 180f * frac - holonomy * frac;
 			var cos = MathF.Cos( angle );
 			var sin = MathF.Sin( angle );
 
+			var (u, v, _) = frames[i];
 			var tu = u * cos + v * sin;
 			var tv = v * cos - u * sin;
+			var scale = taper is null ? 1f : TaperAt( taper, frac );
 
 			var ring = new List<Vec3>( loop.Count );
 
 			foreach ( var p in loop )
 			{
 				var local = p - centre;
-				ring.Add( path[i] + tu * local.x + tv * local.y );
+				ring.Add( path[i] + (tu * local.x + tv * local.y) * scale );
 			}
 
 			rings.Add( ring );
 		}
 
 		return rings;
+	}
+
+	/// <summary>
+	/// Parse a taper string ("0:1,0.5:1.4,1:0.2") into sorted (t, scale) pairs. Empty is
+	/// null (no taper). Anything else malformed fails loudly: a taper that silently
+	/// ignored a typo would ship the wrong shape.
+	/// </summary>
+	internal static List<(float T, float Scale)> ParseTaper( string text )
+	{
+		if ( string.IsNullOrWhiteSpace( text ) )
+			return null;
+
+		var pairs = new List<(float, float)>();
+
+		foreach ( var part in text.Split( ';', ',' ) )
+		{
+			var kv = part.Split( ':' );
+
+			float t = 0f, scale = 0f;
+
+			if ( kv.Length != 2
+				|| !float.TryParse( kv[0].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out t )
+				|| !float.TryParse( kv[1].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out scale ) )
+				FailOn( "Taper (t:scale,…)",
+					$"Taper '{text}' is not a list of t:scale pairs.",
+					"A taper is t:scale pairs in order along the sweep, e.g. 0:1,0.5:1.4,1:0.2.",
+					"Fix the taper string", "Clear the taper to sweep at a constant size" );
+
+			if ( t < 0f || t > 1f || scale <= 0f )
+				FailOn( "Taper (t:scale,…)",
+					$"Taper '{text}' has a t outside 0..1 or a non-positive scale.",
+					"t runs 0 at the start of the sweep to 1 at the end, and scale must be positive.",
+					"Fix the taper string", "Clear the taper to sweep at a constant size" );
+
+			pairs.Add( (t, scale) );
+		}
+
+		pairs.Sort( (a, b) => a.Item1.CompareTo( b.Item1 ) );
+
+		return pairs;
+	}
+
+	internal static float TaperAt( List<(float T, float Scale)> taper, float frac )
+	{
+		if ( frac <= taper[0].T )
+			return taper[0].Scale;
+
+		for ( var i = 1; i < taper.Count; i++ )
+		{
+			if ( frac <= taper[i].T )
+			{
+				var span = taper[i].T - taper[i - 1].T;
+				var t = span > 1e-9f ? (frac - taper[i - 1].T) / span : 0f;
+				return taper[i - 1].Scale + (taper[i].Scale - taper[i - 1].Scale) * t;
+			}
+		}
+
+		return taper[^1].Scale;
+	}
+
+	/// <summary>
+	/// Prepare a hole loop for skinning alongside its outer loop: same traversal direction
+	/// as the outer (ProfileFinder stores holes wound opposite), resampled to the outer's
+	/// point count, and rotated so it starts at the angle the outer loop starts at about
+	/// the shared centre. That pairing is what lets the annular end caps tile index for
+	/// index without twist. Only the first hole is ever prepared — see Execute.
+	/// </summary>
+	internal static List<Vec2> PrepareHoleLoop( List<Vec2> outer, List<Vec2> hole, int count )
+	{
+		var centre = CentreOf( outer );
+		var oriented = new List<Vec2>( hole );
+
+		if ( MathF.Sign( ProfileFinder.SignedArea( oriented ) ) != MathF.Sign( ProfileFinder.SignedArea( outer ) ) )
+			oriented.Reverse();
+
+		var target = MathF.Atan2( outer[0].y - centre.y, outer[0].x - centre.x );
+		var best = 0;
+		var bestD = float.MaxValue;
+
+		for ( var i = 0; i < oriented.Count; i++ )
+		{
+			var a = MathF.Atan2( oriented[i].y - centre.y, oriented[i].x - centre.x );
+			var d = MathF.Abs( a - target );
+
+			if ( d > MathF.PI )
+				d = 2f * MathF.PI - d;
+
+			if ( d < bestD )
+			{
+				bestD = d;
+				best = i;
+			}
+		}
+
+		var rotated = new List<Vec2>( oriented.Count );
+
+		for ( var i = 0; i < oriented.Count; i++ )
+			rotated.Add( oriented[(best + i) % oriented.Count] );
+
+		return Skinner.Resample( rotated, count );
 	}
 
 	/// <summary>
@@ -414,6 +711,49 @@ public sealed class SweepFeature : SketchConsumingFeature
 
 	static Vec3 Turn( Vec3 x, Vec3 axis, float cos, float sin ) =>
 		x * cos + Vec3.Cross( axis, x ) * sin + axis * (Vec3.Dot( axis, x ) * (1f - cos));
+
+	/// <summary>
+	/// Rotate a 2D loop's point order so it starts at the given angle about its centre.
+	/// Resample always starts at the loop's own first point, so without this two sections
+	/// resampled independently start at unrelated angles and their skin shears.
+	/// </summary>
+	internal static List<Vec2> RotateLoopToAngle( List<Vec2> loop, Vec2 centre, float target )
+	{
+		var best = 0;
+		var bestD = float.MaxValue;
+
+		for ( var i = 0; i < loop.Count; i++ )
+		{
+			var a = MathF.Atan2( loop[i].y - centre.y, loop[i].x - centre.x );
+			var d = MathF.Abs( a - target );
+
+			if ( d > MathF.PI )
+				d = 2f * MathF.PI - d;
+
+			if ( d < bestD )
+			{
+				bestD = d;
+				best = i;
+			}
+		}
+
+		var rotated = new List<Vec2>( loop.Count );
+
+		for ( var i = 0; i < loop.Count; i++ )
+			rotated.Add( loop[(best + i) % loop.Count] );
+
+		return rotated;
+	}
+
+	internal static Vec3 CentreOf3( List<Vec3> ring )
+	{
+		var centre = Vec3.Zero;
+
+		foreach ( var p in ring )
+			centre += p;
+
+		return centre / ring.Count;
+	}
 
 	/// <summary>
 	/// The path, as world points. Walked out of a sketch's curves the way a loop is, except that a
@@ -549,9 +889,14 @@ public sealed class LoftFeature : SketchConsumingFeature
 	public readonly IntParam Segments = new( "Segments", 24, 3, 512 );
 
 	public readonly BoolParam Closed = new( "Closed", false );
+
+	/// <summary>Scale between sections as "t:scale,…" pairs, t in 0..1 from the first to the
+	/// last section — same spelling as Sweep's taper. Empty means no taper.</summary>
+	public readonly StringParam Taper = new( "Taper (t:scale,…)", "" );
+
 	public readonly IntParam Material = new( "Material slot", 0, 0, 63 ) { Slider = false };
 
-	public override IReadOnlyList<IParam> Parameters => new IParam[] { Segments, Closed, Result, Material };
+	public override IReadOnlyList<IParam> Parameters => new IParam[] { Segments, Closed, Taper, Result, Material };
 
 	public override IReadOnlyList<IParam> AdvancedParameters => new IParam[] { Material };
 
@@ -569,34 +914,108 @@ public sealed class LoftFeature : SketchConsumingFeature
 		}
 
 		var count = Segments.Clamped;
+		var taper = SweepFeature.ParseTaper( Taper.Value );
 		var rings = new List<List<Vec3>>( sketches.Count );
+		var holeRings = new List<List<Vec3>>( sketches.Count );
+
+		// Holes change the alignment strategy: Skinner.Align rotates each section to its
+		// neighbour in 3D, which would break the index-for-index pairing the annular caps
+		// need. A holed loft therefore aligns every section by start ANGLE about its own
+		// centroid instead — the same correspondence, decided in 2D before any 3D mapping.
+		// A loft with no holes keeps the old Align path exactly, so existing lofts do not move.
+		var anyHoles = false;
 
 		foreach ( var sketch in sketches )
 		{
 			var found = ProfileFinder.Find( sketch );
 
 			if ( found.Profiles.Count == 0 )
-			{
 				Fail(
 					"One of the loft's sections has no closed region in it.",
 					"Every loft section has to be a closed loop so it can be skinned to the next.",
 					"Close that section's curves into a loop",
 					"Remove that sketch from the loft" );
-			}
 
 			if ( found.Profiles[0].HasHoles )
-				Warning = "Loft used each section's outer loop only — holes in a section are not carried through yet.";
+				anyHoles = true;
+		}
 
-			var ring = Skinner.Resample( found.Profiles[0].Outer, count )
-				.Select( sketch.Plane.ToWorld )
-				.ToList();
+		var firstAngle = 0f;
 
-			rings.Add( rings.Count == 0 ? ring : Skinner.Align( ring, rings[^1] ) );
+		foreach ( var sketch in sketches )
+		{
+			var found = ProfileFinder.Find( sketch );
+			var profile = found.Profiles[0];
+			var outer = Skinner.Resample( profile.Outer, count );
+			var centre = SweepFeature.CentreOf( profile.Outer );
+
+			if ( anyHoles )
+			{
+				if ( !profile.HasHoles )
+					Fail(
+						"Every loft section needs the same hole.",
+						"One section has a hole and another does not, so there is no tunnel to skin between them.",
+						"Give every section the same hole", "Remove the hole from every section" );
+
+				if ( profile.Holes.Count > 1 )
+					Warning = $"Only the first of {profile.Holes.Count} holes was carried through the loft; the rest were dropped.";
+
+				if ( rings.Count == 0 )
+				{
+					firstAngle = MathF.Atan2( outer[0].y - centre.y, outer[0].x - centre.x );
+				}
+				else
+				{
+					outer = SweepFeature.RotateLoopToAngle( outer, centre, firstAngle );
+				}
+
+				var hole = SweepFeature.PrepareHoleLoop( profile.Outer, profile.Holes[0], count );
+
+				// About the OUTER centre, not the hole's own: the pairing is by angle about
+				// the shared centre, which is what the annular caps are tiled on.
+				if ( rings.Count > 0 )
+					hole = SweepFeature.RotateLoopToAngle( hole, centre, firstAngle );
+
+				holeRings.Add( hole.Select( sketch.Plane.ToWorld ).ToList() );
+			}
+
+			var ring = outer.Select( sketch.Plane.ToWorld ).ToList();
+
+			if ( !anyHoles && rings.Count > 0 )
+				ring = Skinner.Align( ring, rings[^1] );
+
+			rings.Add( ring );
+		}
+
+		// Taper sizes each section about its own centroid, after alignment, so a tapered
+		// loft keeps the correspondence the skinning was built on.
+		if ( taper is not null )
+		{
+			for ( var i = 0; i < rings.Count; i++ )
+			{
+				var frac = Closed.Value ? i / (float)rings.Count : (rings.Count > 1 ? i / (float)(rings.Count - 1) : 0f);
+				var scale = SweepFeature.TaperAt( taper, frac );
+				var c = SweepFeature.CentreOf3( rings[i] );
+
+				for ( var k = 0; k < rings[i].Count; k++ )
+					rings[i][k] = c + (rings[i][k] - c) * scale;
+
+				if ( anyHoles )
+				{
+					// About the section centroid, not the hole's own: tapering shrinks the
+					// whole section toward its centre, hole position included.
+					for ( var k = 0; k < holeRings[i].Count; k++ )
+						holeRings[i][k] = c + (holeRings[i][k] - c) * scale;
+				}
+			}
 		}
 
 		// Closed skins the last section back to the FIRST ONE'S vertices rather than to a copy
 		// of them, which is the only way the seam is genuinely closed — see Skinner.Skin.
-		Emit( ctx, Skinner.Skin( rings, !Closed.Value, Material.Clamped, wrap: Closed.Value ) );
+		if ( anyHoles )
+			Emit( ctx, Skinner.SkinWithHole( rings, holeRings, Material.Clamped, wrap: Closed.Value ) );
+		else
+			Emit( ctx, Skinner.SkinChecked( rings, !Closed.Value, Material.Clamped, wrap: Closed.Value ) );
 	}
 
 	List<Sketch> ResolveSections( FeatureContext ctx )

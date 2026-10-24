@@ -45,6 +45,10 @@ public static class ProfileBody
 		var sq = Sorted( shape.SquarenessCurve );
 		var flat = Sorted( shape.Flatten );
 		var keel = Sorted( shape.Keel );
+		var top = Sorted( shape.Top );
+		var bottom = Sorted( shape.Bottom );
+		var left = Sorted( shape.Left );
+		var right = Sorted( shape.Right );
 
 		var heights = f.Select( p => p.x ).Concat( s.Select( p => p.x ) )
 			.Concat( o?.Select( p => p.x ) ?? Enumerable.Empty<float>() )
@@ -52,6 +56,10 @@ public static class ProfileBody
 			.Concat( sq?.Select( p => p.x ) ?? Enumerable.Empty<float>() )
 			.Concat( flat?.Select( p => p.x ) ?? Enumerable.Empty<float>() )
 			.Concat( keel?.Select( p => p.x ) ?? Enumerable.Empty<float>() )
+			.Concat( top?.Select( p => p.x ) ?? Enumerable.Empty<float>() )
+			.Concat( bottom?.Select( p => p.x ) ?? Enumerable.Empty<float>() )
+			.Concat( left?.Select( p => p.x ) ?? Enumerable.Empty<float>() )
+			.Concat( right?.Select( p => p.x ) ?? Enumerable.Empty<float>() )
 			.Where( z => z >= MathF.Max( f[0].x, s[0].x ) - 1e-6f && z <= MathF.Min( f[^1].x, s[^1].x ) + 1e-6f )
 			.Distinct().OrderBy( z => z ).ToList();
 
@@ -102,18 +110,41 @@ public static class ProfileBody
 			var halfDepth = MathF.Max( Sample( s, z ), 1e-4f );
 			var offset = o is null ? Vec2.Zero : SampleOffset( o, z );
 			var twist = t is null ? 0f : Sample( t, z ) * MathF.PI / 180f;
-			var n = 2f + Math.Clamp( sq is null ? shape.Squareness : Sample( sq, z ), 0f, 1f ) * 10f;
+			var sqVal = Math.Clamp( sq is null ? shape.Squareness : Sample( sq, z ), 0f, 1f );
+			var n = 2f + sqVal * 10f;
+			var topDepth = MathF.Max( top is null ? halfDepth : Sample( top, z ), 1e-4f );
+			var bottomDepth = MathF.Max( bottom is null ? halfDepth : Sample( bottom, z ), 1e-4f );
+			var leftWidth = MathF.Max( left is null ? halfWidth : Sample( left, z ), 1e-4f );
+			var rightWidth = MathF.Max( right is null ? halfWidth : Sample( right, z ), 1e-4f );
+			var dPos = topDepth;
+			var dNeg = bottomDepth;
+			var wPos = leftWidth;
+			var wNeg = rightWidth;
+
+			if ( shape.Midline == ProfileMidlineMode.Center )
+			{
+				// Keep the section's midline on the spine: split the total span evenly.
+				dPos = dNeg = (topDepth + bottomDepth) * 0.5f;
+				wPos = wNeg = (leftWidth + rightWidth) * 0.5f;
+			}
+
+			// A four-sided, nearly square ring whose vertices sit on the axes is a diamond, not a
+			// box: its only vertices are the axis points and Skinner joins them straight. Turning
+			// the ring start by half a step puts the vertices near the corners instead, so the
+			// same four edges read as a box. Only for a boxy ring; a round four-sided ring keeps
+			// its axis vertices.
+			var angleOffset = sides == 4 && sqVal > 0.5f ? MathF.PI / sides : 0f;
 			var flatten = flat is null ? 0f : Math.Clamp( Sample( flat, z ), -1f, 1f );
 			var keelAmount = keel is null ? 0f : Math.Clamp( Sample( keel, z ), -1f, 1f );
 			var ring = new List<Vec3>( sides );
 
 			for ( var k = 0; k < sides; k++ )
 			{
-				var a = winding * k * MathF.PI * 2f / sides;
+				var a = winding * k * MathF.PI * 2f / sides + angleOffset;
 				var c = MathF.Cos( a );
 				var si = MathF.Sin( a );
-				var d = MathF.Sign( c ) * MathF.Pow( MathF.Abs( c ), 2f / n ) * halfDepth;
-				var w = MathF.Sign( si ) * MathF.Pow( MathF.Abs( si ), 2f / n ) * halfWidth;
+				var d = MathF.Sign( c ) * MathF.Pow( MathF.Abs( c ), 2f / n ) * (c >= 0f ? dPos : dNeg);
+				var w = MathF.Sign( si ) * MathF.Pow( MathF.Abs( si ), 2f / n ) * (si >= 0f ? wPos : wNeg);
 
 				// Flatten squashes one half of the section toward the left-right line through its
 				// centre: positive the back half (a flat back, a D-shaped thigh), negative the front.
@@ -123,7 +154,7 @@ public static class ProfileBody
 				// Keel pulls the front centre out into a ridge (a breastbone, a shin, a hull), or with
 				// a negative amount presses a groove in. A narrow bump so the flanks stay put.
 				if ( keelAmount != 0f && c > 0f )
-					d += keelAmount * halfDepth * MathF.Pow( c, 8f );
+					d += keelAmount * dPos * MathF.Pow( c, 8f );
 
 				if ( twist != 0f )
 				{
@@ -175,6 +206,19 @@ public static class ProfileBody
 
 		if ( custom )
 			MeshTransform.Apply( mesh, Turn( shape.Direction, shape.Roll ) );
+
+		var creases = string.IsNullOrWhiteSpace( shape.Creases )
+			? new Dictionary<EdgeKey, float>()
+			: ParseCreases( shape.Creases, sides, rings.Count, winding, shape.Squareness );
+		result.Creases = creases;
+
+		if ( shape.SubdivLevels > 0 )
+		{
+			mesh = CatmullClark.Subdivide( mesh, shape.SubdivLevels, creases, out var remaining );
+			result.Mesh = mesh;
+			result.Creases = remaining;
+			result.Subdivided = true;
+		}
 
 		return result;
 	}
@@ -286,6 +330,137 @@ public static class ProfileBody
 		return MathF.Max( 0f, worst );
 	}
 
+/// <summary>Parse a crease string into cage edges. Names, all 0..1 sharpness:
+/// <c>dorsal</c>/<c>ridge</c>/<c>top</c> is the longitudinal loop closest to +depth,
+/// <c>keel</c>/<c>ventral</c>/<c>bottom</c> the loop closest to -depth, <c>lateral</c>/<c>side</c>
+/// both loops closest to +/-width, <c>left</c>/<c>right</c> one of those, and
+/// <c>ring@s</c> the ring loop nearest the fraction <c>s</c> (0..1) along the ring sequence.
+/// "Closest" matters because a boxy four-sided ring has two vertices tied for +depth: both
+/// corner loops get the crease. A bad name, value or fraction throws, with the part named —
+/// a crease that silently did nothing would be worse than none.</summary>
+	public static Dictionary<EdgeKey, float> ParseCreases( string text, int sides, int rings, float winding = 1f, float squareness = 0f )
+	{
+		var result = new Dictionary<EdgeKey, float>();
+
+		if ( string.IsNullOrWhiteSpace( text ) )
+			return result;
+
+		if ( sides < 4 )
+			throw new ArgumentException( $"Creases need at least 4 sides, not {sides}.", nameof( sides ) );
+
+		if ( rings < 2 )
+			throw new ArgumentException( $"Creases need at least 2 rings, not {rings}.", nameof( rings ) );
+
+		var offset = sides == 4 && squareness > 0.5f ? MathF.PI / sides : 0f;
+		var cosMax = float.MinValue; var cosMin = float.MaxValue;
+		var sinMax = float.MinValue; var sinMin = float.MaxValue;
+
+		for ( var k = 0; k < sides; k++ )
+		{
+			var a = winding * k * MathF.PI * 2f / sides + offset;
+			cosMax = MathF.Max( cosMax, MathF.Cos( a ) );
+			cosMin = MathF.Min( cosMin, MathF.Cos( a ) );
+			sinMax = MathF.Max( sinMax, MathF.Sin( a ) );
+			sinMin = MathF.Min( sinMin, MathF.Sin( a ) );
+		}
+
+		List<int> Loops( Func<float, float, bool> keep )
+		{
+			var ks = new List<int>();
+
+			for ( var k = 0; k < sides; k++ )
+			{
+				var a = winding * k * MathF.PI * 2f / sides + offset;
+
+				if ( keep( MathF.Cos( a ), MathF.Sin( a ) ) )
+					ks.Add( k );
+			}
+
+			return ks;
+		}
+
+		void Longitudinal( List<int> ks, float value )
+		{
+			foreach ( var k in ks )
+				for ( var r = 0; r + 1 < rings; r++ )
+					result[new EdgeKey( r * sides + k, (r + 1) * sides + k )] = value;
+		}
+
+		foreach ( var raw in (text ?? "").Split( new[] { ';', '\n' }, StringSplitOptions.RemoveEmptyEntries ) )
+		{
+			var part = raw.Trim();
+
+			if ( part.Length == 0 )
+				continue;
+
+			var sep = part.IndexOf( ':' );
+			var eq = part.IndexOf( '=' );
+
+			if ( eq >= 0 && (sep < 0 || eq < sep) )
+				sep = eq;
+
+			if ( sep <= 0 )
+				throw new ArgumentException( $"Creases part '{part}' is not name:value. Write it like dorsal:0.6;keel:0.7;ring@0.21:0.8.", nameof( text ) );
+
+			var name = part[..sep].Trim().ToLowerInvariant();
+			var valueText = part[(sep + 1)..].Trim();
+
+			if ( !float.TryParse( valueText, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var value ) )
+				throw new ArgumentException( $"Creases part '{part}' has a sharpness that is not a number: '{valueText}'.", nameof( text ) );
+
+			if ( value < 0f || value > 1f )
+				throw new ArgumentException( $"Creases part '{part}' has sharpness {value}, outside 0..1.", nameof( text ) );
+
+			if ( name.StartsWith( "ring@", StringComparison.Ordinal ) )
+			{
+				if ( !float.TryParse( name[5..], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var s ) || s < 0f || s > 1f )
+					throw new ArgumentException( $"Creases part '{part}' needs a station fraction ring@0..1, not '{name[5..]}'.", nameof( text ) );
+
+				var ring = Math.Clamp( (int)MathF.Round( s * (rings - 1) ), 0, rings - 1 );
+
+				for ( var k = 0; k < sides; k++ )
+					result[new EdgeKey( ring * sides + k, ring * sides + (k + 1) % sides )] = value;
+
+				continue;
+			}
+
+			var ks = name switch
+			{
+				"dorsal" or "ridge" or "top" => Loops( (c, _) => c >= cosMax - 1e-4f ),
+				"keel" or "ventral" or "bottom" => Loops( (c, _) => c <= cosMin + 1e-4f ),
+				"lateral" or "side" => Loops( (_, si) => si >= sinMax - 1e-4f || si <= sinMin + 1e-4f ),
+				"left" => Loops( (_, si) => si >= sinMax - 1e-4f ),
+				"right" => Loops( (_, si) => si <= sinMin + 1e-4f ),
+				_ => throw new ArgumentException( $"Creases part '{part}' names '{name}', which is not a crease. Use dorsal, keel, lateral, left, right, or ring@s.", nameof( text ) ),
+			};
+
+			Longitudinal( ks, value );
+		}
+
+		return result;
+	}
+
+	/// <summary>Syntax-only crease check for the feature dialog: true when ParseCreases would
+	/// accept the string (geometry sizes are irrelevant to the syntax, so dummy ones do).</summary>
+	public static bool TryParseCreaseSyntax( string text, out string error )
+	{
+		error = null;
+
+		if ( string.IsNullOrWhiteSpace( text ) )
+			return true;
+
+		try
+		{
+			ParseCreases( text, 16, 2 );
+			return true;
+		}
+		catch ( ArgumentException e )
+		{
+			error = e.Message;
+			return false;
+		}
+	}
+
 	static List<Vec2> Sorted( IReadOnlyList<Vec2> curve ) => curve is { Count: > 0 } ? curve.OrderBy( p => p.x ).ToList() : null;
 
 	/// <summary>The centre offset at a height: a Catmull-Rom through the stations, so the spine is
@@ -340,6 +515,16 @@ public static class ProfileBody
 	}
 }
 
+/// <summary>How an asymmetric profile's extremes sit relative to its spine (the <c>Curve</c>
+/// centre line). <c>Spine</c> measures Top/Bottom/Left/Right from the spine, so a deep belly
+/// moves the section's midline below the spine; <c>Center</c> keeps the midline on the spine and
+/// splits the total Top+Bottom (or Left+Right) span evenly either side of it.</summary>
+public enum ProfileMidlineMode
+{
+	Spine,
+	Center
+}
+
 /// <summary>Everything about a <see cref="ProfileBody"/> apart from its two outlines.</summary>
 public sealed class ProfileShape
 {
@@ -357,6 +542,33 @@ public sealed class ProfileShape
 
 	/// <summary>(height, −1..1): a ridge down the front, as a fraction of the half-depth; negative is a groove.</summary>
 	public IReadOnlyList<Vec2> Keel;
+
+	/// <summary>(height, extent) pairs: the extent in the +depth direction at each height, in place
+	/// of the symmetric Side value on that side. Empty means the Side value. Together with
+	/// <see cref="Bottom"/> this is what makes a flat dorsal spine over a deep belly, instead of
+	/// a symmetric tube.</summary>
+	public IReadOnlyList<Vec2> Top;
+
+	/// <summary>(height, extent) pairs: the extent in the -depth direction at each height.</summary>
+	public IReadOnlyList<Vec2> Bottom;
+
+	/// <summary>(height, extent) pairs: the extent in the +width direction at each height, in place
+	/// of the symmetric Front value on that side. Empty means the Front value.</summary>
+	public IReadOnlyList<Vec2> Left;
+
+	/// <summary>(height, extent) pairs: the extent in the -width direction at each height.</summary>
+	public IReadOnlyList<Vec2> Right;
+
+	/// <summary>Crease string, e.g. "dorsal:0.6;keel:0.7;ring@0.21:0.8". Parsed by
+	/// <see cref="ProfileBody.ParseCreases"/> into cage edges; empty means no creases.</summary>
+	public string Creases = "";
+
+	/// <summary>See <see cref="ProfileMidlineMode"/>.</summary>
+	public ProfileMidlineMode Midline = ProfileMidlineMode.Spine;
+
+	/// <summary>Catmull-Clark levels applied to the cage inside Build, with <see cref="Creases"/>.
+	/// 0 (the default) returns the cage exactly as before, so existing profiles do not change.</summary>
+	public int SubdivLevels;
 
 	public int Sides = 16;
 	public float Squareness = 0.15f;
@@ -384,6 +596,15 @@ public sealed class ProfileBuild
 	public PolyMesh Mesh;
 	public int Sides, Rings;
 	public bool QuadCaps;
+
+	/// <summary>The crease edges ParseCreases made for the cage, or the creases still live after
+	/// subdivision when <see cref="ProfileShape.SubdivLevels"/> was used. Empty when no creases
+	/// were given. A later Subdivide can be handed this dictionary directly.</summary>
+	public Dictionary<EdgeKey, float> Creases = new();
+
+	/// <summary>True when <see cref="ProfileShape.SubdivLevels"/> subdivided the cage inside Build.
+	/// Rings/Sides still describe the cage, not the subdivided mesh.</summary>
+	public bool Subdivided;
 
 	/// <summary>Faces closing the first and the last ring.</summary>
 	public List<int> NearCap = new(), FarCap = new();
@@ -449,6 +670,34 @@ public sealed class ProfileFeature : Feature, IScriptValueReader
 	/// breastbone, a shin, a hull); negative presses a groove in.</summary>
 	public readonly StringParam Keel = new( "Keel (height,amount;…)", "" );
 
+	/// <summary>`height,extent;…` — the extent in the +depth direction at each height, replacing
+	/// the symmetric Side value on that side. A flat top over a deep bottom is Top small,
+	/// Bottom large; empty means the Side value.</summary>
+	public readonly StringParam Top = new( "Top (height,extent;…)", "" );
+
+	/// <summary>`height,extent;…` — the extent in the -depth direction at each height.</summary>
+	public readonly StringParam Bottom = new( "Bottom (height,extent;…)", "" );
+
+	/// <summary>`height,extent;…` — the extent in the +width direction at each height, replacing
+	/// the symmetric Front value on that side.</summary>
+	public readonly StringParam Left = new( "Left (height,extent;…)", "" );
+
+	/// <summary>`height,extent;…` — the extent in the -width direction at each height.</summary>
+	public readonly StringParam Right = new( "Right (height,extent;…)", "" );
+
+	/// <summary>Sharp ridges, e.g. dorsal:0.6;keel:0.7;ring@0.21:0.8 — see
+	/// <see cref="ProfileBody.ParseCreases"/>. Empty means no creases. Only the cage carries
+	/// them until a Subdivide level is set, or a later Subdivide is handed the build's creases.</summary>
+	public readonly StringParam Creases = new( "Creases (dorsal:0.6;keel:0.7;ring@0.21:0.8)", "" );
+
+	/// <summary>Spine measures Top/Bottom/Left/Right from the spine (a deep belly moves the
+	/// midline); Center keeps the midline on the spine and splits the total span evenly.</summary>
+	public readonly ChoiceParam Midline = new( "Midline", new[] { "Spine", "Center" } );
+
+	/// <summary>Catmull-Clark levels applied to the cage, with Creases. 0 leaves the cage as
+	/// built, which is the old behaviour; 1 is what makes a crease visible as a sharp ridge.</summary>
+	public readonly IntParam Subdivide = new( "Subdivide levels", 0, 0, 3 );
+
 	/// <summary>Which surface the outline describes. Cage is the mesh as built. Smoothed surface moves
 	/// the cage out so that, once subdivided, the body is exactly as wide and as tall as the outline
 	/// — a leg that reaches the floor after Subdivide.</summary>
@@ -468,10 +717,10 @@ public sealed class ProfileFeature : Feature, IScriptValueReader
 	bool CustomAxis => Along.Index == ProfileBody.AxisCustom;
 
 	public override IReadOnlyList<IParam> Parameters => CustomAxis
-		? new IParam[] { Front, Side, Curve, Twist, Along, AlongDirection, Roll, Mirror, Sides, Squareness, SquarenessCurve, Flatten, Keel, Fit, Caps, Branch, Position, Material }
-		: new IParam[] { Front, Side, Curve, Twist, Along, Mirror, Sides, Squareness, SquarenessCurve, Flatten, Keel, Fit, Caps, Branch, Position, Material };
+		? new IParam[] { Front, Side, Curve, Twist, Along, AlongDirection, Roll, Mirror, Sides, Squareness, SquarenessCurve, Flatten, Keel, Top, Bottom, Left, Right, Creases, Midline, Subdivide, Fit, Caps, Branch, Position, Material }
+		: new IParam[] { Front, Side, Curve, Twist, Along, Mirror, Sides, Squareness, SquarenessCurve, Flatten, Keel, Top, Bottom, Left, Right, Creases, Midline, Subdivide, Fit, Caps, Branch, Position, Material };
 
-	public override IReadOnlyList<IParam> AdvancedParameters => new IParam[] { Twist, SquarenessCurve, Flatten, Keel, Caps, Material };
+	public override IReadOnlyList<IParam> AdvancedParameters => new IParam[] { Twist, SquarenessCurve, Flatten, Keel, Top, Bottom, Left, Right, Creases, Midline, Subdivide, Caps, Material };
 
 	/// <summary>`along=x,y,z` in a build script: three numbers are a custom direction rather than
 	/// one of the named options, so a limb at an angle is one word.</summary>
@@ -498,8 +747,17 @@ public sealed class ProfileFeature : Feature, IScriptValueReader
 
 	protected override void Execute( FeatureContext ctx )
 	{
-		var front = Parse( Front.Value );
-		var side = Parse( Side.Value );
+		var front = ParseStrict( Front, "0,4;20,6;40,3" );
+		var side = ParseStrict( Side, "0,4;20,6;40,3" );
+
+		if ( !ProfileBody.TryParseCreaseSyntax( Creases.Value, out var creaseError ) )
+		{
+			FailOn( Creases.Label,
+				creaseError,
+				$"Creases reads '{Creases.Value}'.",
+				"Write it like dorsal:0.6;keel:0.7;ring@0.21:0.8",
+				"Clear it to leave the cage uncreased" );
+		}
 
 		if ( front.Count < 2 )
 		{
@@ -523,11 +781,18 @@ public sealed class ProfileFeature : Feature, IScriptValueReader
 
 		var shape = new ProfileShape
 		{
-			Offsets = ParseTriples( Curve.Value ),
-			Twists = Parse( Twist.Value ),
+			Offsets = ParseTriplesStrict( Curve, "0,0,0;20,1,0" ),
+			Twists = ParseStrict( Twist, "0,0;20,30" ),
 			SquarenessCurve = ParseCurve( SquarenessCurve, "0,0.1;30,0.6" ),
 			Flatten = ParseCurve( Flatten, "10,0;20,0.6" ),
 			Keel = ParseCurve( Keel, "10,0;20,0.3" ),
+			Top = ParseStrict( Top, "0,3;20,5" ),
+			Bottom = ParseStrict( Bottom, "0,3;20,5" ),
+			Left = ParseStrict( Left, "0,4;20,6" ),
+			Right = ParseStrict( Right, "0,4;20,6" ),
+			Creases = Creases.Value,
+			Midline = Midline.Index == 1 ? ProfileMidlineMode.Center : ProfileMidlineMode.Spine,
+			SubdivLevels = Subdivide.Clamped,
 			Sides = sides,
 			Squareness = Squareness.Clamped,
 			Material = Material.Clamped,
@@ -537,6 +802,15 @@ public sealed class ProfileFeature : Feature, IScriptValueReader
 			QuadCaps = Caps.Index == 1,
 			FitLimit = Fit.Index == 1,
 		};
+
+		if ( shape.SubdivLevels > 0 && !string.IsNullOrWhiteSpace( Branch.Value ) )
+		{
+			FailOn( Subdivide.Label,
+				"A subdivided profile cannot branch into another body yet.",
+				"Branching joins the cage's near cap faces, and subdivision renumbers those faces.",
+				"Subdivide the joined body with a Subdivide feature instead",
+				"Clear Branch from body to keep this a separate body" );
+		}
 
 		var built = ProfileBody.Build( front, side, shape );
 		var mesh = built.Mesh;
@@ -647,6 +921,55 @@ public sealed class ProfileFeature : Feature, IScriptValueReader
 					joined.FootprintRatio < 1f ? "Join the limb before subdividing the body, or use fewer Sides on the body" : "Use more Sides on the limb, or make its first height wider" );
 			}
 		}
+	}
+
+/// <summary>A `height,amount;…` curve, refusing text that is there but does not read, so a typo
+	/// cannot quietly leave the body as it was. This is the B13 fix for Front/Side/Twist and the
+	/// new Top/Bottom/Left/Right curves: the old Parse silently skipped a bad pair, so a typo
+	/// silently changed the shape.</summary>
+	List<Vec2> ParseStrict( StringParam param, string example )
+	{
+		var text = (param.Value ?? "").Trim();
+
+		if ( text.Length == 0 )
+			return new List<Vec2>();
+
+		var parts = text.Split( new[] { ';', '\n' }, StringSplitOptions.RemoveEmptyEntries ).Where( p => p.Trim().Length > 0 ).ToList();
+		var pairs = Parse( text );
+
+		if ( pairs.Count != parts.Count )
+		{
+			FailOn( param.Label,
+				$"{param.Label.Split( '(' )[0].Trim()} has {parts.Count - pairs.Count} part(s) that are not height,amount pairs.",
+				$"It reads '{text}'. Each part must be two numbers, a height and an amount, separated by a comma.",
+				$"Write it like {example}",
+				"Clear it to leave the shape as it is" );
+		}
+
+		return pairs;
+	}
+
+	/// <summary>ParseTriples, refusing text that does not read, for the same B13 reason.</summary>
+	List<Vec3> ParseTriplesStrict( StringParam param, string example )
+	{
+		var text = (param.Value ?? "").Trim();
+
+		if ( text.Length == 0 )
+			return new List<Vec3>();
+
+		var parts = text.Split( new[] { ';', '\n' }, StringSplitOptions.RemoveEmptyEntries ).Where( p => p.Trim().Length > 0 ).ToList();
+		var triples = ParseTriples( text );
+
+		if ( triples.Count != parts.Count )
+		{
+			FailOn( param.Label,
+				$"{param.Label.Split( '(' )[0].Trim()} has {parts.Count - triples.Count} part(s) that are not height,forward,side triples.",
+				$"It reads '{text}'. Each part must be three numbers, separated by commas.",
+				$"Write it like {example}",
+				"Clear it to leave the shape as it is" );
+		}
+
+		return triples;
 	}
 
 	/// <summary>A `height,amount;…` curve, refusing text that is there but does not read, so a typo

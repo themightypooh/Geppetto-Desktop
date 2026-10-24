@@ -194,7 +194,9 @@ public static class ModelMeasure
 	///
 	/// `origin`, `ground`, a bone name (its head), `bone.tail`, `bone.mid`, a body name (its
 	/// centre), `body.top|bottom|front|back|left|right|min|max`, `body.surface(x,y,+z)` (see
-	/// <see cref="TrySurface"/>; `.normal` after it gives the surface's direction instead), or a
+	/// <see cref="TrySurface"/>; `.normal` after it gives the surface's direction instead, `.euler`
+	/// gives the surface frame as Euler degrees), `body.station(s, angleDeg)` (see
+	/// <see cref="TryStation"/>; `.normal` / `.euler` after it work the same way), or a
 	/// literal `x,y,z`. Names match case-insensitively, and a space in a name can be written as an
 	/// underscore.
 	/// </summary>
@@ -217,16 +219,62 @@ public static class ModelMeasure
 			var close = name.IndexOf( ')', surface );
 			var tail = close > 0 ? name[(close + 1)..].Trim().ToLowerInvariant() : null;
 
-			if ( close < 0 || tail is not ("" or ".normal") )
+			if ( close < 0 || tail is not ("" or ".normal" or ".euler") )
 			{
-				reason = $"'{name}': write body.surface(x,y,+z), optionally followed by .normal.";
+				reason = $"'{name}': write body.surface(x,y,+z), optionally followed by .normal or .euler.";
 				return false;
 			}
 
 			if ( !TrySurface( studio, name[..surface], name[(surface + 9)..close], out var hit, out var normal, out reason ) )
 				return false;
 
-			point = tail == ".normal" ? normal : hit;
+			if ( tail == ".normal" ) { point = normal; return true; }
+			if ( tail == ".euler" )
+			{
+				if ( !TryLandmarkFrame( studio, name, out _, out _, out var euler, out reason ) ) return false;
+				point = euler;
+				return true;
+			}
+
+			point = hit;
+			return true;
+		}
+
+		// Lane E: body.station(s, angleDeg) — see TryStation. The tail is handled here so
+		// TryLandmark stays the single resolver for points, normals and frames alike.
+		var station = name.IndexOf( ".station(", StringComparison.OrdinalIgnoreCase );
+		if ( station > 0 )
+		{
+			var close = name.IndexOf( ')', station );
+			var tail = close > 0 ? name[(close + 1)..].Trim().ToLowerInvariant() : null;
+
+			if ( close < 0 || tail is not ("" or ".normal" or ".euler") )
+			{
+				reason = $"'{name}': write body.station(s, angleDeg), optionally followed by .normal or .euler.";
+				return false;
+			}
+
+			var parts = name[(station + 9)..close].Split( ',' ).Select( a => a.Trim() ).ToArray();
+			if ( parts.Length != 2
+				|| !float.TryParse( parts[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var s )
+				|| !float.TryParse( parts[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var angle ) )
+			{
+				reason = $"'{name}': station takes s (0..1 along the body) and an angle in degrees, e.g. body.station(0.17,78).";
+				return false;
+			}
+
+			if ( !TryStation( studio, name[..station], s, angle, out var hit, out var normal, out reason ) )
+				return false;
+
+			if ( tail == ".normal" ) { point = normal; return true; }
+			if ( tail == ".euler" )
+			{
+				if ( !TryLandmarkFrame( studio, name, out _, out _, out var euler, out reason ) ) return false;
+				point = euler;
+				return true;
+			}
+
+			point = hit;
 			return true;
 		}
 
@@ -368,6 +416,249 @@ public static class ModelMeasure
 		// Facing back up the line it was found along, whichever way the faces wind.
 		normal = Vec3.Dot( hit.Normal, dir ) > 0f ? -hit.Normal : hit.Normal;
 		return true;
+	}
+
+	/// <summary>
+	/// A point on a body's skin by normalised station, Lane E.
+	///
+	/// `s` runs 0..1 along the body's LONGEST bounding-box axis (the axis a fish, limb or
+	/// vehicle is longest on), from its minimum to its maximum on that axis. `angleDeg` runs
+	/// around the cross-section at that station: 0° is dorsal (+z, the top), 90° is the right
+	/// lateral side, 180° is ventral (the belly) and 270° is the left side. The ray is cast
+	/// from outside the body towards its cross-section centre, so the point is the skin in
+	/// that direction even when the body is curved or its spine is off-centre; a BVH nearest-
+	/// surface search is the fallback when the ray misses (a deep concavity at that station).
+	/// The normal is oriented outward, along the ray's direction.
+	/// </summary>
+	public static bool TryStation( PartStudio studio, string bodyName, float s, float angleDeg,
+		out Vec3 point, out Vec3 normal, out string reason )
+	{
+		point = normal = Vec3.Zero;
+		reason = null;
+
+		var body = FindBody( studio, bodyName );
+		if ( body?.Mesh is not { } mesh || mesh.Positions.Count == 0 )
+		{
+			reason = $"No body called '{bodyName}'. Bodies: {string.Join( ", ", studio.Bodies.Select( b => b.Name ?? b.Id ) )}.";
+			return false;
+		}
+
+		if ( s < 0f || s > 1f )
+		{
+			reason = $"station({s}, {angleDeg}): s is a share of the body's length, 0..1.";
+			return false;
+		}
+
+		var (min, max) = Bounds( mesh );
+		var size = max - min;
+		var axis = size.x >= size.y && size.x >= size.z ? 0 : size.y >= size.z ? 1 : 2;
+		var extent = axis == 0 ? size.x : axis == 1 ? size.y : size.z;
+		if ( extent <= 1e-6f )
+		{
+			reason = $"{body.Name ?? body.Id} has no length on any axis to take a station from.";
+			return false;
+		}
+
+		var longDir = axis == 0 ? new Vec3( 1, 0, 0 ) : axis == 1 ? new Vec3( 0, 1, 0 ) : new Vec3( 0, 0, 1 );
+		var t = (axis == 0 ? min.x : axis == 1 ? min.y : min.z) + s * extent;
+
+		// The cross-section centre: vertices in a thin slice at this station, so a curved
+		// body centres on its own flesh rather than on its bounding box. No slice (a gap
+		// between stations) falls back to the bounds centre.
+		var centre = (min + max) * 0.5f;
+		var slice = new List<Vec3>();
+		var halfSlice = MathF.Max( extent * 0.02f, 0.05f );
+		foreach ( var p in mesh.Positions )
+		{
+			var coord = axis == 0 ? p.x : axis == 1 ? p.y : p.z;
+			if ( MathF.Abs( coord - t ) <= halfSlice ) slice.Add( p );
+		}
+		if ( slice.Count > 0 )
+		{
+			var sum = Vec3.Zero;
+			foreach ( var p in slice ) sum += p;
+			var avg = sum / slice.Count;
+			centre = axis == 0 ? new Vec3( t, avg.y, avg.z )
+				: axis == 1 ? new Vec3( avg.x, t, avg.z )
+				: new Vec3( avg.x, avg.y, t );
+		}
+		else
+		{
+			centre = axis == 0 ? new Vec3( t, centre.y, centre.z )
+				: axis == 1 ? new Vec3( centre.x, t, centre.z )
+				: new Vec3( centre.x, centre.y, t );
+		}
+
+		// Cross-section axes: u starts at dorsal (+z, or +x when the long axis IS z) and v
+		// is chosen so that +90° lands on the right side for a forward-long body.
+		var u0 = axis == 2 ? new Vec3( 1, 0, 0 ) : new Vec3( 0, 0, 1 );
+		var u = u0 - longDir * Vec3.Dot( u0, longDir );
+		if ( u.LengthSquared < 1e-8f ) u = new Vec3( 1, 0, 0 ) - longDir * (axis == 0 ? 1f : 0f);
+		u = u.Normal;
+		var v = Vec3.Cross( longDir, u ).Normal;
+		u = Vec3.Cross( v, longDir ).Normal;
+
+		var radians = angleDeg * MathF.PI / 180f;
+		var dir = (u * MathF.Cos( radians ) + v * MathF.Sin( radians )).Normal;
+		var radius = MathF.Sqrt( MathF.Max( 0f, (size - longDir * extent).LengthSquared ) ) * 0.5f;
+		var origin = centre + dir * (radius + 1f);
+
+		if ( MeshRaycast.Raycast( mesh, origin, -dir ) is { } hit )
+		{
+			point = hit.Point;
+			normal = Vec3.Dot( hit.Normal, dir ) >= 0f ? hit.Normal.Normal : (-hit.Normal).Normal;
+			return true;
+		}
+
+		var bvh = MeshBVH.Build( mesh );
+		if ( bvh.NearestSurface( mesh, centre + dir * radius, radius * 2f + 2f ) is { } near )
+		{
+			point = near.Point;
+			normal = Vec3.Dot( near.Normal, dir ) >= 0f ? near.Normal.Normal : (-near.Normal).Normal;
+			return true;
+		}
+
+		reason = $"{body.Name ?? body.Id}.station({s}, {angleDeg}): no skin found in that direction at that station. Its bounds are {min.x:0.###},{min.y:0.###},{min.z:0.###} to {max.x:0.###},{max.y:0.###},{max.z:0.###}.";
+		return false;
+	}
+
+	/// <summary>
+	/// The surface frame at a landmark: the point, its outward normal, and the frame as
+	/// Euler degrees (rx, ry, rz — roll about x, pitch about y, yaw about z, in that
+	/// ZYX order). The frame's axes are Z = outward normal, Y = the body's long axis
+	/// projected onto the plane perpendicular to the normal, X = Y × Z, so a thing placed
+	/// with this frame sits flush on the skin with its long direction running along the
+	/// body. For a plain (non-surface) landmark the normal is the named side's direction,
+	/// or up when there is none.
+	/// </summary>
+	public static bool TryLandmarkFrame( PartStudio studio, string name, out Vec3 point, out Vec3 normal, out Vec3 euler, out string reason )
+	{
+		point = normal = euler = Vec3.Zero;
+		reason = null;
+		if ( string.IsNullOrWhiteSpace( name ) ) { reason = "No landmark named."; return false; }
+		name = name.Trim().TrimStart( '@' );
+
+		Vec3 longAxis;
+		var surface = name.IndexOf( ".surface(", StringComparison.OrdinalIgnoreCase );
+		var station = name.IndexOf( ".station(", StringComparison.OrdinalIgnoreCase );
+		if ( surface > 0 )
+		{
+			var close = name.IndexOf( ')', surface );
+			if ( close < 0 ) { reason = $"'{name}': write body.surface(x,y,+z)."; return false; }
+			var bodyName = name[..surface];
+			if ( !TrySurface( studio, bodyName, name[(surface + 9)..close], out point, out normal, out reason ) ) return false;
+			longAxis = LongAxisOf( studio, bodyName );
+			euler = FrameEuler( normal, longAxis );
+			return true;
+		}
+		if ( station > 0 )
+		{
+			var close = name.IndexOf( ')', station );
+			if ( close < 0 ) { reason = $"'{name}': write body.station(s, angleDeg)."; return false; }
+			var bodyName = name[..station];
+			var parts = name[(station + 9)..close].Split( ',' ).Select( a => a.Trim() ).ToArray();
+			if ( parts.Length != 2
+				|| !float.TryParse( parts[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var s )
+				|| !float.TryParse( parts[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var angle ) )
+			{
+				reason = $"'{name}': station takes s (0..1) and an angle in degrees.";
+				return false;
+			}
+			if ( !TryStation( studio, bodyName, s, angle, out point, out normal, out reason ) ) return false;
+			longAxis = LongAxisOf( studio, bodyName );
+			euler = FrameEuler( normal, longAxis );
+			return true;
+		}
+
+		if ( !TryLandmark( studio, name, out point, out reason ) ) return false;
+		var tail = name.Contains( '.' ) ? name[(name.LastIndexOf( '.' ) + 1)..].ToLowerInvariant() : "";
+		normal = tail switch
+		{
+			"top" => new Vec3( 0, 0, 1 ),
+			"bottom" => new Vec3( 0, 0, -1 ),
+			"front" => new Vec3( 1, 0, 0 ),
+			"back" => new Vec3( -1, 0, 0 ),
+			"left" => new Vec3( 0, 1, 0 ),
+			"right" => new Vec3( 0, -1, 0 ),
+			_ => new Vec3( 0, 0, 1 ),
+		};
+		longAxis = LongAxisOf( studio, null );
+		euler = FrameEuler( normal, longAxis );
+		return true;
+	}
+
+	static Vec3 LongAxisOf( PartStudio studio, string bodyName )
+	{
+		Body body = bodyName is null ? null : FindBody( studio, bodyName );
+		var mesh = body?.Mesh;
+		(Vec3 Min, Vec3 Max) bounds;
+		if ( mesh is not null ) bounds = Bounds( mesh );
+		else bounds = Bounds( studio.Bodies );
+		var size = bounds.Max - bounds.Min;
+		if ( size.LengthSquared < 1e-12f ) return new Vec3( 1, 0, 0 );
+		return size.x >= size.y && size.x >= size.z ? new Vec3( 1, 0, 0 )
+			: size.y >= size.z ? new Vec3( 0, 1, 0 ) : new Vec3( 0, 0, 1 );
+	}
+
+	/// <summary>The frame for a surface normal: X = Y × Z, Y = long axis projected off Z, Z = normal.</summary>
+	public static Xform FrameXform( Vec3 normal, Vec3 longAxis )
+	{
+		var z = normal.LengthSquared < 1e-12f ? new Vec3( 0, 0, 1 ) : normal.Normal;
+		var y = longAxis - z * Vec3.Dot( longAxis, z );
+		if ( y.LengthSquared < 1e-8f )
+		{
+			var fallback = MathF.Abs( z.z ) < 0.9f ? new Vec3( 0, 0, 1 ) : new Vec3( 1, 0, 0 );
+			y = fallback - z * Vec3.Dot( fallback, z );
+		}
+		y = y.Normal;
+		var x = Vec3.Cross( y, z ).Normal;
+		// Re-orthogonalise y so the frame is exact, not just close.
+		y = Vec3.Cross( z, x ).Normal;
+		return new Xform( x, y, z, Vec3.Zero );
+	}
+
+	/// <summary>Euler degrees (rx, ry, rz) for a surface frame, ZYX order.</summary>
+	public static Vec3 FrameEuler( Vec3 normal, Vec3 longAxis ) => FrameEuler( FrameXform( normal, longAxis ) );
+
+	/// <summary>Euler degrees (rx, ry, rz) for any frame, ZYX order.</summary>
+	public static Vec3 FrameEuler( Xform f )
+	{
+		// Rows of the matrix whose columns are the frame axes.
+		var r31 = f.X.z;
+		var pitch = MathF.Asin( Math.Clamp( -r31, -1f, 1f ) );
+		float yaw, roll;
+		if ( MathF.Abs( MathF.Cos( pitch ) ) > 1e-4f )
+		{
+			yaw = MathF.Atan2( f.X.y, f.X.x );
+			roll = MathF.Atan2( f.Y.z, f.Z.z );
+		}
+		else
+		{
+			yaw = 0f;
+			roll = MathF.Atan2( -f.Y.x, f.Y.y );
+		}
+		const float deg = 180f / MathF.PI;
+		return new Vec3( roll * deg, pitch * deg, yaw * deg );
+	}
+
+	/// <summary>Axis (unit) and angle in degrees for a surface frame, for axis+angle features.</summary>
+	public static (Vec3 Axis, float AngleDeg) FrameAxisAngle( Vec3 normal, Vec3 longAxis ) => FrameAxisAngle( FrameXform( normal, longAxis ) );
+
+	/// <summary>Axis (unit) and angle in degrees for any frame, for axis+angle features.</summary>
+	public static (Vec3 Axis, float AngleDeg) FrameAxisAngle( Xform f )
+	{
+		var trace = f.X.x + f.Y.y + f.Z.z;
+		var angle = MathF.Acos( Math.Clamp( (trace - 1f) * 0.5f, -1f, 1f ) );
+		if ( angle < 1e-4f ) return (new Vec3( 0, 0, 1 ), 0f);
+		var axis = new Vec3( f.Y.z - f.Z.y, f.Z.x - f.X.z, f.X.y - f.Y.x );
+		if ( axis.LengthSquared < 1e-12f )
+		{
+			// 180°: pick the axis of the largest diagonal entry.
+			axis = f.X.x >= f.Y.y && f.X.x >= f.Z.z ? new Vec3( 1, 0, 0 )
+				: f.Y.y >= f.Z.z ? new Vec3( 0, 1, 0 ) : new Vec3( 0, 0, 1 );
+			return (axis, 180f);
+		}
+		return (axis.Normal, angle * 180f / MathF.PI);
 	}
 
 	public static Body FindBody( PartStudio studio, string name )

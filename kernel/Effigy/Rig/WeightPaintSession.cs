@@ -30,6 +30,51 @@ public sealed class WeightEdit
 	}
 
 	internal IEnumerable<int> Vertices => _before.Keys;
+
+	/// <summary>
+	/// Scriptable rigid-island binding (roadmap J2): bind every small disconnected component
+	/// of <paramref name="mesh"/> 100% to its nearest bone, and hand back the undo entry for it.
+	/// The rule is <see cref="AutoWeights.RigidIslandPlan"/> with no name list: a component
+	/// smaller than <paramref name="maxFraction"/> of the mesh, and smaller than the largest
+	/// component, is rigid. A single-component mesh changes nothing and returns null, the same
+	/// convention <see cref="WeightPaintSession.EndStroke"/> uses for a no-op stroke.
+	/// This is the helper a future `weight` script verb calls. BuildScriptRig has no weight
+	/// verb today, so that wiring is a Lane P follow-up, deliberately not faked here.
+	/// </summary>
+	public static WeightEdit Run( PolyMesh mesh, SkinWeights weights, Skeleton skeleton, float maxFraction = 0.10f )
+	{
+		if ( mesh is null )
+			throw new ArgumentNullException( nameof( mesh ) );
+
+		if ( weights is null )
+			throw new ArgumentNullException( nameof( weights ) );
+
+		if ( weights.Count != mesh.VertexCount )
+			throw new ArgumentException( $"weights ({weights.Count}) and mesh ({mesh.VertexCount}) disagree" );
+
+		var options = new AutoWeightOptions { RigidIslandMaxFraction = maxFraction };
+		var plan = AutoWeights.RigidIslandPlan( mesh, skeleton, options, null );
+
+		if ( plan.Count == 0 )
+			return null;
+
+		var before = new Dictionary<int, BoneWeight[]>();
+		var after = new Dictionary<int, BoneWeight[]>();
+
+		foreach ( var (bone, vertices) in plan )
+		{
+			var single = new[] { new BoneWeight( bone, 1f ) };
+
+			foreach ( var v in vertices )
+			{
+				before[v] = weights[v];
+				weights[v] = single;
+				after[v] = single;
+			}
+		}
+
+		return new WeightEdit( before, after );
+	}
 }
 
 /// <summary>
@@ -106,6 +151,22 @@ public sealed class WeightPaintSession
 
 	/// <summary>Which bone the brush paints. -1 is nothing, and every kind but Smooth refuses.</summary>
 	public int Bone = -1;
+
+	/// <summary>
+	/// Bones the brush must not change (roadmap J2, Backlog 5.5 MUST). Distinct from the
+	/// single-influence vertices <see cref="LockedUnder"/> counts: those cannot move because
+	/// they have nowhere to put the weight, while these are a deliberate user lock. A locked
+	/// bone keeps its pre-stroke value on every vertex it touches, and the other influences
+	/// rescale to fill what is left, so the partition of unity survives. Painting the locked
+	/// bone itself is a no-op (see <see cref="Dab"/>).
+	/// </summary>
+	public HashSet<int> LockedBones = new();
+
+	public void LockBone( int bone ) => LockedBones.Add( bone );
+
+	public void UnlockBone( int bone ) => LockedBones.Remove( bone );
+
+	public bool IsLocked( int bone ) => LockedBones.Contains( bone );
 
 	/// <summary>Brush radius in world units, not pixels — the kernel has no screen.</summary>
 	public float Radius = 0.25f;
@@ -324,7 +385,8 @@ public sealed class WeightPaintSession
 
 			before[vertex] = _weights[vertex];
 			_weights[vertex] = auto[vertex];
-			after[vertex] = auto[vertex];
+			_weights[vertex] = RestoreLocked( before[vertex], _weights[vertex], LockedBones );
+			after[vertex] = _weights[vertex];
 		}
 
 		if ( before.Count == 0 )
@@ -352,10 +414,86 @@ public sealed class WeightPaintSession
 
 	void Dab( Vec3 point )
 	{
+		// A locked bone is not painted at all: painting it and undoing it would still move
+		// the other bones shares through renormalisation, so the stroke is skipped outright.
+		if ( Brush != WeightBrushKind.Smooth && LockedBones.Contains( Bone ) )
+			return;
+
 		var stroke = NewStroke();
 		stroke.Samples.Add( new WeightSample( point, Radius, Strength ) );
 
-		_undo.Absorb( WeightBrush.Apply( _mesh, _weights, stroke, mask: null, _bvh ) );
+		var sampleUndo = WeightBrush.Apply( _mesh, _weights, stroke, mask: null, _bvh );
+
+		_undo.Absorb( sampleUndo );
+
+		// Smooth has no one bone, so it can move a locked bone's share; put it back.
+		if ( LockedBones.Count > 0 )
+			foreach ( var (vertex, previous) in sampleUndo.Previous )
+				_weights[vertex] = RestoreLocked( previous, _weights[vertex], LockedBones );
+	}
+
+	/// <summary>
+	/// A vertex's influences with every locked bone reset to its pre-stroke value (0 when it
+	/// had none) and the rest rescaled to fill what is left. The partition of unity survives
+	/// because the rescale is proportional, the same invariant <see cref="WeightBrush"/> keeps.
+	/// </summary>
+	static BoneWeight[] RestoreLocked( BoneWeight[] before, BoneWeight[] current, HashSet<int> locked )
+	{
+		if ( locked is null || locked.Count == 0 )
+			return current;
+
+		var lockedBefore = new Dictionary<int, float>();
+
+		foreach ( var w in before )
+			if ( locked.Contains( w.Bone ) )
+				lockedBefore[w.Bone] = w.Weight;
+
+		var result = new Dictionary<int, float>();
+		var lockedSum = 0f;
+
+		foreach ( var w in current )
+		{
+			if ( !locked.Contains( w.Bone ) )
+				continue;
+
+			var v = lockedBefore.TryGetValue( w.Bone, out var pv ) ? pv : 0f;
+
+			if ( v > 0f )
+			{
+				result[w.Bone] = v;
+				lockedSum += v;
+			}
+		}
+
+		foreach ( var (bone, v) in lockedBefore )
+		{
+			if ( v > 0f && !result.ContainsKey( bone ) )
+			{
+				result[bone] = v;
+				lockedSum += v;
+			}
+		}
+
+		if ( lockedSum >= 1f )
+			return SkinWeights.Finish( result );
+
+		var rest = 0f;
+
+		foreach ( var w in current )
+			if ( !locked.Contains( w.Bone ) )
+				rest += w.Weight;
+
+		var scale = rest > 0f ? (1f - lockedSum) / rest : 0f;
+
+		foreach ( var w in current )
+		{
+			if ( locked.Contains( w.Bone ) || w.Weight <= 0f )
+				continue;
+
+			result[w.Bone] = w.Weight * scale;
+		}
+
+		return SkinWeights.Finish( result );
 	}
 
 	WeightStroke NewStroke() => new()

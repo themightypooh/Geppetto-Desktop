@@ -556,6 +556,64 @@ public sealed class SketchEllipse : SketchCurve
 /// The ends are handled by reflecting a phantom point outward rather than by duplicating the end
 /// point. Duplicating gives a zero-length segment, and the parameterisation divides by its length.
 /// </summary>
+/// <summary>
+/// A cubic Bezier segment (Backlog G14): two endpoints and two handles. Unlike the
+/// Catmull-Rom <see cref="SketchSpline"/>, the curve passes through its endpoints only —
+/// the handles shape it without lying on it — which is the curve a type designer or a
+/// car-body sketch actually wants. Tessellation steps follow the control-polygon length
+/// against the sketch tolerance, the same heuristic the spline uses.
+/// </summary>
+public sealed class SketchBezier : SketchCurve
+{
+	public int P0, P1, P2, P3;
+
+	public SketchBezier( int p0, int p1, int p2, int p3 )
+	{
+		P0 = p0; P1 = p1; P2 = p2; P3 = p3;
+	}
+
+	public override IEnumerable<int> PointRefs => new[] { P0, P1, P2, P3 };
+
+	public override (int A, int B) Endpoints => (P0, P3);
+
+	public override List<Vec2> Tessellate( Sketch sketch, float tolerance )
+	{
+		var a = sketch.Points[P0];
+		var b = sketch.Points[P1];
+		var c = sketch.Points[P2];
+		var d = sketch.Points[P3];
+
+		var poly = (b - a).Length + (c - b).Length + (d - c).Length;
+		var steps = tolerance > 0f
+			? Math.Clamp( (int)MathF.Ceiling( poly / MathF.Max( tolerance * 8f, 1e-6f ) ), 4, 256 )
+			: 16;
+
+		var output = new List<Vec2>( steps + 1 );
+
+		for ( var i = 0; i <= steps; i++ )
+		{
+			var t = i / (float)steps;
+			var u = 1f - t;
+
+			output.Add(
+				a * (u * u * u) +
+				b * (3f * u * u * t) +
+				c * (3f * u * t * t) +
+				d * (t * t * t) );
+		}
+
+		// Snap the ends onto the authored points: the arithmetic lands on them to within
+		// rounding, and a loop walk compares positions, so "within rounding" is not enough.
+		output[0] = a;
+		output[^1] = d;
+
+		return output;
+	}
+
+	public override SketchCurve Clone() =>
+		new SketchBezier( P0, P1, P2, P3 ) { Id = Id, Construction = Construction };
+}
+
 public sealed class SketchSpline : SketchCurve
 {
 	public List<int> Points = new();
@@ -812,6 +870,128 @@ public sealed class Sketch
 			throw new ArgumentException( "A spline needs at least 2 points" );
 
 		return Add( new SketchSpline( through.Select( AddPoint ).ToList(), closed ) );
+	}
+
+	/// <summary>Cubic Bezier through two endpoints shaped by two handles.</summary>
+	public SketchBezier AddBezier( Vec2 p0, Vec2 p1, Vec2 p2, Vec2 p3 ) =>
+		Add( new SketchBezier( AddPoint( p0 ), AddPoint( p1 ), AddPoint( p2 ), AddPoint( p3 ) ) );
+
+	/// <summary>
+	/// Vector text as stroke lines (Backlog G14): each glyph is drawn from a small built-in
+	/// 5x7 stroke font, so text can be swept, extruded as an engraving path, or lofted
+	/// without any font file on disk. <paramref name="height"/> is the cap height in sketch
+	/// units; <paramref name="spacing"/> is extra advance between glyphs in sketch units.
+	/// Lowercase maps to uppercase; characters with no glyph are skipped, not failed — a
+	/// label with one odd character should still draw the rest of itself.
+	/// </summary>
+	public List<SketchCurve> AddText( string text, Vec2 pos, float height, float spacing = 0f )
+	{
+		if ( string.IsNullOrEmpty( text ) || height <= 0f )
+			return new List<SketchCurve>();
+
+		var unit = height / 7f;
+		var advance = 6f * unit + spacing;
+		var added = new List<SketchCurve>();
+		var x = pos.x;
+
+		foreach ( var raw in text )
+		{
+			var ch = char.ToUpperInvariant( raw );
+
+			if ( !Glyphs.TryGetValue( ch, out var strokes ) )
+			{
+				x += advance;
+				continue;
+			}
+
+			foreach ( var stroke in strokes )
+			{
+				for ( var i = 0; i + 1 < stroke.Length; i++ )
+				{
+					var a = new Vec2( x + stroke[i].x * unit, pos.y + stroke[i].y * unit );
+					var b = new Vec2( x + stroke[i + 1].x * unit, pos.y + stroke[i + 1].y * unit );
+					added.Add( AddLine( a, b ) );
+				}
+			}
+
+			x += advance;
+		}
+
+		return added;
+	}
+
+	/// <summary>
+	/// One glyph: strokes of (x, y) grid points on a 5-wide, 7-tall grid, y up. A stroke is
+	/// one polyline; glyphs are deliberately blocky — this is an engraving font, not a
+	/// typeface, and it must survive tessellation into a sweep path without surprises.
+	/// </summary>
+	static readonly Dictionary<char, Vec2[][]> Glyphs = BuildGlyphs();
+
+	static Dictionary<char, Vec2[][]> BuildGlyphs()
+	{
+		// "x,y x,y|..." per glyph: strokes separated by '|', points by spaces.
+		var raw = new Dictionary<char, string>
+		{
+			['A'] = "0,0 0,5 2,6 4,5 4,0|1,2 3,2",
+			['B'] = "0,0 0,6 3,6 4,5 4,3 0,3|0,3 4,3 4,1 3,0 0,0",
+			['C'] = "4,5 3,6 1,6 0,5 0,1 1,0 3,0 4,1",
+			['D'] = "0,0 0,6 3,6 4,5 4,1 3,0 0,0",
+			['E'] = "4,6 0,6 0,0 4,0|0,3 3,3",
+			['F'] = "0,0 0,6 4,6|0,3 3,3",
+			['G'] = "4,5 3,6 1,6 0,5 0,1 1,0 3,0 4,1 4,3|4,3 2,3",
+			['H'] = "0,0 0,6|4,0 4,6|0,3 4,3",
+			['I'] = "2,0 2,6|1,6 3,6|1,0 3,0",
+			['J'] = "4,6 4,1 3,0 1,0 0,1 0,2",
+			['K'] = "0,0 0,6|4,6 0,3 4,0",
+			['L'] = "0,6 0,0 4,0",
+			['M'] = "0,0 0,6 2,3 4,6 4,0",
+			['N'] = "0,0 0,6 4,0 4,6",
+			['O'] = "1,0 0,1 0,5 1,6 3,6 4,5 4,1 3,0 1,0",
+			['P'] = "0,0 0,6 3,6 4,5 4,4 3,3 0,3",
+			['Q'] = "1,0 0,1 0,5 1,6 3,6 4,5 4,1 3,0 1,0|2,2 4,0",
+			['R'] = "0,0 0,6 3,6 4,5 4,4 3,3 0,3|0,3 4,0",
+			['S'] = "4,5 3,6 1,6 0,5 0,4 1,3 3,3 4,2 4,1 3,0 1,0 0,1",
+			['T'] = "0,6 4,6|2,6 2,0",
+			['U'] = "0,6 0,1 1,0 3,0 4,1 4,6",
+			['V'] = "0,6 2,0 4,6",
+			['W'] = "0,6 1,0 2,3 3,0 4,6",
+			['X'] = "0,0 4,6|4,0 0,6",
+			['Y'] = "0,6 2,3 4,6|2,3 2,0",
+			['Z'] = "0,6 4,6 0,0 4,0",
+			['0'] = "1,0 0,1 0,5 1,6 3,6 4,5 4,1 3,0 1,0|3,1 1,5",
+			['1'] = "2,0 2,6|1,5 2,6|0,0 4,0",
+			['2'] = "0,5 1,6 3,6 4,5 4,3 0,0 4,0",
+			['3'] = "1,6 3,6 4,5 4,3 2,3|2,3 4,3 4,1 3,0 1,0",
+			['4'] = "0,6 0,3 4,3|3,6 3,0",
+			['5'] = "4,6 0,6 0,3 3,3 4,2 4,1 3,0 0,0",
+			['6'] = "3,6 1,6 0,5 0,1 1,0 3,0 4,1 4,3 0,3",
+			['7'] = "0,6 4,6 2,0",
+			['8'] = "1,0 0,1 0,2 1,3 3,3 4,2 4,1 3,0 1,0|0,4 1,5 1,6 3,6 4,5 4,4 3,3 1,3",
+			['9'] = "0,3 4,3 4,5 3,6 1,6 0,5 0,3|4,3 4,1 3,0 1,0 0,1",
+			[' '] = "",
+			['-'] = "1,3 3,3",
+			['.'] = "2,0 2,1",
+		};
+
+		var glyphs = new Dictionary<char, Vec2[][]>();
+
+		foreach ( var (ch, text) in raw )
+		{
+			if ( string.IsNullOrEmpty( text ) )
+			{
+				glyphs[ch] = Array.Empty<Vec2[]>();
+				continue;
+			}
+
+			glyphs[ch] = text.Split( '|' ).Select( stroke => stroke.Split( ' ' ).Select( pt =>
+			{
+				var xy = pt.Split( ',' );
+				return new Vec2( float.Parse( xy[0], System.Globalization.CultureInfo.InvariantCulture ),
+					float.Parse( xy[1], System.Globalization.CultureInfo.InvariantCulture ) );
+			} ).ToArray() ).ToArray();
+		}
+
+		return glyphs;
 	}
 
 	public Sketch Clone() => new()

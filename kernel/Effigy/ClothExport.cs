@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Text;
 
@@ -364,6 +365,128 @@ public static class ClothExport
 
 		sb.Append( "}\n" );
 		return sb.ToString();
+	}
+
+
+	/// <summary>
+	/// HEADLESS LIVE-CLOTH EXPORT — the one call a script verb (`export_cloth PATH.cloth.json`,
+	/// wired by the API lane) makes, so a garment built in Effigy works in GarmentCloth without
+	/// going through the editor's Publish panel.
+	///
+	/// This is the assembly the editor already does (EffigyWindow.PublishLiveCloth) and the
+	/// clothing test mirrors, promoted into the kernel so it cannot drift from either: every
+	/// garment body in the studio becomes one merged sheet — outer wall only (MeshSolidify),
+	/// fur shells stripped, skin weights carried — pinned at the top band, layered with its
+	/// padding, and hung on capsules built from the non-garment bodies. The fabric comes from
+	/// the first garment feature found; a studio with no garment feature still exports, with
+	/// no Fabric block, and the component falls back to its own sliders.
+	///
+	/// Returns null, and writes nothing, when there is no garment cloth to export or no
+	/// capsule on the wearer — a file with no capsules is one GarmentCloth refuses to load,
+	/// so emitting it would only look like a success.
+	/// </summary>
+	public static string ExportLiveCloth( PartStudio studio, string material )
+	{
+		if ( studio is null )
+			return null;
+
+		var mesh = new PolyMesh();
+		var pins = new List<float>();
+		Settings fabric = null;
+		var layering = new Layering();
+		var pads = studio.Features.OfType<PaddingFeature>().ToList();
+		var regions = new BodyRegions.Map( studio.Rig );
+		var furSlots = studio.Features.OfType<FurFeature>()
+			.Where( f => !f.Suppressed && f.ResolvedSlot >= 0 )
+			.Select( f => f.ResolvedSlot ).ToHashSet();
+
+		foreach ( var body in studio.Bodies.Where( b => b.IsGarment ) )
+		{
+			var cloth = WithoutFur( MeshSolidify.OuterSheet( body.Mesh, out _ ) ?? body.Mesh, furSlots );
+
+			if ( cloth is null || cloth.VertexCount == 0 )
+				continue;
+
+			var offset = mesh.VertexCount;
+
+			foreach ( var pos in cloth.Positions )
+				mesh.AddVertex( pos );
+
+			foreach ( var face in cloth.Faces )
+				mesh.AddFace( face.Indices.Select( i => i + offset ).ToArray(), face.UVs, face.Material );
+
+			var feature = studio.Features.OfType<GarmentFeature>().FirstOrDefault( g => g.Id == body.FeatureId );
+			fabric ??= feature is null ? null : FabricSettings( feature.FabricValue, feature.Stiffness.Clamped );
+			pins.AddRange( PinTop( cloth, feature?.LivePinFraction ?? 0.12f ) );
+			layering.Add( cloth, body, pads, regions );
+		}
+
+		if ( mesh.VertexCount == 0 )
+			return null;
+
+		var worn = studio.Bodies.Where( b => !b.IsGarment ).Select( b => b.Mesh ).ToList();
+		var capsules = BoneCapsules.Build( new BodyRegions.Map( studio.Rig ), worn );
+
+		if ( capsules.Count == 0 )
+			return null;
+
+		return Write( mesh, capsules, studio.Rig, material, fabric, pins.ToArray(), layering );
+	}
+
+	/// <summary>ExportLiveCloth, written to <paramref name="path"/>. Returns the path, or null
+	/// when there was nothing to export (see ExportLiveCloth).</summary>
+	public static string ExportLiveClothToFile( PartStudio studio, string material, string path )
+	{
+		var json = ExportLiveCloth( studio, material );
+
+		if ( json is null )
+			return null;
+
+		File.WriteAllText( path, json );
+		return path;
+	}
+
+	/// <summary>Drop every face on a fur slot, keeping surviving vertices in place. Fur is a
+	/// shell over the cloth, not cloth itself, and the runtime simulates per vertex — a fur
+	/// shell in the file would hang in the air as a second garment. Matches the editor's
+	/// WithoutFur, so the headless file matches the panel's file vertex for vertex.</summary>
+	static PolyMesh WithoutFur( PolyMesh source, HashSet<int> furSlots )
+	{
+		if ( source is null || furSlots.Count == 0 || !source.Faces.Any( f => furSlots.Contains( f.Material ) ) )
+			return source;
+
+		var map = new int[source.VertexCount];
+		Array.Fill( map, -1 );
+
+		foreach ( var face in source.Faces )
+			if ( !furSlots.Contains( face.Material ) )
+				foreach ( var vi in face.Indices )
+					if ( (uint)vi < (uint)map.Length )
+						map[vi] = 0;
+
+		var cloth = new PolyMesh();
+		var skin = source.IsRigged ? new SkinWeights() : null;
+
+		for ( var vi = 0; vi < map.Length; vi++ )
+		{
+			if ( map[vi] < 0 )
+				continue;
+
+			map[vi] = cloth.VertexCount;
+			cloth.AddVertex( source.Positions[vi] );
+			skin?.Vertices.Add( source.Skin[vi] );
+		}
+
+		foreach ( var face in source.Faces )
+		{
+			if ( furSlots.Contains( face.Material ) || face.Indices.Any( vi => (uint)vi >= (uint)map.Length ) )
+				continue;
+
+			cloth.AddFace( face.Indices.Select( vi => map[vi] ).ToArray(), face.UVs, face.Material );
+		}
+
+		cloth.Skin = skin;
+		return cloth;
 	}
 
 	static string Escape( string s ) => s.Replace( "\\", "\\\\" ).Replace( "\"", "\\\"" );

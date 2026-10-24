@@ -117,6 +117,25 @@ public sealed class CorrectiveShapeKeyFeature : Feature, IShapeKeyStart
 
 	public MorphDriver Driver => ShapeKeyDriver.From( KeyName, Bone, Channel, Axis, OtherBone, RestAngle, TargetAngle, Ease, Clamp );
 
+	/// <summary>
+	/// Fill this feature's parameters from a driver built elsewhere — the bridge between
+	/// <see cref="PoseSpaceCorrective.AutoBuild"/> and a corrective shape key the document can
+	/// rebuild. Only parameter values move; no geometry is touched here.
+	/// </summary>
+	public void ApplyDriver( MorphDriver driver )
+	{
+		if ( driver is null )
+			throw new ArgumentNullException( nameof( driver ) );
+
+		Bone.Value = driver.Bone;
+		Channel.Index = (int)driver.Channel;
+		Axis.Index = (int)driver.Axis;
+		OtherBone.Value = driver.OtherBone ?? "";
+		RestAngle.Value = driver.Rest;
+		TargetAngle.Value = driver.Target;
+		Clamp.Value = driver.Clamp;
+	}
+
 	/// <summary>The driver as it is after a test pose measured it (Axis and Target from the pose).
 	/// Null until the feature has run.</summary>
 	public MorphDriver Measured { get; private set; }

@@ -91,6 +91,146 @@ public sealed class SculptEdit
 /// <see cref="EndStroke"/>. One stroke is therefore one revision and one undo entry, which is also
 /// what a user means by "undo".
 /// </summary>
+/// <summary>
+/// How a stroke turns a pointer path into brush samples.
+///
+/// <c>Space</c> is the historical behaviour: samples spaced along the path, brush in its
+/// default orientation. <c>Anchored</c> stamps once where the gesture started and carries
+/// the drag as its direction (a grab's hold). <c>DragDot</c> stamps once where the gesture
+/// ended, oriented along the drag (ZBrush's drag-and-stamp). <c>Roll</c> is Space with every
+/// sample's direction set to the path tangent, so strip/crease brushes lay along the path
+/// instead of across it. <c>Line</c> ignores wobble and samples the straight line from the
+/// first point to the last. <c>Lazy</c> is Space after the path has been run through the
+/// <see cref="StrokePath.Smooth"/> stabilizer — see <see cref="SculptSession.LazyRadius"/>.
+/// </summary>
+public enum StrokeMode
+{
+	Space,
+	Anchored,
+	DragDot,
+	Roll,
+	Line,
+	Lazy,
+}
+
+/// <summary>One expanded stroke sample: where the brush lands and which way it faces.</summary>
+public readonly struct StrokePathSample
+{
+	public readonly Vec3 Point;
+	public readonly Vec3 Direction;
+
+	public StrokePathSample( Vec3 point, Vec3 direction )
+	{
+		Point = point;
+		Direction = direction;
+	}
+}
+
+/// <summary>
+/// Expand a raw pointer path into brush samples for a <see cref="StrokeMode"/>.
+///
+/// This is kernel-side on purpose: the editor's pointer path is untestable, but the
+/// expansion is where every mode bug lives (a DragDot that stamps twice, a Line that
+/// keeps the wobble, a Lazy that lags a full radius behind). The session uses it for
+/// <see cref="SculptSession.Mode"/> and <see cref="SculptSession.LazyRadius"/>; a script
+/// stroke builds its samples the same way once OrganicFeatures wires the mode through.
+/// </summary>
+public static class StrokePath
+{
+	/// <summary>Expand <paramref name="points"/> into samples, spaced by <paramref name="spacing"/> where the mode resamples.</summary>
+	public static List<StrokePathSample> Expand( StrokeMode mode, IReadOnlyList<Vec3> points, float spacing, float lazyRadius = 0f )
+	{
+		var output = new List<StrokePathSample>();
+
+		if ( points is null || points.Count == 0 )
+			return output;
+
+		switch ( mode )
+		{
+			case StrokeMode.Anchored:
+				output.Add( new StrokePathSample( points[0], points.Count > 1 ? points[^1] - points[0] : Vec3.Zero ) );
+				return output;
+			case StrokeMode.DragDot:
+				output.Add( new StrokePathSample( points[^1], points.Count > 1 ? points[^1] - points[0] : Vec3.Zero ) );
+				return output;
+			case StrokeMode.Line:
+				return Resample( new[] { points[0], points[^1] }, spacing, tangent: true );
+			case StrokeMode.Lazy:
+				return Resample( Smooth( points, lazyRadius, spacing ), spacing, tangent: false );
+			case StrokeMode.Roll:
+				return Resample( points, spacing, tangent: true );
+			default:
+				return Resample( points, spacing, tangent: false );
+		}
+	}
+
+	/// <summary>
+	/// Exponential moving-average stabilizer: each smoothed point moves only a fraction
+	/// <c>k = 1 - exp(-spacing / lazyRadius)</c> of the way toward the raw point, so jitter
+	/// smaller than the radius is damped and a deliberate move still arrives. A radius of
+	/// zero or less returns the path unchanged.
+	/// </summary>
+	public static List<Vec3> Smooth( IReadOnlyList<Vec3> points, float lazyRadius, float spacing )
+	{
+		var output = new List<Vec3>( points.Count );
+
+		if ( points.Count == 0 )
+			return output;
+
+		if ( lazyRadius <= 0f || spacing <= 0f )
+		{
+			output.AddRange( points );
+			return output;
+		}
+
+		var k = Math.Clamp( 1f - MathF.Exp( -spacing / lazyRadius ), 0.05f, 0.9f );
+		var smoothed = points[0];
+		output.Add( smoothed );
+
+		for ( var i = 1; i < points.Count; i++ )
+		{
+			smoothed += ( points[i] - smoothed ) * k;
+			output.Add( smoothed );
+		}
+
+		return output;
+	}
+
+	static List<StrokePathSample> Resample( IReadOnlyList<Vec3> points, float spacing, bool tangent )
+	{
+		var output = new List<StrokePathSample>();
+		var step = MathF.Max( spacing, 1e-4f );
+		var path = new List<Vec3> { points[0] };
+
+		for ( var i = 1; i < points.Count; i++ )
+		{
+			var a = points[i - 1];
+			var b = points[i];
+			var n = Math.Max( 1, (int)MathF.Ceiling( ( b - a ).Length / step ) );
+
+			for ( var k = 1; k <= n; k++ )
+				path.Add( a + ( b - a ) * ( k / (float)n ) );
+		}
+
+		for ( var i = 0; i < path.Count; i++ )
+		{
+			Vec3 dir = Vec3.Zero;
+
+			if ( tangent )
+			{
+				if ( i + 1 < path.Count && ( path[i + 1] - path[i] ).LengthSquared > 1e-12f )
+					dir = path[i + 1] - path[i];
+				else if ( i > 0 && ( path[i] - path[i - 1] ).LengthSquared > 1e-12f )
+					dir = path[i] - path[i - 1];
+			}
+
+			output.Add( new StrokePathSample( path[i], dir ) );
+		}
+
+		return output;
+	}
+}
+
 public sealed class SculptSession
 {
 	readonly MultiresSculpt _sculpt;
@@ -106,6 +246,8 @@ public sealed class SculptSession
 	List<EdgeKey>[] _neighbors;
 	BrushUndo _undo;
 	Vec3 _lastSample;
+	Vec3 _lazyPoint;
+	bool _lazyInit;
 
 	// The mask as the stroke found it. Diffed against the mask afterwards, so what goes on the undo
 	// stack is only what the stroke actually touched — the same sparse promise the geometry side
@@ -235,6 +377,17 @@ public sealed class SculptSession
 	/// dabs reading as one continuous stroke.
 	/// </summary>
 	public float Spacing = 0.25f;
+
+	/// <summary>How this session expands a pointer path into samples. See <see cref="StrokeMode"/>.</summary>
+	public StrokeMode Mode = StrokeMode.Space;
+
+	/// <summary>
+	/// Lazy-bridge radius in world units: the exponential moving-average stabilizer for hand
+	/// sculpting (Backlog G13). Zero is off. When set — or when <see cref="Mode"/> is
+	/// <see cref="StrokeMode.Lazy"/> — <see cref="MoveTo"/> steers a smoothed cursor toward
+	/// the pointer instead of following it raw, so hand tremor does not carve into the model.
+	/// </summary>
+	public float LazyRadius = 0f;
 
 	/// <summary>
 	/// Most samples one pointer move may be split into. A drag right across the model in one frame
@@ -415,6 +568,8 @@ public sealed class SculptSession
 		_frames = Effigy.Brush.UsesSurfaceFrames( Brush ) ? SculptFrames.Build( _working ) : null;
 
 		_lastSample = hit.Value.Point;
+		_lazyPoint = hit.Value.Point;
+		_lazyInit = true;
 		_maskBefore = Masking ? (float[])MaskFor( Level ).Values.Clone() : null;
 		_strokeMask = Masking ? null : StrokeMask( hit.Value.Point, hit.Value.Normal );
 		Dab( hit.Value.Point, hit.Value.Normal, Vec3.Zero );
@@ -442,6 +597,26 @@ public sealed class SculptSession
 			return 0;
 
 		var target = hit.Value.Point;
+
+		// Lazy stabilizer: steer a smoothed cursor toward the pointer. A jitter step moves
+		// the smoothed cursor only a fraction of the way, so it may earn no sample at all —
+		// that is the stabilizer working, not a dropped event.
+		if ( Mode == StrokeMode.Lazy || LazyRadius > 0f )
+		{
+			var radius = LazyRadius > 0f ? LazyRadius : Radius * 0.5f;
+
+			if ( !_lazyInit )
+			{
+				_lazyPoint = _lastSample;
+				_lazyInit = true;
+			}
+
+			var dist = ( target - _lazyPoint ).Length;
+			var k = dist > 1e-9f ? Math.Clamp( 1f - MathF.Exp( -dist / MathF.Max( radius, 1e-6f ) ), 0.05f, 0.9f ) : 0f;
+			_lazyPoint += ( target - _lazyPoint ) * k;
+			target = _lazyPoint;
+		}
+
 		var travelled = (target - _lastSample).Length;
 		var spacing = MathF.Max( Radius * Spacing, 1e-6f );
 
@@ -487,6 +662,7 @@ public sealed class SculptSession
 		_undo = null;
 		_maskBefore = null;
 		_strokeMask = null;
+		_lazyInit = false;
 
 		var edit = maskBefore is not null
 			? CommitMask( level, maskBefore )
@@ -557,6 +733,7 @@ public sealed class SculptSession
 		_undo = null;
 		_maskBefore = null;
 		_strokeMask = null;
+		_lazyInit = false;
 	}
 
 	/// <summary>

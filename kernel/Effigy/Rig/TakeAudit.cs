@@ -365,6 +365,261 @@ public sealed class TakeAudit
 		return index < 0 ? null : EyeCamera.At( Pose( frame )[index], fieldOfView );
 	}
 
+
+	/// <summary>
+	/// One concrete repair for a failing check: which bone to move, and by what vector, at the
+	/// frame where the check went deepest.
+	///
+	/// For a part against a part or a prop, <see cref="Push"/> is exact: its length is
+	/// <see cref="MeshClash.Report.Depth"/> at that frame and its direction pushes the skinned
+	/// part out of the other surface, so moving the named bone's vertices by Push (in model
+	/// space) puts the deepest point back on the surface. A hair more clears contact; Push
+	/// itself is the minimum, not a margin.
+	///
+	/// For a part against itself, <see cref="MeshClash"/> reports crossings but no depth, so
+	/// <see cref="ExactDepth"/> is false and <see cref="Push"/>'s length is a bounding-sphere
+	/// overlap estimate for the first crossing triangle pair, not a measured penetration. The
+	/// direction (the two crossing triangles' centroids apart) and the bone are exact; the
+	/// distance is a starting push to try, then re-audit.
+	/// </summary>
+	public sealed class Fix
+	{
+		public string Check = "";
+		public float Frame = -1;
+		public float Depth;
+		public bool ExactDepth;
+		/// <summary>Which side went deepest: "part" (a part vertex inside the other solid),
+		/// "other" (an other/prop vertex behind the part's surface), "self" (a self crossing).</summary>
+		public string Side = "";
+		public string Bone = "";
+		public Vec3 Push;
+		public Vec3 Point;
+		public string Note = "";
+
+		public override string ToString() =>
+			Invariant( $"{Check}: move {Bone} by {Push} at frame {Frame:0.##}" )
+			+ (ExactDepth ? Invariant( $" (depth {Depth:0.###})" ) : " (self-crossing: push length is an estimate)")
+			+ (Note.Length > 0 ? $" — {Note}" : "");
+	}
+
+	/// <summary>
+	/// A fix per failing check in <paramref name="audit"/>: the exact bone and outward push
+	/// vector needed to clear a self-collision or prop penetration at that check's
+	/// <see cref="Check.WorstDepthFrame"/> (or <see cref="Check.WorstFrame"/> when the check
+	/// carries no depth, as self checks do not).
+	///
+	/// This re-skins the model at the worst frame and re-runs the clash there, rather than
+	/// trusting anything the audit stored: the audit keeps only depths and frames, not which
+	/// triangle went deepest, and a push computed from a stored depth alone would not know
+	/// which bone it belongs to. The re-run builds its trees exactly the way <see cref="Run"/>
+	/// does — bind pose first, then refit to the frame's skin — because MeshClash's nearest
+	/// search breaks ties between triangles sharing a vertex by traversal order, and a fresh
+	/// tree built on skinned positions orders its leaves differently: the same geometry can
+	/// otherwise report a different depth here than the audit did (seen live: 0.5 vs 1.87
+	/// on one fixture, where the audit's refit tree and a fresh tree picked different faces
+	/// through one shared corner vertex). <paramref name="clip"/> and <paramref name="rig"/> default to
+	/// this audit's own clip and the dump's skeleton when null; pass them explicitly when the
+	/// result came from a different clip object than this audit was built with.
+	/// </summary>
+	public List<Fix> SuggestFixes( Result audit, RigAnimFile clip, Skeleton rig )
+	{
+		if ( audit is null ) throw new ArgumentNullException( nameof( audit ) );
+
+		var useClip = clip ?? Clip;
+		var useRig = rig ?? Dump.Skeleton;
+		var fixes = new List<Fix>();
+
+		foreach ( var check in audit.Checks )
+		{
+			if ( check.FramesOver.Count == 0 ) continue;
+
+			var frame = check.WorstDepthFrame >= 0f ? check.WorstDepthFrame : check.WorstFrame;
+			if ( frame < 0f ) continue;
+
+			var fix = FixFor( check, frame, useClip, useRig );
+			if ( fix is not null ) fixes.Add( fix );
+		}
+
+		return fixes;
+	}
+
+	/// <summary>Convenience: fixes for this audit's own clip and skeleton.</summary>
+	public List<Fix> SuggestFixes( Result audit ) => SuggestFixes( audit, null, null );
+
+	Fix FixFor( Check check, float frame, RigAnimFile useClip, Skeleton useRig )
+	{
+		var pose = RigAnimFile.ModelSpace( Dump.Skeleton, useClip.SampleLocal( Dump.Skeleton, frame ) );
+		var skin = Dump.Meshes.Select( m => Dump.Deform( m, pose ) ).ToArray();
+
+		if ( check.Name.EndsWith( " x itself", StringComparison.Ordinal ) )
+		{
+			var partName = check.Name[..^" x itself".Length];
+			var partIndex = PartIndex( partName );
+			if ( partIndex < 0 ) return null;
+
+			var part = Dump.Meshes[partIndex];
+			var set = PosedSet( part, skin[partIndex] );
+			var report = MeshClash.Self( set, int.MaxValue );
+			if ( report.Crossings == 0 || report.Pairs.Count == 0 ) return null;
+
+			var pair = report.Pairs[0];
+			var centreA = (set.A( pair.TriangleA ) + set.B( pair.TriangleA ) + set.C( pair.TriangleA )) * (1f / 3f);
+			var centreB = (set.A( pair.TriangleB ) + set.B( pair.TriangleB ) + set.C( pair.TriangleB )) * (1f / 3f);
+			var apart = centreA - centreB;
+			var apartDirection = apart.LengthSquared > 1e-12f ? apart.Normal : new Vec3( 1f, 0f, 0f );
+
+			// No measured depth exists for a self crossing; the sphere overlap of the two
+			// triangles is the honest estimate, and it is zero only when the triangles merely
+			// touch at a point the clash test already counted as crossing.
+			var radiusA = MathF.Max( (set.A( pair.TriangleA ) - centreA).Length,
+				MathF.Max( (set.B( pair.TriangleA ) - centreA).Length, (set.C( pair.TriangleA ) - centreA).Length ) );
+			var radiusB = MathF.Max( (set.A( pair.TriangleB ) - centreB).Length,
+				MathF.Max( (set.B( pair.TriangleB ) - centreB).Length, (set.C( pair.TriangleB ) - centreB).Length ) );
+			var magnitude = MathF.Max( 0f, radiusA + radiusB - apart.Length );
+
+			return new Fix
+			{
+				Check = check.Name,
+				Frame = frame,
+				Depth = 0f,
+				ExactDepth = false,
+				Side = "self",
+				Bone = DominantBone( part, set.Corners[pair.TriangleA * 3], skin[partIndex], pose, useRig ),
+				Push = apartDirection * magnitude,
+				Point = centreA,
+				Note = "self-crossing: separate the two crossing regions along Push, then re-audit; the length is an estimate, not a measured depth",
+			};
+		}
+
+		var (aName, bName) = SplitName( check.Name );
+		var aIndex = PartIndex( aName );
+		if ( aIndex < 0 ) return null;
+
+		var aPart = Dump.Meshes[aIndex];
+		var aSet = PosedSet( aPart, skin[aIndex] );
+
+		TriangleSet bSet;
+		if ( bName.Contains( '/' ) )
+		{
+			var slash = bName.IndexOf( '/' );
+			var prop = Dump.Props.FirstOrDefault( p => p.Name == bName[..slash] );
+			var mesh = prop?.Meshes.FirstOrDefault( m => m.Name == bName[(slash + 1)..] );
+			if ( prop is null || mesh is null ) return null;
+			bSet = TriangleSet.From( prop.Placed( mesh ), mesh.Triangles );
+		}
+		else
+		{
+			var bIndex = PartIndex( bName );
+			if ( bIndex < 0 ) return null;
+			bSet = PosedSet( Dump.Meshes[bIndex], skin[bIndex] );
+		}
+
+		var clash = MeshClash.Between( aSet, bSet, int.MaxValue );
+		if ( clash.Clear || clash.Depth <= 0f ) return null;
+
+		// Whichever side went deeper decides which point the push belongs to. A deeper on the
+		// part: push the part's deepest vertex back out through the other's surface. Deeper on
+		// the other side: push the part's nearest surface point away from the other's deepest
+		// vertex. Either way the push moves the part, never the prop or the other part.
+		Vec3 pointOnPart, direction;
+		var side = clash.DepthAIntoB >= clash.DepthBIntoA ? "part" : "other";
+		if ( clash.DepthAIntoB >= clash.DepthBIntoA )
+		{
+			pointOnPart = clash.Deepest;
+			var (nearest, nearestTri, _) = bSet.Nearest( pointOnPart );
+			var delta = nearest - pointOnPart;
+			direction = delta.LengthSquared > 1e-12f ? delta.Normal : bSet.Normal( nearestTri );
+		}
+		else
+		{
+			var (nearest, nearestTri, _) = aSet.Nearest( clash.Deepest );
+			pointOnPart = nearest;
+			var delta = nearest - clash.Deepest;
+			direction = delta.LengthSquared > 1e-12f ? delta.Normal : aSet.Normal( nearestTri );
+		}
+
+		var vertex = NearestVertex( skin[aIndex], pointOnPart );
+
+		return new Fix
+		{
+			Check = check.Name,
+			Frame = frame,
+			Depth = clash.Depth,
+			ExactDepth = true,
+			Side = side,
+			Bone = DominantBone( aPart, vertex, skin[aIndex], pose, useRig ),
+			Push = direction * clash.Depth,
+			Point = pointOnPart,
+			Note = "move the named bone's vertices by Push (model space) to clear this check at this frame",
+		};
+	}
+
+	/// <summary>Run's tree discipline: build on the bind pose, then refit to the frame's
+	/// skin. A tree built fresh on skinned positions orders its leaves differently and can
+	/// report a different depth for the same geometry (see <see cref="SuggestFixes"/>).</summary>
+	static TriangleSet PosedSet( ModelDump.Part part, Vec3[] skinned )
+	{
+		var set = TriangleSet.From( part.Positions, part.Triangles );
+		set.Refit( skinned );
+		return set;
+	}
+
+	int PartIndex( string name )
+	{
+		for ( var i = 0; i < Dump.Meshes.Count; i++ )
+			if ( PartName( i ) == name ) return i;
+		return -1;
+	}
+
+	static int NearestVertex( Vec3[] positions, Vec3 point )
+	{
+		var best = 0;
+		var bestDistance = float.MaxValue;
+
+		for ( var i = 0; i < positions.Length; i++ )
+		{
+			var d = (positions[i] - point).LengthSquared;
+			if ( d < bestDistance ) { bestDistance = d; best = i; }
+		}
+
+		return best;
+	}
+
+	/// <summary>
+	/// The bone that owns <paramref name="vertex"/>: its strongest skin weight, or, for a
+	/// static mesh, the bone whose head sits nearest the vertex at this pose.
+	/// </summary>
+	string DominantBone( ModelDump.Part part, int vertex, Vec3[] skinned, Xform[] pose, Skeleton rig )
+	{
+		if ( part.Weights is not null && vertex >= 0 && vertex < part.Weights.Count )
+		{
+			var weights = part.Weights[vertex];
+			var best = -1;
+			var bestWeight = 0f;
+
+			foreach ( var w in weights )
+				if ( w.Weight > bestWeight ) { bestWeight = w.Weight; best = w.Bone; }
+
+			if ( best >= 0 )
+				return best < rig.Count ? rig.Bones[best].Name : DumpName( best );
+		}
+
+		// Static mesh, or a vertex with no positive weight: nearest bone head wins.
+		var point = vertex >= 0 && vertex < skinned.Length ? skinned[vertex] : Vec3.Zero;
+		var nearest = 0;
+		var nearestDistance = float.MaxValue;
+
+		for ( var i = 0; i < pose.Length && i < rig.Count; i++ )
+		{
+			var d = (pose[i].Origin - point).LengthSquared;
+			if ( d < nearestDistance ) { nearestDistance = d; nearest = i; }
+		}
+
+		return rig.Count > 0 ? rig.Bones[nearest].Name : "";
+	}
+
+	string DumpName( int index ) => index >= 0 && index < Dump.Skeleton.Count ? Dump.Skeleton.Bones[index].Name : "";
+
 	/// <summary>"glove_R x hard_R/hab_rubber" back into its two names.</summary>
 	static (string, string) SplitName( string name )
 	{

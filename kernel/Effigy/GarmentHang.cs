@@ -304,4 +304,50 @@ public static class GarmentHang
 
 		return hull.ToArray();
 	}
+	/// <summary>Options for a standalone deterministic drape bake.</summary>
+	public sealed class SettleOptions
+	{
+		/// <summary>Fixed-step settle frames, 40..120 for a cape or sleeve (roadmap range).</summary>
+		public int Steps = 60;
+
+		/// <summary>How far off the collider the cloth sits, in the same units as the mesh.</summary>
+		public float Clearance = 0.05f;
+
+		/// <summary>0 jersey to 1 canvas, mapped to stretch compliance exactly like GarmentFit.Drape.</summary>
+		public float Stiffness = 0.8f;
+
+		/// <summary>How far a particle may wander from where it started. 0 is no limit, which is
+		/// what a standalone drape needs: a cape hung a few inches off its body must be allowed
+		/// to fall those inches, where GarmentFit's fitted garments only ever settle the last inch.</summary>
+		public float Tether = 0f;
+	}
+
+	/// <summary>
+	/// Bake a cloth mesh onto colliders with the kernel's fixed-step cloth solver, in place.
+	/// Deterministic: same mesh, colliders, pins and options give the same positions on every
+	/// run — no randomness, no wall-clock, no GPU. This is the settle DrapeFeature uses, and
+	/// the same solver GarmentFit.Drape already uses for fitted garments, factored out so a
+	/// cape, apron or torn flap can drape without being a garment recipe first.
+	/// </summary>
+	public static void Settle( PolyMesh garment, IReadOnlyList<PolyMesh> colliders, IEnumerable<int> pinned, SettleOptions o )
+	{
+		if ( garment is null || garment.VertexCount == 0 )
+			return;
+
+		o ??= new SettleOptions();
+		var sim = ClothSim.WithFabric( garment, pinned, Fabric.Cotton );
+		sim.Thickness = MathF.Max( o.Clearance, 1e-3f );
+		var stretch = MathF.Pow( 10f, -7f + 4f * (1f - Math.Clamp( o.Stiffness, 0f, 1f )) );
+		sim.StretchCompliance = MathF.Max( sim.StretchCompliance, 1e-7f ) / 1e-5f * stretch;
+		sim.BendCompliance = MathF.Max( sim.BendCompliance, sim.StretchCompliance * 10f );
+		sim.Tether = o.Tether;
+		sim.SetColliders( colliders );
+
+		// ClothSim.Run takes seconds at 60 fps; Steps is frames, so this is exact, not a rate.
+		sim.Run( Math.Max( 0, o.Steps ) / 60f );
+
+		for ( var i = 0; i < garment.VertexCount; i++ )
+			garment.Positions[i] = sim.Positions[i];
+	}
+
 }

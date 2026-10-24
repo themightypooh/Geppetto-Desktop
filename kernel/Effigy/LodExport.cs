@@ -25,6 +25,13 @@ public static class LodExport
 	/// <summary>The editor's pair: half and a quarter of the triangles.</summary>
 	public static readonly float[] DefaultRatios = { 0.5f, 0.25f };
 
+	/// <summary>
+	/// Lane H: the full LOD0–LOD3 ladder. Each level halves the triangles of the one before
+	/// it, so a distant model costs an eighth of the original. <see cref="BuildLevels"/> picks
+	/// the first N of these; the old two-level DefaultRatios stay untouched for existing callers.
+	/// </summary>
+	public static readonly float[] DefaultRatiosLod3 = { 0.5f, 0.25f, 0.125f };
+
 	/// <summary>Below this many triangles a model's levels save next to nothing.</summary>
 	public const int MinimumTriangles = 64;
 
@@ -68,6 +75,38 @@ public static class LodExport
 	/// The levels as meshes, without writing anything. <paramref name="distances"/> may be null
 	/// (the defaults) or one rising distance per ratio.
 	/// </summary>
+	/// <summary>
+	/// Lane H: LOD0 plus <paramref name="lodLevels"/> decimated levels, in order, with the
+	/// standard halving ratios and the standard switch distances. lodLevels is 0–3: 0 means
+	/// the full model alone, 3 means the full LOD0–LOD3 ladder. Anything else throws rather
+	/// than silently building a ladder nobody asked for.
+	/// </summary>
+	public static List<Level> BuildLevels( PolyMesh mesh, int lodLevels, IReadOnlyList<float> distances = null )
+	{
+		if ( lodLevels < 0 || lodLevels > 3 )
+			throw new ArgumentException( "lodLevels must be 0, 1, 2 or 3", nameof( lodLevels ) );
+		if ( mesh is null )
+			throw new ArgumentNullException( nameof( mesh ) );
+		var ratios = new float[lodLevels];
+		for ( var i = 0; i < lodLevels; i++ )
+			ratios[i] = DefaultRatiosLod3[i];
+		// Build only returns the DECIMATED levels, so LOD0 — the full mesh, at distance 0 —
+		// is prepended here. Without it a "LOD0–LOD3 ladder" would quietly start at LOD1.
+		// Triangles, not faces: a quad face is two triangles, and the decimated levels
+		// count triangles, so counting LOD0's faces would make LOD1 look unchanged on a
+		// quad mesh (384 quads ARE 768 triangles; half of that is 384 triangles).
+		var lod0Triangles = 0;
+		foreach ( var face in mesh.Faces )
+			lod0Triangles += Math.Max( 0, face.Count - 2 );
+		var levels = new List<Level>
+		{
+			new() { Index = 0, Ratio = 1f, Mesh = mesh, Triangles = lod0Triangles,
+				ReachedTarget = true, SwitchDistance = 0f },
+		};
+		levels.AddRange( Build( mesh, ratios, distances ) );
+		return levels;
+	}
+
 	public static List<Level> Build( PolyMesh mesh, IReadOnlyList<float> ratios, IReadOnlyList<float> distances = null )
 	{
 		if ( mesh is null )

@@ -26,6 +26,13 @@ namespace Effigy;
 /// way round; the limb's side faces walk its open base the other way round when both are seen
 /// from outside. Pairing hole vertex i with limb vertex s − i keeps every bridge quad wound the
 /// same way as its neighbours; the offset s is the turn that makes the rungs shortest.
+///
+/// OVERSIZED FOOTPRINTS GET INSET, NOT FLARED. When the hole's perimeter is more than 1.75x
+/// the limb base's, the patch's border is pulled toward the patch centre (a 1-ring of quads
+/// between the old border and the new, smaller hole) before bridging, so a small limb on coarse
+/// parent quads does not flare into a trumpet. After bridging, <paramref name="smoothRings"/>
+/// rounds of surface-tangent Laplacian relaxation run over the bridge loops and their 1-ring
+/// neighbours, so the limb flows out of the parent instead of creasing at the seam.
 /// </summary>
 public static class MeshBranch
 {
@@ -40,8 +47,14 @@ public static class MeshBranch
 		/// <summary>The patch taken out of the parent: faces round, faces along.</summary>
 		public int PatchA, PatchB;
 
-		/// <summary>The hole's perimeter over the limb base's. Far from 1, the bridge flares.</summary>
+		/// <summary>The hole's perimeter over the limb base's, after any inset. Far from 1, the bridge flares.</summary>
 		public float FootprintRatio = 1f;
+
+		/// <summary>The hole's perimeter over the limb base's before any inset.</summary>
+		public float PreInsetRatio = 1f;
+
+		/// <summary>True when the hole was inset to fit the limb base (footprint over 1.75).</summary>
+		public bool InsetApplied;
 
 		/// <summary>The limb's base sits inside the parent: the bridge folds back through it.</summary>
 		public bool StartsInside;
@@ -51,7 +64,9 @@ public static class MeshBranch
 	/// <param name="child">The limb, closed.</param>
 	/// <param name="childBaseFaces">The limb faces to open at its base — its near cap. Their border
 	/// must be one loop of an even number of edges.</param>
-	public static Result Join( PolyMesh parent, PolyMesh child, IReadOnlyCollection<int> childBaseFaces )
+	/// <param name="smoothRings">Tangent-relaxation rounds over the bridge loops and their
+	/// 1-ring neighbours; 0 leaves the bridge exactly as built.</param>
+	public static Result Join( PolyMesh parent, PolyMesh child, IReadOnlyCollection<int> childBaseFaces, int smoothRings = 2 )
 	{
 		var result = new Result();
 
@@ -136,7 +151,35 @@ public static class MeshBranch
 			return Refuse( result, "The opening in the body does not match the limb.",
 				hole is null ? holeWhy : $"The opening has {hole.Count} edges and the limb {n} sides." );
 
-		result.FootprintRatio = Perimeter( parent, hole ) / MathF.Max( basePerimeter, 1e-6f );
+		result.PreInsetRatio = Perimeter( parent, hole ) / MathF.Max( basePerimeter, 1e-6f );
+		result.FootprintRatio = result.PreInsetRatio;
+
+		// Inside or outside: the rungs should leave the parent along its outward normal.
+		// (Measured on the original patch, before any inset moves the hole.)
+		var outward = 0f;
+
+		foreach ( var fi in patch )
+		{
+			var face = parent.Faces[fi];
+			outward += Vec3.Dot( parent.FaceNormal( face ), baseCentre - parent.FaceCentroid( face ) );
+		}
+
+		result.StartsInside = outward < 0f;
+
+		// Oversized footprint: inset the hole toward the patch centre until its perimeter
+		// matches the limb base (capped at a 0.6 pull, so the hole never collapses), with a
+		// 1-ring of quads between the old border and the new hole. The parent stays all quads.
+		if ( result.FootprintRatio > 1.75f && TryInset( parent, patch, hole, result.FootprintRatio, basePerimeter, out var insetParent, out var insetHole ) )
+		{
+			parent = insetParent;
+			hole = insetHole;
+			// The inset parent already excludes the patch faces, and its face indices no
+			// longer line up with the original patch set, so the build loop must not skip
+			// by patch index any more.
+			patch.Clear();
+			result.InsetApplied = true;
+			result.FootprintRatio = Perimeter( parent, hole ) / MathF.Max( basePerimeter, 1e-6f );
+		}
 
 		// Shortest rungs: hole vertex i meets limb vertex (s - i) mod n.
 		var bestS = 0;
@@ -156,18 +199,8 @@ public static class MeshBranch
 			}
 		}
 
-		// Inside or outside: the rungs should leave the parent along its outward normal.
-		var outward = 0f;
-
-		foreach ( var fi in patch )
-		{
-			var face = parent.Faces[fi];
-			outward += Vec3.Dot( parent.FaceNormal( face ), baseCentre - parent.FaceCentroid( face ) );
-		}
-
-		result.StartsInside = outward < 0f;
-
-		// Build: the parent minus the patch, the limb minus its base, and the band between.
+		// Build: the parent minus the patch (plus the inset ring, when inset), the limb minus
+		// its base, and the band between.
 		var mesh = new PolyMesh();
 		mesh.Positions.AddRange( parent.Positions );
 
@@ -212,8 +245,141 @@ public static class MeshBranch
 				bridgeMaterial );
 		}
 
+		if ( smoothRings > 0 )
+			RelaxBridge( mesh, hole, childLoop, offset, smoothRings );
+
 		result.Mesh = MeshEditSession.RemoveUnusedVertices( mesh );
 		return result;
+	}
+
+	/// <summary>Pull the hole loop toward its centre by <paramref name="pull"/> (0..0.6) and
+		/// return a parent whose patch faces are replaced by the 1-ring between the old border
+		/// and the new hole. False when the inset would degenerate, leaving the caller to join
+		/// un-inset rather than refuse a join that used to work.</summary>
+	static bool TryInset( PolyMesh parent, HashSet<int> patch, List<int> hole, float ratio, float basePerimeter, out PolyMesh insetParent, out List<int> insetHole )
+	{
+		insetParent = null;
+		insetHole = null;
+		var n = hole.Count;
+		var centre = Vec3.Zero;
+		foreach ( var v in hole )
+			centre += parent.Positions[v];
+		centre /= n;
+		var pull = Math.Clamp( 1f - 1f / MathF.Max( ratio, 1e-6f ), 0f, 0.6f );
+		if ( pull <= 0f )
+			return false;
+		var keep = 1f - pull;
+		var inset = new PolyMesh();
+		inset.Positions.AddRange( parent.Positions );
+		var w = new List<int>();
+		for ( var i = 0; i < n; i++ )
+			w.Add( inset.Positions.Count + i );
+		foreach ( var v in hole )
+			inset.Positions.Add( centre + (parent.Positions[v] - centre) * keep );
+		if ( Perimeter( inset, w ) < 1e-6f )
+			return false;
+		for ( var i = 0; i < n; i++ )
+			if ( (inset.Positions[w[(i + 1) % n]] - inset.Positions[w[i]]).Length < 1e-6f )
+				return false;
+		var mat = parent.Faces[patch.Min()].Material;
+		for ( var fi = 0; fi < parent.Faces.Count; fi++ )
+		{
+			if ( patch.Contains( fi ) )
+				continue;
+			var f = parent.Faces[fi];
+			inset.AddFace( (int[])f.Indices.Clone(), (Vec2[])f.UVs.Clone(), f.Material );
+		}
+		for ( var i = 0; i < n; i++ )
+		{
+			var u0 = i / (float)n;
+			var u1 = (i + 1) / (float)n;
+			inset.AddFace( new[] { hole[(i + 1) % n], hole[i], w[i], w[(i + 1) % n] },
+				new[] { new Vec2( u1, 0 ), new Vec2( u0, 0 ), new Vec2( u0, 1 ), new Vec2( u1, 1 ) }, mat );
+		}
+		insetParent = inset;
+		insetHole = w;
+		return true;
+	}
+
+	/// <summary>Surface-tangent Laplacian relaxation over the bridge loops and their 1-ring
+	/// neighbours: each round moves a vertex halfway toward its neighbours' mean, with the
+	/// normal component removed, so the seam rounds without the surface shrinking inward.
+	/// Positions only; indices and faces are untouched.</summary>
+	static void RelaxBridge( PolyMesh mesh, List<int> hole, List<int> childLoop, int childOffset, int rounds )
+	{
+		var neighbours = new Dictionary<int, HashSet<int>>();
+		var incident = new Dictionary<int, List<int>>();
+		void Link( int a, int b )
+		{
+			if ( a == b ) return;
+			if ( !neighbours.TryGetValue( a, out var s ) ) neighbours[a] = s = new HashSet<int>();
+			s.Add( b );
+		}
+		for ( var fi = 0; fi < mesh.Faces.Count; fi++ )
+		{
+			var f = mesh.Faces[fi].Indices;
+			for ( var k = 0; k < f.Length; k++ )
+			{
+				var a = f[k];
+				var b = f[(k + 1) % f.Length];
+				Link( a, b ); Link( b, a );
+				if ( !incident.TryGetValue( a, out var l ) ) incident[a] = l = new List<int>();
+				l.Add( fi );
+			}
+		}
+		// Only the two loops move. Their 1-ring neighbours are the averaging set and
+		// stay fixed as anchors: moving them dragged the parent surface and measurably
+		// sharpened the seam (bridge-parent angles rose 22.5 -> 63/82 degrees in the
+		// cube-on-tube probe) instead of rounding it.
+		var holeSet = new HashSet<int>( hole );
+		var childSet = new HashSet<int>();
+		foreach ( var v in childLoop )
+			childSet.Add( v + childOffset );
+		bool IsBridge( int fi )
+		{
+			var f = mesh.Faces[fi].Indices;
+			bool hasHole = false, hasChild = false;
+			foreach ( var v in f )
+			{
+				if ( holeSet.Contains( v ) ) hasHole = true;
+				if ( childSet.Contains( v ) ) hasChild = true;
+			}
+			return hasHole && hasChild;
+		}
+		var loop = new HashSet<int>( holeSet );
+		foreach ( var v in childSet )
+			loop.Add( v );
+		for ( var round = 0; round < rounds; round++ )
+		{
+			var next = new Dictionary<int, Vec3>();
+			foreach ( var v in loop )
+			{
+				if ( !neighbours.TryGetValue( v, out var ns ) || ns.Count == 0 )
+					continue;
+				var mean = Vec3.Zero;
+				foreach ( var nb in ns )
+					mean += mesh.Positions[nb];
+				mean /= ns.Count;
+				var disp = (mean - mesh.Positions[v]) * 0.5f;
+				// Tangent plane of the vertex's home surface: incident faces that are
+				// not bridge faces (parent faces for hole vertices, limb faces for
+				// child vertices). The bridge quad itself must not define the plane,
+				// or the seam vertex slides off its own surface toward the other side.
+				var normal = Vec3.Zero;
+				if ( incident.TryGetValue( v, out var faces ) )
+					foreach ( var fi in faces )
+						if ( !IsBridge( fi ) )
+							normal += mesh.FaceNormal( mesh.Faces[fi] );
+				if ( normal.LengthSquared <= 1e-8f && incident.TryGetValue( v, out faces ) )
+					foreach ( var fi in faces )
+						normal += mesh.FaceNormal( mesh.Faces[fi] );
+				if ( normal.LengthSquared > 1e-8f )
+					disp -= normal.Normal * Vec3.Dot( disp, normal.Normal );
+				next[v] = mesh.Positions[v] + disp;
+			}
+			foreach ( var (v, p) in next )
+				mesh.Positions[v] = p;
+		}
 	}
 
 	static Result Refuse( Result r, string problem, string cause )

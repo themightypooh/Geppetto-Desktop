@@ -145,6 +145,223 @@ public sealed class BrushAlpha
 		float At( int xi, int yi ) => Values[yi * Width + xi];
 		return (At( x0, y0 ) * (1 - fx) + At( x1, y0 ) * fx) * (1 - fy) + (At( x0, y1 ) * (1 - fx) + At( x1, y1 ) * fx) * fy;
 	}
+	/// <summary>
+	/// Built-in procedural alphas, so a brush stamp does not need a PNG on disk.
+	///
+	/// When an alpha name starts with <c>proc:</c> (or is exactly one of the names below),
+	/// <see cref="FromProcedural"/> builds a deterministic 256x256 float stamp instead of
+	/// reading a file. The script side (<c>StrokeFeature.LoadAlpha</c>) still only knows PNG
+	/// paths, so that hook is a follow-up in OrganicFeatures — this is the stamp library it
+	/// will call. Values are 0..1, deterministic per name (a hash, never a Random), so the
+	/// same stamp on another machine is the same stamp.
+	/// </summary>
+	public static bool IsProcedural( string name ) => ProceduralName( name ) is not null;
+
+	/// <summary>A procedural stamp by name, or null when the name is not a known <c>proc:</c> stamp.</summary>
+	public static BrushAlpha FromProcedural( string name )
+	{
+		var key = ProceduralName( name );
+
+		if ( key is null )
+			return null;
+
+		const int size = 256;
+		var values = new float[size * size];
+
+		for ( var y = 0; y < size; y++ )
+		for ( var x = 0; x < size; x++ )
+		{
+			var u = x / (float)( size - 1 );
+			var v = y / (float)( size - 1 );
+			values[y * size + x] = Math.Clamp( ProceduralValue( key, u, v ), 0f, 1f );
+		}
+
+		return new BrushAlpha { Values = values, Width = size, Height = size };
+	}
+
+	static string ProceduralName( string name )
+	{
+		var key = ( name ?? "" ).Trim().ToLowerInvariant();
+
+		if ( key.StartsWith( "proc:" ) )
+			key = key[5..];
+
+		return key switch
+		{
+			"scales" or "gill_slit" or "pores" or "wrinkles" or "stitches" or "veins" or "rivets" or "cracks" => key,
+			_ => null,
+		};
+	}
+
+	static float ProceduralValue( string key, float u, float v ) => key switch
+	{
+		"scales" => Scales( u, v ),
+		"gill_slit" => GillSlit( u, v ),
+		"pores" => Pores( u, v ),
+		"wrinkles" => Wrinkles( u, v ),
+		"stitches" => Stitches( u, v ),
+		"veins" => Veins( u, v ),
+		"rivets" => Rivets( u, v ),
+		"cracks" => Cracks( u, v ),
+		_ => 0f,
+	};
+
+	// Overlapping diamond fish/reptile scales: rows offset by half a scale, each diamond
+	// shaded darker toward its lower edge so rows read as overlapping.
+	static float Scales( float u, float v )
+	{
+		var row = MathF.Floor( v * 10f );
+		var off = row % 2f == 0f ? 0f : 0.5f;
+		var fu = Frac( u * 8f + off );
+		var fv = Frac( v * 10f );
+		var d = MathF.Abs( fu - 0.5f ) * 2f + MathF.Abs( fv - 0.5f ) * 2f;
+		var inside = 1f - Smooth( ( d - 0.7f ) / 0.3f );
+		return inside * ( 0.8f + 0.2f * ( 1f - fv ) );
+	}
+
+	// A crescent opercular slit: a curved band, raised (brighter) on the anterior side.
+	static float GillSlit( float u, float v )
+	{
+		var dx = u - 0.5f;
+		var dy = v - 0.5f;
+		var r = MathF.Sqrt( dx * dx + dy * dy );
+		var band = 1f - Smooth( ( MathF.Abs( r - 0.35f ) - 0.02f ) / 0.06f );
+		var lip = 0.55f + 0.45f * Smooth( dx + 0.5f );
+		var arc = dy < 0.2f ? 1f : 1f - Smooth( ( dy - 0.2f ) / 0.15f );
+		return band * lip * arc;
+	}
+
+	// Worley skin pores: a dark pit at each cell centre, fading out to the cell edge.
+	static float Pores( float u, float v )
+	{
+		var f1 = WorleyF1( u, v, 7, 14f );
+		return 1f - Smooth( f1 / 0.45f );
+	}
+
+	// Parallel anisotropic skin creases: they vary along v and barely along u, warped by
+	// a little noise so they do not read as ruled lines.
+	static float Wrinkles( float u, float v )
+	{
+		var phase = ( v * 16f + 0.8f * ValueNoise( u * 3f, v * 3f, 3 ) ) * MathF.PI * 2f;
+		return 1f - MathF.Abs( MathF.Sin( phase ) );
+	}
+
+	// A surgical/leather seam: a faint line, dashes of thread along it, and a hole at
+	// each stitch end.
+	static float Stitches( float u, float v )
+	{
+		var s = Frac( u * 8f );
+		var dv = MathF.Abs( v - 0.5f );
+		var thread = s > 0.15f && s < 0.85f && dv < 0.03f ? 0.9f : 0f;
+		var hole = ( s < 0.08f || s > 0.92f ) && dv < 0.05f ? 0.15f : 0f;
+		var seam = dv < 0.012f ? 0.3f : 0f;
+		return MathF.Max( thread, MathF.Max( hole, seam ) );
+	}
+
+	// A branching ridge network: ridged value noise, kept only where the ridge is high.
+	static float Veins( float u, float v )
+	{
+		var n = ValueNoise( u * 6f, v * 6f, 5 ) * 0.6f + ValueNoise( u * 12f, v * 12f, 5 ) * 0.4f;
+		var ridge = 1f - MathF.Abs( n * 2f - 1f );
+		return ridge > 0.75f ? ( ridge - 0.75f ) * 4f : 0f;
+	}
+
+	// Circular bolt domes on a grid, each with a recessed collar ring around it.
+	static float Rivets( float u, float v )
+	{
+		var fu = Frac( u * 6f );
+		var fv = Frac( v * 6f );
+		var r = MathF.Sqrt( ( fu - 0.5f ) * ( fu - 0.5f ) + ( fv - 0.5f ) * ( fv - 0.5f ) ) * 2f;
+		if ( r < 0.62f )
+			return 0.35f + 0.65f * MathF.Cos( r / 0.62f * MathF.PI * 0.5f );
+		if ( r < 0.84f )
+			return 0.25f;
+		return 0f;
+	}
+
+	// Voronoi fracture lines: plates near 1, the crack itself at the cell border near 0.
+	static float Cracks( float u, float v )
+	{
+		var edge = WorleyEdge( u, v, 11, 8f );
+		return Smooth( edge / 0.15f );
+	}
+
+	static float Frac( float x ) => x - MathF.Floor( x );
+
+	static float Smooth( float t ) => t < 0f ? 0f : t > 1f ? 1f : t * t * ( 3f - 2f * t );
+
+	static float Hash2( int x, int y, int seed )
+	{
+		var h = x * 374761393 + y * 668265263 + seed * 974634211;
+		h = ( h ^ ( h >> 13 ) ) * 1274126177;
+		return ( ( h ^ ( h >> 16 ) ) & 0xffffff ) / (float)0x1000000;
+	}
+
+	static float ValueNoise( float x, float y, int seed )
+	{
+		var xi = (int)MathF.Floor( x );
+		var yi = (int)MathF.Floor( y );
+		var fx = x - xi;
+		var fy = y - yi;
+		var a = Hash2( xi, yi, seed );
+		var b = Hash2( xi + 1, yi, seed );
+		var c = Hash2( xi, yi + 1, seed );
+		var d = Hash2( xi + 1, yi + 1, seed );
+		var sx = Smooth( fx );
+		var sy = Smooth( fy );
+		return ( a * ( 1f - sx ) + b * sx ) * ( 1f - sy ) + ( c * ( 1f - sx ) + d * sx ) * sy;
+	}
+
+	static float WorleyF1( float u, float v, int seed, float cells )
+	{
+		var cx = (int)MathF.Floor( u * cells );
+		var cy = (int)MathF.Floor( v * cells );
+		var best = float.MaxValue;
+
+		for ( var j = -1; j <= 1; j++ )
+		for ( var i = -1; i <= 1; i++ )
+		{
+			var px = cx + i + Hash2( cx + i, cy + j, seed );
+			var py = cy + j + Hash2( cx + i, cy + j, seed + 101 );
+			var dx = u * cells - px;
+			var dy = v * cells - py;
+			best = MathF.Min( best, MathF.Sqrt( dx * dx + dy * dy ) );
+		}
+
+		return best;
+	}
+
+	// F2 - F1: small exactly on a cell border, which is where a crack or a pore rim lives.
+	static float WorleyEdge( float u, float v, int seed, float cells )
+	{
+		var cx = (int)MathF.Floor( u * cells );
+		var cy = (int)MathF.Floor( v * cells );
+		var f1 = float.MaxValue;
+		var f2 = float.MaxValue;
+
+		for ( var j = -1; j <= 1; j++ )
+		for ( var i = -1; i <= 1; i++ )
+		{
+			var px = cx + i + Hash2( cx + i, cy + j, seed );
+			var py = cy + j + Hash2( cx + i, cy + j, seed + 101 );
+			var dx = u * cells - px;
+			var dy = v * cells - py;
+			var d = MathF.Sqrt( dx * dx + dy * dy );
+
+			if ( d < f1 )
+			{
+				f2 = f1;
+				f1 = d;
+			}
+			else if ( d < f2 )
+			{
+				f2 = d;
+			}
+		}
+
+		return f2 - f1;
+	}
+
 }
 
 /// <summary>A list of samples plus the brush that consumes them.</summary>

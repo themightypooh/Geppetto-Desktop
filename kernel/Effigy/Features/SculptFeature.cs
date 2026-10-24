@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 
 namespace Effigy;
 
@@ -49,7 +50,21 @@ public sealed class SculptFeature : Feature
 	/// </summary>
 	public readonly BoolParam Reproject = new( "Reproject if the cage changes", false );
 
-	public override IReadOnlyList<IParam> Parameters => new IParam[] { Bodies, Reproject };
+	/// <summary>
+	/// How many subdivision levels this sculpt carries above the cage. 0 is the historical
+	/// behaviour: the cage passes through unchanged and a sculpt is built by adding levels
+	/// by hand. A script sets this to build a dense sculpt directly, e.g.
+	/// <c>add Sculpt name=SkinSculpt bodies=Body levels=3</c>.
+	///
+	/// THE ROADMAP SAYS 2, THIS SAYS 0, AND THAT IS DELIBERATE. A default of 2 would
+	/// silently densify every existing sculpt document on its next rebuild — the cage
+	/// passthrough test exists precisely to forbid that — while an explicit
+	/// <c>levels=3</c> works exactly as the roadmap's example. If Argon wants 2 as the
+	/// default for new sculpts only, that needs a migration, not a default change.
+	/// </summary>
+	public readonly IntParam Levels = new( "Multires levels", 0, 0, 5 );
+
+	public override IReadOnlyList<IParam> Parameters => new IParam[] { Bodies, Reproject, Levels };
 
 	MultiresSculpt _sculpt;
 
@@ -61,6 +76,21 @@ public sealed class SculptFeature : Feature
 	/// <summary>The levels and their deltas, once a rebuild has given them a cage. Null before that.</summary>
 	public MultiresSculpt Sculpt => _sculpt;
 
+	/// <summary>
+	/// The sculpt a <c>Sculpt</c> feature attached to each body it rebuilt, for this rebuild
+	/// only. Bodies are re-made from scratch every rebuild, so a body object from an earlier
+	/// feature in the same rebuild IS the object a later feature sees — and a
+	/// <see cref="ConditionalWeakTable{TKey, TValue}"/> lets the entry die with the body
+	/// instead of leaking a sculpt across rebuilds. A later script stroke looks its target
+	/// up here instead of brushing the evaluated mesh directly; without it, the stroke's
+	/// deltas would never be recorded and the next rebuild would lose them.
+	/// </summary>
+	static readonly ConditionalWeakTable<Body, MultiresSculpt> _byBody = new();
+
+	/// <summary>The sculpt attached to <paramref name="body"/> by a Sculpt feature in this rebuild, or null when none sculpted it.</summary>
+	public static MultiresSculpt ForBody( Body body ) =>
+		body is null ? null : _byBody.TryGetValue( body, out var sculpt ) ? sculpt : null;
+
 	/// <summary>Whether this feature is carrying deltas that have not been placed on a cage yet.</summary>
 	public bool HasPendingDeltas => _pending is not null;
 
@@ -71,7 +101,7 @@ public sealed class SculptFeature : Feature
 	int _builtRevision = -1;
 
 	/// <summary>True once the levels have been changed since the last rebuild. See Feature.IsStale.</summary>
-	public override bool IsStale => _pending is not null || (_sculpt is not null && _sculpt.Revision != _builtRevision);
+	public override bool IsStale => _pending is not null || (_sculpt is not null && ( _sculpt.Revision != _builtRevision || _sculpt.TopLevel < Levels.Clamped ));
 
 	/// <summary>This sculpt as bytes, or null if there is nothing to save yet.</summary>
 	public byte[] SaveDeltas() => _sculpt is null ? _pending : SculptBlob.Write( _sculpt );
@@ -152,6 +182,12 @@ public sealed class SculptFeature : Feature
 		{
 			_sculpt.SetCage( body.Mesh );
 		}
+
+		while ( _sculpt.TopLevel < Levels.Clamped )
+			_sculpt.AddLevel();
+
+		_byBody.Remove( body );
+		_byBody.Add( body, _sculpt );
 
 		body.Mesh = _sculpt.Evaluate( _sculpt.TopLevel );
 

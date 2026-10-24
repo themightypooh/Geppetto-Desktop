@@ -18,6 +18,13 @@ namespace Effigy;
 ///   0,0,40 5 | 6,0,20 2.6 | 6,0,2 2          a leg out of the pelvis
 ///   0,0,62 6 | 20,0,60 2 | 31,0,58 1.5       an arm out of the chest
 ///
+/// A joint is a point and a thickness, and the thickness may be elliptical: `x,y,z rx,rz`
+/// (width, depth in the ring frame) or `x,y,z rx,rz,sq` (squareness 0 = ellipse, 1 = rounded
+/// box), with an optional `up=x,y,z` word that rolls the ring so its +Y points at that
+/// direction. A plain `x,y,z r` joint is a circle, exactly as before, and a graph with no
+/// elliptical joints builds exactly as before. Note: Fit pulls onto round cones, so a graph
+/// with elliptical joints skips Fit (reported by SkeletonCage) rather than being rounded.
+///
 /// The skin is one surface on one material slot. The result is an ordinary body: edit it, sculpt it, rig it. It has no UVs yet.
 /// </summary>
 public sealed class SkinFeature : Feature
@@ -96,23 +103,58 @@ public sealed class SkinFeature : Feature
 			foreach ( var joint in chains[c].Split( '|' ).Select( s => s.Trim() ) )
 			{
 				var words = joint.Split( (char[])null, StringSplitOptions.RemoveEmptyEntries );
-				if ( words.Length != 2
-					|| !ModelMeasure.TryParseVec3( words[0], out var p )
-					|| !float.TryParse( words[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var r ) )
+				if ( words.Length < 2 || words.Length > 3
+					|| !ModelMeasure.TryParseVec3( words[0], out var p ) )
 				{
 					FailOn( "Bones", $"Chain {c + 1} cannot be read",
-						$"'{joint}' is not a joint; a joint is a point and a radius, like 0,0,10 2.",
+						$"'{joint}' is not a joint; a joint is a point and a radius, like 0,0,10 2, or an elliptical joint, like 0,0,10 4,2.",
 						"Fix that joint, or remove it" );
 					return graph;
 				}
 
-				if ( !(r > 0f) )
+				// Thickness: one number (a circle), or rx,rz / rx,rz,sq (an ellipse, optionally squared).
+				Vec2 radii = Vec2.Zero;
+				float sq = 0f;
+				var bits = words[1].Split( ',' );
+				bool ThickOk()
 				{
-					FailOn( "Bones", $"Chain {c + 1} has a joint with no thickness",
-						$"'{joint}' has radius {r}.", "Give every joint a radius above zero" );
+					if ( bits.Length == 1 )
+						return float.TryParse( bits[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var r )
+							&& (radii = new Vec2( r, r )).x > 0f;
+					if ( bits.Length == 2 )
+						return float.TryParse( bits[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var rx )
+							&& float.TryParse( bits[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var rz )
+							&& (radii = new Vec2( rx, rz )).x > 0f && radii.y > 0f;
+					if ( bits.Length == 3 )
+						return float.TryParse( bits[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var rx )
+							&& float.TryParse( bits[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var rz )
+							&& float.TryParse( bits[2], NumberStyles.Float, CultureInfo.InvariantCulture, out sq )
+							&& (radii = new Vec2( rx, rz )).x > 0f && radii.y > 0f && sq >= 0f && sq <= 1f;
+					return false;
+				}
+				if ( !ThickOk() )
+				{
+					FailOn( "Bones", $"Chain {c + 1} has a joint with no usable thickness",
+						$"'{joint}' needs a radius above zero, or rx,rz[,sq] with both radii above zero and squareness 0..1.",
+						"Give every joint a radius above zero" );
+					return graph;
 				}
 
-				var n = graph.AddNode( p, r, MathF.Max( weld, 1e-4f ) );
+				// Axial roll: an optional third word, up=x,y,z.
+				var up = Vec3.Zero;
+				if ( words.Length == 3 )
+				{
+					if ( !words[2].StartsWith( "up=", StringComparison.Ordinal )
+						|| !ModelMeasure.TryParseVec3( words[2][3..], out up ) )
+					{
+						FailOn( "Bones", $"Chain {c + 1} cannot be read",
+							$"'{joint}' has a third word that is not up=x,y,z.",
+							"Drop the third word, or write it as up=x,y,z" );
+						return graph;
+					}
+				}
+
+				var n = graph.AddNode( p, radii, sq, up, MathF.Max( weld, 1e-4f ) );
 				if ( prev >= 0 )
 					graph.AddEdge( prev, n );
 				prev = n;

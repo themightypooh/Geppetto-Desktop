@@ -39,6 +39,15 @@ public static class SkeletonCage
 	{
 		public readonly List<Vec3> Nodes = new();
 		public readonly List<float> Radii = new();
+		/// <summary>Per-node ring radii (width, depth) in the ring frame. Kept in step with
+		/// <see cref="Radii"/> by <see cref="AddNode"/>; <see cref="RadiiAt"/> falls back to the
+		/// scalar radius when a node predates this list.</summary>
+		public readonly List<Vec2> RadiiXY = new();
+		/// <summary>Per-node axial roll: the direction the ring's +Y should point at, projected
+		/// onto the ring plane. Zero means "keep the parallel-transported frame".</summary>
+		public readonly List<Vec3> UpVectors = new();
+		/// <summary>Per-node ring squareness: 0 = ellipse, 1 = rounded box.</summary>
+		public readonly List<float> Squareness = new();
 		public readonly List<(int A, int B)> Edges = new();
 
 		/// <summary>A joint, or the existing one within <paramref name="weld"/> of <paramref name="p"/>
@@ -51,13 +60,74 @@ public static class SkeletonCage
 				if ( (Nodes[i] - p).LengthSquared <= weld * weld )
 				{
 					Radii[i] = MathF.Max( Radii[i], radius );
+					if ( i < RadiiXY.Count )
+						RadiiXY[i] = new Vec2( MathF.Max( RadiiXY[i].x, radius ), MathF.Max( RadiiXY[i].y, radius ) );
 					return i;
 				}
 			}
 
 			Nodes.Add( p );
 			Radii.Add( radius );
+			RadiiXY.Add( new Vec2( radius, radius ) );
+			UpVectors.Add( Vec3.Zero );
+			Squareness.Add( 0f );
 			return Nodes.Count - 1;
+		}
+
+		/// <summary>An elliptical joint: <paramref name="radii"/> is (width, depth) in the ring
+		/// frame, <paramref name="squareness"/> 0 = ellipse, 1 = rounded box, <paramref name="up"/>
+		/// the direction the ring's +Y should point at (axial roll); zero keeps the
+		/// parallel-transported frame. Welding keeps the larger radius per axis, the larger
+		/// squareness, and the first non-zero up vector.</summary>
+		public int AddNode( Vec3 p, Vec2 radii, float squareness = 0f, Vec3 up = default, float weld = 1e-2f )
+		{
+			if ( !(radii.x > 0f) || !(radii.y > 0f) || !float.IsFinite( radii.x ) || !float.IsFinite( radii.y ) )
+				throw new ArgumentException( $"Elliptical joint radii must both be above zero, not {radii.x:0.##} x {radii.y:0.##}.", nameof( radii ) );
+			if ( squareness < 0f || squareness > 1f || !float.IsFinite( squareness ) )
+				throw new ArgumentOutOfRangeException( nameof( squareness ), squareness, "Squareness runs 0 (ellipse) to 1 (rounded box)." );
+			for ( var i = 0; i < Nodes.Count; i++ )
+			{
+				if ( (Nodes[i] - p).LengthSquared <= weld * weld )
+				{
+					Radii[i] = MathF.Max( Radii[i], MathF.Max( radii.x, radii.y ) );
+					if ( i < RadiiXY.Count )
+						RadiiXY[i] = new Vec2( MathF.Max( RadiiXY[i].x, radii.x ), MathF.Max( RadiiXY[i].y, radii.y ) );
+					if ( i < Squareness.Count )
+						Squareness[i] = MathF.Max( Squareness[i], squareness );
+					if ( i < UpVectors.Count && UpVectors[i].LengthSquared < 1e-12f && up.LengthSquared >= 1e-12f )
+						UpVectors[i] = up;
+					return i;
+				}
+			}
+			Nodes.Add( p );
+			Radii.Add( MathF.Max( radii.x, radii.y ) );
+			RadiiXY.Add( radii );
+			UpVectors.Add( up );
+			Squareness.Add( squareness );
+			return Nodes.Count - 1;
+		}
+
+		/// <summary>An elliptical joint from two radii, as <see cref="AddNode(Vec3, Vec2, float, Vec3, float)"/>.</summary>
+		public int AddEllipticalNode( Vec3 p, float rx, float rz, float squareness = 0f, Vec3 up = default, float weld = 1e-2f )
+			=> AddNode( p, new Vec2( rx, rz ), squareness, up, weld );
+
+		public Vec2 RadiiAt( int i ) => i < RadiiXY.Count ? RadiiXY[i] : new Vec2( Radii[i], Radii[i] );
+		public Vec3 UpAt( int i ) => i < UpVectors.Count ? UpVectors[i] : Vec3.Zero;
+		public float SquarenessAt( int i ) => i < Squareness.Count ? Squareness[i] : 0f;
+
+		/// <summary>True when any node is non-circular or squared: then round-cone Fit must not run.</summary>
+		public bool IsElliptical
+		{
+			get
+			{
+				for ( var i = 0; i < Nodes.Count; i++ )
+				{
+					var r = RadiiAt( i );
+					if ( MathF.Abs( r.x - r.y ) > 1e-4f * MathF.Max( r.x, r.y ) || SquarenessAt( i ) > 1e-4f )
+						return true;
+				}
+				return false;
+			}
 		}
 
 		/// <summary>A limb between two joints. A joint to itself, or a limb already there, is ignored.</summary>
@@ -101,6 +171,9 @@ public static class SkeletonCage
 		public int MaxBranches;
 		public int Transitions;
 		public int ExtraJointPoints;
+		/// <summary>Fit was asked for but skipped because the graph is elliptical: round-cone
+		/// Fit would pull an elliptical cage back to a round tube.</summary>
+		public bool FitSkippedForElliptical;
 	}
 
 	public static PolyMesh Build( Graph graph, Options options = null ) => Build( graph, options, out _ );
@@ -121,6 +194,12 @@ public static class SkeletonCage
 		{
 			if ( !(graph.Radii[i] > 0f) || !float.IsFinite( graph.Radii[i] ) )
 				throw new InvalidOperationException( $"Joint {i + 1} has radius {graph.Radii[i]}; every joint needs a thickness above zero." );
+			var rxy = graph.RadiiAt( i );
+			if ( !(rxy.x > 0f) || !(rxy.y > 0f) || !float.IsFinite( rxy.x ) || !float.IsFinite( rxy.y ) )
+				throw new InvalidOperationException( $"Joint {i + 1} has radii {rxy.x:0.##} x {rxy.y:0.##}; every joint needs two thicknesses above zero." );
+			var sq = graph.SquarenessAt( i );
+			if ( sq < 0f || sq > 1f || !float.IsFinite( sq ) )
+				throw new InvalidOperationException( $"Joint {i + 1} has squareness {sq}; squareness runs 0 (ellipse) to 1 (rounded box)." );
 		}
 
 		var adj = new List<int>[n];
@@ -153,7 +232,12 @@ public static class SkeletonCage
 		if ( options.SmoothLevels > 0 )
 			cage = CatmullClark.Subdivide( cage, options.SmoothLevels );
 
-		if ( options.Fit )
+		// Fit pulls onto round cones, which would round an elliptical cage back to a tube:
+		// for an elliptical graph the rings are already at their exact radii, so Fit is
+		// skipped and reported, rather than silently destroying the ellipse.
+		if ( options.Fit && graph.IsElliptical )
+			report.FitSkippedForElliptical = true;
+		else if ( options.Fit )
 			FitToSweep( cage, graph, options );
 
 		return cage;
@@ -395,7 +479,32 @@ public static class SkeletonCage
 				}
 				while ( x1 != start && ring.Count <= 2 * fan.Count );
 
-				_jointRing[(node, nbrs[v])] = ring.ToArray();
+				var stored = ring.ToArray();
+				var rxy = _g.RadiiAt( node );
+				var rMean = (rxy.x + rxy.y) * 0.5f;
+				if ( MathF.Abs( rxy.x - rxy.y ) > 1e-4f * rMean )
+				{
+					// Scale this limb's socket in the limb's own frame, on copies: the
+					// original ring vertices are shared with the joint's other limbs, so
+					// scaling them in place would drag the neighbours. A band of quads
+					// closes the original ring to its scaled copy, keeping the mesh closed.
+					var dir = dirs[v];
+					var xF = _g.UpAt( node ).LengthSquared > 1e-8f ? Perp( _g.UpAt( node ), dir ).Normal : ReferencePerpendicular( dir );
+					if ( xF.LengthSquared < 0.5f ) xF = AnyPerpendicular( dir );
+					var yF = Vec3.Cross( dir, xF );
+					var copy = new int[ring.Count];
+					for ( var i = 0; i < ring.Count; i++ )
+					{
+						var off = _pos[ring[i]] - c;
+						var axial = Vec3.Dot( off, dir );
+						var perp = off - dir * axial;
+						copy[i] = Add( c + dir * axial + xF * (Vec3.Dot( perp, xF ) * rxy.x / rMean) + yF * (Vec3.Dot( perp, yF ) * rxy.y / rMean) );
+					}
+					for ( var i = 0; i < ring.Count; i++ )
+						_faces.Add( new[] { ring[i], ring[(i + 1) % ring.Count], copy[(i + 1) % ring.Count], copy[i] } );
+					stored = copy;
+				}
+				_jointRing[(node, nbrs[v])] = stored;
 			}
 		}
 
@@ -556,8 +665,8 @@ public static class SkeletonCage
 			else
 			{
 				u = ReferencePerpendicular( t0 );
-				current = Ring( _g.Nodes[c0], t0, u, _g.Radii[c0], count );
-				Cap( Reverse( current ), _g.Nodes[c0], -t0, Perp( u, t0 ), _g.Radii[c0] );
+				current = Ring( _g.Nodes[c0], t0, u, _g.RadiiAt( c0 ), _g.SquarenessAt( c0 ), _g.UpAt( c0 ), count );
+				Cap( Reverse( current ), _g.Nodes[c0], -t0, Perp( u, t0 ), _g.RadiiAt( c0 ), _g.SquarenessAt( c0 ), _g.UpAt( c0 ) );
 			}
 
 			var tPrev = t0;
@@ -575,7 +684,7 @@ public static class SkeletonCage
 					if ( mid.LengthSquared < 0.5f )
 						mid = t;
 					u = Transport( u, tPrev, mid );
-					var ring = Ring( _g.Nodes[a], mid, u, _g.Radii[a], count );
+					var ring = Ring( _g.Nodes[a], mid, u, _g.RadiiAt( a ), _g.SquarenessAt( a ), _g.UpAt( a ), count );
 					Bridge( current, ring );
 					current = ring;
 					u = Transport( u, mid, t );
@@ -589,15 +698,21 @@ public static class SkeletonCage
 				var offA = j == 0 && startRing is not null ? Extent( startRing, _g.Nodes[a], t ) : 0f;
 				var offB = j == m - 1 && endRing is not null ? Extent( endRing, _g.Nodes[b], -t ) : 0f;
 				var free = len - offA - offB;
-				var ra = _g.Radii[a];
-				var rb = _g.Radii[b];
-				var spacing = _o.RingSpacing > 0f ? _o.RingSpacing : (ra + rb);
+				var ra = _g.RadiiAt( a );
+				var rb = _g.RadiiAt( b );
+				var raMean = (ra.x + ra.y) * 0.5f;
+				var rbMean = (rb.x + rb.y) * 0.5f;
+				var spacing = _o.RingSpacing > 0f ? _o.RingSpacing : (raMean + rbMean);
+				var sqA = _g.SquarenessAt( a );
+				var sqB = _g.SquarenessAt( b );
+				var upA = _g.UpAt( a );
+				var upB = _g.UpAt( b );
 				var inner = free > 0f ? Math.Clamp( (int)MathF.Ceiling( free / spacing ) - 1, 0, 64 ) : 0;
 
 				for ( var i = 1; i <= inner; i++ )
 				{
 					var s = offA + free * i / (inner + 1);
-					var ring = Ring( _g.Nodes[a] + t * s, t, u, ra + (rb - ra) * (s / len), count );
+					var ring = Ring( _g.Nodes[a] + t * s, t, u, Lerp( ra, rb, s / len ), sqA + (sqB - sqA) * (s / len), LerpUp( upA, upB, s / len ), count );
 					Bridge( current, ring );
 					current = ring;
 				}
@@ -614,25 +729,54 @@ public static class SkeletonCage
 			}
 			else
 			{
-				var ring = Ring( _g.Nodes[cm], tPrev, u, _g.Radii[cm], count );
+				var ring = Ring( _g.Nodes[cm], tPrev, u, _g.RadiiAt( cm ), _g.SquarenessAt( cm ), _g.UpAt( cm ), count );
 				Bridge( current, ring );
-				Cap( ring, _g.Nodes[cm], tPrev, Perp( u, tPrev ), _g.Radii[cm] );
+				Cap( ring, _g.Nodes[cm], tPrev, Perp( u, tPrev ), _g.RadiiAt( cm ), _g.SquarenessAt( cm ), _g.UpAt( cm ) );
 			}
 		}
 
 		/// <summary>A ring of <paramref name="count"/> vertices round <paramref name="axis"/>, the first
 		/// along <paramref name="u"/>, counter-clockwise round the axis.</summary>
 		int[] Ring( Vec3 center, Vec3 axis, Vec3 u, float radius, int count )
+			=> Ring( center, axis, u, new Vec2( radius, radius ), 0f, Vec3.Zero, count );
+
+		/// <summary>An elliptical ring: <paramref name="radii"/> is (x, y) in the ring frame,
+		/// <paramref name="squareness"/> 0 = ellipse, 1 = rounded box (a superellipse exponent
+		/// running 2 to 8), <paramref name="up"/> rotates the frame so the ring's +Y points at
+		/// the up vector projected onto the ring plane (axial roll); zero keeps the
+		/// parallel-transported frame. With circular radii and no squareness or up, this is
+		/// exactly the old ring.</summary>
+		int[] Ring( Vec3 center, Vec3 axis, Vec3 u, Vec2 radii, float squareness, Vec3 up, int count )
 		{
 			var x = Perp( u, axis ).Normal;
 			if ( x.LengthSquared < 0.5f )
 				x = AnyPerpendicular( axis );
 			var y = Vec3.Cross( axis, x );
+			if ( up.LengthSquared > 1e-8f )
+			{
+				var upP = Perp( up, axis );
+				if ( upP.LengthSquared > 1e-4f )
+				{
+					y = upP.Normal;
+					x = Vec3.Cross( y, axis );
+				}
+			}
+			var n = 2f + Math.Clamp( squareness, 0f, 1f ) * 6f;
 			var ring = new int[count];
 			for ( var i = 0; i < count; i++ )
 			{
 				var a = 2f * MathF.PI * i / count;
-				ring[i] = Add( center + (x * MathF.Cos( a ) + y * MathF.Sin( a )) * radius );
+				var cx = MathF.Cos( a );
+				var sy = MathF.Sin( a );
+				float px, py;
+				if ( squareness <= 0f ) { px = cx * radii.x; py = sy * radii.y; }
+				else
+				{
+					var e = 2f / n;
+					px = MathF.Sign( cx ) * MathF.Pow( MathF.Abs( cx ), e ) * radii.x;
+					py = MathF.Sign( sy ) * MathF.Pow( MathF.Abs( sy ), e ) * radii.y;
+				}
+				ring[i] = Add( center + x * px + y * py );
 			}
 
 			return ring;
@@ -683,9 +827,13 @@ public static class SkeletonCage
 		/// on a four-sided limb). <paramref name="ring"/> runs counter-clockwise round
 		/// <paramref name="outward"/>.</summary>
 		void Cap( int[] ring, Vec3 center, Vec3 outward, Vec3 u, float radius )
+			=> Cap( ring, center, outward, u, new Vec2( radius, radius ), 0f, Vec3.Zero );
+
+		void Cap( int[] ring, Vec3 center, Vec3 outward, Vec3 u, Vec2 radii, float squareness, Vec3 up )
 		{
 			var first = Perp( _pos[ring[0]] - center, outward );
-			var tipRing = Ring( center + outward * (radius * 0.55f), outward, first.LengthSquared > 1e-8f ? first : u, radius * 0.8f, ring.Length );
+			var rMean = (radii.x + radii.y) * 0.5f;
+			var tipRing = Ring( center + outward * (rMean * 0.55f), outward, first.LengthSquared > 1e-8f ? first : u, radii * 0.8f, squareness, up, ring.Length );
 			Bridge( ring, tipRing );
 
 			if ( tipRing.Length == 4 )
@@ -694,7 +842,7 @@ public static class SkeletonCage
 				return;
 			}
 
-			var tip = Add( center + outward * radius );
+			var tip = Add( center + outward * rMean );
 			for ( var i = 0; i < tipRing.Length; i += 2 )
 				_faces.Add( new[] { tipRing[i], tipRing[i + 1], tipRing[(i + 2) % tipRing.Length], tip } );
 		}
@@ -764,6 +912,16 @@ public static class SkeletonCage
 		Vec3 Centroid( int[] ring ) => ring.Aggregate( Vec3.Zero, ( a, v ) => a + _pos[v] ) / ring.Length;
 
 		Vec3 Dir( int a, int b ) => (_g.Nodes[b] - _g.Nodes[a]).Normal;
+
+		static Vec2 Lerp( Vec2 a, Vec2 b, float t ) => new( a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t );
+
+		static Vec3 LerpUp( Vec3 a, Vec3 b, float t )
+		{
+			if ( a.LengthSquared < 1e-8f ) return b;
+			if ( b.LengthSquared < 1e-8f ) return a;
+			var m = a * (1f - t) + b * t;
+			return m.LengthSquared > 1e-8f ? m.Normal : a;
+		}
 
 		static int[] Reverse( int[] ring )
 		{

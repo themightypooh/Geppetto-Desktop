@@ -36,6 +36,9 @@ public sealed class BindReport
 	public int VoxelVertices;
 	public int OtherVertices;
 
+	/// <summary>Vertices rebound rigidly as rigid islands by Heat (see BindRigidIslands).</summary>
+	public int RigidVertices;
+
 	/// <summary>Why the requested method was not used everywhere, or null if it was.</summary>
 	public string Fallback;
 
@@ -71,6 +74,16 @@ public sealed class AutoWeightOptions
 	/// <summary>Voxel binding: neighbour-averaging passes over the mesh after weighting.</summary>
 	public int VoxelSmoothPasses = 2;
 
+	/// <summary>
+	/// Rigid-island rule for Heat: a disconnected component at most this fraction of the mesh
+	/// (and smaller than the largest component) binds rigidly to its nearest bone instead of
+	/// smearing across the skin. 0 disables the size rule; name-matched ranges still apply.
+	/// </summary>
+	public float RigidIslandMaxFraction = 0.10f;
+
+	/// <summary>Body-name fragments that mark a range a rigid island (eyes, teeth, claws, buttons).</summary>
+	public string[] RigidIslandNames = { "eye", "teeth", "tooth", "claw", "button", "fang" };
+
 	/// <summary>Weight twist, helper, IK and face bones too. Off: those are widgets, not limbs — the
 	/// same rule <see cref="Skeleton.TryBodySpan"/> uses.</summary>
 	public bool IncludeHelperBones;
@@ -103,7 +116,7 @@ public sealed class AutoWeightOptions
 public static class AutoWeights
 {
 	/// <summary>Bone heat, falling back to voxel where heat has no answer. See the class notes.</summary>
-	public static SkinWeights Heat( PolyMesh mesh, Skeleton skeleton, out BindReport report, AutoWeightOptions options = null )
+	public static SkinWeights Heat( PolyMesh mesh, Skeleton skeleton, out BindReport report, AutoWeightOptions options = null, IReadOnlyList<BodyRange> ranges = null )
 	{
 		options ??= new AutoWeightOptions();
 		report = new BindReport { Requested = BindMethod.Heat, Used = BindMethod.Heat };
@@ -121,6 +134,7 @@ public static class AutoWeights
 				+ "so it was weighted by voxel distance instead";
 			var voxel = VoxelCore( mesh, skeleton, bones, options, report );
 			report.VoxelVertices = mesh.VertexCount;
+			NoteRigid( report, BindRigidIslands( mesh, voxel, skeleton, options, ranges ).Count );
 			return voxel;
 		}
 
@@ -197,6 +211,7 @@ public static class AutoWeights
 			report.Fallback = $"the heat system could not be solved ({why}), so the mesh was weighted by voxel distance instead";
 			var voxel = VoxelCore( mesh, skeleton, bones, options, report );
 			report.VoxelVertices = n;
+			NoteRigid( report, BindRigidIslands( mesh, voxel, skeleton, options, ranges ).Count );
 			return voxel;
 		}
 
@@ -266,6 +281,10 @@ public static class AutoWeights
 
 		if ( report.OtherVertices > 0 )
 			report.Notes.Add( $"{report.OtherVertices} vertices received no heat and took their nearest bone" );
+
+		// Last, so a rigid island is rigid whatever path weighted it: heat, cold-piece voxel,
+		// or the nearest-bone fallback above.
+		NoteRigid( report, BindRigidIslands( mesh, weights, skeleton, options, ranges ).Count );
 
 		return weights;
 	}
@@ -481,4 +500,164 @@ public static class AutoWeights
 		report.Notes.Add( $"voxel grid {grid.Nx}x{grid.Ny}x{grid.Nz}, {grid.SolidCount} solid cells" );
 		return weights;
 	}
+	/// <summary>
+	/// Which disconnected components of <paramref name="mesh"/> are rigid islands, and which
+	/// bone each binds to (roadmap J2). Two rules, either one enough:
+	/// (1) NAME: a <see cref="BodyRange"/> whose body name or id contains a
+	/// <see cref="AutoWeightOptions.RigidIslandNames"/> fragment marks every component it
+	/// touches rigid — this is how Eyes bind to eye_L and Teeth to jaw even when the island
+	/// is not small. (2) SIZE: a component at most
+	/// <see cref="AutoWeightOptions.RigidIslandMaxFraction"/> of the mesh, and smaller than the
+	/// largest component, is rigid. A one-component mesh has no islands, and a mesh that IS
+	/// one small piece is not an island of itself. Pure planning: nothing is mutated here, so
+	/// <see cref="WeightEdit.Run"/> can capture its before-state first.
+	/// </summary>
+	internal static List<(int Bone, List<int> Vertices)> RigidIslandPlan( PolyMesh mesh, Skeleton skeleton,
+		AutoWeightOptions options, IReadOnlyList<BodyRange> ranges )
+	{
+		if ( mesh is null )
+			throw new ArgumentNullException( nameof( mesh ) );
+
+		if ( skeleton is null || skeleton.Count == 0 )
+			throw new InvalidOperationException( "Cannot bind to a skeleton with no bones. Add bones in the Rig workspace first." );
+
+		options ??= new AutoWeightOptions();
+
+		var n = mesh.VertexCount;
+		var plan = new List<(int, List<int>)>();
+
+		if ( n == 0 )
+			return plan;
+
+		var neighbours = mesh.BuildVertexEdges();
+		var label = new int[n];
+
+		Array.Fill( label, -1 );
+
+		var pieces = new List<List<int>>();
+
+		for ( var v = 0; v < n; v++ )
+		{
+			if ( label[v] >= 0 )
+				continue;
+
+			var piece = new List<int>();
+			var stack = new Stack<int>();
+
+			stack.Push( v );
+			label[v] = pieces.Count;
+
+			while ( stack.Count > 0 )
+			{
+				var cur = stack.Pop();
+
+				piece.Add( cur );
+
+				foreach ( var e in neighbours[cur] )
+				{
+					var nb = e.A == cur ? e.B : e.A;
+
+					if ( nb < 0 || nb >= n || label[nb] >= 0 )
+						continue;
+
+					label[nb] = pieces.Count;
+					stack.Push( nb );
+				}
+			}
+
+			pieces.Add( piece );
+		}
+
+		if ( pieces.Count <= 1 )
+			return plan;
+
+		var largest = 0;
+
+		foreach ( var p in pieces )
+			largest = Math.Max( largest, p.Count );
+
+		var named = new bool[pieces.Count];
+
+		if ( ranges is not null && options.RigidIslandNames is not null )
+		{
+			foreach ( var r in ranges )
+			{
+				var name = (r.BodyName ?? "") + " " + (r.BodyId ?? "");
+				var hit = false;
+
+				foreach ( var key in options.RigidIslandNames )
+				{
+					if ( !string.IsNullOrWhiteSpace( key ) && name.Contains( key, StringComparison.OrdinalIgnoreCase ) )
+					{
+						hit = true;
+						break;
+					}
+				}
+
+				if ( !hit )
+					continue;
+
+				for ( var k = r.Start; k < r.Start + r.Count && k < n; k++ )
+					if ( label[k] >= 0 )
+						named[label[k]] = true;
+			}
+		}
+
+		var maxFraction = options.RigidIslandMaxFraction;
+
+		for ( var p = 0; p < pieces.Count; p++ )
+		{
+			var piece = pieces[p];
+			var small = maxFraction > 0f && piece.Count <= maxFraction * n && piece.Count < largest;
+
+			if ( !named[p] && !small )
+				continue;
+
+			var centroid = Vec3.Zero;
+
+			foreach ( var v in piece )
+				centroid += mesh.Positions[v];
+
+			centroid /= Math.Max( piece.Count, 1 );
+
+			// Nearest by bone segment, helpers included: a rigid island legitimately binds to
+			// eye_L or jaw, which the heat bone list may have skipped as auxiliaries.
+			plan.Add( (SkinBinder.NearestBone( centroid, skeleton ), piece) );
+		}
+
+		return plan;
+	}
+
+	/// <summary>Apply <see cref="RigidIslandPlan"/> to <paramref name="weights"/> in place; returns the changed vertices.</summary>
+	internal static List<int> BindRigidIslands( PolyMesh mesh, SkinWeights weights, Skeleton skeleton,
+		AutoWeightOptions options, IReadOnlyList<BodyRange> ranges )
+	{
+		if ( weights is null || weights.Count != mesh.VertexCount )
+			throw new ArgumentException( $"weights ({weights?.Count ?? 0}) and mesh ({mesh.VertexCount}) disagree" );
+
+		var changed = new List<int>();
+
+		foreach ( var (bone, vertices) in RigidIslandPlan( mesh, skeleton, options, ranges ) )
+		{
+			var single = new[] { new BoneWeight( bone, 1f ) };
+
+			foreach ( var v in vertices )
+			{
+				weights[v] = single;
+				changed.Add( v );
+			}
+		}
+
+		return changed;
+	}
+
+	static void NoteRigid( BindReport report, int count )
+	{
+		if ( count <= 0 )
+			return;
+
+		report.RigidVertices += count;
+		report.Notes.Add( $"{count} vertices in rigid island(s) bound 100% to their nearest bone" );
+	}
+
 }

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Effigy;
 
@@ -9,6 +10,21 @@ namespace Effigy;
 /// be. Two copies of this would eventually disagree, and the symptom would be a model that shades
 /// differently depending on which format it was exported through.
 /// </summary>
+/// <summary>
+/// How much each neighbouring face counts when its normal is averaged into a corner.
+/// Area is the historical behaviour. Angle weights by the corner's own angle, so a face
+/// that only touches a vertex at a point counts for less than one that wraps around it.
+/// FaceWeighted (roadmap B2) weights by area squared times corner angle, so a large flat
+/// panel dominates the shared vertex normal and the narrow chamfer strip next to it
+/// absorbs the curvature instead of puffing the panel out.
+/// </summary>
+public enum NormalWeightMode
+{
+	Area,
+	Angle,
+	FaceWeighted,
+}
+
 public static class MeshNormals
 {
 	/// <summary>Faces meeting at a sharper angle than this keep a hard edge; anything softer gets
@@ -25,6 +41,9 @@ public static class MeshNormals
 	/// and means the parametric stage never has to hand-author smoothing groups.
 	/// </summary>
 	public static (int[][] CornerNormals, List<Vec3> Normals) ComputeCornerNormals( PolyMesh mesh, float angleDegrees )
+		=> ComputeCornerNormals( mesh, angleDegrees, NormalWeightMode.Area );
+
+	public static (int[][] CornerNormals, List<Vec3> Normals) ComputeCornerNormals( PolyMesh mesh, float angleDegrees, NormalWeightMode mode )
 	{
 		var cosLimit = MathF.Cos( angleDegrees * MathF.PI / 180f );
 		var faceCount = mesh.FaceCount;
@@ -43,6 +62,33 @@ public static class MeshNormals
 			faceNormals[fi] = n;
 			faceAreas[fi] = mesh.FaceArea( f, n );
 		}
+
+		// Corner angles, for Angle and FaceWeighted modes: the angle between the two
+		// edges of the face meeting at each corner.
+		var cornerAngles = new float[faceCount][];
+
+		for ( var fi = 0; fi < faceCount; fi++ )
+		{
+			var f = mesh.Faces[fi];
+			var angles = new float[f.Count];
+			cornerAngles[fi] = angles;
+
+			for ( var i = 0; i < f.Count; i++ )
+			{
+				var prev = mesh.Positions[f.Indices[(i + f.Count - 1) % f.Count]];
+				var cur = mesh.Positions[f.Indices[i]];
+				var next = mesh.Positions[f.Indices[(i + 1) % f.Count]];
+				var e0 = (prev - cur).Normal;
+				var e1 = (next - cur).Normal;
+				angles[i] = MathF.Acos( Math.Clamp( Vec3.Dot( e0, e1 ), -1f, 1f ) );
+			}
+		}
+
+		// Marked sharp edges split normals regardless of angleDegrees. The roadmap
+		// names this set PolyMesh.SharpEdges; this tree does not have that member — the
+		// marked-edge set it does have is PolyMesh.Seams (the same set CatmullClark
+		// preserves as marked seams), so that is what splits here.
+		var sharp = mesh.Seams;
 
 		var vertexFaces = VertexFaces.Build( mesh );
 
@@ -91,11 +137,35 @@ public static class MeshNormals
 				{
 					var other = neighbours[k];
 
-					if ( Vec3.Dot( own, faceNormals[other] ) >= cosLimit )
+					if ( Vec3.Dot( own, faceNormals[other] ) < cosLimit )
+						continue;
+
+					// A sharp edge between this face and the neighbour is a hard split:
+					// the two sides never average, however soft the angle threshold is.
+					if ( other != fi && SharesSharpEdge( mesh.Faces[fi], mesh.Faces[other], vertex, sharp ) )
+						continue;
+
+					var angle = 0f;
+					var of = mesh.Faces[other];
+
+					for ( var ci = 0; ci < of.Count; ci++ )
 					{
-						sum += faceNormals[other] * faceAreas[other];
-						taken++;
+						if ( of.Indices[ci] == vertex )
+						{
+							angle = cornerAngles[other][ci];
+							break;
+						}
 					}
+
+					var weight = mode switch
+					{
+						NormalWeightMode.Angle => angle,
+						NormalWeightMode.FaceWeighted => faceAreas[other] * faceAreas[other] * angle,
+						_ => faceAreas[other],
+					};
+
+					sum += faceNormals[other] * weight;
+					taken++;
 				}
 
 				var full = taken == neighbours.Length;
@@ -122,6 +192,26 @@ public static class MeshNormals
 		}
 
 		return (cornerNormals, normals);
+	}
+
+	static bool SharesSharpEdge( Face a, Face b, int vertex, HashSet<EdgeKey> sharp )
+	{
+		if ( sharp is null || sharp.Count == 0 )
+			return false;
+
+		foreach ( var w in a.Indices )
+		{
+			if ( w == vertex )
+				continue;
+
+			if ( !b.Indices.Contains( w ) )
+				continue;
+
+			if ( sharp.Contains( new EdgeKey( vertex, w ) ) )
+				return true;
+		}
+
+		return false;
 	}
 
 	/// <summary>

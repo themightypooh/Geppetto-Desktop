@@ -194,3 +194,246 @@ public static class EyeRender
 		return sheet;
 	}
 }
+
+/// <summary>The pupil's outline. Round is human; VerticalSlit is cat/dragon; HorizontalGoat
+/// is the goat/sheep bar; Keyhole is a round pupil with a downward notch.</summary>
+public enum PupilShape
+{
+	Round,
+	VerticalSlit,
+	HorizontalGoat,
+	Keyhole,
+}
+
+/// <summary>What <see cref="EyeAsset.BuildEyeAsset"/> returns: the dual-layer mesh plus the
+/// procedural iris texture that paints it.</summary>
+public sealed class EyeAssetResult
+{
+	public PolyMesh Mesh;
+	public byte[] IrisTexture;
+	public int TextureSize = 256;
+	public float IrisRadius;
+	public float PupilRadius;
+}
+
+/// <summary>
+/// An anatomical eye as real geometry, not a painted blob: a concave iris/pupil inner mesh
+/// plus a convex clearcoat cornea dome over it, in eye-local space (forward is +X, up is +Z,
+/// matching EyeCamera). The iris texture is procedural — radial fibres and a limbal ring baked
+/// into bytes — so the same eye renders the same way headless and in s&amp;box.
+/// </summary>
+public static class EyeAsset
+{
+	/// <param name="radius">Eyeball radius. The iris disc sits at 0.78×radius forward, inside the sphere.</param>
+	/// <param name="preset">Human, cat, goat, dragon, or anything else (falls back to human proportions).
+	/// The preset sets iris size only; <paramref name="pupil"/> is authoritative for the pupil shape.</param>
+	/// <param name="irisColor">Iris colour as 0..1 RGB.</param>
+	/// <param name="pupil">Pupil outline shape.</param>
+	public static EyeAssetResult BuildEyeAsset( float radius, string preset, Vec3 irisColor, PupilShape pupil )
+	{
+		if ( radius <= 0f )
+			throw new ArgumentException( "An eye needs a positive radius.", nameof( radius ) );
+
+		var irisFraction = (preset ?? "").Trim().ToLowerInvariant() switch
+		{
+			"cat" => 0.58f,
+			"dragon" => 0.60f,
+			"goat" => 0.52f,
+			"keyhole" => 0.55f,
+			_ => 0.50f,
+		};
+
+		var irisR = radius * irisFraction;
+		var pupilR = radius * 0.22f;
+		var frontX = radius * 0.78f;
+		var dish = radius * 0.12f;
+		const int segments = 32;
+
+		var mesh = new PolyMesh();
+
+		// Iris: an annulus from the pupil boundary out to the iris rim, dished so the rim sits
+		// forward and the pupil edge sits back — a concave bowl, not a flat disc.
+		var rings = new int[3][];
+
+		for ( var ri = 0; ri < 3; ri++ )
+		{
+			rings[ri] = new int[segments];
+
+			for ( var k = 0; k < segments; k++ )
+			{
+				var theta = MathF.PI * 2f * k / segments;
+				var boundary = PupilRadiusAt( theta, pupil, pupilR );
+				var t = ri / 2f;
+				var r = boundary + (irisR - boundary) * t;
+				var y = r * MathF.Cos( theta );
+				var z = r * MathF.Sin( theta );
+				var x = frontX - dish * (1f - t);
+				rings[ri][k] = mesh.AddVertex( new Vec3( x, y, z ) );
+			}
+		}
+
+		for ( var ri = 0; ri < 2; ri++ )
+		{
+			for ( var k = 0; k < segments; k++ )
+			{
+				var k2 = (k + 1) % segments;
+				var a = rings[ri][k];
+				var b = rings[ri][k2];
+				var c = rings[ri + 1][k2];
+				var d = rings[ri + 1][k];
+				mesh.AddFace( new[] { a, b, c, d },
+					new[]
+					{
+						Uv( mesh.Positions[a], irisR ), Uv( mesh.Positions[b], irisR ),
+						Uv( mesh.Positions[c], irisR ), Uv( mesh.Positions[d], irisR ),
+					}, 0 );
+			}
+		}
+
+		// Cornea: a spherical cap over the iris, pole forward, material slot 1 (clearcoat).
+		var capHeight = radius * 0.35f;
+		var phiMax = MathF.Acos( Math.Clamp( 1f - capHeight / radius, -1f, 1f ) );
+		const int domeRings = 8;
+		var pole = mesh.AddVertex( new Vec3( radius, 0, 0 ) );
+		var dome = new int[domeRings][];
+
+		for ( var ri = 0; ri < domeRings; ri++ )
+		{
+			dome[ri] = new int[segments];
+			var phi = phiMax * (ri + 1) / domeRings;
+
+			for ( var k = 0; k < segments; k++ )
+			{
+				var theta = MathF.PI * 2f * k / segments;
+				dome[ri][k] = mesh.AddVertex( new Vec3(
+					radius * MathF.Cos( phi ),
+					radius * MathF.Sin( phi ) * MathF.Cos( theta ),
+					radius * MathF.Sin( phi ) * MathF.Sin( theta ) ) );
+			}
+		}
+
+		for ( var k = 0; k < segments; k++ )
+		{
+			var k2 = (k + 1) % segments;
+			mesh.AddFace( new[] { pole, dome[0][k2], dome[0][k] },
+				new[] { new Vec2( 0.5f, 0.5f ), Uv( mesh.Positions[dome[0][k2]], irisR ), Uv( mesh.Positions[dome[0][k]], irisR ) }, 1 );
+		}
+
+		for ( var ri = 0; ri + 1 < domeRings; ri++ )
+		{
+			for ( var k = 0; k < segments; k++ )
+			{
+				var k2 = (k + 1) % segments;
+				mesh.AddFace( new[] { dome[ri][k], dome[ri][k2], dome[ri + 1][k2], dome[ri + 1][k] },
+					new[]
+					{
+						Uv( mesh.Positions[dome[ri][k]], irisR ), Uv( mesh.Positions[dome[ri][k2]], irisR ),
+						Uv( mesh.Positions[dome[ri + 1][k2]], irisR ), Uv( mesh.Positions[dome[ri + 1][k]], irisR ),
+					}, 1 );
+			}
+		}
+
+		return new EyeAssetResult
+		{
+			Mesh = mesh,
+			IrisTexture = IrisTexture( irisColor ),
+			TextureSize = 256,
+			IrisRadius = irisR,
+			PupilRadius = pupilR,
+		};
+	}
+
+	static Vec2 Uv( Vec3 p, float irisR ) => new( 0.5f + p.y / (2f * irisR), 0.5f + p.z / (2f * irisR ) );
+
+	/// <summary>Pupil boundary radius at angle theta (0 = +Y, PI/2 = +Z) for an ellipse, or a
+	/// circle with a downward notch for Keyhole.</summary>
+	static float PupilRadiusAt( float theta, PupilShape shape, float p )
+	{
+		var cos = MathF.Cos( theta );
+		var sin = MathF.Sin( theta );
+
+		switch ( shape )
+		{
+			case PupilShape.VerticalSlit:
+				return Ellipse( 0.22f * p, p, cos, sin );
+			case PupilShape.HorizontalGoat:
+				return Ellipse( p, 0.35f * p, cos, sin );
+			case PupilShape.Keyhole:
+			{
+				// Bottom is theta = -PI/2 (sin = -1): grow the boundary there into a notch.
+				var toBottom = MathF.Acos( Math.Clamp( -sin, -1f, 1f ) );
+				var notch = toBottom < 0.6f ? 1f + 0.6f * (1f - toBottom / 0.6f) : 1f;
+				return p * notch;
+			}
+			default:
+				return p;
+		}
+	}
+
+	static float Ellipse( float a, float b, float cos, float sin )
+	{
+		var den = MathF.Sqrt( (b * cos) * (b * cos) + (a * sin) * (a * sin) );
+		return den < 1e-9f ? a : a * b / den;
+	}
+
+	/// <summary>
+	/// 256×256 RGBA iris: radial fibres, a dark limbal ring at the rim, black pupil in the
+	/// middle. The texture's pupil is a round 0.42-fraction approximation — the geometry's
+	/// pupil shape is authoritative, the texture just must not paint colour over the hole.
+	/// </summary>
+	static byte[] IrisTexture( Vec3 irisColor )
+	{
+		const int size = 256;
+		var rgba = new byte[size * size * 4];
+
+		for ( var y = 0; y < size; y++ )
+		{
+			for ( var x = 0; x < size; x++ )
+			{
+				var nx = (x - 127.5f) / 127.5f;
+				var ny = (y - 127.5f) / 127.5f;
+				var r = MathF.Sqrt( nx * nx + ny * ny );
+				var o = (y * size + x) * 4;
+
+				if ( r > 1f )
+				{
+					rgba[o + 3] = 0;
+					continue;
+				}
+
+				if ( r < 0.42f )
+				{
+					rgba[o + 3] = 255;
+					continue;
+				}
+
+				var theta = MathF.Atan2( ny, nx );
+				var fiber = Hash( (int)MathF.Floor( theta * 20f ), (int)MathF.Floor( r * 24f ), 7 );
+				var brightness = 0.7f + 0.45f * fiber;
+
+				if ( r > 0.85f )
+					brightness *= 1f - 0.6f * (r - 0.85f) / 0.15f;
+
+				rgba[o] = Byte( irisColor.x * brightness );
+				rgba[o + 1] = Byte( irisColor.y * brightness );
+				rgba[o + 2] = Byte( irisColor.z * brightness );
+				rgba[o + 3] = 255;
+			}
+		}
+
+		return rgba;
+	}
+
+	static byte Byte( float v ) => (byte)Math.Clamp( (int)MathF.Round( v * 255f ), 0, 255 );
+
+	static float Hash( int x, int y, int seed )
+	{
+		unchecked
+		{
+			var h = (uint)(x * 374761393 + y * 668265263 + seed * 144665);
+			h = (h ^ (h >> 13)) * 1274126177u;
+			h ^= h >> 16;
+			return (h & 0xFFFFFF) / (float)0xFFFFFF;
+		}
+	}
+}

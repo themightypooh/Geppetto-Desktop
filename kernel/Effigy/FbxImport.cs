@@ -286,9 +286,10 @@ public static class FbxImport
 
 				indices[k] = remap[point];
 
-				// Standard UV convention: V=0 at bottom, V=1 at top, matching OpenGL textures and PolyMesh.
+				// FBX's V runs up from the bottom; Effigy's runs down from the top. The same flip
+				// the writer makes on the way out.
 				if ( source.CornerUVs is { } cornerUVs && c < cornerUVs.Length )
-					uvs[k] = new Vec2( cornerUVs[c].x, cornerUVs[c].y );
+					uvs[k] = new Vec2( cornerUVs[c].x, 1f - cornerUVs[c].y );
 
 				if ( source.CornerColors is { } colours && c < colours.Length )
 				{

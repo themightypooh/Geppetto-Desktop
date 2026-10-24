@@ -70,6 +70,15 @@ public static class QuadRemesh
 		/// mirror seam.</summary>
 		public float CurvatureAlign = 0.15f;
 
+		/// <summary>When true (the default), the orientation field leans toward principal
+		/// curvature at <see cref="CurvatureAlign"/> strength, and hard creases (mesh seams
+		/// and high-dihedral edges) pull it along themselves. When false, the field is the
+		/// smooth field alone: the same remesh, without curvature guidance. This is the
+		/// switch the roadmap's "RemeshFeature Quad mode with AlignToCurvature" means;
+		/// RemeshFeature itself is outside this lane, so it reads this option when it
+		/// adopts it.</summary>
+		public bool AlignToCurvature = true;
+
 		/// <summary>Tangential smoothing passes over the final mesh, each followed by a
 		/// reprojection onto the source.</summary>
 		public int RelaxPasses = 10;
@@ -187,6 +196,94 @@ public static class QuadRemesh
 		return new Result { Mesh = mesh, Stats = Measure( mesh ), FromTriangles = from, Time = clock.Elapsed };
 	}
 
+	/// <summary>A 4-RoSy cross-field on a mesh: one tangent direction per vertex, meaningful
+	/// only up to a quarter turn (the symmetry of a quad's edges), plus the field's own
+	/// neighbour-agreement score. This is the kernel-side port of the desktop
+	/// <c>CrossFieldService</c> idea, computed from the mesh itself rather than from an
+	/// arbitrary up vector: each vertex's direction is the 4-angle average of its incident
+	/// edge directions, weighted toward high-dihedral edges (creases) and, when
+	/// <paramref name="alignToCurvature"/> is true, toward edges across strong curvature.
+	/// A direction differing by 90 degrees from its neighbour counts as agreement, not
+	/// disagreement — that is what the 4 in 4-RoSy buys.</summary>
+	public sealed class CrossField
+	{
+		public Vec3[] Tangent;
+		public Vec3[] Bitangent;
+		public Vec3[] Normal;
+
+		/// <summary>Mean 4-RoSy neighbour agreement over the mesh's edges, 0..1. 1 means
+		/// every neighbouring pair of directions is parallel or a quarter turn apart.</summary>
+		public float Alignment;
+	}
+
+	public static CrossField ComputeCrossField( PolyMesh mesh, bool alignToCurvature = true )
+	{
+		if ( mesh is null )
+			throw new ArgumentNullException( nameof( mesh ) );
+		var n = mesh.VertexCount;
+		var field = new CrossField { Tangent = new Vec3[n], Bitangent = new Vec3[n], Normal = new Vec3[n] };
+		if ( n == 0 )
+			return field;
+		var normals = mesh.ComputeVertexNormals();
+		var vertexEdges = mesh.BuildVertexEdges();
+		for ( var i = 0; i < n; i++ )
+		{
+			var normal = normals[i].LengthSquared > 1e-12f ? normals[i].Normal : new Vec3( 0, 0, 1 );
+			field.Normal[i] = normal;
+			var up = MathF.Abs( normal.y ) < 0.9f ? new Vec3( 0, 1, 0 ) : new Vec3( 1, 0, 0 );
+			var t0 = Vec3.Cross( up, normal );
+			t0 = t0.LengthSquared > 1e-12f ? t0.Normal : new Vec3( 1, 0, 0 );
+			var b0 = Vec3.Cross( normal, t0 );
+			if ( !alignToCurvature || vertexEdges is null || i >= vertexEdges.Length )
+			{
+				field.Tangent[i] = t0;
+				field.Bitangent[i] = b0;
+				continue;
+			}
+			// 4-angle average: an edge direction counts at 4x its angle, so directions
+			// 90 degrees apart reinforce instead of cancelling.
+			double cx = 0, cy = 0;
+			foreach ( var e in vertexEdges[i] )
+			{
+				var j = e.A == i ? e.B : e.A;
+				if ( j < 0 || j >= n || j == i )
+					continue;
+				var d = mesh.Positions[j] - mesh.Positions[i];
+				d -= normal * Vec3.Dot( d, normal );
+				if ( d.LengthSquared < 1e-18f )
+					continue;
+				d = d.Normal;
+				var theta = MathF.Atan2( Vec3.Dot( d, b0 ), Vec3.Dot( d, t0 ) );
+				// Crease pull: a seam edge, or an edge across a sharp normal change, counts
+				// far more than a flat interior edge, so loops follow creases and ridges.
+				var w = 1f;
+				if ( mesh.Seams is not null && mesh.Seams.Contains( e ) )
+					w = 8f;
+				else if ( j < normals.Length )
+					w = 1f + 3f * (1f - MathF.Max( -1f, MathF.Min( 1f, Vec3.Dot( normal, normals[j].Normal ) ) ));
+				cx += w * Math.Cos( 4 * theta );
+				cy += w * Math.Sin( 4 * theta );
+			}
+			var phi = (cx == 0 && cy == 0) ? 0f : (float)(0.25 * Math.Atan2( cy, cx ));
+			var t = t0 * MathF.Cos( phi ) + b0 * MathF.Sin( phi );
+			field.Tangent[i] = t.LengthSquared > 1e-12f ? t.Normal : t0;
+			field.Bitangent[i] = Vec3.Cross( normal, field.Tangent[i] );
+		}
+		// Agreement: for each unique edge, |2d^2 - 1| where d = |dot| of the two
+		// tangents — 1 at parallel and at a quarter turn, 0 at 45 degrees off.
+		var edges = mesh.BuildEdgeFaces();
+		double sum = 0;
+		var count = 0;
+		foreach ( var (key, _) in edges )
+		{
+			var d = MathF.Abs( Vec3.Dot( field.Tangent[key.A], field.Tangent[key.B] ) );
+			sum += Math.Abs( 2 * d * d - 1 );
+			count++;
+		}
+		field.Alignment = count == 0 ? 1f : (float)(sum / count);
+		return field;
+	}
+
 	// --- the pipeline ------------------------------------------------------------------------
 
 	/// <summary>One remesh of one (possibly half) surface. <paramref name="seam"/> &gt;= 0 means
@@ -232,7 +329,7 @@ public static class QuadRemesh
 		foreach ( var level in levels )
 			level.Colour();
 
-		Curvature( levels, scale, options.CurvatureAlign );
+		Curvature( levels, scale, options.AlignToCurvature ? options.CurvatureAlign : 0f );
 		SolveOrientation( levels );
 		SolvePosition( levels, scale );
 

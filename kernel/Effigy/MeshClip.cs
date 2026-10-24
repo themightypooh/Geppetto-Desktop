@@ -144,6 +144,136 @@ public static class MeshClip
 		return result;
 	}
 
+	/// <summary>
+	/// <see cref="Section(PolyMesh, ClipPlane)"/> under its roadmap name: keep the half of
+	/// the mesh on the plane's kept side, faces clipped in place, no cap.
+	/// </summary>
+	public static PolyMesh Clip( PolyMesh mesh, ClipPlane plane ) => Section( mesh, plane );
+
+	/// <summary>
+	/// A planar trim, not a section view: keep the plane's kept half and close the cut
+	/// with a watertight cap, so the result is a solid again rather than an open shell.
+	/// The cap is a fan over each boundary loop of the clipped mesh, oriented to face
+	/// away from the kept side. A mesh whose cut boundary is not a set of simple loops
+	/// (a non-manifold input, or a plane that only grazes it) gets no cap for that loop
+	/// rather than a fan over garbage — the clipped mesh is still returned.
+	/// </summary>
+	public static PolyMesh TrimPlane( PolyMesh mesh, ClipPlane plane, int capMaterial = 0 )
+	{
+		if ( mesh is null )
+			throw new ArgumentNullException( nameof( mesh ) );
+
+		var result = Section( mesh, plane );
+		Cap( result, plane, capMaterial );
+		return result;
+	}
+
+	/// <summary>
+	/// Trim a mesh to an axis-aligned box, capping every cut face, for crisp stylized
+	/// rock/armor bevel cuts. Sequential planar trims: each trim caps its own cut, and
+	/// the next trim cuts the previous caps too, so the final solid is the box
+	/// intersection with caps on all six cut faces.
+	/// </summary>
+	public static PolyMesh BoxTrim( PolyMesh mesh, Vec3 min, Vec3 max, int capMaterial = 0 )
+	{
+		if ( mesh is null )
+			throw new ArgumentNullException( nameof( mesh ) );
+
+		var result = mesh.Clone();
+		result = TrimPlane( result, new ClipPlane( new Vec3( 1, 0, 0 ), min.x ), capMaterial );
+		result = TrimPlane( result, new ClipPlane( new Vec3( -1, 0, 0 ), -max.x ), capMaterial );
+		result = TrimPlane( result, new ClipPlane( new Vec3( 0, 1, 0 ), min.y ), capMaterial );
+		result = TrimPlane( result, new ClipPlane( new Vec3( 0, -1, 0 ), -max.y ), capMaterial );
+		result = TrimPlane( result, new ClipPlane( new Vec3( 0, 0, 1 ), min.z ), capMaterial );
+		result = TrimPlane( result, new ClipPlane( new Vec3( 0, 0, 1 ) * -1f, -max.z ), capMaterial );
+		return result;
+	}
+
+	static void Cap( PolyMesh mesh, ClipPlane plane, int capMaterial )
+	{
+		var edgeUse = new Dictionary<(int, int), int>();
+		var edgeDir = new Dictionary<(int, int), (int, int)>();
+
+		foreach ( var face in mesh.Faces )
+		{
+			for ( var i = 0; i < face.Count; i++ )
+			{
+				var a = face.Indices[i];
+				var b = face.Indices[( i + 1 ) % face.Count];
+				var key = a < b ? (a, b) : (b, a);
+				edgeUse[key] = edgeUse.TryGetValue( key, out var n ) ? n + 1 : 1;
+				edgeDir[key] = (a, b);
+			}
+		}
+
+		// Boundary edges, chained into loops. Each vertex on a simple loop has exactly
+		// two boundary neighbours; anything else means the loop is not simple, and that
+		// loop is skipped rather than capped wrongly.
+		var next = new Dictionary<int, int>();
+
+		foreach ( var (key, use) in edgeUse )
+		{
+			if ( use != 1 )
+				continue;
+
+			var (a, b) = edgeDir[key];
+
+			if ( next.ContainsKey( a ) )
+				return;
+
+			next[a] = b;
+		}
+
+		var seen = new HashSet<int>();
+
+		foreach ( var start in new List<int>( next.Keys ) )
+		{
+			if ( seen.Contains( start ) )
+				continue;
+
+			var loop = new List<int>();
+			var v = start;
+
+			while ( next.TryGetValue( v, out var w ) && !seen.Contains( v ) )
+			{
+				seen.Add( v );
+				loop.Add( v );
+				v = w;
+			}
+
+			if ( loop.Count < 3 || v != start )
+				continue;
+
+			// Newell normal of the loop; the cap faces away from the kept side.
+			var normal = Vec3.Zero;
+
+			for ( var i = 0; i < loop.Count; i++ )
+			{
+				var a = mesh.Positions[loop[i]];
+				var b = mesh.Positions[loop[( i + 1 ) % loop.Count]];
+				normal += new Vec3(
+					( a.y - b.y ) * ( a.z + b.z ),
+					( a.z - b.z ) * ( a.x + b.x ),
+					( a.x - b.x ) * ( a.y + b.y ) );
+			}
+
+			if ( Vec3.Dot( normal, plane.Normal ) > 0f )
+				loop.Reverse();
+
+			var centre = Vec3.Zero;
+
+			foreach ( var i in loop )
+				centre += mesh.Positions[i];
+
+			centre /= loop.Count;
+			var centreIndex = mesh.AddVertex( centre );
+			var uvs = new Vec2[3];
+
+			for ( var i = 0; i < loop.Count; i++ )
+				mesh.AddFace( new[] { centreIndex, loop[i], loop[( i + 1 ) % loop.Count] }, uvs, capMaterial );
+		}
+	}
+
 	readonly struct ClipVert
 	{
 		public readonly Vec3 Position;
