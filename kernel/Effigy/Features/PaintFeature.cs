@@ -181,6 +181,16 @@ public sealed class PaintFeature : Feature
 	/// </summary>
 	public List<PaintStroke> Strokes;
 
+	/// <summary>
+	/// The texel strokes on this layer, in the order they were painted — the durable half of
+	/// texture painting. A texel stroke names texels of the layer's canvas directly (see
+	/// <see cref="TexelStroke"/>), and Execute replays it after the mesh strokes on every
+	/// rebuild, so a direct texel scrub is no longer undone by the next rebuild: the scrub
+	/// itself is the log entry. Null until the first one lands, like <see cref="Strokes"/>.
+	/// Serialised by StudioDocument as texstroke/texerase lines, one per stroke.
+	/// </summary>
+	public List<TexelStroke> TexelStrokes;
+
 	/// <summary>Bumped each time the stroke list changes, so <see cref="IsStale"/> can notice
 	/// without anyone remembering to call MarkDirty.</summary>
 	public int Revision { get; private set; }
@@ -203,6 +213,12 @@ public sealed class PaintFeature : Feature
 
 	// The layer with its fill under the strokes, keyed on the stroke maps and the fill settings.
 	PaintLayerMaps _layerMaps;
+
+	// The texel-applied copy of _layerMaps, and the _layerMaps it was copied from. See
+	// Execute: the copy exists so a texel stroke is applied once per build, not once per
+	// rebuild, and so the cached _layerMaps stays pristine for the next build to copy from.
+	PaintLayerMaps _texelMaps;
+	PaintLayerMaps _texelFrom;
 	PaintLayerMaps _layerFrom;
 	string _fillKey;
 
@@ -231,7 +247,7 @@ public sealed class PaintFeature : Feature
 	public PaintCanvas Below { get; private set; }
 
 	/// <summary>This layer's own content (fill and strokes), before compositing, or null before a build.</summary>
-	public PaintLayerMaps Layer => _layerMaps;
+	public PaintLayerMaps Layer => TexelStrokes is { Count: > 0 } && _texelMaps is not null ? _texelMaps : _layerMaps;
 
 	/// <summary>The final mask (generator, mask paint, invert) the last build used, or null when
 	/// the layer shows everywhere.</summary>
@@ -246,6 +262,17 @@ public sealed class PaintFeature : Feature
 	public void AddStroke( PaintStroke stroke )
 	{
 		(Strokes ??= new()).Add( stroke );
+		Revision++;
+	}
+
+	/// <summary>Append a texel stroke and mark the feature stale, exactly like
+	/// <see cref="AddStroke"/>: the revision bump is what moves the desktop's paint
+	/// fingerprint, so the next snapshot is built fresh instead of serving the pre-stroke
+	/// one. This is the commit a texture-paint caller makes — scrubbing
+	/// <c>body.Mesh.Paint</c> directly is preview only and does not call this.</summary>
+	public void AddTexelStroke( TexelStroke stroke )
+	{
+		(TexelStrokes ??= new()).Add( stroke );
 		Revision++;
 	}
 
@@ -290,6 +317,7 @@ public sealed class PaintFeature : Feature
 		ApplyRecipe();
 
 		var hasStrokes = Strokes is { Count: > 0 };
+		var hasTexel = TexelStrokes is { Count: > 0 };
 		var fill = Fill.Value && (FillUseColor.Value || FillUseRoughness.Value || FillUseMetalness.Value || FillUseHeight.Value);
 		var generator = Generator;
 
@@ -342,7 +370,7 @@ public sealed class PaintFeature : Feature
 		var shaped = _generated is null ? null : PaintLayers.Shape( (float[])_generated.Clone(), MaskLevel.Clamped, MaskSoftness.Clamped );
 		GeneratorMask = shaped;
 
-		if ( !hasStrokes && !fill )
+		if ( !hasStrokes && !hasTexel && !fill )
 		{
 			// A fresh layer with nothing on it yet. Not a failure — it is how every layer starts —
 			// and the body's paint passes through untouched.
@@ -374,9 +402,30 @@ public sealed class PaintFeature : Feature
 			_fillKey = fillKey;
 		}
 
-		Mask = PaintLayers.FinalMask( shaped, _layerMaps.MaskPaint, InvertMask.Value, resolution, resolution );
+		// Texel strokes land on a COPY of the layer maps, never on _layerMaps itself:
+		// _layerMaps is cached and reused across rebuilds, and painting into it in place
+		// would re-apply the same stroke on every rebuild after the first. The copy is
+		// rebuilt exactly when _layerMaps is, so a texel stroke is applied once per build
+		// and the cached copy is reused, unmodified, until something actually changes.
+		// A layer with no texel strokes skips the copy entirely and behaves byte-for-byte
+		// as before.
+		var effectiveMaps = _layerMaps;
 
-		if ( !_layerMaps.HasSurface )
+		if ( hasTexel )
+		{
+			if ( _texelMaps is null || !ReferenceEquals( _texelFrom, _layerMaps ) )
+			{
+				_texelMaps = CloneMaps( _layerMaps );
+				_texelFrom = _layerMaps;
+				TexelReplay.ApplyAll( _texelMaps, TexelStrokes );
+			}
+
+			effectiveMaps = _texelMaps;
+		}
+
+		Mask = PaintLayers.FinalMask( shaped, effectiveMaps.MaskPaint, InvertMask.Value, resolution, resolution );
+
+		if ( !effectiveMaps.HasSurface )
 		{
 			Warn( "This layer only has mask paint",
 				"Every stroke on it was painted on the Layer Mask, so there is nothing for the mask to show.",
@@ -400,12 +449,12 @@ public sealed class PaintFeature : Feature
 
 		var compositeKey = $"{BlendMode}|{Opacity.Clamped}|{MaskLevel.Clamped}|{MaskSoftness.Clamped}|{InvertMask.Value}|{generatedKey}";
 
-		if ( _cachedCanvas is null || !ReferenceEquals( _compositeBelow, below ) || !ReferenceEquals( _compositeLayer, _layerMaps )
+		if ( _cachedCanvas is null || !ReferenceEquals( _compositeBelow, below ) || !ReferenceEquals( _compositeLayer, effectiveMaps )
 			|| _compositeKey != compositeKey )
 		{
-			_cachedCanvas = PaintLayers.CompositeSet( below, _layerMaps, BlendMode, Opacity.Clamped, Mask );
+			_cachedCanvas = PaintLayers.CompositeSet( below, effectiveMaps, BlendMode, Opacity.Clamped, Mask );
 			_compositeBelow = below;
-			_compositeLayer = _layerMaps;
+			_compositeLayer = effectiveMaps;
 			_compositeKey = compositeKey;
 		}
 
@@ -415,6 +464,25 @@ public sealed class PaintFeature : Feature
 		_builtRevision = Revision;
 	}
 
+
+	/// <summary>A deep copy of a layer's maps, channel by channel. PaintCanvas.Clone also
+	/// clones companions, but layer maps carry their channels as separate fields with null
+	/// companions, so this is just the four (or five) canvases, copied.</summary>
+	static PaintLayerMaps CloneMaps( PaintLayerMaps maps )
+	{
+		if ( maps is null )
+			return null;
+
+		return new PaintLayerMaps
+		{
+			Color = maps.Color?.Clone(),
+			Roughness = maps.Roughness?.Clone(),
+			Metalness = maps.Metalness?.Clone(),
+			Height = maps.Height?.Clone(),
+			MaskPaint = maps.MaskPaint?.Clone(),
+			Size = maps.Size,
+		};
+	}
 
 	/// <summary>Parse <see cref="Recipe"/> into the dialog parameters. No-op when the recipe is empty,
 	/// so every existing document and script builds exactly as before.</summary>

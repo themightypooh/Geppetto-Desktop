@@ -25,7 +25,7 @@ namespace Marionette.Desktop;
 /// </summary>
 public static class DataTransferService
 {
-	public enum Channel { SkinWeights, UVs, VertexColors, MorphDeltas, Morphs = MorphDeltas }
+	public enum Channel { SkinWeights, UVs, VertexColors, MorphDeltas, Morphs = MorphDeltas, UV2 }
 
 	public sealed class Options
 	{
@@ -50,15 +50,18 @@ public static class DataTransferService
 		var wantUV = Array.IndexOf( options.Channels, Channel.UVs ) >= 0;
 		var wantColors = Array.IndexOf( options.Channels, Channel.VertexColors ) >= 0;
 		var wantMorphs = Array.IndexOf( options.Channels, Channel.MorphDeltas ) >= 0;
+		var wantUV2 = Array.IndexOf( options.Channels, Channel.UV2 ) >= 0;
 
 		var outMesh = new PolyMesh();
 		outMesh.Positions.AddRange( target.Positions );
 		foreach ( var f in target.Faces )
 			outMesh.Faces.Add( new Face( (int[])f.Indices.Clone(), (Vec2[])f.UVs.Clone(), f.Material ) );
-		// No UV2 passthrough: the desktop kernel mirror has no UV2/FaceUV2 (that channel
-		// exists only in the geppetto tree so far), so copying it would break this build.
-		// UV2 transfer is a Lane P sync follow-up, not part of the UV channel here, which
-		// is the per-corner Face.UVs the transfer interpolates.
+		// UV2 rides its own channel (wave3detail): the kernel mirror now carries UV2/FaceUV2
+		// (Lane P sync landed it), so the stale "mirror has no UV2" note is gone. UV2 is
+		// per-vertex on PolyMesh, so the transfer interpolates it per target vertex like
+		// the other vertex channels, using the hit triangle's corner UV2s (GetUV2, which
+		// is seam-correct per hit face). A target vertex shared across a source seam
+		// keeps one value, the same collapse the UV channel's per-vertex intermediate has.
 
 		if ( wantSkin && source.Skin is not null )
 			outMesh.Skin = new SkinWeights( target.Positions.Count );
@@ -82,6 +85,8 @@ public static class DataTransferService
 
 		var perVertUV = wantUV ? new Vec2[target.Positions.Count] : null;
 		var hasUV = wantUV ? new bool[target.Positions.Count] : null;
+		var perVertUV2 = wantUV2 ? new Vec2[target.Positions.Count] : null;
+		var hasUV2 = wantUV2 ? new bool[target.Positions.Count] : null;
 
 		var bvh = MeshBVH.Build( source );
 		int transferred = 0, skipped = 0;
@@ -115,6 +120,12 @@ public static class DataTransferService
 				hasUV[ti] = true;
 			}
 
+			if ( wantUV2 && source.HasUV2 )
+			{
+				perVertUV2[ti] = source.GetUV2( tri.face, tri.c0 ) * w.w0 + source.GetUV2( tri.face, tri.c1 ) * w.w1 + source.GetUV2( tri.face, tri.c2 ) * w.w2;
+				hasUV2[ti] = true;
+			}
+
 			if ( wantColors && colors is not null && source.VertexColors is not null
 				&& v0 < source.VertexColors.Length && v1 < source.VertexColors.Length && v2 < source.VertexColors.Length )
 				colors[ti] = source.VertexColors[v0] * w.w0 + source.VertexColors[v1] * w.w1 + source.VertexColors[v2] * w.w2;
@@ -137,6 +148,14 @@ public static class DataTransferService
 					int v = f.Indices[c];
 					if ( v < hasUV.Length && hasUV[v] && c < f.UVs.Length ) f.UVs[c] = perVertUV[v];
 				}
+		if ( wantUV2 && hasUV2 is not null )
+		{
+			var uv2 = new List<Vec2>( target.Positions.Count );
+			for ( int vi = 0; vi < target.Positions.Count; vi++ )
+				uv2.Add( hasUV2[vi] ? perVertUV2[vi] : ( target.HasUV2 && vi < target.UV2.Count ? target.UV2[vi] : Vec2.Zero ) );
+			outMesh.UV2 = uv2;
+			outMesh.FaceUV2 = null;
+		}
 		if ( colors is not null ) outMesh.VertexColors = colors;
 		if ( outMorphs.Count > 0 ) outMesh.Morphs.AddRange( outMorphs );
 

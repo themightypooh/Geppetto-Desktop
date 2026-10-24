@@ -61,6 +61,13 @@ public sealed class SplineFeature : Feature
 		};
 
 		ctx.Splines[Id] = spline;
+
+		// Scatter's Curve/CurveIMM modes look a spline up by the Curve string, and a
+		// script can only name a spline it can spell: publish under the feature name
+		// too, so curve=ChainPath works and not just the unreadable id. A later spline
+		// with the same name wins, like bodies by name.
+		if ( !string.IsNullOrWhiteSpace( Name ) )
+			ctx.Splines[Name] = spline;
 		ctx.LastSplineId = Id;
 
 		// Fewer than two points is a spline being drawn, not a broken one. Nothing is built and

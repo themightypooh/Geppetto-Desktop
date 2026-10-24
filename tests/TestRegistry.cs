@@ -88,7 +88,11 @@ internal static class DesktopTestHost
             BaselineTests.Register( registry, settings );
             ClipSpaceTests.Register( registry, settings );
             AiTests.Register( registry, settings );
+            AiJudgeBackstopTests.Register( registry, settings );
+            AiStandaloneJudgeTests.Register( registry, settings );
+            AiBuilderHealerTests.Register( registry, settings );
             AiLiveTests.Register( registry, settings );
+            ViewportCorrectionTests.Register( registry, settings );
             HarnessTests.Register( registry, settings );
             AssetPathTests.Register( registry, settings );
             DocumentSessionTests.Register( registry, settings );
@@ -98,6 +102,7 @@ internal static class DesktopTestHost
             DocumentSaveTests.Register( registry, settings );
             GizmoMathTests.Register( registry, settings );
             MaterialDescriptorTests.Register( registry, settings );
+            ViewerLookTests.Register( registry, settings );
             PoseEditTests.Register( registry, settings );
             DesktopProjectTests.Register( registry, settings );
             ParametricEditTests.Register( registry, settings );
@@ -137,6 +142,7 @@ internal static class DesktopTestHost
             LiveIkBufferTests.Register( registry, settings );
             HairStrandTests.Register( registry, settings );
             HdrPipelineTests.Register( registry, settings );
+            NprTests.Register( registry, settings );
             RenderArchitectureTests.Register( registry, settings );
             TwoSidedShadingTests.Register( registry, settings );
             IblTests.Register( registry, settings );

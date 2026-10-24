@@ -27,6 +27,15 @@ namespace Marionette.Desktop;
 ///   when there is none yet, so a .riganim previews without an FBX pane; `rest` drops
 ///   back to the bind pose. A clip set in a live pane survives live revisions until `rest`.
 ///   keys | kmove D T:F.. | kdel T:F.. | kease E T:F.. | kins F T.. | undo | redo | save
+///   texpaint BODY path=X,Y;X,Y.. [channel=color|rough|metal|height|mask] [color=R,G,B]
+///     [radius=TEXELS] [strength=0..1] [falloff=smooth|linear|sharp|constant] [spacing=0.5]
+///     [erase=0|1]: commit one texel stroke to the Paint layer on BODY (see the
+///     texpaint script verb for the same commit in a script). The stroke goes into the
+///     layer's log, the studio rebuilds, and the pane swaps to a fresh snapshot -- the
+///     fingerprint mechanism, not a dirty-rect push: a dirty rect only fixes the GL
+///     upload, while a committed stroke + fresh snapshot is what survives a rebuild, a
+///     save, and the next snapshot promotion. Refused on a live-run pane (its studio
+///     changes every revision) and when the body has no Paint layer naming it.
 ///   ortho 0|1 | refadd VIEW PATH | refset I key=value.. | refdel I | refsave | refs
 ///
 /// A new frame is only written after the host acks the last one, so it never reads a half-written
@@ -310,6 +319,24 @@ public static class ServeMode
 			EmitKeys();
 		}
 		var face = new FacePoserService();         // the Face Poser panel's flex sliders over this pane's model
+		// Wave-2 verbs: attach the morph document for `face symmetrize` / `face split`.
+		// Only an opened document with exactly one editable body gets one: a live-run pane's
+		// studio changes every revision (and MorphEditService throws if the vertex/face count
+		// moves under it), and a multi-body model has no single mesh to edit. Anything else
+		// leaves Morphs null, and those face commands fail clearly instead of pretending.
+		void AttachMorphs()
+		{
+			try
+			{
+				var bodies = (follow is null ? loader.Session?.Studio : null)?.Bodies
+					.Where( b => !b.IsReference && b.Mesh is { VertexCount: > 0 } ).ToList();
+				face.Morphs = bodies is { Count: 1 }
+					? new MorphEditService( bodies[0].Mesh, new EditHistory() )
+					: null;
+			}
+			catch { face.Morphs = null; }
+		}
+		AttachMorphs();
 		void EmitKeys() => Emit( keys?.Snapshot( mesh.Rig ) ?? new JsonObject { ["ev"] = "keys", ["tracks"] = new JsonArray(), ["undo"] = 0, ["redo"] = 0, ["dirty"] = false, ["saveable"] = false, ["frames"] = 0 } );
 		ClipKeyEditor Keys() => keys ?? throw new InvalidOperationException( "No clip to edit keys on." );
 		OpenKeys( options.Clip );
@@ -946,6 +973,54 @@ public static class ServeMode
 					OpenKeys( null );
 					break;
 				}
+				// Wave 3: gait — a PlanGait clip, generated from this pane's own rig and
+				// played in the pane (AdvancedIkService had a planner and no caller).
+				// gait TYPE feet=F1,F2 [stride=] [height=] [frames=] [root=] [save=PATH]
+				case "gait":
+				{
+					if ( mesh.Rig is not { Count: > 0 } ) throw new InvalidOperationException( "This model has no skeleton to walk on." );
+					var gt = arg.Split( ' ', StringSplitOptions.RemoveEmptyEntries ).FirstOrDefault() ?? throw new ArgumentException( "gait needs a type: gait walk feet=foot_L,foot_R" );
+					var go = AnimCallers.Opts( arg );
+					var feet = (go.TryGetValue( "feet", out var fv ) ? fv : "").Split( ',', StringSplitOptions.RemoveEmptyEntries );
+					if ( feet.Length == 0 ) throw new ArgumentException( "gait needs feet=: gait walk feet=foot_L,foot_R" );
+					var gait = AnimCallers.BuildGaitClip( mesh.Rig, gt, feet, AnimCallers.OptF( go, "stride", 20f ), AnimCallers.OptF( go, "height", 4f ), AnimCallers.OptI( go, "frames", 60 ), go.TryGetValue( "root", out var rv ) ? rv : null );
+					player ??= new MarionettePlayer( mesh.Rig );
+					player.LoadClip( gait );
+					activeClipPath = null;
+					player.Playing = true;
+					player.Time = 0;
+					if ( go.TryGetValue( "save", out var gsave ) ) { File.WriteAllText( gsave, RigAnimWriter.Write( gait ) ); }
+					Emit( new JsonObject { ["ev"] = "gait", ["type"] = gt, ["feet"] = feet.Length, ["frames"] = gait.FrameCount, ["tracks"] = gait.Tracks.Count, ["saved"] = go.TryGetValue( "save", out var gs ) ? gs : "" } );
+					OpenKeys( null );
+					break;
+				}
+				// Wave 3: blend — the active clip blended with another clip file, baked
+				// per frame through ClipBlendService and played in the pane.
+				// blend FILE [weight=0..1] [mode=override|additive] [save=PATH]
+				case "blend":
+				{
+					if ( player?.Clip is null ) throw new InvalidOperationException( "No clip is playing to blend from. Load one with `clip PATH` first." );
+					if ( mesh.Rig is not { Count: > 0 } ) throw new InvalidOperationException( "This model has no skeleton to blend on." );
+					var bp = arg.Split( ' ', StringSplitOptions.RemoveEmptyEntries ).FirstOrDefault() ?? throw new ArgumentException( "blend needs a clip file: blend other.riganim weight=0.5" );
+					var bo = AnimCallers.Opts( arg );
+					var bfile = bp;
+					if ( !File.Exists( bfile ) && !string.IsNullOrEmpty( options.Model ) )
+					{
+						var beside = Path.Combine( Path.GetDirectoryName( Path.GetFullPath( options.Model ) ) ?? ".", Path.GetFileName( bfile ) );
+						if ( File.Exists( beside ) ) bfile = beside;
+					}
+					var layer = RigAnimFile.ReadFile( bfile );
+					var mode = (bo.TryGetValue( "mode", out var mv ) ? mv : "override").ToLowerInvariant() == "additive" ? BlendMode.Additive : BlendMode.Override;
+					var blended = AnimCallers.BuildBlendClip( player.Clip, layer, AnimCallers.OptF( bo, "weight", 0.5f ), mode, mesh.Rig );
+					player.LoadClip( blended );
+					activeClipPath = null;
+					player.Playing = true;
+					player.Time = 0;
+					if ( bo.TryGetValue( "save", out var bsave ) ) { File.WriteAllText( bsave, RigAnimWriter.Write( blended ) ); }
+					Emit( new JsonObject { ["ev"] = "blend", ["file"] = bfile, ["weight"] = AnimCallers.OptF( bo, "weight", 0.5f ), ["mode"] = mode.ToString(), ["frames"] = blended.FrameCount, ["tracks"] = blended.Tracks.Count, ["saved"] = bo.TryGetValue( "save", out var bs ) ? bs : "" } );
+					OpenKeys( null );
+					break;
+				}
 				// the dope sheet: keys are "track:frame" refs, track being the index in the keys event
 				case "keys": EmitKeys(); break;
 				// face [set NAME VALUE [BALANCE] | preset NAME | zero | random | scale S | save NAME | export PATH]
@@ -968,6 +1043,130 @@ public static class ServeMode
 				}
 				case "undo": Keys().Undo(); EmitKeys(); break;
 				case "redo": Keys().Redo(); EmitKeys(); break;
+				case "texpaint":
+				{
+					// Commit one texel stroke to the Paint layer on a body, then show it.
+					// FINGERPRINT, NOT DIRTY-RECT: the stroke is appended to the layer's log
+					// (AddTexelStroke bumps PaintFeature.Revision), the studio rebuilds, and
+					// the pane swaps to a snapshot built fresh from that studio -- so the new
+					// snapshot's fingerprint already includes the stroke and TryPromoteSnapshot
+					// accepts it. A dirty-rect GL push would show the stroke until the next
+					// rebuild replaced the canvas; this survives it. The player is left alone:
+					// the rig is studio-owned and a paint rebuild does not move it.
+					if ( follow is not null || loader.Session?.Studio is null )
+						throw new InvalidOperationException( "texpaint needs an opened .effigy pane, not a live-run pane." );
+
+					var parts = arg.Split( ' ', StringSplitOptions.RemoveEmptyEntries );
+					if ( parts.Length < 2 )
+						throw new ArgumentException( "texpaint needs a body and a path: texpaint Body path=10,20;30,20" );
+
+					var studio = loader.Session.Studio;
+					var body = studio.Bodies.FirstOrDefault( b => b.Name == parts[0] || b.Id == parts[0] );
+					if ( body?.Mesh is null )
+						throw new ArgumentException( $"No body called '{parts[0]}'." );
+
+					var opts = new Dictionary<string, string>( StringComparer.OrdinalIgnoreCase );
+					foreach ( var kv in parts.Skip( 1 ) )
+					{
+						var eq = kv.IndexOf( '=' );
+						if ( eq > 0 ) opts[kv[..eq]] = kv[( eq + 1 )..];
+					}
+
+					if ( !opts.TryGetValue( "path", out var pathText ) || string.IsNullOrWhiteSpace( pathText ) )
+						throw new ArgumentException( "texpaint needs path=: texpaint Body path=10,20;30,20 -- texel coordinates in the layer's canvas, row 0 at the top." );
+
+					var feature = studio.Features.OfType<Effigy.PaintFeature>()
+						.LastOrDefault( f => f.Bodies.BodyIds.Contains( body.Id ) );
+					if ( feature is null )
+						throw new InvalidOperationException( $"{body.Name ?? body.Id} has no Paint layer naming it. Add one first (add Paint bodies={body.Name ?? body.Id}), then texpaint commits strokes to it." );
+
+					var channel = opts.GetValueOrDefault( "channel", "color" ).ToLowerInvariant() switch
+					{
+						"color" or "colour" or "base" => Effigy.PaintChannel.Color,
+						"rough" or "roughness" => Effigy.PaintChannel.Roughness,
+						"metal" or "metalness" or "metallic" => Effigy.PaintChannel.Metalness,
+						"height" => Effigy.PaintChannel.Height,
+						"mask" => Effigy.PaintChannel.Mask,
+						_ => throw new ArgumentException( $"channel={opts.GetValueOrDefault( "channel", "" )}: use color, rough, metal, height or mask." ),
+					};
+
+					var color = opts.GetValueOrDefault( "color", "1,0,0" ).Split( ',' );
+					if ( color.Length < 3 || !float.TryParse( color[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var cr )
+						|| !float.TryParse( color[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var cg )
+						|| !float.TryParse( color[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var cb ) )
+						throw new ArgumentException( $"color={opts.GetValueOrDefault( "color", "" )}: three numbers 0..1, e.g. color=1,0,0." );
+
+					if ( !float.TryParse( opts.GetValueOrDefault( "radius", "12" ), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var radius ) || radius <= 0 )
+						throw new ArgumentException( $"radius={opts.GetValueOrDefault( "radius", "" )}: a positive texel radius." );
+
+					if ( !float.TryParse( opts.GetValueOrDefault( "strength", "1" ), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var strength ) || strength <= 0 || strength > 1 )
+						throw new ArgumentException( $"strength={opts.GetValueOrDefault( "strength", "" )}: 0..1." );
+
+					var falloff = opts.GetValueOrDefault( "falloff", "smooth" ).ToLowerInvariant() switch
+					{
+						"smooth" => Effigy.BrushFalloff.Smooth,
+						"linear" => Effigy.BrushFalloff.Linear,
+						"sharp" => Effigy.BrushFalloff.Sharp,
+						"constant" => Effigy.BrushFalloff.Constant,
+						_ => throw new ArgumentException( $"falloff={opts.GetValueOrDefault( "falloff", "" )}: smooth, linear, sharp or constant." ),
+					};
+
+					if ( !float.TryParse( opts.GetValueOrDefault( "spacing", "0.5" ), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var spacing ) || spacing <= 0 )
+						throw new ArgumentException( $"spacing={opts.GetValueOrDefault( "spacing", "" )}: a positive fraction of the radius." );
+
+					// Wave-5 papercut: built directly from parsed args ON PURPOSE, not via
+					// TexturePaintService.Session.ToTexelStroke -- no Session exists on this
+					// command path (no canvas, no dab stream), and the durable commit is
+					// AddTexelStroke below. See the TexturePaintService header for the full
+					// routing decision.
+					var stroke = new Effigy.TexelStroke
+					{
+						Channel = channel,
+						R = cr, G = cg, B = cb, A = 1f,
+						Radius = radius, Strength = strength, Falloff = falloff, Spacing = spacing,
+						Erase = opts.GetValueOrDefault( "erase", "0" ) is "1" or "true" or "on" or "yes",
+					};
+
+					foreach ( var point in pathText.Split( ';', StringSplitOptions.RemoveEmptyEntries ) )
+					{
+						var xy = point.Split( ',' );
+						if ( xy.Length < 2 || !float.TryParse( xy[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var px )
+							|| !float.TryParse( xy[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var py ) )
+							throw new ArgumentException( $"path={pathText}: points are x,y pairs separated by ';', e.g. path=10,20;30,20." );
+						stroke.Path.Add( new Effigy.TexelStrokePoint( px, py ) );
+					}
+
+					if ( stroke.Path.Count == 0 )
+						throw new ArgumentException( "texpaint needs at least one path point: path=10,20." );
+
+					feature.AddTexelStroke( stroke );
+					var report = studio.Rebuild();
+					if ( feature.Error is not null )
+						throw new InvalidOperationException( $"texpaint rebuild failed: {feature.Error}" );
+					if ( report.HasErrors )
+						throw new InvalidOperationException( $"texpaint rebuild failed: {string.Join( "; ", report.Errors.Select( e => e.FeatureId + ": " + e.Message ) )}" );
+
+					var snapshot = loader.Session.BuildSnapshot();
+					if ( !loader.TryPromoteSnapshot( snapshot ) )
+					{
+						snapshot.Mesh.Dispose();
+						throw new InvalidOperationException( "texpaint: fresh snapshot was stale on promotion (fingerprint moved under it); the stroke is in the document, re-open the pane to see it." );
+					}
+
+					// Swap to the fresh snapshot's mesh the way a live revision does: upload
+					// in place over the old buffers, then release the old mesh.
+					var fresh = snapshot.Mesh;
+					if ( fresh.TriangleCount > 0 ) fresh.Upload( gl, mesh );
+					var oldMesh = mesh; mesh = fresh;
+					oldMesh.ReleaseGpu( gl ); oldMesh.Dispose();
+					Refocus();
+					renderer.ResetTemporalHistory(); dirty = true;
+					Emit( new JsonObject { ["ev"] = "texpaint", ["body"] = body.Name ?? body.Id, ["points"] = stroke.Path.Count,
+						["channel"] = channel.ToString(), ["revision"] = feature.Revision,
+						["texelStrokes"] = feature.TexelStrokes?.Count ?? 0 } );
+					break;
+				}
+
 				case "save":
 				{
 					var backup = Keys().Save( Path.Combine( Environment.GetFolderPath( Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolderOption.DoNotVerify ), "geppetto", "clip-backups" ) );

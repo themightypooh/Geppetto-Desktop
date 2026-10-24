@@ -1,0 +1,546 @@
+using System;
+using System.Collections.Generic;
+using System.Numerics;
+using Effigy;
+using Silk.NET.OpenGL;
+
+namespace Marionette.Desktop;
+
+/// <summary>R9: surface parameters for live geometry, the same terms a mesh batch feeds the lit shader.</summary>
+public readonly record struct LiveMaterial( Vector3 Albedo, float Roughness = .6f, float Metallic = 0f,
+	Vector3 Emission = default, float Alpha = 1f, bool Blend = false, bool DoubleSided = true )
+{
+	public MaterialLobes Lobes { get; init; } = MaterialLobes.None;
+	/// <summary>Soft round sprite in albedo alpha and emission (billboards); quads otherwise draw square.</summary>
+	public bool Sprite { get; init; }
+}
+
+/// <summary>Camera basis a layer builds view-facing geometry (billboards, ribbons) against.</summary>
+public readonly record struct LiveView( Vector3 Eye, Vector3 Right, Vector3 Up, Vector3 Forward );
+
+/// <summary>Growable vertex stream in <see cref="ViewportMesh"/>'s 20-float layout, unskinned.
+/// Buffers grow to the high-water mark and are reused, so steady frames do not allocate.</summary>
+public sealed class LiveBuilder
+{
+	float[] _data = new float[ViewportMesh.FloatsPerVertex * 1024];
+	public int FloatCount { get; private set; }
+	public int VertexCount => FloatCount / ViewportMesh.FloatsPerVertex;
+	internal float[] Data => _data;
+	/// <summary>World AABB of everything emitted since the last reset (inverted when empty).</summary>
+	public Vector3 Min { get; private set; } = new( float.PositiveInfinity );
+	public Vector3 Max { get; private set; } = new( float.NegativeInfinity );
+	internal void Reset() { FloatCount = 0; ResetBounds(); }
+	internal void ResetBounds() { Min = new Vector3( float.PositiveInfinity ); Max = new Vector3( float.NegativeInfinity ); }
+
+	public void Vertex( Vector3 p, Vector3 n, Vector2 uv, Vector3 tangent )
+	{
+		if ( FloatCount + ViewportMesh.FloatsPerVertex > _data.Length ) Array.Resize( ref _data, _data.Length * 2 );
+		var d = _data.AsSpan( FloatCount, ViewportMesh.FloatsPerVertex );
+		d[0] = p.X; d[1] = p.Y; d[2] = p.Z;
+		d[3] = n.X; d[4] = n.Y; d[5] = n.Z;
+		d[6] = d[7] = d[8] = d[9] = 0; // bone indices
+		d[10] = 1; d[11] = d[12] = d[13] = 0; // bone weights
+		d[14] = uv.X; d[15] = uv.Y;
+		d[16] = tangent.X; d[17] = tangent.Y; d[18] = tangent.Z; d[19] = 1;
+		FloatCount += ViewportMesh.FloatsPerVertex;
+		Min = Vector3.Min( Min, p ); Max = Vector3.Max( Max, p );
+	}
+
+	public void Triangle( Vector3 a, Vector3 b, Vector3 c, Vector3 na, Vector3 nb, Vector3 nc )
+	{
+		var t = SafeNormalize( b - a, Vector3.UnitX );
+		Vertex( a, na, new Vector2( 0, 0 ), t );
+		Vertex( b, nb, new Vector2( 1, 0 ), t );
+		Vertex( c, nc, new Vector2( 0, 1 ), t );
+	}
+
+	/// <summary>Quad a-b-c-d (counter-clockwise seen from <paramref name="n"/>).</summary>
+	public void Quad( Vector3 a, Vector3 b, Vector3 c, Vector3 d, Vector3 n )
+	{
+		var t = SafeNormalize( b - a, Vector3.UnitX );
+		Vertex( a, n, new Vector2( 0, 1 ), t ); Vertex( b, n, new Vector2( 1, 1 ), t ); Vertex( c, n, new Vector2( 1, 0 ), t );
+		Vertex( a, n, new Vector2( 0, 1 ), t ); Vertex( c, n, new Vector2( 1, 0 ), t ); Vertex( d, n, new Vector2( 0, 0 ), t );
+	}
+
+	public static Vector3 SafeNormalize( Vector3 v, Vector3 fallback )
+	{
+		float l = v.Length();
+		return l > 1e-12f ? v / l : fallback;
+	}
+}
+
+/// <summary>One source of live geometry. <see cref="Advance"/> steps its simulation, <see cref="Emit"/>
+/// writes this frame's triangles. Emit must not allocate in steady state.</summary>
+public abstract class LiveLayer
+{
+	public LiveMaterial Material { get; set; } = new( new Vector3( .8f ) );
+	public bool Visible { get; set; } = true;
+	/// <summary>True when the geometry changes between frames (TAA must not treat it as static).</summary>
+	public virtual bool Dynamic => true;
+	// R7: last build's positions; reused as previous positions when the vertex count is unchanged.
+	internal float[] PrevPositions = Array.Empty<float>();
+	internal int PrevCount = -1;
+	public virtual void Advance( float dt ) { }
+	public abstract void Emit( LiveBuilder b, in LiveView view );
+}
+
+/// <summary>Camera-facing billboards from a CPU <see cref="ParticleSystem"/>, sorted back-to-front.
+/// Particles shrink over their last <see cref="FadeOut"/> of life (no per-vertex alpha in the layout).</summary>
+public sealed class ParticleLayer : LiveLayer
+{
+	public ParticleSystem System { get; }
+	public float FadeOut { get; set; } = .3f;
+	ParticleBillboard[] _billboards = new ParticleBillboard[256];
+	float _accumulator;
+
+	public ParticleLayer( ParticleSystem system ) => System = system ?? throw new ArgumentNullException( nameof( system ) );
+	public int LastDrawn { get; private set; }
+
+	public override void Advance( float dt )
+	{
+		_accumulator += dt;
+		float step = System.Settings.FixedDeltaTime;
+		int n = 0;
+		while ( _accumulator >= step && n < 8 ) { System.Step(); _accumulator -= step; n++; }
+		if ( n == 8 ) _accumulator = 0;
+	}
+
+	public override void Emit( LiveBuilder b, in LiveView view )
+	{
+		var order = System.SortBackToFront( view.Eye, view.Forward );
+		if ( _billboards.Length < order.Length ) _billboards = new ParticleBillboard[Math.Max( order.Length, _billboards.Length * 2 )];
+		int count = System.WriteBillboards( order, _billboards );
+		var n = -view.Forward;
+		for ( int i = 0; i < count; i++ )
+		{
+			ref readonly var p = ref _billboards[i];
+			float fade = FadeOut > 0 ? Math.Clamp( ( 1f - p.NormalizedAge ) / FadeOut, 0f, 1f ) : 1f;
+			float h = p.Size * .5f * fade;
+			if ( h <= 0 ) continue;
+			var r = view.Right * h; var u = view.Up * h;
+			b.Quad( p.Position - r - u, p.Position + r - u, p.Position + r + u, p.Position - r + u, n );
+		}
+		LastDrawn = count;
+	}
+}
+
+/// <summary>Strands (hair, particle trails, curves) as camera-facing ribbons.</summary>
+public sealed class StrandLayer : LiveLayer
+{
+	readonly HairStrandService _hair;
+	readonly IReadOnlyList<Vector3[]> _static;
+	public float Width { get; set; }
+	/// <summary>Root-to-tip width taper (tip width = Width × Taper).</summary>
+	public float Taper { get; set; } = .3f;
+	public Func<float, (Vector3 bodyCentre, float bodyRadius, Vector3 wind)> Environment { get; set; }
+	public float Gravity { get; set; } = -386.0886f;
+
+	public StrandLayer( HairStrandService hair, float width ) { _hair = hair ?? throw new ArgumentNullException( nameof( hair ) ); Width = width; }
+	/// <summary>Fixed polylines, e.g. realized geometry-nodes curves.</summary>
+	public StrandLayer( IReadOnlyList<Vector3[]> polylines, float width ) { _static = polylines ?? throw new ArgumentNullException( nameof( polylines ) ); Width = width; }
+	public override bool Dynamic => _hair is not null;
+	float _time;
+
+	public override void Advance( float dt )
+	{
+		if ( _hair is null || dt <= 0 ) return;
+		_time += dt;
+		var env = Environment?.Invoke( _time );
+		// HairStrandService integrates gravity along its y; the viewer is Z-up, so strands are stored
+		// with y/z swapped (see Swap) and gravity is applied on stored y = world z.
+		_hair.Step( dt, Gravity,
+			env is { } e && e.bodyRadius > 0 ? Swap( e.bodyCentre ) : null, env?.bodyRadius ?? 0f,
+			env is { } w ? Swap( w.wind ) : null, substeps: 2 );
+	}
+
+	/// <summary>World (Z-up) ↔ hair-service (Y-up) axis swap; its own inverse.</summary>
+	public static (float, float, float) Swap( Vector3 v ) => ( v.X, v.Z, v.Y );
+	public static Vector3 Swap( (float x, float y, float z) v ) => new( v.x, v.z, v.y );
+
+	Vector3[] _scratch = new Vector3[64];
+
+	public override void Emit( LiveBuilder b, in LiveView view )
+	{
+		if ( _hair is not null )
+		{
+			var strands = _hair.Strands;
+			for ( int s = 0; s < strands.Count; s++ )
+			{
+				var pts = strands[s].Points;
+				if ( _scratch.Length < pts.Count ) _scratch = new Vector3[pts.Count * 2];
+				for ( int i = 0; i < pts.Count; i++ ) _scratch[i] = Swap( pts[i] );
+				Ribbon( b, view, _scratch.AsSpan( 0, pts.Count ) );
+			}
+		}
+		else
+			for ( int s = 0; s < _static.Count; s++ ) Ribbon( b, view, _static[s] );
+	}
+
+	void Ribbon( LiveBuilder b, in LiveView view, ReadOnlySpan<Vector3> pts )
+	{
+		if ( pts.Length < 2 ) return;
+		Vector3 prevL = default, prevR = default;
+		for ( int i = 0; i < pts.Length; i++ )
+		{
+			var tangent = LiveBuilder.SafeNormalize( pts[Math.Min( i + 1, pts.Length - 1 )] - pts[Math.Max( i - 1, 0 )], Vector3.UnitZ );
+			var toEye = LiveBuilder.SafeNormalize( view.Eye - pts[i], -view.Forward );
+			var side = LiveBuilder.SafeNormalize( Vector3.Cross( tangent, toEye ), view.Right );
+			float t = i / (float)( pts.Length - 1 );
+			float half = Width * .5f * ( 1f + ( Taper - 1f ) * t );
+			Vector3 l = pts[i] - side * half, r = pts[i] + side * half;
+			if ( i > 0 )
+			{
+				var n = LiveBuilder.SafeNormalize( Vector3.Cross( side, tangent ), toEye );
+				if ( Vector3.Dot( n, toEye ) < 0 ) n = -n;
+				b.Quad( prevL, prevR, r, l, n );
+			}
+			prevL = l; prevR = r;
+		}
+	}
+}
+
+/// <summary>Live cloth: <see cref="ClothSimService.State"/> stepped each frame, drawn with smooth normals.</summary>
+public sealed class ClothLayer : LiveLayer
+{
+	public ClothSimService.State State { get; }
+	public ClothSimService.Options Options { get; }
+	public float MaxStep { get; set; } = 1f / 60;
+	Vector3[] _normals = Array.Empty<Vector3>();
+
+	public ClothLayer( ClothSimService.State state, ClothSimService.Options options = null )
+	{
+		State = state ?? throw new ArgumentNullException( nameof( state ) );
+		Options = options ?? new ClothSimService.Options();
+	}
+
+	public override void Advance( float dt )
+	{
+		while ( dt > 1e-6f ) { float h = MathF.Min( dt, MaxStep ); ClothSimService.Step( State, h, Options ); dt -= h; }
+	}
+
+	public override void Emit( LiveBuilder b, in LiveView view ) =>
+		EmitPolygons( b, State.Positions, State.Faces, ref _normals );
+
+	internal static void EmitPolygons( LiveBuilder b, Vec3[] positions, List<int[]> faces, ref Vector3[] normals )
+	{
+		if ( normals.Length != positions.Length ) normals = new Vector3[positions.Length];
+		Array.Clear( normals );
+		for ( int f = 0; f < faces.Count; f++ )
+		{
+			var face = faces[f];
+			for ( int k = 1; k + 1 < face.Length; k++ )
+			{
+				var a = V( positions[face[0]] ); var fn = Vector3.Cross( V( positions[face[k]] ) - a, V( positions[face[k + 1]] ) - a );
+				normals[face[0]] += fn; normals[face[k]] += fn; normals[face[k + 1]] += fn;
+			}
+		}
+		for ( int i = 0; i < normals.Length; i++ ) normals[i] = LiveBuilder.SafeNormalize( normals[i], Vector3.UnitZ );
+		for ( int f = 0; f < faces.Count; f++ )
+		{
+			var face = faces[f];
+			for ( int k = 1; k + 1 < face.Length; k++ )
+				b.Triangle( V( positions[face[0]] ), V( positions[face[k]] ), V( positions[face[k + 1]] ),
+					normals[face[0]], normals[face[k]], normals[face[k + 1]] );
+		}
+	}
+
+	internal static Vector3 V( Vec3 v ) => new( v.x, v.y, v.z );
+}
+
+/// <summary>A realized geometry-nodes result: meshes, nested instances (transforms compose) and
+/// curves (as ribbons). Static; the triangle soup is built once and replayed.</summary>
+public sealed class GeometrySetLayer : LiveLayer
+{
+	readonly LiveBuilder _baked = new();
+	readonly List<Vector3[]> _curves = new();
+	readonly StrandLayer _curveLayer;
+	public int InstanceCount { get; }
+	public override bool Dynamic => false;
+
+	public GeometrySetLayer( GeometrySet set, Xform? transform = null, float curveWidth = 1f )
+	{
+		if ( set is null ) throw new ArgumentNullException( nameof( set ) );
+		int instances = 0;
+		Bake( set, transform ?? Xform.Identity, ref instances );
+		InstanceCount = instances;
+		if ( _curves.Count > 0 ) _curveLayer = new StrandLayer( _curves, curveWidth );
+	}
+
+	void Bake( GeometrySet set, Xform xf, ref int instances )
+	{
+		if ( set.Mesh is { } m )
+		{
+			var poly = m.Poly;
+			var pos = new Vec3[poly.Positions.Count];
+			for ( int i = 0; i < pos.Length; i++ ) pos[i] = xf.TransformPoint( poly.Positions[i] );
+			var faces = new List<int[]>( poly.Faces.Count );
+			foreach ( var f in poly.Faces ) faces.Add( xf.FlipsWinding ? Reverse( f.Indices ) : ToArray( f.Indices ) );
+			var normals = Array.Empty<Vector3>();
+			ClothLayer.EmitPolygons( _baked, pos, faces, ref normals );
+		}
+		if ( set.Curves is { } c )
+			foreach ( var sp in c.Splines )
+			{
+				var pts = new Vector3[sp.Points.Length];
+				for ( int i = 0; i < pts.Length; i++ ) pts[i] = ClothLayer.V( xf.TransformPoint( sp.Points[i] ) );
+				_curves.Add( pts );
+			}
+		if ( set.Instances is { } inst )
+			for ( int i = 0; i < inst.Transforms.Length; i++ )
+			{
+				instances++;
+				Bake( inst.Prototypes[inst.Reference[i]], Compose( inst.Transforms[i], xf ), ref instances );
+			}
+	}
+
+	/// <summary>Apply <paramref name="inner"/> then <paramref name="outer"/>.</summary>
+	static Xform Compose( Xform inner, Xform outer ) =>
+		new( outer.TransformDirection( inner.X ), outer.TransformDirection( inner.Y ), outer.TransformDirection( inner.Z ), outer.TransformPoint( inner.Origin ) );
+
+	static int[] ToArray( IReadOnlyList<int> idx ) { var a = new int[idx.Count]; for ( int i = 0; i < a.Length; i++ ) a[i] = idx[i]; return a; }
+	static int[] Reverse( IReadOnlyList<int> idx ) { var a = ToArray( idx ); Array.Reverse( a ); return a; }
+
+	public override void Emit( LiveBuilder b, in LiveView view )
+	{
+		var src = _baked.Data;
+		for ( int i = 0; i < _baked.FloatCount; i += ViewportMesh.FloatsPerVertex )
+			b.Vertex( new Vector3( src[i], src[i + 1], src[i + 2] ), new Vector3( src[i + 3], src[i + 4], src[i + 5] ),
+				new Vector2( src[i + 14], src[i + 15] ), new Vector3( src[i + 16], src[i + 17], src[i + 18] ) );
+		_curveLayer?.Emit( b, view );
+	}
+}
+
+/// <summary>R9: live scene features (particles, strands, cloth, geometry-nodes output) drawn by
+/// <see cref="SceneRenderer"/> with the same lit shader and lighting as the mesh — no second
+/// material path. One dynamic vertex buffer, re-filled each frame.</summary>
+public sealed class LiveGeometry : IDisposable
+{
+	public List<LiveLayer> Layers { get; } = new();
+	readonly LiveBuilder _builder = new();
+	readonly int[] _start = new int[64], _count = new int[64];
+	int _built;
+	GL _gl;
+	uint _vao, _vbo, _prevVbo, _white, _whiteLinear, _flatNormal, _disc;
+	int _capacityBytes;
+	static readonly Vector2[] UnitScale = { Vector2.One, Vector2.One, Vector2.One, Vector2.One, Vector2.One, Vector2.One };
+	static readonly Vector2[] ZeroOffset = new Vector2[6];
+	static readonly float[] ZeroRotation = new float[6];
+
+	public bool IsEmpty { get { for ( int i = 0; i < Layers.Count; i++ ) if ( Layers[i].Visible ) return false; return true; } }
+	public bool HasDynamic { get { for ( int i = 0; i < Layers.Count; i++ ) if ( Layers[i].Visible && Layers[i].Dynamic ) return true; return false; } }
+	public int VertexCount => _builder.VertexCount;
+
+	/// <summary>World AABB of last build's opaque (shadow-casting) layers; inverted when none.</summary>
+	public Vector3 CasterMin { get; private set; } = new( float.PositiveInfinity );
+	public Vector3 CasterMax { get; private set; } = new( float.NegativeInfinity );
+	public bool HasCasters => CasterMin.X <= CasterMax.X;
+
+	/// <summary>Depth-only draw of the opaque layers for a shadow pass; caller owns shader and MVP.</summary>
+	public void DrawDepth( GL gl )
+	{
+		if ( !HasCasters || _vao == 0 ) return;
+		gl.BindVertexArray( _vao );
+		for ( int i = 0; i < _built; i++ )
+			if ( _count[i] > 0 && !Layers[i].Material.Blend ) gl.DrawArrays( PrimitiveType.Triangles, _start[i], (uint)_count[i] );
+	}
+
+	public void Advance( float dt ) { for ( int i = 0; i < Layers.Count; i++ ) Layers[i].Advance( dt ); }
+
+	/// <summary>Rebuilds every visible layer's triangles for this camera and uploads them.</summary>
+	public unsafe void Build( GL gl, in LiveView view )
+	{
+		_builder.Reset();
+		CasterMin = new Vector3( float.PositiveInfinity ); CasterMax = new Vector3( float.NegativeInfinity );
+		_built = Math.Min( Layers.Count, _start.Length );
+		for ( int i = 0; i < _built; i++ )
+		{
+			_start[i] = _builder.VertexCount;
+			_builder.ResetBounds();
+			if ( Layers[i].Visible ) Layers[i].Emit( _builder, view );
+			_count[i] = _builder.VertexCount - _start[i];
+			if ( _count[i] > 0 && !Layers[i].Material.Blend ) { CasterMin = Vector3.Min( CasterMin, _builder.Min ); CasterMax = Vector3.Max( CasterMax, _builder.Max ); }
+		}
+		if ( _builder.VertexCount == 0 ) return;
+		EnsureGl( gl );
+		FillPrevious( gl );
+		gl.BindBuffer( BufferTargetARB.ArrayBuffer, _vbo );
+		int bytes = _builder.FloatCount * sizeof( float );
+		fixed ( float* p = _builder.Data )
+		{
+			if ( bytes > _capacityBytes )
+			{
+				_capacityBytes = Math.Max( bytes, _capacityBytes * 2 );
+				gl.BufferData( BufferTargetARB.ArrayBuffer, (nuint)_capacityBytes, null, BufferUsageARB.DynamicDraw );
+			}
+			gl.BufferSubData( BufferTargetARB.ArrayBuffer, 0, (nuint)bytes, p );
+		}
+		gl.BindBuffer( BufferTargetARB.ArrayBuffer, 0 );
+	}
+
+	float[] _prev = new float[3 * 1024];
+	int _prevCapacityBytes;
+
+	/// <summary>R7: per-vertex previous world position (location 6) so motion blur/TAA see live
+	/// motion. A layer whose vertex count changed (particles spawning) gets zero object motion.</summary>
+	unsafe void FillPrevious( GL gl )
+	{
+		int verts = _builder.VertexCount;
+		if ( _prev.Length < verts * 3 ) Array.Resize( ref _prev, Math.Max( verts * 3, _prev.Length * 2 ) );
+		var data = _builder.Data;
+		for ( int i = 0; i < _built; i++ )
+		{
+			var layer = Layers[i];
+			int n = _count[i], start = _start[i];
+			bool match = layer.PrevCount == n && !ResetHistory;
+			for ( int v = 0; v < n; v++ )
+			{
+				int src = ( start + v ) * ViewportMesh.FloatsPerVertex, dst = ( start + v ) * 3;
+				if ( match ) { _prev[dst] = layer.PrevPositions[v * 3]; _prev[dst + 1] = layer.PrevPositions[v * 3 + 1]; _prev[dst + 2] = layer.PrevPositions[v * 3 + 2]; }
+				else { _prev[dst] = data[src]; _prev[dst + 1] = data[src + 1]; _prev[dst + 2] = data[src + 2]; }
+			}
+			if ( layer.PrevPositions.Length < n * 3 ) layer.PrevPositions = new float[Math.Max( n * 3, layer.PrevPositions.Length * 2 )];
+			for ( int v = 0; v < n; v++ )
+			{
+				int src = ( start + v ) * ViewportMesh.FloatsPerVertex;
+				layer.PrevPositions[v * 3] = data[src]; layer.PrevPositions[v * 3 + 1] = data[src + 1]; layer.PrevPositions[v * 3 + 2] = data[src + 2];
+			}
+			layer.PrevCount = n;
+		}
+		ResetHistory = false;
+		gl.BindBuffer( BufferTargetARB.ArrayBuffer, _prevVbo );
+		int bytes = verts * 3 * sizeof( float );
+		fixed ( float* p = _prev )
+		{
+			if ( bytes > _prevCapacityBytes )
+			{
+				_prevCapacityBytes = Math.Max( bytes, _prevCapacityBytes * 2 );
+				gl.BufferData( BufferTargetARB.ArrayBuffer, (nuint)_prevCapacityBytes, null, BufferUsageARB.DynamicDraw );
+			}
+			gl.BufferSubData( BufferTargetARB.ArrayBuffer, 0, (nuint)bytes, p );
+		}
+	}
+
+	/// <summary>Set when temporal history is rejected (camera cut, reload): next build reports no object motion.</summary>
+	public bool ResetHistory { get; set; }
+
+	unsafe void EnsureGl( GL gl )
+	{
+		if ( _gl is not null ) return;
+		_gl = gl;
+		_vao = gl.GenVertexArray(); _vbo = gl.GenBuffer();
+		gl.BindVertexArray( _vao );
+		gl.BindBuffer( BufferTargetARB.ArrayBuffer, _vbo );
+		const uint stride = ViewportMesh.FloatsPerVertex * sizeof( float );
+		(int loc, int size, int offset)[] attribs = { (0, 3, 0), (1, 3, 3), (2, 4, 6), (3, 4, 10), (4, 2, 14), (5, 4, 16) };
+		foreach ( var (loc, size, offset) in attribs )
+		{
+			gl.EnableVertexAttribArray( (uint)loc );
+			gl.VertexAttribPointer( (uint)loc, size, VertexAttribPointerType.Float, false, stride, (void*)( offset * sizeof( float ) ) );
+		}
+		_prevVbo = gl.GenBuffer();
+		gl.BindBuffer( BufferTargetARB.ArrayBuffer, _prevVbo );
+		gl.EnableVertexAttribArray( 6 );
+		gl.VertexAttribPointer( 6, 3, VertexAttribPointerType.Float, false, 3 * sizeof( float ), null );
+		gl.BindVertexArray( 0 );
+		_white = Pixel( gl, 255, 255, 255, InternalFormat.Srgb8Alpha8 );
+		_whiteLinear = Pixel( gl, 255, 255, 255, InternalFormat.Rgba8 );
+		_flatNormal = Pixel( gl, 128, 128, 255, InternalFormat.Rgba8 );
+		_disc = Disc( gl, 64 );
+	}
+
+	/// <summary>White disc with a smooth alpha falloff to the edge, mipmapped.</summary>
+	static unsafe uint Disc( GL gl, int size )
+	{
+		var px = new byte[size * size * 4];
+		for ( int y = 0; y < size; y++ )
+			for ( int x = 0; x < size; x++ )
+			{
+				float dx = ( x + .5f ) / size * 2 - 1, dy = ( y + .5f ) / size * 2 - 1;
+				float t = Math.Clamp( 1f - MathF.Sqrt( dx * dx + dy * dy ), 0f, 1f );
+				int i = ( y * size + x ) * 4;
+				px[i] = px[i + 1] = px[i + 2] = 255;
+				px[i + 3] = (byte)( 255 * t * t * ( 3 - 2 * t ) );
+			}
+		uint tex = gl.GenTexture();
+		gl.BindTexture( TextureTarget.Texture2D, tex );
+		fixed ( byte* p = px ) gl.TexImage2D( TextureTarget.Texture2D, 0, InternalFormat.Srgb8Alpha8, (uint)size, (uint)size, 0, PixelFormat.Rgba, PixelType.UnsignedByte, p );
+		gl.GenerateMipmap( TextureTarget.Texture2D );
+		gl.TexParameter( TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.LinearMipmapLinear );
+		gl.TexParameter( TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear );
+		gl.TexParameter( TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge );
+		gl.TexParameter( TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge );
+		return tex;
+	}
+
+	static unsafe uint Pixel( GL gl, byte r, byte g, byte b, InternalFormat format )
+	{
+		uint t = gl.GenTexture();
+		gl.BindTexture( TextureTarget.Texture2D, t );
+		byte* px = stackalloc byte[4] { r, g, b, 255 };
+		gl.TexImage2D( TextureTarget.Texture2D, 0, format, 1, 1, 0, PixelFormat.Rgba, PixelType.UnsignedByte, px );
+		gl.TexParameter( TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest );
+		gl.TexParameter( TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest );
+		return t;
+	}
+
+	/// <summary>Shader locations the lit pass uses for per-batch material state.</summary>
+	public readonly record struct Uniforms( int Albedo, int Rough, int Metal, int Emit, int NormalY, int UvScale, int UvOffset,
+		int UvRotation, int AlphaMode, int AlphaCutoff, int BaseAlpha, int NormalStrength, int Ps1Occlusion, int Ps1Wear,
+		int Ps1Grime, int Ps1GrimeFilm, int Ps1Glow, int DoubleSided, int Skinned, int Model );
+
+	/// <summary>Draws the built layers with the currently bound lit shader. <paramref name="translucent"/> selects
+	/// blended layers (depth-tested, no depth write) instead of opaque ones. Restores uSkinned afterwards.</summary>
+	public unsafe void Draw( GL gl, GlShader shader, in Uniforms u, LobeUniforms lobes, bool translucent, int restoreSkinned )
+	{
+		if ( _builder.VertexCount == 0 || _gl is null ) return;
+		bool any = false;
+		for ( int i = 0; i < _built; i++ ) any |= _count[i] > 0 && Layers[i].Material.Blend == translucent;
+		if ( !any ) return;
+		shader.SetInt( u.Skinned, 0 );
+		shader.SetMatrix( u.Model, Matrix4x4.Identity );
+		Bind( gl, 1, _white ); Bind( gl, 2, _flatNormal ); Bind( gl, 3, _whiteLinear );
+		Bind( gl, 4, _whiteLinear ); Bind( gl, 5, _white ); Bind( gl, 6, _whiteLinear );
+		shader.SetFloat( u.NormalY, 1f );
+		if ( u.UvScale >= 0 ) { shader.SetVec2Array( u.UvScale, UnitScale ); shader.SetVec2Array( u.UvOffset, ZeroOffset ); }
+		if ( u.UvRotation >= 0 ) shader.SetFloatArray( u.UvRotation, ZeroRotation );
+		shader.SetFloat( u.NormalStrength, 1f );
+		shader.SetFloat( u.Ps1Occlusion, 0 ); shader.SetFloat( u.Ps1Wear, 0 ); shader.SetFloat( u.Ps1Grime, 0 );
+		shader.SetFloat( u.Ps1GrimeFilm, 0 ); shader.SetFloat( u.Ps1Glow, 0 );
+		gl.BindVertexArray( _vao );
+		if ( translucent ) { gl.Enable( EnableCap.Blend ); gl.BlendFunc( BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha ); gl.DepthMask( false ); }
+		for ( int i = 0; i < _built; i++ )
+		{
+			if ( _count[i] == 0 ) continue;
+			var m = Layers[i].Material;
+			if ( m.Blend != translucent ) continue;
+			shader.SetVec3( u.Albedo, m.Albedo.X, m.Albedo.Y, m.Albedo.Z );
+			shader.SetFloat( u.Rough, m.Roughness );
+			shader.SetFloat( u.Metal, m.Metallic );
+			shader.SetVec3( u.Emit, m.Emission.X, m.Emission.Y, m.Emission.Z );
+			shader.SetInt( u.AlphaMode, (int)( m.Blend ? AlphaMode.Blend : AlphaMode.Opaque ) );
+			shader.SetFloat( u.AlphaCutoff, .5f );
+			shader.SetFloat( u.BaseAlpha, m.Alpha );
+			shader.SetInt( u.DoubleSided, m.DoubleSided ? 1 : 0 );
+			lobes?.Apply( shader, m.Lobes );
+			Bind( gl, 1, m.Sprite ? _disc : _white ); Bind( gl, 5, m.Sprite ? _disc : _white );
+			gl.DrawArrays( PrimitiveType.Triangles, _start[i], (uint)_count[i] );
+		}
+		if ( translucent ) { gl.Disable( EnableCap.Blend ); gl.DepthMask( true ); }
+		gl.BindVertexArray( 0 );
+		shader.SetInt( u.Skinned, restoreSkinned );
+	}
+
+	static void Bind( GL gl, int unit, uint texture )
+	{
+		gl.ActiveTexture( TextureUnit.Texture0 + unit );
+		gl.BindTexture( TextureTarget.Texture2D, texture );
+	}
+
+	public void Dispose()
+	{
+		if ( _gl is null ) return;
+		_gl.DeleteVertexArray( _vao ); _gl.DeleteBuffer( _vbo ); _gl.DeleteBuffer( _prevVbo );
+		_gl.DeleteTexture( _white ); _gl.DeleteTexture( _whiteLinear ); _gl.DeleteTexture( _flatNormal ); _gl.DeleteTexture( _disc );
+		_gl = null;
+	}
+}

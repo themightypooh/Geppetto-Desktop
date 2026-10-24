@@ -124,7 +124,7 @@ class CatalogueTests(unittest.TestCase):
                             'print(json.dumps(dict(type=\'result\', is_error=False)))\n')
             fake.chmod(0o755)
             with patch.object(chat, 'CLAUDE', str(fake)), patch.object(chat, '_get', side_effect=OSError), \
-                 patch.object(chat, 'CONFIG', '/no/file'), patch.object(chat, 'DEFAULT_MODELS', []), \
+                 patch.object(chat, 'CONFIG', '/no/file'), patch.object(chat, 'DEFAULT_MODELS', []), patch.object(chat, 'ZOOPA_FILE', '/no/zoopa'), \
                  patch.dict(os.environ, {'ANTHROPIC_API_KEY': 'must-not-be-used'}):
                 models = chat.models()
                 self.assertEqual([m['id'] for m in models], ['claude/haiku', 'claude/opus', 'claude/sonnet'])
@@ -179,9 +179,14 @@ class EndpointSafetyTests(unittest.TestCase):
                                        endpoint='https://proxy.example.com/v1/', key_env='MY_PROXY_KEY'))
 
     def test_redirected_known_provider_is_rejected(self):
-        preset = next(m for m in chat.DEFAULT_MODELS if m['id'] == 'deepseek/deepseek-v4-pro')
-        with self.assertRaisesRegex(RuntimeError, 'known provider'):
-            chat.validate_endpoint(dict(preset, endpoint='https://evil.example/v1/'))
+        # No provider ships built in anymore; the pinning mechanism is tested with an
+        # injected preset map, not a built-in record.
+        preset = dict(id='deepseek/deepseek-v4-pro', kind='openai',
+                      endpoint='https://api.deepseek.com/v1/', model='deepseek-v4-pro',
+                      key_env='TEACHER_API_KEY')
+        with patch.object(chat, 'PRESET_HOSTS', {'deepseek/deepseek-v4-pro': 'api.deepseek.com'}):
+            with self.assertRaisesRegex(RuntimeError, 'known provider'):
+                chat.validate_endpoint(dict(preset, endpoint='https://evil.example/v1/'))
         # the default provider key must not go to a non-official host either
         with self.assertRaisesRegex(RuntimeError, 'only sent to'):
             chat.validate_endpoint(fixture(kind='anthropic', endpoint='https://evil.example/v1/',
@@ -200,11 +205,14 @@ class EndpointSafetyTests(unittest.TestCase):
         chat.validate_endpoint(fixture(endpoint='http://localhost:5001/v1/'))
 
     def test_request_refuses_a_redirected_provider_before_any_send(self):
-        preset = next(m for m in chat.DEFAULT_MODELS if m['id'] == 'deepseek/deepseek-v4-pro')
-        with patch.dict(os.environ, {'TEACHER_API_KEY': 'secret'}):
-            with self.assertRaisesRegex(RuntimeError, 'known provider'):
-                chat.complete(dict(preset, endpoint='https://evil.example/v1/'),
-                              [dict(role='you', text='hi')])
+        preset = dict(id='deepseek/deepseek-v4-pro', kind='openai',
+                      endpoint='https://api.deepseek.com/v1/', model='deepseek-v4-pro',
+                      key_env='TEACHER_API_KEY')
+        with patch.object(chat, 'PRESET_HOSTS', {'deepseek/deepseek-v4-pro': 'api.deepseek.com'}):
+            with patch.dict(os.environ, {'TEACHER_API_KEY': 'secret'}):
+                with self.assertRaisesRegex(RuntimeError, 'known provider'):
+                    chat.complete(dict(preset, endpoint='https://evil.example/v1/'),
+                                  [dict(role='you', text='hi')])
 
     def test_cli_records_and_keyless_records_are_not_blocked(self):
         chat.validate_endpoint(dict(id='claude/opus', kind='claude-cli', endpoint='cli', model='opus'))

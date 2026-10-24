@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -324,6 +324,14 @@ public sealed class MirrorFeature : Feature
 			// without that reversal every mirrored face would point into the solid.
 			var copy = MeshTransform.Transformed( source.Mesh, xform );
 
+			// Bone flip (roadmap J): a mirrored copy used to keep the ORIGINAL side's
+			// bone indices, so a mirrored left arm bent with the right arm's bones.
+			// Remap before the copy is added or welded, so both paths get flipped
+			// weights. Without a rig in the studio there is nothing to flip against,
+			// and weights carry by index as before; a skin whose bone indices do not
+			// belong to this rig is left alone rather than remapped into nonsense.
+			copy.Skin = FlipSkin( copy.Skin, ctx.Rig );
+
 			if ( Merge.Value )
 				MeshWeldMerge.WeldInto( source.Mesh, copy );
 			else
@@ -337,6 +345,34 @@ public sealed class MirrorFeature : Feature
 			foreach ( var source in sources )
 				ctx.Bodies.Remove( source );
 		}
+	}
+
+	/// <summary>
+	/// Mirror a skin's bone indices to their mirror partners: every weight on arm_L
+	/// becomes a weight on arm_R, and back, by <see cref="Skeleton.MirrorPartners"/>.
+	/// Centre bones map to themselves, so a spine weight survives unchanged. Null
+	/// skin, an empty rig, or a skin naming bones outside the rig returns the skin
+	/// untouched — flipping against the wrong rig would be worse than not flipping.
+	/// Public so tests can prove the flip without building a whole studio around it.
+	/// </summary>
+	public static SkinWeights FlipSkin( SkinWeights skin, Skeleton rig )
+	{
+		if ( skin is null || rig is null || rig.Count == 0 )
+			return skin;
+
+		var partners = rig.MirrorPartners( out _ );
+
+		foreach ( var weights in skin.Vertices )
+			foreach ( var w in weights )
+				if ( w.Bone < 0 || w.Bone >= partners.Length )
+					return skin;
+
+		var flipped = new SkinWeights();
+
+		foreach ( var weights in skin.Vertices )
+			flipped.Vertices.Add( weights.Select( w => new BoneWeight( partners[w.Bone], w.Weight ) ).ToArray() );
+
+		return flipped;
 	}
 }
 
@@ -536,9 +572,10 @@ public sealed class SubdivideFeature : Feature
 /// Per-corner UV2 mappings (FaceUV2) do not survive — their indices name the old UV2
 /// list — so the vertex UV2 list is kept and the corner mapping is dropped.
 /// Bone bindings are carried by index, not by name: a PolyMesh has no skeleton, so the
-/// _L/_R bone-name flip the roadmap asks for cannot happen here. It needs the skeleton
-/// that owns the bone names, which is a rigging-lane step, not a mesh merge — the
-/// weights themselves are carried faithfully, which is the part this merge owns.
+/// _L/_R bone-name flip cannot happen inside this merge itself. MirrorFeature does it
+/// before the weld (FlipSkin against the studio rig), so a merged mirror arrives here
+/// already flipped; any other caller of WeldInto still gets weights carried faithfully
+/// by index, which is the part this merge owns.
 /// </summary>
 internal static class MeshWeldMerge
 {

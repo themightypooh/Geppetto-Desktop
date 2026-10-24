@@ -7303,15 +7303,24 @@ public sealed partial class MeshEditSession
 	}
 
 	/// <summary>
-	/// Sweep the selected edges round the up axis (Z) through the <see cref="Pivot"/> and build faces
+	/// Sweep the selected edges round an axis through the <see cref="Pivot"/> and build faces
 	/// behind them — Blender's Spin, and with <paramref name="rise"/> its Screw. Select an open rim
 	/// and spin it for a lathe: a bowl from a lip, a button from an edge, a horn from a ring with rise.
 	/// A full turn with no rise closes on itself instead of leaving a doubled seam.
+	/// The axis defaults to Z (the old behaviour, kept exactly); the EditOp passes its Axis
+	/// choice through, so X and Y spins are the same code with a different axis, not a
+	/// second implementation. Rise runs ALONG the axis, not along Z — a screw about X
+	/// climbs in X.
 	/// </summary>
 	/// <param name="degrees">How far round to go. 360 is a full turn.</param>
 	/// <param name="steps">How many bands of faces to split the turn into.</param>
-	/// <param name="rise">How far up Z the far end ends up — the screw's pitch per turn.</param>
-	public void Spin( float degrees, int steps, float rise = 0f )
+	/// <param name="rise">How far along the axis the far end ends up — the screw's pitch per turn.</param>
+	public void Spin( float degrees, int steps, float rise = 0f ) => Spin( degrees, steps, rise, new Vec3( 0, 0, 1 ) );
+
+	/// <summary>Spin about <paramref name="axis"/> through the <see cref="Pivot"/>; see
+	/// <see cref="Spin(float, int, float)"/> for the operation. The axis is normalised here,
+	/// so a caller passing a scaled vector still spins round the same line.</summary>
+	public void Spin( float degrees, int steps, float rise, Vec3 axis )
 	{
 		if ( SelectedEdges.Count == 0 )
 			throw new InvalidOperationException( "Spin sweeps edges. Switch to Edge mode (2) and pick the profile to sweep." );
@@ -7352,11 +7361,18 @@ public sealed partial class MeshEditSession
 				var sin = MathF.Sin( angle );
 				var ring = new Dictionary<int, int>();
 
+				// Rodrigues about the axis, not a hard-coded XY rotation: with axis Z this
+				// reduces to exactly the old formula (x cos - y sin, x sin + y cos, z),
+				// and with axis X or Y it turns in the right plane instead. Rise is along
+				// the axis, so a screw climbs the axis it turns about.
+				var axisN = axis.Length > 1e-9f ? axis / axis.Length : new Vec3( 0, 0, 1 );
+
 				foreach ( var v in profile )
 				{
 					var copy = CopyVertex( v );
 					var p = Mesh.Positions[v] - Pivot;
-					Mesh.Positions[copy] = Pivot + new Vec3( p.x * cos - p.y * sin, p.x * sin + p.y * cos, p.z + rise * t );
+					var turned = p * cos + Vec3.Cross( axisN, p ) * sin + axisN * (Vec3.Dot( axisN, p ) * (1f - cos));
+					Mesh.Positions[copy] = Pivot + turned + axisN * (rise * t);
 					ring[v] = copy;
 				}
 

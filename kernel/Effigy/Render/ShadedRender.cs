@@ -65,6 +65,18 @@ public sealed class ShadeMaterial
 	public Vec3 Emission;
 	/// <summary>Oil-film hue shift on grazing reflections, 0..1 (blue → purple → green → gold with angle).</summary>
 	public float Iridescence;
+	/// <summary>Wave-2 look wiring: the SlotLook spectrum, carried into the physical renderer.
+	/// All default to the old behaviour (Toon/Stylized 0, Opacity 1, ShadowTint white), so a
+	/// material that never sets them shades exactly as before. Outline is NOT here: an outline
+	/// needs a second geometry pass (back-face extrusion), which this rasteriser does not do;
+	/// <see cref="LookSpectrum.OutlineOffset"/> stays the headless half until such a pass exists.</summary>
+	public float Toon;
+	public int ToonBands = 3;
+	public float ToonRim;
+	public float Stylized;
+	public float Opacity = 1f;
+	/// <summary>Tint of ambient / occluded light (the light in shadow). White is no tint.</summary>
+	public Vec3 ShadowTint = Vec3.One;
 
 	public static ShadeMaterial Clay() => new() { UseVertexColours = false };
 	public static ShadeMaterial HardCandy() => new() { Roughness = 0.18f, Coat = 1f, CoatRoughness = 0.03f, Subsurface = 0.55f, ScatterDistance = 0.35f };
@@ -704,7 +716,13 @@ public static class ShadedRender
 					var dist = (wpos[i] - sceneCentre).Length / (sceneRadius * 6f);
 					colour = Vec3.Lerp( colour, bg, Smooth( 0.35f, 1f, dist ) );
 				}
-				hdr[i] = colour;
+				// Wave-2 look wiring: Opacity < 1 dithers the supersample away (Bayer,
+				// the same stipple LookSpectrum.DitheredAlpha defines), so a translucent
+				// fin reads as stipple instead of a flat wash. The floor keeps its own colour.
+				if ( kind[i] == 1 && m.Opacity < 1f && LookSpectrum.DitheredAlpha( m.Opacity, x, y ) <= 0f )
+					hdr[i] = bg;
+				else
+					hdr[i] = colour;
 			}
 		} );
 
@@ -1142,6 +1160,9 @@ public static class ShadedRender
 			// Diffuse, wrapped round the terminator by the subsurface amount.
 			var wrap = m.Subsurface * 0.5f;
 			var diff = MathF.Max( 0f, (nl + wrap) / (1f + wrap) );
+			// Wave-2 look wiring: cel bands step the diffuse term itself, so a toon
+			// material bands in the real renderer, not just in LookSpectrum.Shade.
+			if ( m.Toon > 0f ) diff = diff + (LookSpectrum.Quantize( diff, Math.Clamp( m.ToonBands, 2, 8 ) ) - diff) * m.Toon;
 			var lit = Mul( diffuseColour, radiance ) * (diff * visible / MathF.PI * 3.1f);
 			// Light that went in elsewhere and comes out here: strong where the part is thin.
 			if ( m.Subsurface > 0f )
@@ -1173,12 +1194,28 @@ public static class ShadedRender
 			result += lit;
 		}
 
+		// Wave-2 look wiring, direct part only (ambient terms below keep their own tint).
+		if ( m.ToonRim > 0f && m.Toon > 0f )
+		{
+			var fres = MathF.Pow( 1f - nv, 4f );
+			result += Vec3.One * (Smooth( 0.62f, 0.68f, fres ) * m.ToonRim * m.Toon * 0.5f);
+		}
+		if ( m.Stylized > 0f )
+		{
+			// No cavity channel reaches this pixel path, so the stylized read is the
+			// saturation + warm-AO half of LookSpectrum.Shade, with (1 - ao) as the
+			// crease proxy: open areas saturate, shut areas warm and darken.
+			var lum = (result.x + result.y + result.z) / 3f;
+			result = Vec3.Lerp( new Vec3( lum, lum, lum ), result, 1f + 0.2f * m.Stylized );
+			result = Vec3.Lerp( result, new Vec3( result.x, result.y * 0.85f, result.z * 0.65f ), m.Stylized * (1f - ao) * 0.5f );
+			result *= 1f - 0.125f * m.Stylized * ao;
+		}
 		var r = n * (2f * Vec3.Dot( n, v )) - v;
 		if ( frame.EnvBake is { } bake )
 		{
 			// --- image-based lighting: SH diffuse on the bent normal, split-sum GGX specular -------
 			var env = frame.Env;
-			var ambient = Mul( diffuseColour, bake.Diffuse( frame.ToEnv( bentN ) ) ) * (env.Diffuse * ao);
+			var ambient = Mul( Mul( diffuseColour, bake.Diffuse( frame.ToEnv( bentN ) ) ) * (env.Diffuse * ao), m.ShadowTint );
 			if ( m.Subsurface > 0f ) ambient += Mul( Mul( tint, albedo ), bake.Diffuse( frame.ToEnv( bentN ) ) ) * (0.15f * m.Subsurface * env.Diffuse * ao);
 
 			// Reflections that point into the surface (a normal map tilting past the silhouette) see nothing.
@@ -1204,7 +1241,7 @@ public static class ShadedRender
 
 		// Ambient: the sky from above, bounce from below, both occluded.
 		var hemi = Vec3.Lerp( scene.GroundColour, scene.SkyColour, n.z * 0.5f + 0.5f );
-		result += Mul( diffuseColour, hemi ) * ao;
+		result += Mul( Mul( diffuseColour, hemi ) * ao, m.ShadowTint );
 		if ( m.Subsurface > 0f ) result += Mul( Mul( tint, albedo ), hemi ) * (0.12f * m.Subsurface * ao);
 		// Reflection of the sky gradient along the mirror direction, sharper for smoother surfaces.
 		var envG = Vec3.Lerp( scene.GroundColour, scene.SkyColour * 1.3f, Smooth( -0.3f, 0.6f, r.z ) );

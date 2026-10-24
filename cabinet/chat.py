@@ -4,6 +4,9 @@
 Optional ~/.config/geppetto/chat-models.json is a list of provider records. It augments
 live Ollama/KoboldCpp discovery. Records use id, label, kind, endpoint, model and
 optionally key_env, env_file, auth_header, extra_body and research (tool support).
+
+No provider ships built in: every model is one the individual brings — their own CLI
+logins, local discovery, or this file. Nothing here ties a specific model to the app.
 """
 import base64
 import json
@@ -25,20 +28,11 @@ OLLAMA = os.environ.get('OLLAMA_HOST', 'http://127.0.0.1:11434').rstrip('/')
 if not OLLAMA.startswith(('http://', 'https://')):
     OLLAMA = 'http://' + OLLAMA
 
-DEFAULT_MODELS = [
-    dict(id='reflection/Beam-1.0-501B-A23B', label='Beam 1.0 · Reflection', kind='openai',
-         endpoint='https://api.reflection.ai/openai/v1/', model='Beam-1.0-501B-A23B', key_env='REFLECTION_API_KEY'),
-    dict(id='deepseek/deepseek-v4-pro', label='DeepSeek V4 Pro · cloud', kind='openai',
-         endpoint='https://api.deepseek.com/v1/', model='deepseek-v4-pro', key_env='TEACHER_API_KEY',
-         env_file='~/local-llm/.env', extra_body={'thinking': {'type': 'disabled'}}),
-    dict(id='mimo/mimo-v2.6-pro', label='MiMo V2.6 Pro · cloud', kind='openai',
-         endpoint='https://token-plan-sgp.xiaomimimo.com/v1/', model='mimo-v2.6-pro', key_env='MIMO_API_KEY',
-         env_file='~/local-llm/.mimo.env', auth_header='api-key', extra_body={'thinking': {'type': 'disabled'}}),
-    # listed even before its key is set, marked (key missing): put MINIMAX_API_KEY=... in ~/local-llm/.minimax.env
-    dict(id='minimax/MiniMax-M3', label='MiniMax M3 · cloud', kind='openai', always=True,
-         endpoint='https://api.minimax.io/v1/', model='MiniMax-M3', key_env='MINIMAX_API_KEY',
-         env_file='~/local-llm/.minimax.env', extra_body={'reasoning_split': True}),
-]
+# No model ships built in. Every model comes from the individual using the app:
+# their own CLI logins (Claude/Grok), local discovery (Ollama/KoboldCpp), or their
+# own ~/.config/geppetto/chat-models.json. Nothing here names a provider, so no
+# specific model is ever tied to the app for anyone.
+DEFAULT_MODELS = []
 
 # Claude through the claude CLI, on its own login (the Max plan), never an API key
 CLAUDE = shutil.which('claude') or os.path.expanduser('~/.local/bin/claude')

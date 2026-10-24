@@ -81,7 +81,7 @@ public static class ScriptLive
     {
         var tools = new AiSuiteTools(root);
         var live = new AiLiveRun(tools, emit);
-        var session = new AiLiveControl.Session(root, live, cancel, allowDirections: false, pace: pace);
+        var session = new AiLiveControl.Session(root, live, cancel, allowDirections: false, pace: pace, allowReview: open);
         using var stop = new CancellationTokenSource();
         var watch = session.WatchAsync(stop.Token);
         live.Commit(studio, "initial");
@@ -97,14 +97,30 @@ public static class ScriptLive
         {
             while (true)
             {
-                bool ok = Drain(ref studio, pending, result, baseDir, live, session, open, cancel.Token, root);
+                bool ok;
+                try
+                {
+                    session.ReviewBoundary();
+                    ok = Drain(ref studio, pending, result, baseDir, live, session, open, cancel.Token, root);
+                }
+                catch (AiLiveControl.ReviewRequestedException)
+                {
+                    // BeforeOperation is outside BuildScript's per-line catch. Keep
+                    // the unexecuted tail; the next inbox edit runs ahead of it.
+                    session.ReviewReady();
+                    result.Ok = true; result.Error = null; result.ErrorLine = 0;
+                    ok = true;
+                }
                 state = ok ? "completed" : "failed";
                 if (!open) break;
                 string phase = ok ? "open" : "held";
                 Inbox.Answer(root, entry, result, from, ok, pending.Sum(p => Lines(p.Text)));
                 live.Status(phase, outcome: ok ? "open for more lines" : $"line {result.ErrorLine}: {result.Error}");
 
-                var next = Inbox.Next(root, cancel.Token, TimeSpan.FromMinutes(idleMinutes));
+                var next = Inbox.Next(root, cancel.Token, TimeSpan.FromMinutes(idleMinutes), () =>
+                {
+                    if (session.TakeReview()) session.ReviewReady();
+                });
                 if (next is null) break;
                 entry = next.Value.Name;
                 from = result.Log.Count;
@@ -172,7 +188,12 @@ public static class ScriptLive
                 // step of its own: it is the caption of the line after it. Pace and pause still
                 // gate only the lines that change the model; the rest run at once.
                 if (IsCaption(verb)) { ct.ThrowIfCancellationRequested(); return; }
-                session.BoundaryAsync(ct, mutation: BuildScript.Mutates(verb)).GetAwaiter().GetResult();
+                try { session.BoundaryAsync(ct, mutation: BuildScript.Mutates(verb)).GetAwaiter().GetResult(); }
+                catch (AiLiveControl.ReviewRequestedException)
+                {
+                    first.Value = (string.Join("\n", text.Split('\n').Skip(n - 1)), at + n - 1);
+                    throw;
+                }
                 live.Status("building", $"line {at + n}: {Clip(line)}");   // the whole line: the chest's tool wheel reads the tool from it
             };
             Action<int, string, string> after = (n, verb, line) =>
@@ -232,7 +253,14 @@ public static class ScriptLive
                 + (vars.Count > 0 ? " vars=" + string.Join(",", vars) : "");
             if (outcome.Length > 300) outcome = outcome[..300];
             live.Status("checkpoint", operation: title, outcome: outcome);
-            var gate = WaitForCheckpoint(root, live, session, title, ct);
+            CheckpointGate gate;
+            try { gate = WaitForCheckpoint(root, live, session, title, ct); }
+            catch (AiLiveControl.ReviewRequestedException)
+            {
+                if (string.IsNullOrWhiteSpace(tail)) pending.RemoveFirst();
+                else first.Value = (tail, at + cp + 1);
+                throw;
+            }
             if (gate is CheckpointGate.Closed or CheckpointGate.Skip) { pending.Clear(); return true; }
             if (string.IsNullOrWhiteSpace(tail)) pending.RemoveFirst();
             else first.Value = (tail, at + cp + 1);
@@ -313,6 +341,7 @@ public static class ScriptLive
         while (true)
         {
             ct.ThrowIfCancellationRequested();
+            session.ReviewBoundary();
             if (session.TakeCheckpointContinue()) return CheckpointGate.Continue;
             if (Directory.Exists(inbox))
             {
@@ -454,7 +483,7 @@ public static class Inbox
     }
 
     /// <summary>Waits for the next request; null when nothing came for <paramref name="idle"/>.</summary>
-    public static Entry? Next(string root, CancellationToken ct, TimeSpan idle)
+    public static Entry? Next(string root, CancellationToken ct, TimeSpan idle, Action? idleTick = null)
     {
         string folder = Folder(root);
         Directory.CreateDirectory(folder);
@@ -462,6 +491,7 @@ public static class Inbox
         while (DateTime.UtcNow < until)
         {
             ct.ThrowIfCancellationRequested();
+            idleTick?.Invoke();
             string? path = Directory.EnumerateFiles(folder)
                 .Where(p => Path.GetExtension(p) is ".txt" or ".skip" or ".close" or ".rewind")
                 .OrderBy(p => Path.GetFileName(p), StringComparer.Ordinal).FirstOrDefault();

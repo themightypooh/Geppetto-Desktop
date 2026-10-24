@@ -44,9 +44,9 @@ class QmlCardTests(unittest.TestCase):
         self.assertIn('objectName: "noticeCard"', QML)
 
     def test_the_card_buttons_call_the_host_slots(self):
-        for needle in ("host.noticeStart(ncard.everyTime)", "host.noticeCancel()",
+        for needle in ("host.noticeStart(ncard.everyTime, ncard.neverShow)", "host.noticeCancel()",
                        'objectName: "noticeStart"', 'objectName: "noticeCancel"',
-                       'objectName: "noticeEveryTime"'):
+                       'objectName: "noticeEveryTime"', 'objectName: "noticeNeverShow"'):
             self.assertIn(needle, QML)
 
 

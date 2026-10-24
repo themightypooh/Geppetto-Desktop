@@ -52,10 +52,19 @@ public sealed class SlotLook
 	public Vec3 SubsurfaceColor = new( 0.85f, 0.22f, 0.15f );
 	/// <summary>Thin-membrane alpha: 1 is opaque, below 1 is fin webbing, wing, glass.</summary>
 	public float Opacity = 1f;
+	/// <summary>Tint of shadowed / ambient light on this slot, sRGB. White is no tint:
+	/// a fresh look shades exactly as before, and Describe() only writes it when moved.
+	/// Renderer-side (ShadedRender ambient, desktop GLSL ambient); complex.vfx has no
+	/// single shadow-tint parameter, so the exported .vmat does not carry it.</summary>
+	public Vec3 ShadowTint = Vec3.One;
+	/// <summary>Oil-film hue shift on grazing reflections, 0..1 (blue -> purple -> green -> gold
+	/// with angle, the same film <see cref="Effigy.Render.ShadeMaterial.Iridescence"/> uses).
+	/// Renderer-side (ShadedRender, desktop GLSL); no invented .vmat parameter.</summary>
+	public float Iridescence;
 
 	public bool Glows => Emit.x > 0f || Emit.y > 0f || Emit.z > 0f;
 
-	public SlotLook Clone() => new() { Color = Color, Rough = Rough, Metal = Metal, Emit = Emit, Preset = Preset, Toon = Toon, ToonBands = ToonBands, ToonRim = ToonRim, Stylized = Stylized, OutlineWidth = OutlineWidth, OutlineColor = OutlineColor, Clearcoat = Clearcoat, ClearcoatRoughness = ClearcoatRoughness, Subsurface = Subsurface, SubsurfaceColor = SubsurfaceColor, Opacity = Opacity };
+	public SlotLook Clone() => new() { Color = Color, Rough = Rough, Metal = Metal, Emit = Emit, Preset = Preset, Toon = Toon, ToonBands = ToonBands, ToonRim = ToonRim, Stylized = Stylized, OutlineWidth = OutlineWidth, OutlineColor = OutlineColor, Clearcoat = Clearcoat, ClearcoatRoughness = ClearcoatRoughness, Subsurface = Subsurface, SubsurfaceColor = SubsurfaceColor, Opacity = Opacity, ShadowTint = ShadowTint, Iridescence = Iridescence };
 
 	/// <summary>The shipped hard-surface looks, by name.</summary>
 	public static readonly IReadOnlyDictionary<string, SlotLook> Presets = new Dictionary<string, SlotLook>( StringComparer.OrdinalIgnoreCase )
@@ -78,14 +87,15 @@ public sealed class SlotLook
 		["eye_cornea"] = Make( "eye_cornea", "#20242a", 0.08f, 0f, clearcoat: 1f, clearcoatRough: 0.03f, subsurface: 0.2f ),
 		["wet_mucus"] = Make( "wet_mucus", "#6a8a7a", 0.15f, 0f, clearcoat: 0.9f, subsurface: 0.3f ),
 		["flesh_sss"] = Make( "flesh_sss", "#c98a7a", 0.55f, 0f, subsurface: 0.7f, subsurfaceColor: "#d94a2a" ),
-		["chitin_iridescent"] = Make( "chitin_iridescent", "#2a3a4a", 0.18f, 0.3f, stylized: 0.4f, clearcoat: 0.7f ),
+		["chitin_iridescent"] = Make( "chitin_iridescent", "#2a3a4a", 0.18f, 0.3f, stylized: 0.4f, clearcoat: 0.7f, iridescence: 0.7f ),
 	};
 
 	static SlotLook Make( string name, string color, float rough, float metal, string emit = null,
 		float toon = 0f, int toonBands = 3, float toonRim = 0f, float stylized = 0f,
 		float outline = 0f, string outlineColor = null,
 		float clearcoat = 0f, float clearcoatRough = 0.05f,
-		float subsurface = 0f, string subsurfaceColor = null, float opacity = 1f ) => new()
+		float subsurface = 0f, string subsurfaceColor = null, float opacity = 1f,
+		string shadowTint = null, float iridescence = 0f ) => new()
 	{
 		Preset = name,
 		Color = FurMaterial.ParseHex( color, Vec3.One ),
@@ -99,6 +109,8 @@ public sealed class SlotLook
 		Subsurface = subsurface,
 		SubsurfaceColor = subsurfaceColor is null ? new Vec3( 0.85f, 0.22f, 0.15f ) : FurMaterial.ParseHex( subsurfaceColor, new Vec3( 0.85f, 0.22f, 0.15f ) ),
 		Opacity = opacity,
+		ShadowTint = shadowTint is null ? Vec3.One : FurMaterial.ParseHex( shadowTint, Vec3.One ),
+		Iridescence = iridescence,
 	};
 
 	/// <summary>Named look by name, cloned so the caller owns it. The roadmap's TryPreset: the
@@ -113,7 +125,7 @@ public sealed class SlotLook
 	public static string PresetList => string.Join( ", ", Presets.Keys );
 
 	/// <summary>The keys `material` and the document's `materiallook` line take.</summary>
-	public static bool IsKey( string key ) => key?.ToLowerInvariant() is "preset" or "color" or "colour" or "rough" or "metal" or "emit" or "toon" or "toonbands" or "toon_bands" or "toonrim" or "toon_rim" or "stylized" or "outline" or "outlinecolor" or "outlinecolour" or "clearcoat" or "coat" or "clearcoatrough" or "clearcoatroughness" or "coatrough" or "subsurface" or "sss" or "subsurfacecolor" or "subsurfacecolour" or "opacity";
+	public static bool IsKey( string key ) => key?.ToLowerInvariant() is "preset" or "color" or "colour" or "rough" or "metal" or "emit" or "toon" or "toonbands" or "toon_bands" or "toonrim" or "toon_rim" or "stylized" or "outline" or "outlinecolor" or "outlinecolour" or "clearcoat" or "coat" or "clearcoatrough" or "clearcoatroughness" or "coatrough" or "subsurface" or "sss" or "subsurfacecolor" or "subsurfacecolour" or "opacity" or "shadowtint" or "shadow_tint" or "iridescence";
 
 	/// <summary>
 	/// Apply key=value pairs over <paramref name="start"/> (or a fresh look). preset= goes first,
@@ -162,7 +174,7 @@ public sealed class SlotLook
 
 					if ( key == "rough" ) look.Rough = f; else look.Metal = f;
 					break;
-				case "toon" or "toonrim" or "toon_rim" or "stylized" or "clearcoat" or "coat" or "clearcoatrough" or "clearcoatroughness" or "coatrough" or "subsurface" or "sss" or "opacity":
+				case "toon" or "toonrim" or "toon_rim" or "stylized" or "clearcoat" or "coat" or "clearcoatrough" or "clearcoatroughness" or "coatrough" or "subsurface" or "sss" or "opacity" or "iridescence":
 					if ( !float.TryParse( value, NumberStyles.Float, CultureInfo.InvariantCulture, out var g ) || g < 0f || g > 1f )
 					{
 						error = $"{key}={value}: give a number from 0 to 1";
@@ -177,6 +189,7 @@ public sealed class SlotLook
 						case "clearcoatrough" or "clearcoatroughness" or "coatrough": look.ClearcoatRoughness = g; break;
 						case "subsurface" or "sss": look.Subsurface = g; break;
 						case "opacity": look.Opacity = g; break;
+						case "iridescence": look.Iridescence = g; break;
 					}
 					break;
 				case "toonbands" or "toon_bands":
@@ -195,10 +208,12 @@ public sealed class SlotLook
 					}
 					look.OutlineWidth = w;
 					break;
-				case "outlinecolor" or "outlinecolour" or "subsurfacecolor" or "subsurfacecolour":
+				case "outlinecolor" or "outlinecolour" or "subsurfacecolor" or "subsurfacecolour" or "shadowtint" or "shadow_tint":
 					var hc = FurMaterial.ParseHex( value, new Vec3( -1, -1, -1 ) );
 					if ( hc.x < 0f ) { error = $"{key}={value}: give a #rrggbb colour"; return null; }
-					if ( key.StartsWith( "outline" ) ) look.OutlineColor = hc; else look.SubsurfaceColor = hc;
+					if ( key.StartsWith( "outline" ) ) look.OutlineColor = hc;
+					else if ( key.StartsWith( "shadow" ) ) look.ShadowTint = hc;
+					else look.SubsurfaceColor = hc;
 					break;
 			}
 		}
@@ -234,6 +249,8 @@ public sealed class SlotLook
 			if ( SubsurfaceColor.x != 0.85f || SubsurfaceColor.y != 0.22f || SubsurfaceColor.z != 0.15f ) s += $" subsurfacecolor={Hex( SubsurfaceColor )}";
 		}
 		if ( Opacity < 1f ) s += $" opacity={N( Opacity )}";
+		if ( ShadowTint.x != 1f || ShadowTint.y != 1f || ShadowTint.z != 1f ) s += $" shadowtint={Hex( ShadowTint )}";
+		if ( Iridescence > 0f ) s += $" iridescence={N( Iridescence )}";
 		if ( !string.IsNullOrEmpty( Preset ) ) s += $" preset={Preset}";
 		return s;
 	}
@@ -272,6 +289,13 @@ public sealed class SlotLook
 		CoatRoughness = Clearcoat > 0f ? Math.Clamp( ClearcoatRoughness, 0.01f, 1f ) : 0.04f,
 		Subsurface = Subsurface,
 		SubsurfaceTint = Subsurface > 0f ? Linear( SubsurfaceColor ) : null,
+		Iridescence = Iridescence,
+		ShadowTint = ShadowTint,
+		Toon = Toon,
+		ToonBands = ToonBands,
+		ToonRim = ToonRim,
+		Stylized = Stylized,
+		Opacity = Opacity,
 	};
 
 	/// <summary>The slot as an s&amp;box complex.vfx material: tint, metalness, roughness, glow.</summary>

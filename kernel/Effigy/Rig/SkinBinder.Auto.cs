@@ -6,8 +6,11 @@ namespace Effigy;
 public static partial class SkinBinder
 {
 	/// <summary>Bone heat weights, falling back to voxel distance where heat has no answer. See <see cref="AutoWeights"/>.</summary>
-	public static SkinWeights BindHeat( PolyMesh mesh, Skeleton skeleton, out BindReport report, AutoWeightOptions options = null ) =>
-		AutoWeights.Heat( mesh, skeleton, out report, options );
+	/// <summary>Bone heat weights, falling back to voxel distance where heat has no answer. See <see cref="AutoWeights"/>.
+	/// <paramref name="ranges"/> reaches Heat's rigid-island rule: a name-matched body range binds rigidly
+	/// even when it is larger than <see cref="AutoWeightOptions.RigidIslandMaxFraction"/>.</summary>
+	public static SkinWeights BindHeat( PolyMesh mesh, Skeleton skeleton, out BindReport report, AutoWeightOptions options = null, IReadOnlyList<BodyRange> ranges = null ) =>
+		AutoWeights.Heat( mesh, skeleton, out report, options, ranges );
 
 	/// <summary>Geodesic voxel weights: distance measured through the solid. See <see cref="AutoWeights"/>.</summary>
 	public static SkinWeights BindVoxel( PolyMesh mesh, Skeleton skeleton, out BindReport report, AutoWeightOptions options = null ) =>
@@ -49,7 +52,7 @@ public static partial class SkinBinder
 		switch ( method )
 		{
 			case BindMethod.Heat:
-				weights = AutoWeights.Heat( mesh, skeleton, out report, options );
+				weights = AutoWeights.Heat( mesh, skeleton, out report, options, ranges );
 				break;
 
 			case BindMethod.Voxel:

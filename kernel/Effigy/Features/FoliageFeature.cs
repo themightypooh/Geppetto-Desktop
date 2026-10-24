@@ -50,8 +50,15 @@ public sealed class FoliageFeature : Feature
 	public readonly IntParam Seed = new( "Seed", 11, 0, 1000000 );
 	public readonly IntParam Material = new( "Material slot", 0, 0, 63 ) { Slider = false };
 
+	/// <summary>Studio SkinBinder wiring (roadmap A4): when on, the published bone
+	/// hierarchy is appended to the studio rig and this plant's mesh is skinned
+	/// rigidly to its own branch bones, so it sways in animation. Off by default:
+	/// an unrigged plant is the old behaviour, and a rig is studio state a feature
+	/// should not claim unasked.</summary>
+	public readonly BoolParam BindRig = new( "Bind rig", false );
+
 	public override IReadOnlyList<IParam> Parameters =>
-		new IParam[] { Preset, Height, Levels, BranchAngle, Gnarl, LeafCardCount, Seed, Material };
+		new IParam[] { Preset, Height, Levels, BranchAngle, Gnarl, LeafCardCount, Seed, Material, BindRig };
 
 	/// <summary>The hierarchy this build grew, in growth order (parents before children).
 	/// Empty until Execute runs.</summary>
@@ -74,6 +81,9 @@ public sealed class FoliageFeature : Feature
 		public Vec3 Position;
 		public Vec3 Normal;
 		public float Size;
+
+		/// <summary>Index into the segs list this leaf grew from — what BindRig skins it to.</summary>
+		public int SegIndex;
 	}
 
 	sealed class PresetSpec
@@ -173,15 +183,16 @@ public sealed class FoliageFeature : Feature
 				Depth = depth, Wind = maxDepth <= 0 ? 1f : depth / (float)maxDepth,
 			};
 			segs.Add( seg );
+			var segIndex = segs.Count - 1;
 
 			if ( depth >= maxDepth || radius < height * 0.0018f )
 			{
-				AddLeaves( spec, rng, seg, direction, leaves );
+				AddLeaves( spec, rng, seg, direction, leaves, segIndex );
 				return;
 			}
 
 			if ( spec.Leaves == LeafMode.AlongBranch || spec.Leaves == LeafMode.Fronds )
-				AddLeaves( spec, rng, seg, direction, leaves );
+				AddLeaves( spec, rng, seg, direction, leaves, segIndex );
 
 			var childCount = depth < spec.Children.Length ? spec.Children[depth] : spec.ChildFallback;
 			Orthonormal( direction, out var fx, out _ );
@@ -238,13 +249,22 @@ public sealed class FoliageFeature : Feature
 		var mesh = new PolyMesh();
 		var colours = new List<Vec4>();
 
-		foreach ( var seg in segs )
+		// vertBone runs parallel to the mesh vertices: the segment index each
+		// vertex grew from. Only BindRig reads it; an unrigged plant pays one
+		// int per vertex and nothing else.
+		var vertBone = new List<int>();
+
+		for ( var si = 0; si < segs.Count; si++ )
 		{
+			var seg = segs[si];
 			var limb = LimbMesh( seg, Material.Clamped );
 			var base_ = mesh.VertexCount;
 			MeshTransform.Append( mesh, limb );
 			for ( var v = base_; v < mesh.VertexCount; v++ )
+			{
 				colours.Add( new Vec4( 0.4f, 0.3f, 0.2f, seg.Wind ) );
+				vertBone.Add( si );
+			}
 		}
 
 		foreach ( var leaf in leaves )
@@ -253,7 +273,10 @@ public sealed class FoliageFeature : Feature
 			var base_ = mesh.VertexCount;
 			MeshTransform.Append( mesh, card );
 			for ( var v = base_; v < mesh.VertexCount; v++ )
+			{
 				colours.Add( new Vec4( 0.25f, 0.55f, 0.25f, 1f ) );
+				vertBone.Add( leaf.SegIndex );
+			}
 		}
 
 		mesh.VertexColors = colours.ToArray();
@@ -280,10 +303,13 @@ public sealed class FoliageFeature : Feature
 			Tail = (s.Tail + new Vec3( 0, 0, -minZ )) * heightScale,
 		} ).ToList();
 
+		if ( BindRig.Value )
+			BindRigToStudio( ctx, mesh, vertBone );
+
 		ctx.Bodies.Add( new Body( ctx.NewBodyId(), Name, mesh ) );
 	}
 
-	static void AddLeaves( PresetSpec spec, Random rng, Seg seg, Vec3 direction, List<Leaf> leaves )
+	static void AddLeaves( PresetSpec spec, Random rng, Seg seg, Vec3 direction, List<Leaf> leaves, int segIndex )
 	{
 		Orthonormal( direction, out var x, out var y );
 		var span = (seg.Tail - seg.Head).Length;
@@ -301,6 +327,7 @@ public sealed class FoliageFeature : Feature
 						Position = seg.Tail + jitter * span * 0.3f,
 						Normal = (direction + x * Rand( rng, -0.5f, 0.5f ) + y * Rand( rng, -0.5f, 0.5f )).Normal,
 						Size = spec.LeafSize * span * 0.5f,
+						SegIndex = segIndex,
 					} );
 				}
 				break;
@@ -320,12 +347,13 @@ public sealed class FoliageFeature : Feature
 						Position = pos,
 						Normal = (x * Rand( rng, -1f, 1f ) + y * Rand( rng, -1f, 1f ) + direction * 0.3f).Normal,
 						Size = spec.LeafSize * span * 0.35f,
+						SegIndex = segIndex,
 					} );
 				}
 				break;
 			}
 			case LeafMode.TipNubs:
-				leaves.Add( new Leaf { Position = seg.Tail, Normal = direction, Size = spec.LeafSize * span } );
+				leaves.Add( new Leaf { Position = seg.Tail, Normal = direction, Size = spec.LeafSize * span, SegIndex = segIndex } );
 				break;
 		}
 	}
@@ -384,4 +412,65 @@ public sealed class FoliageFeature : Feature
 
 	static Vec3 Rotate( Vec3 v, Vec3 axis, float degrees ) =>
 		Xform.Rotate( axis, degrees * MathF.PI / 180f ).TransformDirection( v );
+
+	/// <summary>
+	/// Roadmap A4's studio step: append this plant's published bones to the studio
+	/// rig (parents before children — growth order guarantees a parent is already
+	/// in the map when its child is added) and skin the mesh rigidly, one bone per
+	/// vertex, to the segment that vertex grew from. A trunk vertex stays on the
+	/// trunk bone, a twig tip on its twig bone, a leaf on the segment it grew from,
+	/// so a wind or sway pose moves the canopy and not the trunk.
+	///
+	/// LIMITS, stated not hidden. A feature cannot own a skeleton, and
+	/// <see cref="FeatureContext"/> carries the rig but not the studio, so the
+	/// studio's BodyBoneMap (body id -&gt; bone name) is NOT updated here — the mesh
+	/// skin itself is the binding, and export reads skin directly. A bone name
+	/// already in the rig is reused rather than duplicated, so two BindRig plants
+	/// in one document share names like trunk_01 — the second plant's vertices
+	/// still point at the first plant's bones, which is wrong for independent sway
+	/// and is the reason BindRig stays opt-in until bone names carry the feature.
+	/// </summary>
+	void BindRigToStudio( FeatureContext ctx, PolyMesh mesh, List<int> vertBone )
+	{
+		if ( ctx.Rig is null )
+			Fail( "Foliage Bind rig needs a rig.", "This studio has no rig to bind to.",
+				"Add a rig first", "Or turn Bind rig off" );
+
+		var rig = ctx.Rig;
+		var byName = new Dictionary<string, int>( StringComparer.Ordinal );
+
+		for ( var i = 0; i < rig.Bones.Count; i++ )
+			byName.TryAdd( rig.Bones[i].Name, i );
+
+		var rigIndex = new int[_bones.Count];
+
+		for ( var i = 0; i < _bones.Count; i++ )
+		{
+			var bone = _bones[i];
+
+			if ( byName.TryGetValue( bone.Name, out var existing ) )
+			{
+				rigIndex[i] = existing;
+				continue;
+			}
+
+			var parent = -1;
+
+			if ( bone.Parent is not null && !byName.TryGetValue( bone.Parent, out parent ) )
+				Fail( $"Foliage bone '{bone.Name}' has no parent in the rig.",
+					$"Its parent '{bone.Parent}' was not added before it, so the hierarchy is broken.",
+					"This is a growth-order bug, not a settings problem" );
+
+			var added = rig.AddBoneFromPoints( bone.Name, parent, bone.Head, bone.Tail );
+			byName[bone.Name] = added;
+			rigIndex[i] = added;
+		}
+
+		var skin = new SkinWeights();
+
+		foreach ( var s in vertBone )
+			skin.Vertices.Add( new[] { new BoneWeight( rigIndex[s], 1f ) } );
+
+		mesh.Skin = skin;
+	}
 }

@@ -9,7 +9,7 @@ public static partial class BuildScript
 {
 	const string BakeUsage = "bake Low High[,High2…] folder | bake * folder — [size=1024] "
 		+ "[maps=normal,ao,curvature,cavity,height,thickness,bentnormal,objectnormal,position,id|all|everything] "
-		+ "[cage=0|distance|CageBody] [distance=0] [ss=1] [bits=8|16] [id=material|body] [green=gl|dx] [flipv=0] "
+		+ "[cage=0|distance|CageBody] [distance=0] [round=0] [ss=1] [bits=8|16] [id=material|body] [green=gl|dx] [flipv=0] "
 		+ "[vmat=0|1] [shader=complex|skin] [preset=Body|Head|Mouth|Wet flesh] [k=1] [color=] [rough=] [metal=] [name=] [assets=]";
 
 	/// <summary>
@@ -23,6 +23,10 @@ public static partial class BuildScript
 	///   cage=                       a number pushes the rays' start out that far; a body name uses
 	///                               that body as the cage mesh (a pushed-out copy of the low body).
 	///   bits=16                     height, normal, bent normal, object normal and position as 16-bit PNGs.
+	///   round=0                     rounded-edge radius in model units: a texel near a hard edge
+	///                               blends the neighbour face normal, reading as a baked fillet along
+	///                               sharp hard-surface edges without a subdivided high source. 0
+	///                               (default) bakes the sculpt normals exactly, so a hard low edge stays hard.
 	///   id=body                     the ID map colours by high body instead of material slot.
 	///   shader=skin preset= k=      the vmat is s&amp;box's skin shader with a preset; k is translucency
 	///                               (1 real skin, 3-10 gel-like flesh) for the transmission mask, which
@@ -48,6 +52,11 @@ public static partial class BuildScript
 
 		if ( bits != 8 && bits != 16 )
 			return Fail( r, $"bits={bits}: a bake is written at 8 or 16 bits." );
+
+		var round = opts.TryGetValue( "round", out var roundText ) ? Number( roundText ) : 0f;
+
+		if ( round < 0f )
+			return Fail( r, $"round={roundText}: a rounded-edge radius is 0 or above, in model units." );
 
 		var idBy = opts.GetValueOrDefault( "id", "material" ).Trim().ToLowerInvariant();
 
@@ -141,6 +150,7 @@ public static partial class BuildScript
 			AoRays = (int)Number( opts.GetValueOrDefault( "rays", "64" ) ),
 			AoDistance = opts.TryGetValue( "aodistance", out var aoDistance ) ? Number( aoDistance ) : 0f,
 			Padding = (int)Number( opts.GetValueOrDefault( "padding", "4" ) ),
+			BevelRadius = round,
 			SixteenBit = bits == 16,
 		};
 
@@ -166,7 +176,7 @@ public static partial class BuildScript
 
 		r.Log.Add( $"bake: {(options.FlipGreen ? "DirectX" : "OpenGL")} green, v = 0 at the {(flipV ? "bottom" : "top")}, "
 			+ (pairs.Any( p => p.Cage is not null ) ? "cage mesh" : options.Cage > 0f ? $"cage {N( options.Cage )}" : "no cage")
-			+ $", {options.Supersample}x{options.Supersample} samples per texel" + (pairs.Count > 1 ? $", {pairs.Count} pairs baked apart" : "") );
+			+ $", {options.Supersample}x{options.Supersample} samples per texel" + (options.BevelRadius > 0f ? $", round {N( options.BevelRadius )}" : "") + (pairs.Count > 1 ? $", {pairs.Count} pairs baked apart" : "") );
 
 		if ( !Truthy( opts.GetValueOrDefault( "vmat", "0" ) ) )
 			return true;

@@ -53,6 +53,11 @@ public static partial class BuildScript
 		/// body so this point is its model origin, and the layout says where that point was.</summary>
 		public Dictionary<string, Vec3> Pivots = new( StringComparer.OrdinalIgnoreCase );
 
+		/// <summary>Run-local weight locks, by body id: bone indices a `weight lock` pinned for this
+		/// script run. Like Pivots, this is run state, not document state — a later rebuild from the
+		/// feature tree does not keep it, and neither does a later script run.</summary>
+		public Dictionary<string, HashSet<int>> WeightLocks = new( StringComparer.OrdinalIgnoreCase );
+
 		public override string ToString()
 		{
 			var sb = new StringBuilder();
@@ -64,9 +69,38 @@ public static partial class BuildScript
 
 	/// <summary>Run <paramref name="text"/> against <paramref name="studio"/>. Files a `render`,
 	/// `match` or `save` writes go under <paramref name="baseDir"/> when their path is relative.</summary>
-	public static Result Run( PartStudio studio, string text, string baseDir = null )
+	public static Result Run( PartStudio studio, string text, string baseDir = null ) => Run( studio, text, baseDir, null, null );
+
+	/// <summary>Lane P carry-up from the desktop mirror: the verbs that change the
+	/// document. A live run publishes a revision after each of these, and only these.</summary>
+	public static bool Mutates( string verb ) =>
+		verb?.ToLowerInvariant() is "add" or "edit" or "set" or "remove" or "remedy" or "material" or "facematerial" or "refimage";
+
+	/// <summary>Lane P carry-up from the desktop mirror: the first word of a script
+	/// line, lower case; null for a blank line or a comment.</summary>
+	public static string VerbOf( string line )
 	{
-		var result = new Result();
+		line = (line ?? "").Trim();
+		if ( line.Length == 0 || line.StartsWith( '#' ) ) return null;
+		var tokens = Tokenise( line );
+		return tokens.Count == 0 ? null : tokens[0].ToLowerInvariant();
+	}
+
+	/// <summary>Run with a hook either side of each command, for a caller that paces the script or
+	/// publishes what each line did. The hooks get the 1-based line number, the verb and the line;
+	/// an exception from a hook is the caller's, so it is not caught as the line's error.</summary>
+	public static Result Run( PartStudio studio, string text, string baseDir,
+		Action<int, string, string> before, Action<int, string, string> after ) => Run( studio, text, baseDir, before, after, new Result() );
+
+	/// <summary>Run into an existing <paramref name="result"/>, for a caller that feeds one document
+	/// script in pieces: a pivot set by an earlier piece still counts at a later export. Its log keeps
+	/// growing; Ok, Error and ErrorLine are this piece's.</summary>
+	public static Result Run( PartStudio studio, string text, string baseDir,
+		Action<int, string, string> before, Action<int, string, string> after, Result result )
+	{
+		result.Ok = true;
+		result.Error = null;
+		result.ErrorLine = 0;
 		baseDir ??= Directory.GetCurrentDirectory();
 
 		if ( studio is null )
@@ -85,9 +119,13 @@ public static partial class BuildScript
 			if ( line.Length == 0 || line.StartsWith( '#' ) )
 				continue;
 
+			var tokens = Tokenise( line );
+			var verb = tokens.Count > 0 ? tokens[0].ToLowerInvariant() : "";
+			before?.Invoke( i + 1, verb, line );
+
 			try
 			{
-				if ( !Command( studio, Tokenise( line ), baseDir, result ) )
+				if ( !Command( studio, tokens, baseDir, result ) )
 				{
 					result.Ok = false;
 					result.ErrorLine = i + 1;
@@ -101,6 +139,8 @@ public static partial class BuildScript
 				result.Error = e.Message;
 				return result;
 			}
+
+			after?.Invoke( i + 1, verb, line );
 		}
 
 		return result;
@@ -527,6 +567,29 @@ public static partial class BuildScript
 				r.Log.Add( string.Join( " ", args ) );
 				return true;
 
+			case "facematerial":
+			{
+				// Lane P carry-up from the desktop mirror: facematerial slot=2 faces=Box:0,0,6:0,0,1;… — what the bench writes when picked faces go
+				// onto a slot (s&box's face menu). Replays as the same FaceMaterialEdit on the history.
+				var pairs = Pairs( args );
+				const string usage = "facematerial slot=N faces=Body:x,y,z:nx,ny,nz;…";
+
+				foreach ( var key in pairs.Keys )
+					if ( key is not ("slot" or "faces") )
+						return Fail( r, $"facematerial: unexpected '{key}'. Use: {usage}" );
+
+				if ( !pairs.TryGetValue( "slot", out var slotText ) || !int.TryParse( slotText, out var faceSlot ) || faceSlot < 0 )
+					return Fail( r, "facematerial needs slot=N (0 or more; 0 takes the faces off their slot)." );
+
+				if ( !AssignFaceSlots( studio, faceSlot, pairs.GetValueOrDefault( "faces" ), out var changed, out var already, out var whySlots ) )
+					return Fail( r, whySlots );
+
+				r.Log.Add( changed == 0
+					? $"{already} face(s) already on {studio.NameForSlot( faceSlot )}"
+					: $"{changed} face(s) -> {studio.NameForSlot( faceSlot )}" + (already > 0 ? $" ({already} already there)" : "") );
+				return true;
+			}
+
 			case "material":
 			{
 				// material 1 materials/alley/brass.vmat — what slot 1 is exported as.
@@ -648,6 +711,9 @@ public static partial class BuildScript
 
 			case "weight":
 				return WeightVerb( studio, args, r );
+
+			case "sculpt":
+				return SculptVerb( studio, args, r );
 
 			case "facerig":
 				return FaceRigVerb( studio, args, baseDir, r );
@@ -1250,6 +1316,17 @@ public static partial class BuildScript
 		var bodiesFirst = ordered.Where( p => Normalise( p.Key ) is "bodies" or "body" ).ToList();
 		ordered = bodiesFirst.Concat( ordered.Where( p => !bodiesFirst.Contains( p ) ) ).ToList();
 
+		// Lane P carry-up from the desktop mirror: add Fillet faces=Box:0,0,6:0,0,1 — a face selection on an edge tool is the faces' rims.
+		if ( TakesFacesAsEdges( feature ) && pairs.TryGetValue( "faces", out var faceText ) )
+		{
+			var faces = new List<FaceRef>();
+
+			if ( !ParseFaces( studio, faceText, faces, out var whyFaces ) )
+				return Fail( r, $"faces: {whyFaces}" );
+
+			feature.ApplyGeometrySelection( faces, Array.Empty<string>(), studio.Bodies );
+		}
+
 		// Lane E: align=/tilt= state. tilt is a modifier of align, so it is held until
 		// align has a frame to tilt, whichever order the two arrive in.
 		Xform? alignFrame = null;
@@ -1257,6 +1334,9 @@ public static partial class BuildScript
 
 		foreach ( var (key, value) in ordered )
 		{
+			if ( key == "faces" && TakesFacesAsEdges( feature ) )
+				continue;
+
 			if ( key == "name" )
 			{
 				feature.Name = value;
@@ -2346,6 +2426,88 @@ public static partial class BuildScript
 		return true;
 	}
 
+	/// <summary>Lane P carry-up from the desktop mirror: parse a face selection
+	/// Body:x,y,z:nx,ny,nz;… into FaceRefs, resolving each face on its body.</summary>
+	public static bool ParseFaces( PartStudio studio, string value, List<FaceRef> faceRefs, out string why )
+	{
+		why = null;
+		faceRefs.Clear();
+
+		foreach ( var part in (value ?? "").Split( ';', StringSplitOptions.RemoveEmptyEntries ) )
+		{
+			var bits = part.Split( ':' );
+			if ( bits.Length != 3 ) { why = $"'{part}' is not a face Body:x,y,z:nx,ny,nz."; return false; }
+
+			var body = ModelMeasure.FindBody( studio, bits[0].Trim() );
+			if ( body is null ) { why = $"No body called '{bits[0].Trim()}'. Bodies: {string.Join( ", ", studio.Bodies.Select( b => b.Name ?? b.Id ) )}."; return false; }
+			if ( !Point( studio, bits[1].Trim(), out var p, out why ) ) return false;
+			if ( !ModelMeasure.TryParseVec3( bits[2].Trim(), out var n ) || n.LengthSquared < 1e-12f ) { why = $"'{bits[2]}' is not a normal nx,ny,nz."; return false; }
+
+			if ( !FacePlane.TryResolveFace( new[] { body }, new FaceRef( body.Id, p, n ), out var hit, out var faceIndex ) )
+			{ why = $"No face of {body.Name ?? body.Id} faces {bits[2].Trim()} near {bits[1].Trim()}."; return false; }
+
+			faceRefs.Add( FacePlane.Capture( hit, faceIndex, p ) );
+		}
+
+		return true;
+	}
+
+	/// <summary>The feature stores edges (Fillet, Chamfer) and was handed faces: each face becomes its surface
+	/// rim, through the same Feature.ApplyGeometrySelection the s&box editor calls for "select the
+	/// top, then Fillet" (FacePlane.CaptureBoundary). Also names the faces' bodies, as s&box does.</summary>
+	static bool TakesFacesAsEdges( Feature feature ) =>
+		feature is FilletFeature or ChamferFeature;
+
+	/// <summary>Lane P carry-up from the desktop mirror: facematerial slot=N faces=Body:x,y,z:nx,ny,nz;… — the face menu's "put these faces on slot N"
+	/// (FaceMaterialEdit.Assign per face; slot 0 detaches), which edits the FaceMaterial features in the
+	/// history rather than the mesh. Every face resolves before anything changes, so a bad one changes
+	/// nothing. Faces already on the slot are skipped. Rebuilds once when anything changed.</summary>
+	public static bool AssignFaceSlots( PartStudio studio, int slot, string faces, out int changed, out int already, out string why )
+	{
+		changed = 0;
+		already = 0;
+		why = null;
+
+		if ( slot < 0 ) { why = "facematerial needs slot=N (0 or more; 0 takes the faces off their slot)."; return false; }
+		if ( string.IsNullOrWhiteSpace( faces ) ) { why = "facematerial needs faces=Body:x,y,z:nx,ny,nz;… (select faces first)."; return false; }
+
+		var refs = new List<FaceRef>();
+		if ( !ParseFaces( studio, faces, refs, out why ) ) return false;
+
+		var picks = new List<(string Body, int Face, FaceRef Reference)>();
+
+		foreach ( var reference in refs )
+		{
+			if ( !FacePlane.TryResolveFace( studio.Bodies, reference, out var body, out var index ) )
+			{ why = $"facematerial: a face in the selection no longer resolves on {reference.BodyId}. Select it again."; return false; }
+
+			picks.Add( (body.Id, index, reference) );
+		}
+
+		if ( picks.Count == 0 ) { why = "facematerial: no faces given."; return false; }
+
+		foreach ( var (bodyId, index, reference) in picks )
+		{
+			var mesh = studio.Bodies.First( b => b.Id == bodyId ).Mesh;
+
+			if ( index < mesh.FaceCount && mesh.Faces[index].Material == slot )
+			{
+				already++;
+				continue;
+			}
+
+			if ( slot == 0 ? FaceMaterialEdit.Detach( studio, bodyId, index ) : FaceMaterialEdit.Assign( studio, bodyId, index, reference, slot ) )
+				changed++;
+			else if ( slot != 0 )
+			{ why = "facematerial: a face couldn't be found in the history. Rebuild and try again."; return false; }
+		}
+
+		if ( changed > 0 )
+			studio.Rebuild();
+
+		return true;
+	}
+
 	static Dictionary<string, string> Pairs( IEnumerable<string> tokens )
 	{
 		var pairs = new Dictionary<string, string>( StringComparer.OrdinalIgnoreCase );
@@ -2378,9 +2540,9 @@ public static partial class BuildScript
 	public static readonly string[] VerbNames = {
 		"add", "edit", "set", "remove", "remedy", "remedy all", "var", "rebuild", "fix",
 		"render", "turnaround", "describe", "measure", "at", "distance", "symmetry",
-		"clearance", "topology", "section", "flex", "match", "save", "echo", "refimage", "material",
+		"clearance", "topology", "section", "flex", "match", "save", "echo", "refimage", "material", "facematerial",
 		"pivot", "export", "corrective", "corrective auto", "bake", "paintmaps",
-		"checkpoint", "fit_profile", "reproject", "retopo", "transfer", "weight",
+		"checkpoint", "fit_profile", "reproject", "retopo", "transfer", "weight", "sculpt",
 		"facerig", "playermodel", "export_cloth", "spritesheet", "attachment",
 		"hitbox", "bodygroup", "ragdoll", "lod_chain", "lint",
 		"bone", "chain", "subdivide", "twist", "mirror bones", "rig", "bind", "skin",
@@ -2572,36 +2734,209 @@ public static partial class BuildScript
 	static bool WeightVerb( PartStudio studio, List<string> args, Result r )
 	{
 		if ( args.Count < 2 )
-			return Fail( r, "weight needs a body and an operation: weight Body smooth | transfer FromBody | lock | unlock | ramp | island" );
+			return Fail( r, "weight needs a body and an operation: weight Body smooth | transfer FromBody | lock bone=Bone | unlock bone=Bone | ramp bone=Bone mode=linear|radial ... | island [max=0.10]" );
 		var body = ModelMeasure.FindBody( studio, args[0] );
 		if ( body?.Mesh is null ) return Fail( r, $"No body called '{args[0]}'." );
 		var op = args[1].ToLowerInvariant();
 		switch ( op )
 		{
 			case "smooth":
+			{
 				if ( !body.Mesh.IsRigged ) return Fail( r, $"{body.Name ?? body.Id} has no skin weights to smooth. Rig it first (bind)." );
-				body.Mesh.Skin = SkinBinder.SmoothWeights( body.Mesh, body.Mesh.Skin );
-				r.Log.Add( $"weight: smoothed skin weights on {body.Name ?? body.Id} (run-time mesh operation, like fix)" );
+				var before = body.Mesh.Skin.Clone();
+				var smoothed = SkinBinder.SmoothWeights( body.Mesh, body.Mesh.Skin );
+				if ( LocksFor( r, body.Id ) is { Count: > 0 } locked )
+					for ( var v = 0; v < smoothed.Count; v++ )
+						smoothed[v] = RestoreLockedWeights( before[v], smoothed[v], locked );
+				body.Mesh.Skin = smoothed;
+				r.Log.Add( $"weight: smoothed skin weights on {body.Name ?? body.Id}" + ( LocksFor( r, body.Id ) is { Count: > 0 } ? " (locked bones held)" : "" ) + " (run-time mesh operation, like fix)" );
 				return true;
+			}
 			case "transfer":
+			{
 				if ( args.Count < 3 ) return Fail( r, "weight transfer needs a source body: weight Body transfer FromBody" );
 				var source = ModelMeasure.FindBody( studio, args[2] );
 				if ( source?.Mesh is null ) return Fail( r, $"No body called '{args[2]}'." );
 				try
 				{
 					var reached = SkinBinder.TransferFrom( body.Mesh, source.Mesh );
-					r.Log.Add( $"weight: transferred skin weights {source.Name ?? source.Id} -> {body.Name ?? body.Id} ({reached} vertices reached)" );
+					r.Log.Add( $"weight: transferred skin weights {source.Name ?? source.Id} -> {body.Name ?? body.Id} ({reached} vertices reached) (run-time mesh operation, like fix)" );
 					return true;
 				}
 				catch ( Exception e ) { return Fail( r, $"weight transfer failed: {e.Message}" ); }
+			}
 			case "lock":
 			case "unlock":
+			{
+				if ( !body.Mesh.IsRigged ) return Fail( r, $"{body.Name ?? body.Id} has no skin weights to lock. Rig it first (bind)." );
+				var opts = Pairs( args.Skip( 2 ) );
+				if ( !opts.TryGetValue( "bone", out var boneText ) || !TryWeightBone( studio, boneText, out var bone ) )
+					return Fail( r, $"weight {op} needs a bone: weight {body.Name ?? body.Id} {op} bone=BoneName (bones: {string.Join( ", ", studio.Rig.Bones.Select( b => b.Name ) )})." );
+				var locks = LocksFor( r, body.Id, create: true );
+				if ( op == "lock" ) locks.Add( bone );
+				else locks.Remove( bone );
+				r.Log.Add( $"weight: {( op == "lock" ? "locked" : "unlocked" )} bone '{studio.Rig.Bones[bone].Name}' on {body.Name ?? body.Id} (run-local: this script run only, lost on rebuild)" );
+				return true;
+			}
 			case "ramp":
+			{
+				if ( !body.Mesh.IsRigged ) return Fail( r, $"{body.Name ?? body.Id} has no skin weights to ramp. Rig it first (bind)." );
+				var opts = Pairs( args.Skip( 2 ) );
+				if ( !opts.TryGetValue( "bone", out var boneText ) || !TryWeightBone( studio, boneText, out var bone ) )
+					return Fail( r, $"weight ramp needs a bone: weight {body.Name ?? body.Id} ramp bone=BoneName mode=linear|radial ... (bones: {string.Join( ", ", studio.Rig.Bones.Select( b => b.Name ) )})." );
+				if ( LocksFor( r, body.Id ) is { } lk && lk.Contains( bone ) )
+					return Fail( r, $"weight ramp: bone '{studio.Rig.Bones[bone].Name}' is locked on {body.Name ?? body.Id}; unlock it first (weight {body.Name ?? body.Id} unlock bone={studio.Rig.Bones[bone].Name})." );
+				var mode = opts.GetValueOrDefault( "mode", "linear" ).ToLowerInvariant();
+				SkinWeights ramped;
+				try
+				{
+					if ( mode == "linear" )
+					{
+						if ( !opts.TryGetValue( "origin", out var oText ) || !ModelMeasure.TryParseVec3( oText, out var origin ) )
+							return Fail( r, "weight ramp linear needs origin=x,y,z direction=x,y,z [from=a] [to=b]" );
+						if ( !opts.TryGetValue( "direction", out var dText ) || !ModelMeasure.TryParseVec3( dText, out var direction ) )
+							return Fail( r, "weight ramp linear needs direction=x,y,z (non-zero) origin=x,y,z [from=a] [to=b]" );
+						var from = opts.TryGetValue( "from", out var fText ) ? Number( fText ) : 0f;
+						var to = opts.TryGetValue( "to", out var tText ) ? Number( tText ) : 1f;
+						ramped = WeightRamp.ApplyLinear( body.Mesh, body.Mesh.Skin, bone, origin, direction, from, to );
+					}
+					else if ( mode == "radial" )
+					{
+						if ( !opts.TryGetValue( "center", out var cText ) || !ModelMeasure.TryParseVec3( cText, out var center ) )
+							return Fail( r, "weight ramp radial needs center=x,y,z radius=r [feather=f]" );
+						if ( !opts.TryGetValue( "radius", out var radText ) )
+							return Fail( r, "weight ramp radial needs center=x,y,z radius=r [feather=f]" );
+						var radius = Number( radText );
+						var feather = opts.TryGetValue( "feather", out var feText ) ? Number( feText ) : 0f;
+						ramped = WeightRamp.ApplyRadial( body.Mesh, body.Mesh.Skin, bone, center, radius, feather );
+					}
+					else return Fail( r, $"weight ramp mode '{mode}': linear or radial." );
+				}
+				catch ( Exception e ) { return Fail( r, $"weight ramp failed: {e.Message}" ); }
+				body.Mesh.Skin = ramped;
+				r.Log.Add( $"weight: {mode} ramp on bone '{studio.Rig.Bones[bone].Name}' for {body.Name ?? body.Id} (run-time mesh operation, like fix)" );
+				return true;
+			}
 			case "island":
-				return Fail( r, $"weight {op} is not yet wired: WeightRamp.ApplyLinear/ApplyRadial and per-bone locks live in the rig-weight lane, not in this tree yet. Available now: smooth, transfer." );
+			{
+				if ( !body.Mesh.IsRigged ) return Fail( r, $"{body.Name ?? body.Id} has no skin weights for islands. Rig it first (bind)." );
+				var opts = Pairs( args.Skip( 2 ) );
+				var max = opts.TryGetValue( "max", out var mText ) ? Number( mText ) : 0.10f;
+				var before = body.Mesh.Skin.Clone();
+				WeightEdit edit;
+				try { edit = WeightEdit.Run( body.Mesh, body.Mesh.Skin, studio.Rig, max ); }
+				catch ( Exception e ) { return Fail( r, $"weight island failed: {e.Message}" ); }
+				if ( edit is null )
+				{
+					r.Log.Add( $"weight: no rigid islands on {body.Name ?? body.Id} (single component, or none under max={max}; size rule only — WeightEdit.Run takes no name list)" );
+					return true;
+				}
+				if ( LocksFor( r, body.Id ) is { Count: > 0 } locked )
+					for ( var v = 0; v < body.Mesh.Skin.Count; v++ )
+						body.Mesh.Skin[v] = RestoreLockedWeights( before[v], body.Mesh.Skin[v], locked );
+				r.Log.Add( $"weight: rigid islands on {body.Name ?? body.Id}: {edit.Count} vertices bound 100% to their nearest bone (run-time mesh operation, like fix)" );
+				return true;
+			}
 			default:
-				return Fail( r, $"No weight operation '{op}'. Available: smooth, transfer. (lock, unlock, ramp, island are queued behind the rig-weight lane.)" );
+				return Fail( r, $"No weight operation '{op}'. Available: smooth, transfer, lock, unlock, ramp, island." );
 		}
+	}
+
+	/// <summary>Bone by name or index, for the weight verb. Names come from the studio rig.</summary>
+	static bool TryWeightBone( PartStudio studio, string text, out int bone )
+	{
+		bone = -1;
+		if ( int.TryParse( text, out var idx ) && idx >= 0 && idx < studio.Rig.Count ) { bone = idx; return true; }
+		bone = studio.Rig.IndexOf( text );
+		return bone >= 0;
+	}
+
+	/// <summary>Run-local locks for a body, or null when none were set (create: make the set).</summary>
+	static HashSet<int> LocksFor( Result r, string bodyId, bool create = false )
+	{
+		if ( r.WeightLocks.TryGetValue( bodyId, out var locks ) ) return locks;
+		if ( !create ) return null;
+		locks = new HashSet<int>();
+		r.WeightLocks[bodyId] = locks;
+		return locks;
+	}
+
+	/// <summary>WeightPaintSession.RestoreLocked, mirrored for script ops: locked bones keep
+	/// their pre-op value on every vertex and the rest rescale to fill what is left, so the
+	/// partition of unity survives. A locked bone that had no influence stays at 0.</summary>
+	static BoneWeight[] RestoreLockedWeights( BoneWeight[] before, BoneWeight[] current, HashSet<int> locked )
+	{
+		if ( locked is null || locked.Count == 0 ) return current;
+		var lockedBefore = new Dictionary<int, float>();
+		foreach ( var w in before )
+			if ( locked.Contains( w.Bone ) ) lockedBefore[w.Bone] = w.Weight;
+		var result = new Dictionary<int, float>();
+		var lockedSum = 0f;
+		foreach ( var w in current )
+		{
+			if ( !locked.Contains( w.Bone ) ) continue;
+			var v = lockedBefore.TryGetValue( w.Bone, out var pv ) ? pv : 0f;
+			if ( v > 0f ) { result[w.Bone] = v; lockedSum += v; }
+		}
+		foreach ( var (bone, v) in lockedBefore )
+			if ( v > 0f && !result.ContainsKey( bone ) ) { result[bone] = v; lockedSum += v; }
+		if ( lockedSum >= 1f ) return SkinWeights.Finish( result );
+		var rest = 0f;
+		foreach ( var w in current )
+			if ( !locked.Contains( w.Bone ) ) rest += w.Weight;
+		var scale = rest > 0f ? (1f - lockedSum) / rest : 0f;
+		foreach ( var w in current )
+		{
+			if ( locked.Contains( w.Bone ) || w.Weight <= 0f ) continue;
+			result[w.Bone] = w.Weight * scale;
+		}
+		return SkinWeights.Finish( result );
+	}
+
+	static bool SculptVerb( PartStudio studio, List<string> args, Result r )
+	{
+		if ( args.Count < 2 )
+			return Fail( r, "sculpt needs a body and an operation: sculpt Body dab at=x,y,z dir=x,y,z [brush=draw] [radius=0.25] [strength=0.05]" );
+		var body = ModelMeasure.FindBody( studio, args[0] );
+		if ( body?.Mesh is null ) return Fail( r, $"No body called '{args[0]}'." );
+		if ( args[1].ToLowerInvariant() != "dab" )
+			return Fail( r, $"No sculpt operation '{args[1]}'. Available: dab." );
+		var opts = Pairs( args.Skip( 2 ) );
+		if ( !opts.TryGetValue( "at", out var atText ) || !ModelMeasure.TryParseVec3( atText, out var at ) )
+			return Fail( r, "sculpt dab needs at=x,y,z (a point on or near the surface) and dir=x,y,z (the ray direction, usually the inward normal)." );
+		if ( !opts.TryGetValue( "dir", out var dirText ) || !ModelMeasure.TryParseVec3( dirText, out var dir ) || dir.LengthSquared < 1e-12f )
+			return Fail( r, "sculpt dab needs dir=x,y,z, non-zero." );
+		if ( opts.TryGetValue( "level", out var lvText ) && int.TryParse( lvText, out var lv ) && lv != 0 )
+			return Fail( r, "sculpt dab only works at level=0 (the cage): higher levels change the vertex count, so the dab has nowhere to write back to. Use `add Sculpt levels=N` + `reproject` for multires work, or `add Stroke` for a persistent stroke." );
+		var brush = BrushKind.Draw;
+		if ( opts.TryGetValue( "brush", out var brushText ) && !Enum.TryParse<BrushKind>( brushText, ignoreCase: true, out brush ) )
+			return Fail( r, $"sculpt dab brush '{brushText}' is not a brush kind (draw, inflate, smooth, flatten, pinch, grab, clay, ...)." );
+		var radius = opts.TryGetValue( "radius", out var radText ) ? Number( radText ) : 0.25f;
+		var strength = opts.TryGetValue( "strength", out var strText ) ? Number( strText ) : 0.05f;
+		if ( radius <= 0f ) return Fail( r, "sculpt dab needs radius > 0." );
+		// One click through SculptSession: BeginStroke dabs at the ray hit, EndStroke commits
+		// it as one edit. The ray starts outside the model along -dir from the dab point, so
+		// the hit lands on the surface near `at`. Level 0 only: Evaluate(0) is the cage, so
+		// the edit's vertex indices write straight back onto the body's mesh.
+		var sculpt = new MultiresSculpt( body.Mesh );
+		var session = new SculptSession( sculpt ) { Brush = brush, Radius = radius, Strength = strength };
+		var origin = at - dir.Normal * 100f;
+		SculptEdit edit;
+		try
+		{
+			if ( !session.BeginStroke( origin, dir ) )
+				return Fail( r, $"sculpt dab: ray from {origin} along {dir} missed {body.Name ?? body.Id}; put `at` on the surface and `dir` pointing into it." );
+			edit = session.EndStroke();
+		}
+		catch ( Exception e ) { return Fail( r, $"sculpt dab failed: {e.Message}" ); }
+		if ( edit is null )
+		{
+			r.Log.Add( $"sculpt: dab on {body.Name ?? body.Id} moved nothing (zero strength, or the brush found no vertices in range)" );
+			return true;
+		}
+		edit.Write( body.Mesh, forward: true );
+		r.Log.Add( $"sculpt: {brush} dab on {body.Name ?? body.Id} moved {edit.Count} vertices (run-time mesh operation, like fix: a later rebuild from features does not keep it — `add Stroke` is the persistent stroke)" );
+		return true;
 	}
 
 	static bool AutoCorrective( PartStudio studio, List<string> args, Result r )

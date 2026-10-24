@@ -28,6 +28,10 @@ public sealed record ViewSettings
 /// <summary>The HDR post chain: owns the linear Rgba16f scene target, a progressive bloom mip
 /// chain, the SSR history copy, the half-resolution depth-of-field layers, and the composite
 /// that applies depth of field, bloom, the view transform and the single sRGB encode.</summary>
+/// <summary>NPR tone pass for the desktop composite (wave 5, item 30). None keeps the
+/// plain composite; the others replace shading on geometry (background untouched).</summary>
+public enum NprTone { None, Halftone, Crosshatch, Bayer }
+
 public sealed class BloomPass : IDisposable
 {
 	const int MaxLevels = 6;
@@ -69,6 +73,14 @@ public sealed class BloomPass : IDisposable
 	public const float SceneUnitsPerMm = 1f / 25.4f;
 
 	public float Threshold { get; set; } = 1.0f;
+	/// <summary>Linework-style ink outlines over the composite; off by default.</summary>
+	public bool NprInk { get; set; }
+	public NprTone NprTone { get; set; } = NprTone.None;
+	/// <summary>0..1 blend of the NPR treatment toward the plain composite.</summary>
+	public float NprStrength { get; set; } = 1f;
+	/// <summary>Outline sampling radius in pixels.</summary>
+	public float NprInkWidth { get; set; } = 1.5f;
+	public System.Numerics.Vector3 NprInkColor { get; set; } = new( 0f, 0f, 0f );
 	/// <summary>Soft-knee width as a fraction of <see cref="Threshold"/>.</summary>
 	public float Knee { get; set; } = 0.5f;
 	public float Intensity { get; set; } = 0.6f;
@@ -242,6 +254,9 @@ public sealed class BloomPass : IDisposable
 		SetCoc( _compositeProg, focus, dof ? fStop : 0f, near, far );
 		Set( "uViewExposure", view.Exposure ); Set( "uGamma", view.Gamma <= 0 ? 1f : view.Gamma );
 		SetInt( "uViewTransform", (int)view.Transform ); SetInt( "uLook", (int)view.Look );
+		SetInt( "uNprInk", NprInk ? 1 : 0 ); SetInt( "uNprTone", (int)NprTone ); SetInt( "uHasDepth", depthTex != 0 ? 1 : 0 );
+		Set( "uNprStrength", Math.Clamp( NprStrength, 0f, 1f ) ); Set( "uNprInkWidth", MathF.Max( 0.5f, NprInkWidth ) );
+		_gl.Uniform3( _uniforms[_compositeProg, "uNprInkColor"], NprInkColor.X, NprInkColor.Y, NprInkColor.Z );
 		var balance = WhiteBalance.Gain( view.WhiteBalanceTemperature, view.WhiteBalanceTint );
 		_gl.Uniform3( _uniforms[_compositeProg, "uWhiteBalance"], balance.X, balance.Y, balance.Z );
 		// With a scene depth texture the composite also writes that depth into the target, so

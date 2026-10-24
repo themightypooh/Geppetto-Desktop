@@ -330,6 +330,20 @@ public sealed class DocumentSession
 			foreach ( var (slot, look) in Studio.MaterialLooks )
 				if ( look is not null )
 					materialResolver.SetOverride( slot, MaterialPalette.ForLook( Studio.NameForSlot( slot ), look ) );
+
+		// Wave-5 look fix: detail slots (Wear rust/algae, metal/dark details) carry a Kind
+		// but no look and no name, so they all fell back to the neutral default and the
+		// model rendered one flat colour. Give them a descriptor from their kind, but
+		// only where nothing stronger exists: a look or a .vmat binding still wins.
+		if ( Studio is not null )
+			foreach ( var feature in Studio.Features.OfType<Effigy.IDetailMaterials>() )
+				foreach ( var detail in feature.DetailMaterials )
+				{
+					if ( Studio.MaterialLooks.ContainsKey( detail.Slot ) ) continue;
+					if ( Studio.MaterialBindings.ContainsKey( detail.Slot ) ) continue;
+					Studio.MaterialLooks.TryGetValue( detail.SourceSlot, out var sourceLook );
+					materialResolver.SetOverride( detail.Slot, MaterialPalette.ForDetail( detail, sourceLook ) );
+				}
 		// Lane B: capture each batch's resolved descriptor before ApplyMaterials, so the paint
 		// swap below can rebuild a batch from the same descriptor instead of inventing one.
 		// validateTextures: false here — ApplyMaterials does the validating pass itself, and a

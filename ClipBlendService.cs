@@ -524,8 +524,7 @@ public static class ClipBlendService
 // Lane K additions are guarded: they need Lane K kernel types (RigChannel,
 // FCurveModifier, ScalarKey, RigTrack.ChannelCurves/EvaluateWithChannels) that
 // the desktop kernel mirror (kernel/Effigy) does not have until Lane P syncs
-// RigAnimFile.cs/ClipKeys.cs into it. Lane P: delete the #if/#endif pair at sync.
-#if LANE_K_KERNEL
+// RigAnimFile.cs/ClipKeys.cs into it. Lane P: the #if/#endif pair was deleted at sync (wave 2 cleanup).
 	/// <summary>
 	/// Lane K: like <see cref="SampleClipBone"/>, but a track with channel curves is
 	/// read through <see cref="RigTrack.EvaluateWithChannels"/> so a layer's curves
@@ -630,7 +629,6 @@ public static class ClipBlendService
 
 		return result;
 	}
-#endif // LANE_K_KERNEL
 }
 
 /// <summary>

@@ -26,7 +26,10 @@ namespace Effigy;
 /// autofix, save_clip) replace the affected tracks with per-frame keys: a baked
 /// frame list has no segments to ease, so key easing is not preserved through a
 /// bake, and that is stated on each verb rather than hidden. Verbs that do not
-/// bake (key, channel, pose_preset) keep the clip's key structure.
+/// bake (key, channel, pose_preset) keep the clip's key structure. pose_apply
+/// likewise only sets one key per bone; pose_save / pose_blend write a PoseLibrary
+/// file and touch no clip. pose_preset is session-only — its persistent form is a
+/// pose in a library file, via pose_save.
 /// 
 /// AXES. Gait moves forward on +X and lifts feet on +Z (the kernel's model space,
 /// where the floor sits on Z - see SoftBone's ground note). A rig built facing
@@ -383,6 +386,70 @@ public static class BuildScriptAnim
 
 				presets[name] = pose;
 				result.Log.Add( $"pose_preset {name} ({pose.Count} bone(s))" );
+				break;
+			}
+
+			// Lane 8 (2D suite): persistent poses. pose_preset above dies with the
+			// script; these three verbs read/write a PoseLibrary JSON file instead
+			// (NAME.poselib.json by convention, any path works). pose_apply and
+			// pose_blend never touch Face Poser presets, and pose_apply only ever
+			// sets one key per bone — it does not bake the clip.
+			case "pose_save":
+			{
+				var name = Req( opts, "name" );
+				var path = Req( opts, "path" );
+				Dictionary<string, RigPose> pose;
+				if ( opts.TryGetValue( "preset", out var presetName ) )
+				{
+					if ( !presets.TryGetValue( presetName, out var preset ) )
+						throw new AnimException( $"no pose_preset '{presetName}'" );
+					pose = new Dictionary<string, RigPose>( preset, StringComparer.OrdinalIgnoreCase );
+				}
+				else
+				{
+					var clip = Clip( result );
+					pose = PoseLibrary.Capture( clip, Int( opts, "frame", 0 ) );
+				}
+				var mask = PoseLibrary.ParseMask( Opt( opts, "mask" ) );
+				if ( mask is not null )
+					pose = pose.Where( kv => PoseLibrary.MatchesMask( kv.Key, mask ) ).ToDictionary( kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase );
+				if ( pose.Count == 0 )
+					throw new AnimException( $"pose_save {name} captured no bones" );
+				var lib = File.Exists( path ) ? PoseLibrary.Load( path ) : new PoseLibrary();
+				lib.SetPose( name, pose );
+				lib.Save( path );
+				result.Log.Add( $"pose_save {name} ({pose.Count} bone(s)) to {path}" );
+				break;
+			}
+
+			case "pose_apply":
+			{
+				var name = Req( opts, "name" );
+				var path = Req( opts, "path" );
+				var clip = Clip( result );
+				var pose = PoseLibrary.Load( path ).GetPose( name )
+					?? throw new AnimException( $"no pose '{name}' in '{path}'" );
+				var frame = Int( opts, "frame", 0 );
+				var weight = Num( opts, "weight", 1f );
+				var ease = opts.TryGetValue( "ease", out var easeText ) ? ParseEase( easeText ) : RigEase.Smooth;
+				var applied = PoseLibrary.Apply( clip, pose, frame, weight, PoseLibrary.ParseMask( Opt( opts, "mask" ) ), ease );
+				result.Log.Add( $"pose_apply {name} at frame {frame} ({applied} bone(s))" );
+				break;
+			}
+
+			case "pose_blend":
+			{
+				var aName = Req( opts, "a" );
+				var bName = Req( opts, "b" );
+				var outName = Req( opts, "out" );
+				var path = Req( opts, "path" );
+				var lib = PoseLibrary.Load( path );
+				var a = lib.GetPose( aName ) ?? throw new AnimException( $"no pose '{aName}' in '{path}'" );
+				var b = lib.GetPose( bName ) ?? throw new AnimException( $"no pose '{bName}' in '{path}'" );
+				var blended = PoseLibrary.Blend( a, b, Num( opts, "weight", 0.5f ), PoseLibrary.ParseMask( Opt( opts, "mask" ) ) );
+				lib.SetPose( outName, blended );
+				lib.Save( path );
+				result.Log.Add( $"pose_blend {aName} + {bName} -> {outName} ({blended.Count} bone(s)) in {path}" );
 				break;
 			}
 

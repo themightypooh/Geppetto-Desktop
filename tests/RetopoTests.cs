@@ -159,5 +159,31 @@ internal static class RetopoTests
 			var r = RetopoService.Retopo( m );
 			Require( r.InputTriangles == 2 );
 		} );
+		Check( "lod targets parse sorted descending deduped", () =>
+		{
+			var t = RetopoService.ParseLodTargets( "500,4000,500" );
+			Require( t.Length == 2 && t[ 0 ] == 4000 && t[ 1 ] == 500 );
+		} );
+
+		Check( "lod chain descends and preservation summaries report targets", () =>
+		{
+			var m = new PolyMesh();
+			for ( int y = 0; y < 5; y++ ) for ( int x = 0; x < 5; x++ ) m.Positions.Add( new Vec3( x, y, 0 ) );
+			for ( int y = 0; y < 4; y++ ) for ( int x = 0; x < 4; x++ )
+			{
+				int a = y * 5 + x, b = a + 1, c = a + 5, d = c + 1;
+				m.Faces.Add( new Face( new[] { a, b, d } ) );
+				m.Faces.Add( new Face( new[] { a, d, c } ) );
+			}
+			var chain = RetopoService.RetopoLodChain( m, "16,8" );
+			Require( chain.Count == 2 );
+			Require( chain[ 1 ].Mesh.Faces.Count <= chain[ 0 ].Mesh.Faces.Count, "smaller LOD target should not have more faces" );
+			Require( chain[ 0 ].Mesh.Faces.Count < m.Faces.Count, "LOD should decimate below the input" );
+			var p0 = RetopoService.CheckLodPreservation( m, 16, chain[ 0 ] );
+			var p1 = RetopoService.CheckLodPreservation( m, 8, chain[ 1 ] );
+			Require( p0.Summary().Contains( "target 16" ) && p1.Summary().Contains( "target 8" ) );
+			Require( p0.MaterialsPreserved && p1.MaterialsPreserved );
+		} );
+
 	}
 }

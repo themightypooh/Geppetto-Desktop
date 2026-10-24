@@ -16,6 +16,17 @@ public sealed class OrbitCamera
 	public float FovDegrees = 45f;
 	public float Near = 0.1f;
 	public float Far = 5000f;
+	/// <summary>Wave-2 camera wiring: lens f-stop from a camera track (PartTrackEvaluator),
+	/// 0 disables depth of field. Read by SceneRenderer's composite as the fallback when
+	/// its own DepthOfFieldFStop is 0.</summary>
+	public float FStop;
+	/// <summary>Wave-2 camera wiring: lens focal length in mm (35mm full-frame, 24mm
+	/// frame height) from a camera track. 0 means unset; when set, PartTrackEvaluator
+	/// derives FovDegrees from it (2*atan(12/focal)) unless a track FOV wins.</summary>
+	public float FocalLengthMm;
+	/// <summary>Wave-2 camera wiring: focus distance in world units from the eye, 0 means
+	/// focus on the orbit target (the renderer's existing fallback).</summary>
+	public float FocusDistance;
 	/// <summary>Flat projection: no perspective, so a front/side/top view lines up with a reference
 	/// picture. The visible height matches what the perspective view shows at the target.</summary>
 	public bool Orthographic;

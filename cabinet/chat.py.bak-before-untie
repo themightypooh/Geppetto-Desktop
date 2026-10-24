@@ -1,0 +1,647 @@
+#!/usr/bin/env python3
+"""Shared chat/research catalogue. Secrets stay in environment variables or existing key files.
+
+Optional ~/.config/geppetto/chat-models.json is a list of provider records. It augments
+live Ollama/KoboldCpp discovery. Records use id, label, kind, endpoint, model and
+optionally key_env, env_file, auth_header, extra_body and research (tool support).
+"""
+import base64
+import json
+import re
+import os
+import shutil
+import socket
+import subprocess
+import tempfile
+import threading
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+CONFIG = os.path.expanduser('~/.config/geppetto/chat-models.json')
+SYSTEM = "You are Geppetto's helpful chat assistant. Answer clearly and concretely. Do not claim you changed files or the scene: this chat has no editing tools."
+OLLAMA = os.environ.get('OLLAMA_HOST', 'http://127.0.0.1:11434').rstrip('/')
+if not OLLAMA.startswith(('http://', 'https://')):
+    OLLAMA = 'http://' + OLLAMA
+
+DEFAULT_MODELS = [
+    dict(id='reflection/Beam-1.0-501B-A23B', label='Beam 1.0 · Reflection', kind='openai',
+         endpoint='https://api.reflection.ai/openai/v1/', model='Beam-1.0-501B-A23B', key_env='REFLECTION_API_KEY'),
+    dict(id='deepseek/deepseek-v4-pro', label='DeepSeek V4 Pro · cloud', kind='openai',
+         endpoint='https://api.deepseek.com/v1/', model='deepseek-v4-pro', key_env='TEACHER_API_KEY',
+         env_file='~/local-llm/.env', extra_body={'thinking': {'type': 'disabled'}}),
+    dict(id='mimo/mimo-v2.6-pro', label='MiMo V2.6 Pro · cloud', kind='openai',
+         endpoint='https://token-plan-sgp.xiaomimimo.com/v1/', model='mimo-v2.6-pro', key_env='MIMO_API_KEY',
+         env_file='~/local-llm/.mimo.env', auth_header='api-key', extra_body={'thinking': {'type': 'disabled'}}),
+    # listed even before its key is set, marked (key missing): put MINIMAX_API_KEY=... in ~/local-llm/.minimax.env
+    dict(id='minimax/MiniMax-M3', label='MiniMax M3 · cloud', kind='openai', always=True,
+         endpoint='https://api.minimax.io/v1/', model='MiniMax-M3', key_env='MINIMAX_API_KEY',
+         env_file='~/local-llm/.minimax.env', extra_body={'reasoning_split': True}),
+]
+
+# Claude through the claude CLI, on its own login (the Max plan), never an API key
+CLAUDE = shutil.which('claude') or os.path.expanduser('~/.local/bin/claude')
+CLAUDE_MODELS = [
+    dict(id='claude/opus', label='Claude Opus · Max plan', kind='claude-cli', model='opus', endpoint='cli', research=False),
+    dict(id='claude/sonnet', label='Claude Sonnet · Max plan', kind='claude-cli', model='sonnet', endpoint='cli', research=False),
+    dict(id='claude/haiku', label='Claude Haiku · Max plan', kind='claude-cli', model='haiku', endpoint='cli', research=False),
+]
+
+ZOOPA_FILE = os.path.expanduser('~/.config/geppetto/zoopa.md')
+ZOOPA_MODELS = [
+    dict(id='zoopa/opus', label='Zoopa · Opus (Max)', kind='claude-cli', model='opus', endpoint='cli', research=False,
+         system_file=ZOOPA_FILE),
+]
+
+# --- Endpoint safety (audit C1): the terminal AI mode's rules (AiCli.Connection), ported. ---
+# A provider's key may only travel to the host that key belongs to. Before this, _request()
+# attached a record's key to whatever endpoint the record named — and chat-models.json records
+# override built-ins by id, so a pasted/shared record could redirect a known provider to an
+# arbitrary host and receive its key, over plain http if it said so.
+OFFICIAL_HOSTS = {'anthropic': 'api.anthropic.com', 'google': 'generativelanguage.googleapis.com',
+                  'openai': 'api.openai.com'}
+# The env names a provider's *default* key lives under in the terminal mode. For the anthropic
+# and google wire kinds there is exactly one official host each, so the default key going to any
+# other host is a redirect by definition. (The openai *kind* is a protocol spoken by many
+# providers, each its own record with its own key_env — those are pinned by PRESET_HOSTS below
+# for built-ins, and a new record naming its own key_env is the explicit-key custom case.)
+DEFAULT_KEY_ENVS = {'anthropic': 'ANTHROPIC_API_KEY', 'google': 'GEMINI_API_KEY'}
+PRESET_HOSTS = {m['id']: urllib.parse.urlparse(m['endpoint']).hostname for m in DEFAULT_MODELS}
+
+
+def _is_loopback(host):
+    return host == 'localhost' or host == '::1' or (host or '').startswith('127.')
+
+
+def validate_endpoint(model):
+    """Raise RuntimeError, in plain words, if this record's endpoint must not receive its key.
+
+    Rules: non-loopback endpoints must be https; a built-in provider record (known id) may
+    only ever talk to its own host; the anthropic/google default key may only go to that
+    provider's official host — a custom host for those kinds must name its *own* key_env in
+    the record (the explicit-key custom case). Records with no key_env send no key, so only
+    the scheme rule applies to them. CLI records ('cli') make no HTTP request here at all.
+    """
+    if model.get('kind') in ('claude-cli', 'grok-cli') or model.get('endpoint') == 'cli':
+        return
+    endpoint = model.get('endpoint') or ''
+    parsed = urllib.parse.urlparse(endpoint if '://' in endpoint else 'https://' + endpoint)
+    host = (parsed.hostname or '').lower()
+    if not host:
+        raise RuntimeError('This model has no usable endpoint; check its record before sending.')
+    if parsed.scheme == 'http':
+        if not _is_loopback(host):
+            raise RuntimeError('Refusing to send to %s over plain http: a key or your words would '
+                               'travel unencrypted. Use its https endpoint, or a local model.' % host)
+    elif parsed.scheme != 'https':
+        raise RuntimeError('Refusing to send to %s: only https (or a local http server) is allowed.' % endpoint)
+    if not model.get('key_env'):
+        return
+    preset_host = PRESET_HOSTS.get(model.get('id'))
+    if preset_host:
+        if host != preset_host:
+            raise RuntimeError('Refusing: %s is a known provider whose key belongs to %s, not %s. '
+                               'A record must not redirect a known provider to another host; if you '
+                               'meant a different service, add it as a new model with its own id and '
+                               'its own key.' % (model.get('id'), preset_host, host))
+        return
+    official = OFFICIAL_HOSTS.get(model.get('kind'))
+    if official and host != official and model['key_env'] == DEFAULT_KEY_ENVS.get(model.get('kind')):
+        raise RuntimeError('Refusing: the default %s key is only sent to %s, never to %s. For a '
+                           'custom host, name that service\'s own key variable (key_env) in its '
+                           'model record.' % (model['key_env'], official, host))
+
+
+# --- Child environments (audit C2/G2/G-env): allowlist, never the whole process env. ---
+# The cabinet process environment carries every provider's key. Children used to inherit all
+# of it; now each spawn gets a minimal baseline plus only what that child itself needs.
+BASE_ENV_NAMES = ('PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'TERM', 'LANG', 'LC_ALL', 'LC_CTYPE',
+                  'TZ', 'TMPDIR', 'DISPLAY', 'WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR',
+                  'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME',
+                  'DBUS_SESSION_BUS_ADDRESS', 'CLAUDE_CONFIG_DIR')
+
+
+def child_env():
+    """A spawned CLI's environment: the baseline only — no provider keys at all. CLI models
+    (Claude/Grok) authenticate with their own login files under $HOME, not with API keys."""
+    return {k: os.environ[k] for k in BASE_ENV_NAMES if k in os.environ}
+
+
+# What the native research child needs on top of the runtime baseline host.py assembles
+# (PATH/DOTNET_ROOT/LD_LIBRARY_PATH come from the host's prepared environment).
+RESEARCH_ENV_BASE = BASE_ENV_NAMES + ('DOTNET_ROOT', 'LD_LIBRARY_PATH')
+# Research's own optional search keys: AiResearch.cs reads exactly these three, for the
+# research function itself. They are not other providers' chat/build keys.
+RESEARCH_SEARCH_KEYS = ('BRAVE_SEARCH_API_KEY', 'SMITHSONIAN_API_KEY', 'DATA_GOV_API_KEY')
+
+
+def research_env(base, model):
+    """The research child's environment (audit G2): the baseline in `base`, research's own
+    search keys, and ONLY the selected model's key — never every key in the process env."""
+    env = {k: base[k] for k in RESEARCH_ENV_BASE if base.get(k)}
+    for name in RESEARCH_SEARCH_KEYS:
+        if os.environ.get(name):
+            env[name] = os.environ[name]
+    if model.get('key_env') and key(model):
+        env[model['key_env']] = key(model)
+    return env
+
+
+def key(model):
+    name = model.get('key_env', '')
+    if not name:
+        return ''
+    value = os.environ.get(name, '')
+    if value:
+        return value
+    if model.get('env_file'):
+        try:
+            for line in Path(model['env_file']).expanduser().read_text().splitlines():
+                k, sep, v = line.removeprefix('export ').partition('=')
+                if sep and k.strip() == name:
+                    return v.strip().strip('\"').strip("'")
+        except OSError:
+            pass
+    return ''
+
+
+def _get(url):
+    with urllib.request.urlopen(url, timeout=1.5) as response:
+        return json.load(response)
+
+
+def models(discover=True):
+    """Installed local models plus configured external models; no network on the UI thread."""
+    custom = []
+    try:
+        data = json.loads(Path(CONFIG).read_text())
+        if isinstance(data, list):
+            custom = [m for m in data if isinstance(m, dict) and
+                      all(isinstance(m.get(k), str) and m[k] for k in ('id', 'endpoint', 'model'))]
+    except (OSError, ValueError):
+        pass
+    out = []
+    if discover:
+        try:
+            for m in _get(OLLAMA + '/api/tags').get('models', []):
+                name = m['name']
+                size = m.get('details', {}).get('parameter_size', '')
+                out.append(dict(id='ollama/' + name, label=('Qwen3.5 4.5B · local chat' if name == 'geppetto-chat:latest' else name.removesuffix(':latest') + ' · ' + size + ' local'),
+                                kind='ollama', endpoint=OLLAMA + '/', model=name,
+                                research='tools' in m.get('capabilities', []),
+                                vision='vision' in m.get('capabilities', []),
+                                extra_body={'reasoning_effort': 'none'} if m.get('details', {}).get('family') == 'qwen35' else {}))
+        except (OSError, ValueError, KeyError):
+            pass
+        try:
+            for m in _get('http://127.0.0.1:5001/v1/models').get('data', []):
+                out.append(dict(id=m['id'], label='RP · ' + m['id'].split('/')[-1], kind='openai',
+                                endpoint='http://127.0.0.1:5001/v1/', model=m['id'], research=False))
+        except (OSError, ValueError, KeyError):
+            pass
+    if os.access(CLAUDE, os.X_OK):
+        out += [dict(m) for m in CLAUDE_MODELS]
+        if os.path.exists(ZOOPA_FILE):
+            out += [dict(m) for m in ZOOPA_MODELS]
+    if os.access(GROK, os.X_OK):
+        out += [dict(m) for m in GROK_MODELS]
+    for m in DEFAULT_MODELS:
+        if key(m) or m.get('always'):
+            out.append(dict(m))
+    # Custom records override discovery/presets, without hiding the user's installed models.
+    by_id = {m['id']: m for m in out}
+    for m in custom:
+        by_id[m['id']] = dict(m)
+    out = list(by_id.values())
+    for m in out:
+        m.setdefault('label', m['model'])
+        m.setdefault('kind', 'openai')
+        m.setdefault('research', True)
+        m['available'] = not m.get('key_env') or bool(key(m))
+        if not m['available']:
+            m['label'] += ' (key missing)'
+    preferred = ['ollama/geppetto-chat:latest', 'ollama/prompt-pocket:latest']
+    return sorted(out, key=lambda m: (preferred.index(m['id']) if m['id'] in preferred else 2,
+                                     0 if m['kind'] == 'ollama' else 1, m['label'].lower()))
+
+
+def find(model_id, catalogue=None):
+    return next((m for m in (models() if catalogue is None else catalogue) if m['id'] == model_id), None)
+
+
+def research_arguments(model):
+    if not model.get('research', True):
+        raise RuntimeError('This model is for chat; research needs tool calling.')
+    validate_endpoint(model)
+    if model.get('key_env') and not key(model):
+        raise RuntimeError('Missing ' + model['key_env'])
+    endpoint = model['endpoint'].rstrip('/') + ('/v1/' if model['kind'] == 'ollama' else '/')
+    args = ['--provider', 'openai' if model['kind'] == 'ollama' else model['kind'],
+            '--endpoint', endpoint, '--model', model['model']]
+    if model.get('key_env'):
+        args += ['--key-env', model['key_env']]
+    if model.get('auth_header'):
+        args += ['--auth-header', model['auth_header']]
+    if model.get('extra_body'):
+        args += ['--request-options', json.dumps(model['extra_body'])]
+    if model.get('vision'):
+        args.append('--vision')
+    return args
+
+
+def _url(model):
+    base = model['endpoint'].rstrip('/') + '/'
+    return base + {'ollama': 'api/chat', 'anthropic': 'messages',
+                   'google': 'models/' + urllib.parse.quote(model['model'], safe='') + ':generateContent'}.get(model['kind'], 'chat/completions')
+
+
+NOTES_LIMIT = 6000
+API_LIMIT = 4000
+EFFIGY_API = os.path.expanduser(os.environ.get('GEPPETTO_EFFIGY_API', '~/games/projects/geppetto/EFFIGY-API.md'))
+_WORD = re.compile(r'[a-z][a-z0-9]{2,}')
+_STOP = set('the and for with that this what how can you are was not but have from your into does its any all use'.split())
+
+
+def research_notes(run_dir):
+    """The newest design brief a research run saved, as chat background."""
+    try:
+        briefs = sorted(f for f in os.listdir(run_dir) if f.startswith('task-') and f.endswith('-brief.txt'))
+        if not briefs:
+            return ''
+        with open(os.path.join(run_dir, briefs[-1]), encoding='utf-8', errors='replace') as f:
+            text = f.read(NOTES_LIMIT + 1).strip()
+    except OSError:
+        return ''
+    if len(text) > NOTES_LIMIT:
+        text = text[:NOTES_LIMIT].rsplit('\n', 1)[0] + '\n[notes truncated]'
+    return text
+
+
+def effigy_reference(question, path=None, limit=API_LIMIT):
+    """EFFIGY-API.md sections that share the most words with the question, within the limit."""
+    words = set(_WORD.findall(question.lower())) - _STOP
+    if not words:
+        return ''
+    try:
+        with open(path or EFFIGY_API, encoding='utf-8', errors='replace') as f:
+            text = f.read()
+    except OSError:
+        return ''
+    sections = [p.strip() for p in re.split(r'(?m)^(?=#{2,3} )', text) if p.strip()]
+    scored = []
+    for i, part in enumerate(sections):
+        lines = part.split('\n', 1)
+        heading = set(_WORD.findall(lines[0].lower()))
+        body = _WORD.findall(part.lower())
+        score = sum(3 if w in heading else 0 for w in words) + sum(1 for w in body if w in words) / (1 + len(body) / 400)
+        if score > 0:
+            scored.append((score, i, part))
+    picked, used = [], 0
+    for score, i, part in sorted(scored, reverse=True):
+        if used + len(part) > limit:
+            continue
+        picked.append((i, part)); used += len(part)
+    return '\n\n'.join(part for i, part in sorted(picked))
+
+
+def _system(notes, api=''):
+    system = SYSTEM
+    if notes:
+        system += (" Research notes for the player's current project follow. They came from web research:"
+                   " use them as reference, cite them when relevant, and say so when they do not cover a question."
+                   "\n\n<research_notes>\n" + notes + "\n</research_notes>")
+    if api:
+        system += ("\n\nExcerpts from Effigy's API reference (Geppetto's modeller) that match the question follow."
+                   " Use only names that appear here; if what you need is not in them, say so instead of inventing API."
+                   "\n\n<effigy_api>\n" + api + "\n</effigy_api>")
+    return system
+
+
+IMAGE_TYPES = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif'}
+IMAGE_CAP = 4 * 1024 * 1024
+
+
+def _image_payloads(paths):
+    """Local picture files as mime + base64, capped so a chat turn cannot ship a huge file."""
+    out = []
+    for raw in (paths or [])[:4]:
+        path = os.path.abspath(os.path.expanduser(str(raw)))
+        mime = IMAGE_TYPES.get(os.path.splitext(path)[1].lower())
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            continue
+        if not mime or size <= 0 or size > IMAGE_CAP:
+            continue
+        out.append({'mime': mime, 'data': base64.b64encode(Path(path).read_bytes()).decode('ascii'), 'path': path})
+    return out
+
+
+def _said(turn):
+    """Text of one turn, plus any attached picture paths a CLI model can open itself."""
+    text = turn.get('text') or ''
+    paths = [p['path'] for p in _image_payloads(turn.get('images'))]
+    if not paths:
+        return text
+    return (text or 'What is in this picture?') + '\n\nImage files to look at:\n' + '\n'.join(paths)
+
+
+def _wire_messages(history, kind):
+    messages = []
+    for turn in history:
+        role = 'user' if turn['role'] == 'you' else 'assistant'
+        text = turn.get('text') or ''
+        images = _image_payloads(turn.get('images')) if role == 'user' else []
+        if not images:
+            messages.append({'role': role, 'content': text})
+            continue
+        caption = text or 'What is in this picture?'
+        if kind == 'ollama':
+            messages.append({'role': role, 'content': caption, 'images': [p['data'] for p in images]})
+        elif kind == 'anthropic':
+            blocks = [{'type': 'image', 'source': {'type': 'base64', 'media_type': p['mime'], 'data': p['data']}} for p in images]
+            blocks.append({'type': 'text', 'text': caption})
+            messages.append({'role': role, 'content': blocks})
+        else:
+            blocks = [{'type': 'text', 'text': caption}]
+            blocks += [{'type': 'image_url', 'image_url': {'url': 'data:%s;base64,%s' % (p['mime'], p['data'])}} for p in images]
+            messages.append({'role': role, 'content': blocks})
+    return messages
+
+
+def _google_parts(turn):
+    text = turn.get('text') or ''
+    images = _image_payloads(turn.get('images')) if turn['role'] == 'you' else []
+    parts = [{'text': text or ('What is in this picture?' if images else '')}]
+    parts += [{'inline_data': {'mime_type': p['mime'], 'data': p['data']}} for p in images]
+    return [p for p in parts if p.get('text') or p.get('inline_data')]
+
+
+def _body(model, history, streaming=False, notes='', api=''):
+    history = [h for h in history if h['role'] in ('you', 'model') and (h.get('text') or h.get('images'))][-16:]
+    # Keep whole recent turns, leaving headroom in the local 8k context for notes and the reply.
+    while len(history) > 1 and sum(len(h.get('text') or '') for h in history) > 16000 - len(notes) - len(api):
+        history = history[1:]
+    while history and history[0]['role'] != 'you':
+        history = history[1:]
+    kind = model['kind']
+    messages = _wire_messages(history, kind)
+    system = _system(notes, api)
+    if kind == 'anthropic':
+        return dict(model=model['model'], max_tokens=2048, system=system, messages=messages)
+    if kind == 'google':
+        return {'systemInstruction': {'parts': [{'text': system}]},
+                'contents': [{'role': 'user' if h['role'] == 'you' else 'model', 'parts': _google_parts(h)} for h in history]}
+    body = dict(model=model['model'], messages=[{'role': 'system', 'content': system}] + messages, stream=streaming)
+    if kind == 'ollama':
+        body.update(think=False, keep_alive='2m', options={'num_ctx': 8192, 'num_predict': 2048})
+    else:
+        body.update(model.get('extra_body', {}))
+    return body
+
+
+def _reply(kind, data):
+    if kind == 'ollama':
+        return data.get('message', {}).get('content') or ''
+    if kind == 'anthropic':
+        return ''.join(b.get('text', '') for b in data.get('content', []) if b.get('type') == 'text')
+    if kind == 'google':
+        return ''.join(p.get('text', '') for p in (data.get('candidates') or [{}])[0].get('content', {}).get('parts', []) if not p.get('thought'))
+    return ((data.get('choices') or [{}])[0].get('message') or {}).get('content') or ''
+
+
+def _request(model, history, streaming, notes='', api=''):
+    validate_endpoint(model)
+    secret = key(model)
+    if model.get('key_env') and not secret:
+        raise RuntimeError('Missing ' + model['key_env'] + '; configure this provider before sending.')
+    headers = {'Content-Type': 'application/json'}
+    kind = model['kind']
+    if kind == 'anthropic':
+        headers.update({'x-api-key': secret, 'anthropic-version': '2023-06-01'})
+    elif kind == 'google':
+        headers['x-goog-api-key'] = secret
+    elif secret:
+        header = model.get('auth_header', 'Authorization')
+        headers[header] = 'Bearer ' + secret if header.lower() == 'authorization' else secret
+    return urllib.request.Request(_url(model), data=json.dumps(_body(model, history, streaming, notes, api)).encode(), headers=headers, method='POST')
+
+
+CLAUDE_HOME = os.path.expanduser('~/.local/share/geppetto/chat')
+CLAUDE_TOOLS = ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Skill', 'WebSearch', 'WebFetch',
+                'Bash(geppetto-live *)', 'Bash(python3 */cabinet/host.py *)', 'Bash(ls *)', 'Bash(mkdir *)', 'Bash(cat *)']
+CLAUDE_CHAT = ("You are the chat in Geppetto's cabinet (the paper ball), talking to po. You can model:"
+               " use the geppetto skill, write Effigy build scripts in this folder and run them with"
+               " `geppetto-live build.txt - outdir` so po watches each step in a viewport pane; the run stays open"
+               " with the model loaded: change it with `geppetto-live more RUN edit.txt` (a few lines), never a"
+               " new run or a rebuild; a bad line holds the run, send the fix with `more`; `geppetto-live close RUN`"
+               " when po is happy. po flags steps with notes in the chest; they reach you at your next tool call; `geppetto-live rewind RUN N` puts the model back to revision N. Never restart, quit or"
+               " take over the Geppetto chest. The chat window is small: keep replies short.")
+_claude_sessions = set()      # chat sessions the CLI has already started; later turns --resume them
+
+# Grok through the grok CLI, on its own grok.com login, never an API key.
+GROK = shutil.which('grok') or os.path.expanduser('~/.local/bin/grok')
+GROK_MODELS = [
+    dict(id='grok/grok-4.7', label='Grok 4.7', kind='grok-cli', model='grok-4.7', endpoint='cli', research=False),
+    dict(id='grok/grok-4.7-build-fast', label='Grok 4.7 fast', kind='grok-cli', model='grok-4.7-build-fast', endpoint='cli', research=False),
+    dict(id='grok/grok-4.6', label='Grok 4.6', kind='grok-cli', model='grok-4.6', endpoint='cli', research=False),
+    dict(id='grok/grok-4.5', label='Grok 4.5', kind='grok-cli', model='grok-4.5', endpoint='cli', research=False),
+]
+GROK_CHAT = CLAUDE_CHAT
+_grok_sessions = set()
+
+
+
+def _extra_system(model):
+    """A model's own extra system prompt: inline text, or a file it points at (read fresh each call)."""
+    extra = str(model.get('system') or '')
+    path = str(model.get('system_file') or '')
+    if path:
+        try:
+            extra = (extra + '\n\n' + Path(path).expanduser().read_text()).strip()
+        except OSError:
+            pass
+    return extra.strip()
+
+
+def _chat_system(model):
+    extra = _extra_system(model)
+    return CLAUDE_CHAT + ('\n\n' + extra if extra else '')
+
+def _claude_cli(model, history, cancel, timeout, session=''):
+    """Claude via `claude -p` on its own login (the Max plan), with modelling tools, one CLI session per chat."""
+    history = [h for h in history if h['role'] in ('you', 'model')][-16:]
+    while history and history[0]['role'] != 'you':
+        history = history[1:]
+    resume = bool(session) and session in _claude_sessions
+    if resume or len(history) == 1:
+        prompt = _said(history[-1])
+    else:     # the chat began with another model: hand Claude what was said so far
+        prompt = ('The conversation so far:\n\n' +
+                  '\n\n'.join(('User: ' if h['role'] == 'you' else 'Assistant: ') + _said(h) for h in history[:-1]) +
+                  '\n\nReply to the user\'s latest message:\n\n' + _said(history[-1]))
+    env = child_env()     # allowlist (audit C2): no ANTHROPIC_API_KEY etc. — the CLI's own login is used
+    args = [CLAUDE, '-p', '--model', model['model'], '--output-format', 'stream-json', '--include-partial-messages',
+            '--verbose', '--setting-sources', 'user', '--append-system-prompt', _chat_system(model),
+            '--allowedTools', *CLAUDE_TOOLS]
+    if session:
+        args += ['--resume', session] if resume else ['--session-id', session]
+    else:
+        args.append('--no-session-persistence')
+    os.makedirs(CLAUDE_HOME, mode=0o700, exist_ok=True)   # audit G6: chat home holds CLI sessions
+    p = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
+                         cwd=CLAUDE_HOME, text=True)
+    timer = threading.Timer(max(timeout, 3600), p.kill)     # a build can take a while
+    timer.start()
+    said = False
+    try:
+        p.stdin.write(prompt)
+        p.stdin.close()
+        for line in p.stdout:
+            if cancel is not None and cancel.is_set():
+                return
+            try:
+                data = json.loads(line)
+            except ValueError:
+                continue
+            if session and data.get('type') == 'system':
+                _claude_sessions.add(session)
+            if data.get('type') == 'stream_event':
+                event = data['event']
+                delta = event.get('delta', {})
+                if delta.get('type') == 'text_delta':
+                    said = True
+                    yield delta.get('text', '')
+                elif event.get('type') == 'content_block_start' and event.get('content_block', {}).get('type') == 'tool_use':
+                    yield ('\n\n' if said else '') + '[' + event['content_block'].get('name', 'tool') + ']\n\n'
+                    said = False
+            elif data.get('type') == 'result' and data.get('is_error'):
+                raise RuntimeError('Claude: ' + str(data.get('result') or 'the request failed'))
+        if p.wait() != 0:
+            raise RuntimeError('claude CLI failed: ' + (p.stderr.read().strip()[-300:] or 'exit %d' % p.returncode))
+    finally:
+        timer.cancel()
+        if p.poll() is None:
+            p.kill()
+
+
+def _grok_cli(model, history, cancel, timeout, session=''):
+    """Grok via `grok -p` on its grok.com login, one CLI session per chat."""
+    history = [h for h in history if h['role'] in ('you', 'model')][-16:]
+    while history and history[0]['role'] != 'you':
+        history = history[1:]
+    resume = bool(session) and session in _grok_sessions
+    if resume or len(history) == 1:
+        prompt = _said(history[-1])
+    else:
+        prompt = ('The conversation so far:\n\n' +
+                  '\n\n'.join(('User: ' if h['role'] == 'you' else 'Assistant: ') + _said(h) for h in history[:-1]) +
+                  '\n\nReply to the user\'s latest message:\n\n' + _said(history[-1]))
+    env = child_env()     # allowlist (audit C2): no GROK_SESSION_ID/XAI_API_KEY etc. — its own login is used
+    os.makedirs(CLAUDE_HOME, mode=0o700, exist_ok=True)   # audit G6: chat home holds CLI sessions
+    # The prompt goes in a 0600 file, not argv (audit G1): argv is world-visible in `ps` /
+    # /proc/<pid>/cmdline to every same-user process. grok's --prompt-file is its single-turn
+    # file contract, the equivalent of Claude's stdin feed above.
+    fd, prompt_path = tempfile.mkstemp(prefix='geppetto-grok-prompt-', dir=CLAUDE_HOME)
+    with os.fdopen(fd, 'w') as f:
+        f.write(prompt)
+    args = [GROK, '--prompt-file', prompt_path, '--model', model['model'], '--output-format', 'streaming-messages-json',
+            '--include-partial-messages', '--no-alt-screen', '--no-subagents', '--permission-mode', 'auto',
+            '--rules', _chat_system(model), '--cwd', CLAUDE_HOME]
+    if session:
+        args += ['--resume', session] if resume else ['--session-id', session]
+    p = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
+                         cwd=CLAUDE_HOME, text=True)
+    timer = threading.Timer(max(timeout, 3600), p.kill)
+    timer.start()
+    said = False
+    try:
+        for line in p.stdout:
+            if cancel is not None and cancel.is_set():
+                return
+            try:
+                data = json.loads(line)
+            except ValueError:
+                continue
+            if session and data.get('type') == 'system':
+                _grok_sessions.add(session)
+            if data.get('type') == 'stream_event':
+                event = data.get('event') or {}
+                delta = event.get('delta') or {}
+                if delta.get('type') == 'text_delta':
+                    said = True
+                    yield delta.get('text', '')
+                elif event.get('type') == 'content_block_start' and event.get('content_block', {}).get('type') == 'tool_use':
+                    yield ('\n\n' if said else '') + '[' + event['content_block'].get('name', 'tool') + ']\n\n'
+                    said = False
+            elif data.get('type') == 'result' and data.get('is_error'):
+                raise RuntimeError('Grok: ' + str(data.get('result') or 'the request failed'))
+        if p.wait() != 0:
+            raise RuntimeError('grok CLI failed: ' + (p.stderr.read().strip()[-300:] or 'exit %d' % p.returncode))
+    finally:
+        timer.cancel()
+        if p.poll() is None:
+            p.kill()
+        try:
+            os.unlink(prompt_path)
+        except OSError:
+            pass
+
+
+def stream(model, history, cancel=None, timeout=120, notes='', api='', session=''):
+    """Yield answer text; native Ollama NDJSON and OpenAI SSE stream immediately."""
+    if cancel is not None and cancel.is_set():
+        return
+    kind = model['kind']
+    if kind == 'claude-cli':
+        yield from _claude_cli(model, history, cancel, timeout, session)
+        return
+    if kind == 'grok-cli':
+        yield from _grok_cli(model, history, cancel, timeout, session)
+        return
+    streaming = kind in ('ollama', 'openai')
+    try:
+        with urllib.request.urlopen(_request(model, history, streaming, notes, api), timeout=timeout) as response:
+            ctype = response.headers.get('Content-Type', '')
+            if not streaming or ('event-stream' not in ctype and kind != 'ollama'):
+                data = json.load(response)
+                if cancel is None or not cancel.is_set():
+                    yield _reply(kind, data)
+                return
+            for line in response:
+                if cancel is not None and cancel.is_set():
+                    return
+                line = line.decode().strip()
+                if not line or line.startswith(('event:', ':')):
+                    continue
+                if line.startswith('data:'):
+                    line = line[5:].strip()
+                if line == '[DONE]':
+                    break
+                data = json.loads(line)
+                if data.get('error'):
+                    raise RuntimeError('Model server rejected the request. Check model compatibility and available memory.')
+                if kind == 'ollama':
+                    yield _reply(kind, data)
+                else:
+                    yield ((data.get('choices') or [{}])[0].get('delta') or {}).get('content') or ''
+    except urllib.error.HTTPError as e:
+        e.close()
+        raise RuntimeError('%s returned HTTP %d. Check model, credentials and quota.' % (model['label'], e.code)) from None
+    except (urllib.error.URLError, socket.timeout, TimeoutError):
+        raise RuntimeError('Cannot reach %s or request timed out. Check its model server.' % model['label']) from None
+    except (ValueError, KeyError, TypeError):
+        raise RuntimeError('%s returned an invalid response.' % model['label']) from None
+
+
+def complete(model, history, timeout=120):
+    text = ''.join(stream(model, history, timeout=timeout)).strip()
+    if not text:
+        raise RuntimeError(model['label'] + ' sent back no text')
+    return text
+
+
+if __name__ == '__main__':
+    for m in models():
+        print(m['id'], m['label'], 'research' if m['research'] else 'chat only')

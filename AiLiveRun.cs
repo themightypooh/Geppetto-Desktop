@@ -44,12 +44,13 @@ public sealed class AiLiveRun
         }
     }
 
-    public void Control(string state, bool pauseRequested, bool paused, double pace, int pending, string? id, string? outcome)
+    public void Control(string state, bool pauseRequested, bool paused, double pace, int pending, string? id, string? outcome, bool scriptReview = false)
     {
         lock (gate)
         {
             controls = new JsonObject { ["pauseRequested"] = pauseRequested, ["paused"] = paused,
-                ["paceSeconds"] = pace, ["pendingDirections"] = pending, ["commandId"] = id, ["outcome"] = outcome };
+                ["paceSeconds"] = pace, ["pendingDirections"] = pending, ["commandId"] = id, ["outcome"] = outcome,
+                ["scriptReview"] = scriptReview };
             if (state == "cancelling") { Status(state, outcome: outcome); return; }
             // Control events never start/clear an operation identity; an in-flight build keeps it.
             if (!cancelling) Append(state, null, outcome, current);

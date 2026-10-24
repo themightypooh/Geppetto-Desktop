@@ -9,6 +9,7 @@ layout(location = 2) in vec4 aBoneIndices;
 layout(location = 3) in vec4 aBoneWeights;
 layout(location = 4) in vec2 aUv;
 layout(location = 5) in vec4 aTangent;
+layout(location = 7) in vec4 aColor;
 
 uniform mat4 uMvp;
 uniform mat4 uModel;
@@ -22,6 +23,7 @@ out vec3 vTangent;
 out float vHandedness;
 out float vMirror;
 out vec3 vObject;
+out vec3 vColor;
 
 void main() {
 	vec3 pos = aPos;
@@ -56,6 +58,7 @@ void main() {
 	// the authored outward side.
 	vMirror = mirror;
 	vUv = aUv;
+	vColor = aColor.rgb;
 	// Bind-pose object position: procedural material masks stay stuck to the surface as it moves.
 	vObject = aPos;
 	gl_Position = uMvp * world;
@@ -70,6 +73,7 @@ in vec3 vTangent;
 in float vHandedness;
 in float vMirror;
 in vec3 vObject;
+in vec3 vColor;
 
 uniform vec3 uAlbedo;
 uniform sampler2D uAlbedoMap;
@@ -99,6 +103,22 @@ uniform float uUvRotation[6];
 uniform float uRoughness;
 uniform float uMetallic;
 uniform vec3 uEmission;
+// Wave-2 look wiring: pasted from GlShader.LookSpectrumGlsl's helpers (the wiring
+// Lane C's comment asked for), driven per batch by ViewportMesh.DrawBatched via
+// GlShader.SetLook, and per live layer by LiveGeometry.Draw. Defaults are no-ops.
+uniform float uLookToon;
+uniform int uLookToonBands;
+uniform float uLookToonRim;
+uniform float uLookStylized;
+uniform float uLookOutlineWidth;
+uniform vec3 uLookOutlineColor;
+uniform float uLookClearcoat;
+uniform float uLookClearcoatRough;
+uniform float uLookSubsurface;
+uniform vec3 uLookSubsurfaceColor;
+uniform float uLookOpacity;
+uniform vec3 uLookShadowTint;
+uniform float uLookIridescence;
 uniform vec3 uEye;
 uniform vec3 uKeyDirection;
 uniform mat4 uLightViewProjection;
@@ -150,6 +170,30 @@ vec3 fresnel(vec3 f0, float c) {
 	return f0 + (vec3(1.0) - f0) * k;
 }
 
+float lookQuantize(float nl, int bands, float edge) {
+	if (bands <= 1) return clamp(nl, 0.0, 1.0);
+	float scaled = clamp(nl, 0.0, 1.0) * float(bands);
+	float level = floor(scaled);
+	float frac = scaled - level;
+	float lo = level / float(bands);
+	if (frac < edge) return mix(max(level - 1.0, 0.0) / float(bands), lo, smoothstep(0.0, edge, frac));
+	if (frac > 1.0 - edge) return mix(lo, min(level + 1.0, float(bands)) / float(bands), smoothstep(1.0 - edge, 1.0, frac));
+	return lo;
+}
+float lookDitheredAlpha(float opacity, vec2 fragCoord) {
+	if (opacity >= 1.0) return 1.0;
+	if (opacity <= 0.0) return 0.0;
+	float t = fract(sin(dot(fragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+	return opacity > t ? 1.0 : 0.0;
+}
+vec3 lookOilFilm(float t) {
+	t = clamp(t, 0.0, 1.0) * 3.0;
+	vec3 blue = vec3(0.25, 0.4, 1.0), purple = vec3(0.7, 0.25, 0.95), green = vec3(0.25, 0.95, 0.55), gold = vec3(1.0, 0.8, 0.3);
+	if (t < 1.0) return mix(blue, purple, t);
+	if (t < 2.0) return mix(purple, green, t - 1.0);
+	return mix(green, gold, t - 2.0);
+}
+
 " + MaterialFeatureShaders.Lobes + ScreenSpaceShaders.Lit + @"
 
 vec3 shadeLight(vec3 n, vec3 v, float nv, vec3 lDir, vec3 radiance, float lightSize, vec3 diffuseCol, vec3 f0, float roughness, float ao) {
@@ -159,11 +203,14 @@ vec3 shadeLight(vec3 n, vec3 v, float nv, vec3 lDir, vec3 radiance, float lightS
 	float diff = max(rawNl, 0.0);
 	float nl = max(rawNl, 0.0);
 	if (diff <= 0.0 && nl <= 0.0) return vec3(0.0);
+	// Wave-2 look wiring: cel bands step the diffuse term, mirroring LookSpectrum.
+	if (uLookToon > 0.0) diff = mix(diff, lookQuantize(diff, clamp(uLookToonBands, 2, 8), 0.08), uLookToon);
 	vec3 h = normalize(l + v);
 	float nh = max(dot(n, h), 0.0);
 	float vh = max(dot(v, h), 0.0);
 	float r = max(roughness, lightSize * 0.6);
 	float spec = ggx(nh, nl, nv, r);
+	if (uLookToon > 0.0 && roughness < 0.4) spec = mix(spec, lookQuantize(clamp(spec, 0.0, 1.0), clamp(uLookToonBands, 2, 8), 0.08), uLookToon);
 	vec3 F = fresnel(f0, vh);
 	return ((vec3(1.0) - F) * diffuseCol * diff + F * spec * nl * ao) * radiance;
 }
@@ -284,10 +331,13 @@ void main() {
 	rough = clamp(sqrt(rough * rough + normalVariance * 0.5), 0.04, 1.0);
 	float metal = clamp(uMetallic * texture(uMetallicMap, transformUv(vUv, 3)).r, 0.0, 1.0);
 	vec4 albedoTex = texture(uAlbedoMap, transformUv(vUv, 0));
-	vec3 albedo = uAlbedo * albedoTex.rgb;
+	vec3 albedo = uAlbedo * albedoTex.rgb * vColor;
 	float matAlpha = uBaseAlpha * albedoTex.a;
 	if (uAlphaMode == 1 && matAlpha < uAlphaCutoff) discard;
 	if (uAlphaMode == 3 && matAlpha <= r6Hash()) discard;
+	// Wave-2 look wiring: opaque batches with a look opacity below 1 dither away
+		// (stipple, not a wash). Blend-mode batches keep their own alpha path.
+	if (uAlphaMode == 0 && uLookOpacity < 1.0 && lookDitheredAlpha(uLookOpacity, gl_FragCoord.xy) <= 0.0) discard;
 	float ao = texture(uOcclusionMap, transformUv(vUv, 5)).r;
 	ao = clamp(ao * uPs1Occlusion, 0.0, 1.0);
 	// Cheap screen-space-ish ambient occlusion from normal variance (cavity darkening).
@@ -353,6 +403,19 @@ void main() {
 		direct += shadeLight(n, v, nv, pl, uPointLightColor * uPointLightIntensity * plAtt, 0.25, diffuseCol, f0, rough, ao);
 	}
 	hdr += direct * directMask;
+		// Wave-4 SSS: wrapped diffuse + backlight translucency, mirroring kernel
+		// ShadePixel and GlShader.lookSpectrum. uLookSubsurface is 0 for non-SSS
+		// looks, so this is a no-op there. shadeLight returns 0 on the shadow side,
+		// so this term is what warms the terminator and backlit rims red. The 3.0
+		// factor is the key light's radiance, matching the key shadeLight call above.
+		if (uLookSubsurface > 0.0) {
+			float sssWrap = 0.5 * uLookSubsurface;
+			float nlKey = dot(n, keyDir);
+			float wrapDiff = max(0.0, (nlKey + sssWrap) / (1.0 + sssWrap));
+			float backKey = pow(max(0.0, dot(v, -keyDir)), 3.0);
+			float rimBack = pow(1.0 - nv, 3.0) * max(0.0, dot(v, -keyDir));
+			hdr += uLookSubsurfaceColor * albedo * uLookSubsurface * (wrapDiff * 0.5 + backKey * 0.75 + rimBack * 0.5) * 3.0 * directMask;
+		}
 	// Environment lighting from cubemap.
 	float sh[9] = float[9](0.2820947918, 0.4886025119*n.y, 0.4886025119*n.z, 0.4886025119*n.x,
 		1.0925484306*n.x*n.y, 1.0925484306*n.y*n.z, 0.3153915653*(3.0*n.z*n.z-1.0),
@@ -360,20 +423,39 @@ void main() {
 	vec3 irradiance = vec3(0);
 	for (int i=0; i<9; i++) irradiance += uIrradiance[i]*sh[i];
 	vec3 envDiffuse = max(irradiance, vec3(0)) / 3.14159265359 * uEnvMapIntensity;
-	hdr += diffuseCol * envDiffuse * ao * uEnvIntensity * uEnvColor * ambientMask;
+	hdr += diffuseCol * envDiffuse * ao * uEnvIntensity * uEnvColor * ambientMask * uLookShadowTint;
 	vec3 skyCol    = vec3(0.24, 0.27, 0.34);
 	vec3 horizonCol = vec3(0.18, 0.19, 0.22);
 	vec3 groundCol = vec3(0.10, 0.09, 0.10);
 	float hemiMix = n.z * 0.5 + 0.5;
 	vec3 hemi = mix(groundCol, mix(horizonCol, skyCol, smoothstep(0.0, 1.0, hemiMix)), hemiMix);
-	hdr += diffuseCol * hemi * ao * (1.0 - uEnvMapIntensity) * uEnvIntensity * uEnvColor * ambientMask;
+	hdr += diffuseCol * hemi * ao * (1.0 - uEnvMapIntensity) * uEnvIntensity * uEnvColor * ambientMask * uLookShadowTint;
 
 	// Ground bounce / ambient reflection with fresnel and roughness preservation for metals
 	vec3 refl = r6BendReflection(reflect(-v, n), n, v, rough);
 	vec3 envSpec = textureLod(uEnvMap, refl, rough * uEnvironmentMaxLod).rgb * uEnvMapIntensity * uEnvIntensity * uEnvColor;
 	vec2 brdf = texture(uBrdfLut, vec2(nv, rough)).rg;
 	vec3 envF = f0 * brdf.x + brdf.y;
+	// Wave-2 look wiring: oil-film hue shift on grazing reflections, mirroring
+		// ShadeMaterial.Iridescence (same blue->purple->green->gold phase walk).
+	if (uLookIridescence > 0.0) {
+		float filmPhase = 1.0 - nv + abs(mod((vWorld.x + vWorld.y * 0.7 + vWorld.z * 0.4) * 0.05, 0.35));
+		envF = mix(envF, envF * lookOilFilm(filmPhase) * 1.5, uLookIridescence);
+	}
 	hdr += envF * envSpec * ao * ao * directMask;
+	// Wave-2 look wiring: stepped rim highlight at the silhouette, mirroring LookSpectrum.
+	if (uLookToon > 0.0 && uLookToonRim > 0.0) {
+		float fres = pow(1.0 - nv, 4.0);
+		hdr += vec3(1.0) * (smoothstep(0.62, 0.68, fres) * uLookToonRim * uLookToon * 0.5) * directMask;
+	}
+	// Wave-2 look wiring, stylized half: no cavity channel reaches this shader, so
+		// (1 - ao) is the crease proxy — open areas saturate, shut areas warm/darken.
+	if (uLookStylized > 0.0) {
+		float lum = (hdr.r + hdr.g + hdr.b) / 3.0;
+		hdr = mix(vec3(lum), hdr, 1.0 + 0.2 * uLookStylized);
+		hdr = mix(hdr, vec3(hdr.r, hdr.g * 0.85, hdr.b * 0.65), uLookStylized * (1.0 - ao) * 0.5);
+		hdr *= 1.0 - 0.125 * uLookStylized * ao;
+	}
 	// R5: view-space SSR with binary refinement; replaces the environment where it hits.
 	if (uSsrStrength > 0.0 && uScreenSize.x > 0.0 && !unlitBack) {
 		vec4 hit = r5Ssr(n, rough);

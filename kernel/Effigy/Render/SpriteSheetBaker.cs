@@ -45,8 +45,12 @@ public sealed class SpriteSheetOptions
 /// RGBA PNG. Normal is a VIEW-space (screen-space) normal map, +Z toward the
 /// viewer — not tangent-space: the baker cannot assume UVs or tangents exist.
 /// Material packs depth in R (near = 255, far = 0, per tile) and emission in
-/// G; G is 0 today because <see cref="PolyMesh"/> carries no emission channel
-/// (paint-emission sampling is a follow-up, not faked here).</summary>
+/// G: the brighter of the face's slot look Emit peak and the interpolated
+/// per-vertex <see cref="PolyMesh.VertexEmission"/> peak, 0 where nothing glows.
+/// Wave-2 look wiring filled G; before it, G was 0 because no emission channel
+/// reached this baker. Paint has no emission channel (PaintChannel is colour,
+/// roughness, metalness, height, mask), so paint-emission sampling is not a
+/// source here — slot looks and vertex emission are.</summary>
 public sealed class SpriteSheetResult
 {
     public bool Ok;
@@ -173,7 +177,7 @@ public static class SpriteSheetBaker
             for (int d = 0; d < dirs; d++)
             {
                 var tileBuf = RenderTile(bodies, posed, views[d], render, scale, centres[d],
-                    centre, perspDist, tanHalf, options.Camera == SpriteCamera.Persp);
+                    centre, perspDist, tanHalf, options.Camera == SpriteCamera.Persp, studio.MaterialLooks);
                 Blit(colour, normal, material, alpha, tileBuf, d, f, tile, render);
             }
         }
@@ -215,10 +219,12 @@ public static class SpriteSheetBaker
         public byte[] Alpha = Array.Empty<byte>();
         public int[] Normal = Array.Empty<int>();
         public float[] Depth = Array.Empty<float>();
+        public float[] Emission = Array.Empty<float>();
     }
 
     static TileBuf RenderTile(List<Body> bodies, List<Vec3[]> posed, RenderView view, int size,
-        float scale, (float cx, float cy) centre2d, Vec3 centre3d, float perspDist, float tanHalf, bool persp)
+        float scale, (float cx, float cy) centre2d, Vec3 centre3d, float perspDist, float tanHalf, bool persp,
+        IReadOnlyDictionary<int, SlotLook> looks = null)
     {
         var (right, up, forward) = view.Axes();
         var key = (forward * -0.6f + up * 0.55f + right * 0.55f).Normal;
@@ -231,6 +237,7 @@ public static class SpriteSheetBaker
             Alpha = new byte[size * size],
             Normal = new int[size * size],
             Depth = new float[size * size],
+            Emission = new float[size * size],
         };
         Array.Fill(buf.Depth, float.MaxValue);
         Array.Fill(buf.Normal, Raster.Rgb(128, 128, 255));
@@ -242,6 +249,7 @@ public static class SpriteSheetBaker
             var vnorm = VertexNormals(mesh, pos);
             int baseColour = Palette[bi % Palette.Length];
             bool vertexColour = mesh.HasVertexColors;
+            bool vertexEmission = mesh.HasVertexEmission;
             foreach (var face in mesh.Faces)
             {
                 if (face.Indices.Length < 3) continue;
@@ -258,11 +266,17 @@ public static class SpriteSheetBaker
                     Project(pb, out float bx, out float by, out float bd);
                     Project(pc, out float cx, out float cy, out float cd);
                     if (persp && (ad <= 1e-6f || bd <= 1e-6f || cd <= 1e-6f)) continue;
+                    float faceEmit = 0f;
+                    if (looks is not null && looks.TryGetValue(face.Material, out var faceLook) && faceLook is not null)
+                        faceEmit = MathF.Max(faceLook.Emit.x, MathF.Max(faceLook.Emit.y, faceLook.Emit.z));
                     Fill(buf, size, ax, ay, ad, bx, by, bd, cx, cy, cd,
                         vnorm[ia], vnorm[ib], vnorm[ic], fn,
                         vertexColour ? mesh.VertexColors[ia] : default, vertexColour ? mesh.VertexColors[ib] : default,
                         vertexColour ? mesh.VertexColors[ic] : default, vertexColour, baseColour,
-                        facing, right, up, forward, key, fill, rim, persp);
+                        facing, right, up, forward, key, fill, rim, persp,
+                        vertexEmission ? Peak(mesh.VertexEmission[ia]) : 0f,
+                        vertexEmission ? Peak(mesh.VertexEmission[ib]) : 0f,
+                        vertexEmission ? Peak(mesh.VertexEmission[ic]) : 0f, faceEmit);
                 }
             }
         }
@@ -311,11 +325,14 @@ public static class SpriteSheetBaker
         return acc;
     }
 
+    static float Peak(Vec3 v) => MathF.Max(v.x, MathF.Max(v.y, v.z));
+
     static void Fill(TileBuf buf, int size,
         float ax, float ay, float ad, float bx, float by, float bd, float cx, float cy, float cd,
         Vec3 na, Vec3 nb, Vec3 nc, Vec3 faceNormal,
         Vec4 ca, Vec4 cb, Vec4 cc, bool vertexColour, int baseColour,
-        bool facing, Vec3 right, Vec3 up, Vec3 forward, Vec3 key, Vec3 fill, Vec3 rim, bool persp)
+        bool facing, Vec3 right, Vec3 up, Vec3 forward, Vec3 key, Vec3 fill, Vec3 rim, bool persp,
+        float ea = 0f, float eb = 0f, float ec = 0f, float faceEmit = 0f)
     {
         int minX = Math.Max(0, (int)MathF.Floor(MathF.Min(ax, MathF.Min(bx, cx))));
         int maxX = Math.Min(size - 1, (int)MathF.Ceiling(MathF.Max(ax, MathF.Max(bx, cx))));
@@ -363,6 +380,7 @@ public static class SpriteSheetBaker
                 b = (baseColour & 0xFF) / 255f;
             }
             buf.Depth[i] = depth;
+            buf.Emission[i] = MathF.Max(faceEmit, ea * u0 + eb * u1 + ec * u2);
             buf.Alpha[i] = 255;
             buf.Colour[i] = Raster.Rgb((int)(r * shade * 255f), (int)(g * shade * 255f), (int)(b * shade * 255f));
             var ncam = new Vec3(Vec3.Dot(n, right), Vec3.Dot(n, up), -Vec3.Dot(n, forward)).Normal;
@@ -379,6 +397,7 @@ public static class SpriteSheetBaker
         int factor = render / tileSize;
         int ox = d * tileSize, oy = f * tileSize;
         var sampledDepth = new float[tileSize * tileSize];
+        var sampledEmission = new float[tileSize * tileSize];
         Array.Fill(sampledDepth, float.MaxValue);
         for (int y = 0; y < tileSize; y++)
         for (int x = 0; x < tileSize; x++)
@@ -390,7 +409,7 @@ public static class SpriteSheetBaker
             colour.Pixels[di] = tile.Colour[si];
             normal.Pixels[di] = tile.Normal[si];
             alpha[di] = tile.Alpha[si];
-            if (tile.Alpha[si] != 0) sampledDepth[y * tileSize + x] = tile.Depth[si];
+            if (tile.Alpha[si] != 0) { sampledDepth[y * tileSize + x] = tile.Depth[si]; sampledEmission[y * tileSize + x] = tile.Emission[si]; }
         }
         float min = float.MaxValue, max = float.MinValue;
         foreach (var v in sampledDepth)
@@ -402,7 +421,8 @@ public static class SpriteSheetBaker
             float v = sampledDepth[y * tileSize + x];
             int depthByte = v == float.MaxValue || max <= min ? 0
                 : (int)((1f - (v - min) / (max - min)) * 255f);
-            material.Pixels[di] = Raster.Rgb(depthByte, 0, 0);
+            int emitByte = (int)(Math.Clamp(sampledEmission[y * tileSize + x], 0f, 1f) * 255f);
+            material.Pixels[di] = Raster.Rgb(depthByte, emitByte, 0);
         }
     }
 

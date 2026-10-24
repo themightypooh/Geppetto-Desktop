@@ -15,10 +15,37 @@ public sealed class WearFeature : GarmentDetailFeature
 	public readonly FloatParam Amount = new( "Amount", 0.8f, 0f, 1f );
 	public readonly IntParam Seed = new( "Seed", 17, 0, 65535 );
 	public readonly BoolParam Fray = new( "Loose threads", true );
-	public override IReadOnlyList<IParam> Parameters => Placement.Concat( new IParam[] { Style, Area, Width, Height, Amount, Fray, Seed } ).ToArray();
+	/// <summary>Hard-surface rust, §4 crane/buoy: fraction of faces re-slotted to rust. 0 = off, garment path only.</summary>
+	public readonly FloatParam Rust = new( "Rust", 0f, 0f, 1f );
+
+	/// <summary>Hard-surface dents: fraction of the body's size pitted inward. 0 = off.</summary>
+	public readonly FloatParam Dents = new( "Dents", 0f, 0f, 1f );
+
+	/// <summary>Waterline height for the algae band, in model units. Only read when Algae band &gt; 0.</summary>
+	public readonly FloatParam Waterline = new( "Waterline", 0f, -100000f, 100000f, "u" );
+
+	/// <summary>Algae coverage inside the waterline band, 0..1. 0 = off.</summary>
+	public readonly FloatParam Algae = new( "Algae", 0f, 0f, 1f );
+
+	/// <summary>Half-width of the algae band around Waterline, in model units. 0 = off.</summary>
+	public readonly FloatParam AlgaeBand = new( "Algae band", 0f, 0f, 1000f, "u" );
+	public override IReadOnlyList<IParam> Parameters => Placement.Concat( new IParam[] { Style, Area, Width, Height, Amount, Fray, Seed, Rust, Dents, Waterline, Algae, AlgaeBand } ).ToArray();
 	public int ChangedFaces { get; private set; }
+	public int RustFaces { get; private set; }
+	public int AlgaeFaces { get; private set; }
+	public int DentedVertices { get; private set; }
 	protected override void Execute( FeatureContext ctx )
 	{
+		// Hard-surface rust/wear (§4): when any rust dial is up, the garment path
+		// below must not run — it needs a rig and a garment, and a buoy has neither.
+		// With every rust dial at its 0 default this branch never fires, so existing
+		// garment behaviour is unchanged.
+		if ( Rust.Clamped > 0f || Dents.Clamped > 0f || AlgaeBand.Clamped > 0f )
+		{
+			RustPath( ctx );
+			return;
+		}
+
 		var targets = Targets( ctx );
 		ChangedFaces = 0;
 		var map = new BodyRegions.Map( ctx.Rig );
@@ -128,5 +155,134 @@ public sealed class WearFeature : GarmentDetailFeature
 		}
 		if ( ChangedFaces == 0 && Amount.Clamped > 0f )
 			Fail( "No cloth faces in that area", "The garment may not reach that place, or its faces are larger than the cut.", "Choose a covered place, enlarge the area, or subdivide the garment before Wear" );
+	}
+
+	/// <summary>
+	/// Hard-surface rust, dents and waterline algae on any body — no rig, no garment
+	/// needed. Rust and algae are face-slot reassignments (the same mechanism the
+	/// garment path uses for worn/dirt slots); dents are real inward displacement
+	/// along per-vertex normals, so they read in the viewport even where the viewer
+	/// renders material slots flat. A face slot is only a number until a material
+	/// definition exists for it, so the rust/algae slots are also registered in
+	/// <see cref="GarmentDetailFeature.Materials"/> like every other detail slot.
+	/// </summary>
+	void RustPath( FeatureContext ctx )
+	{
+		ChangedFaces = 0;
+		RustFaces = 0;
+		AlgaeFaces = 0;
+		DentedVertices = 0;
+		Materials.Clear();
+
+		var targets = RequireBodies( ctx, Bodies );
+
+		if ( targets.Count == 0 )
+			Fail( "No body to rust.", "The selection names no body in this studio.", "Pick a body first" );
+
+		var maxSlot = ctx.Bodies.SelectMany( b => b.Mesh.Faces ).Select( f => f.Material )
+			.Concat( ctx.ShellSlots ).DefaultIfEmpty( 0 ).Max();
+		var rustSlot = maxSlot + 1;
+		var algaeSlot = maxSlot + 2;
+		var rustUsed = false;
+		var algaeUsed = false;
+
+		foreach ( var body in targets )
+		{
+			var mesh = body.Mesh;
+
+			if ( mesh is null || mesh.VertexCount == 0 )
+				continue;
+
+			// Per-vertex normals for the dents: face normals averaged over the
+			// faces that touch the vertex, so a dent sinks into the surface
+			// instead of sliding sideways along it.
+			var normals = new Vec3[mesh.VertexCount];
+
+			foreach ( var face in mesh.Faces )
+			{
+				var n = mesh.FaceNormal( face );
+
+				foreach ( var vi in face.Indices )
+					normals[vi] += n;
+			}
+
+			for ( var vi = 0; vi < normals.Length; vi++ )
+				normals[vi] = normals[vi].LengthSquared < 1e-12f ? new Vec3( 0, 0, 1 ) : normals[vi].Normal;
+
+			var min = new Vec3( float.MaxValue, float.MaxValue, float.MaxValue );
+			var max = new Vec3( float.MinValue, float.MinValue, float.MinValue );
+
+			foreach ( var p in mesh.Positions )
+			{
+				min = new Vec3( MathF.Min( min.x, p.x ), MathF.Min( min.y, p.y ), MathF.Min( min.z, p.z ) );
+				max = new Vec3( MathF.Max( max.x, p.x ), MathF.Max( max.y, p.y ), MathF.Max( max.z, p.z ) );
+			}
+
+			var diagonal = (max - min).Length;
+			var dentDepth = Dents.Clamped * diagonal * 0.03f;
+
+			if ( Dents.Clamped > 0f && dentDepth > 0f )
+			{
+				for ( var vi = 0; vi < mesh.VertexCount; vi++ )
+				{
+					var n = Hash01( mesh.Positions[vi] * 0.9f + new Vec3( Seed.Clamped * 0.13f, 0f, 0f ) );
+
+					if ( n <= 0.45f )
+						continue;
+
+					mesh.Positions[vi] -= normals[vi] * ((n - 0.45f) / 0.55f) * dentDepth;
+					DentedVertices++;
+				}
+			}
+
+			for ( var fi = 0; fi < mesh.FaceCount; fi++ )
+			{
+				var face = mesh.Faces[fi];
+				var c = mesh.FaceCentroid( face );
+				var inBand = AlgaeBand.Clamped > 0f && MathF.Abs( c.z - Waterline.Clamped ) <= AlgaeBand.Clamped;
+
+				if ( inBand && Hash01( c * 1.7f + new Vec3( Seed.Clamped * 0.29f, 0f, 0f ) ) < Algae.Clamped )
+				{
+					face.Material = algaeSlot;
+					AlgaeFaces++;
+					algaeUsed = true;
+					continue;
+				}
+
+				if ( Rust.Clamped > 0f
+					&& Hash01( c * 1.7f + new Vec3( Seed.Clamped * 0.13f, 0f, 0f ) )
+						< Rust.Clamped * (0.35f + 0.65f * Hash01( c + new Vec3( Seed.Clamped * 0.07f, 0f, 0f ) )) )
+				{
+					face.Material = rustSlot;
+					RustFaces++;
+					rustUsed = true;
+				}
+			}
+		}
+
+		if ( rustUsed )
+		{
+			Materials.Add( new DetailMaterial { Kind = "rust", Slot = rustSlot, SourceSlot = 0, Key = Id + "_rust" } );
+			ctx.ShellSlots.Add( rustSlot );
+		}
+
+		if ( algaeUsed )
+		{
+			Materials.Add( new DetailMaterial { Kind = "algae", Slot = algaeSlot, SourceSlot = 0, Key = Id + "_algae" } );
+			ctx.ShellSlots.Add( algaeSlot );
+		}
+
+		ChangedFaces = RustFaces + AlgaeFaces;
+
+		if ( RustFaces == 0 && AlgaeFaces == 0 && DentedVertices == 0 && (Rust.Clamped > 0f || AlgaeBand.Clamped > 0f) )
+			Fail( "Rust changed nothing.", "No face rolled under the rust or algae thresholds.",
+				"Raise Rust or Algae", "Check the Waterline band covers the body" );
+	}
+
+	/// <summary>Deterministic 0..1 noise from a point, so a rebuild rusts the same faces.</summary>
+	static float Hash01( Vec3 p )
+	{
+		var h = MathF.Sin( p.x * 12.9898f + p.y * 78.233f + p.z * 37.719f ) * 43758.5453f;
+		return h - MathF.Floor( h );
 	}
 }

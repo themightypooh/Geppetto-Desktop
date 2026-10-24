@@ -192,7 +192,7 @@ vec3 lookSpectrum(vec3 albedo, float nl, float nv, float nh, float vl, float rou
 	public void SetLook( float toon, int toonBands, float toonRim, float stylized,
 		float outlineWidth, float outlineR, float outlineG, float outlineB,
 		float clearcoat, float clearcoatRough, float subsurface, float subsurfaceR, float subsurfaceG, float subsurfaceB,
-		float opacity )
+		float opacity, float shadowTintR = 1f, float shadowTintG = 1f, float shadowTintB = 1f, float iridescence = 0f )
 	{
 		SetFloat( Uniform( "uLookToon" ), toon );
 		SetInt( Uniform( "uLookToonBands" ), toonBands );
@@ -205,6 +205,8 @@ vec3 lookSpectrum(vec3 albedo, float nl, float nv, float nh, float vl, float rou
 		SetFloat( Uniform( "uLookSubsurface" ), subsurface );
 		SetVec3( Uniform( "uLookSubsurfaceColor" ), subsurfaceR, subsurfaceG, subsurfaceB );
 		SetFloat( Uniform( "uLookOpacity" ), opacity );
+		SetVec3( Uniform( "uLookShadowTint" ), shadowTintR, shadowTintG, shadowTintB );
+		SetFloat( Uniform( "uLookIridescence" ), iridescence );
 	}
 
 	public void Dispose() => _gl.DeleteProgram( Handle );

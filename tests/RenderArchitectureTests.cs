@@ -88,7 +88,7 @@ internal static class RenderArchitectureTests
 				var cube = new PolyMesh();
 				for ( int i = 0; i < 8; i++ ) cube.AddVertex( new Vec3( ( i & 1 ) == 0 ? -.5f : .5f, ( i & 2 ) == 0 ? -.5f : .5f, ( i & 4 ) == 0 ? -.5f : .5f ) );
 				foreach ( var f in new[] { new[] { 0, 2, 3, 1 }, new[] { 4, 5, 7, 6 }, new[] { 0, 1, 5, 4 }, new[] { 2, 6, 7, 3 }, new[] { 0, 4, 6, 2 }, new[] { 1, 3, 7, 5 } } ) cube.AddFace( f );
-				var cubeLayer = new GeometrySetLayer( GeometrySet.FromMesh( cube ) ) { Material = new LiveMaterial( new Vector3( .9f, .02f, .02f ), Emission: new Vector3( 2f, 0, 0 ) ) };
+				var cubeLayer = new GeometrySetLayer( Effigy.GeometrySet.FromMesh( cube ) ) { Material = new LiveMaterial( new Vector3( .9f, .02f, .02f ), Emission: new Vector3( 2f, 0, 0 ) ) };
 				var particles = new ParticleSystem( new ParticleSystemSettings { Gravity = Vector3.Zero, Capacity = 64 } );
 				particles.AddEmitter( new ParticleEmitter { Position = new Vector3( 0, 0, 1.2f ), LifetimeMin = 10, LifetimeMax = 10, SizeMin = .05f, SizeMax = .05f, Bursts = { new ParticleBurst( 0, 50 ) } } );
 				particles.Step();

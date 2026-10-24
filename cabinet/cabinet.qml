@@ -1232,12 +1232,11 @@ Window {
     // Lane O: freehand draw-over layer for pane 1. Armed with DRAW (or the ToolCard DRAW
     // key), it captures a freehand stroke over the viewport and draws it back as a polyline.
     // Points are kept as fractions of the layer (fx, fy), so they survive a pane resize, and
-    // strokeJson is the payload a host slot turns into world-space rays: the cabinet viewport
-    // is a streamed serve image, it has no 3D camera in QML, so the ray per point must come
-    // from the serve viewer's camera (ServeMode pick already does ScreenRay internally) —
-    // that 3-line host slot (rays + mesh -> live_runs.add_draw_over_note) is the one piece
-    // still missing, and it is NOT faked here: SEND only reports the captured stroke on the
-    // status line until that slot exists. While disarmed the MouseArea is disabled, so normal
+    // strokeJson is the payload the host ray slot turns into 3D hits: the cabinet viewport
+    // is a streamed serve image, it has no 3D camera in QML, so the ray per point comes
+    // from the serve viewer's camera — host.drawOverStroke sends each point as a `drop`
+    // probe (ServeMode ScreenRay + face pick, no selection change) and writes the stroke
+    // as a note on the watched run. While disarmed the MouseArea is disabled, so normal
     // clicks, picks and orbits are untouched. The CheckpointBar above is not touched by this.
     component DrawOverLayer: Item {
         id: dl
@@ -1285,14 +1284,14 @@ Window {
             spacing: 4
             Chip {
                 label: dl.armed ? "DRAW: ON" : "DRAW"; lit: dl.armed
-                tip: "draw-over: drag a freehand stroke over the model; SEND turns it into a note once the host ray slot lands"
+                tip: "draw-over: drag a freehand stroke over the model; SEND turns it into a note on the watched run"
                 onClicked: { dl.armed = !dl.armed; if (!dl.armed) { dl.points = []; dl.strokeReady = false; dlCanvas.requestPaint(); } }
             }
             Chip {
                 visible: dl.strokeReady
                 label: "SEND STROKE"; lit: true
-                tip: "captured stroke payload (fractions of the pane); the host slot that raycasts it is still to land"
-                onClicked: dl.sendStroke(dl.strokeJson)
+                tip: "captured stroke payload (fractions of the pane); SEND asks the serve viewer for the face under each point"
+                onClicked: dl.sendStroke(JSON.stringify(dl.points.map(function (pt) { return { x: Math.round(pt.fx * dl.width), y: Math.round(pt.fy * dl.height) }; })))
             }
             Chip {
                 visible: dl.points.length > 0
@@ -1417,7 +1416,9 @@ Window {
         objectName: "noticeCard"
         readonly property var nc: host.notice
         property bool everyTime: false
+        property bool neverShow: false
         visible: !!nc.show
+        onVisibleChanged: if (!visible) neverShow = false
         width: Math.min(660, root.g0.view.w - 24)
         height: Math.min(560, root.g0.view.h - 24)
         x: root.cabX + root.g0.view.x + Math.round((root.g0.view.w - width) / 2)
@@ -1464,6 +1465,34 @@ Window {
             }
         }
         Row {
+            objectName: "noticeNeverShow"
+            x: 16; width: parent.width - 32
+            anchors.bottom: parent.bottom; anchors.bottomMargin: 44
+            spacing: 10
+            Item {
+                width: 32; height: 32
+                Rectangle {
+                    anchors.fill: parent; radius: 4
+                    color: ncard.neverShow ? root.amber : "transparent"
+                    border.width: 3; border.color: root.amber
+                }
+                Text {
+                    visible: ncard.neverShow
+                    anchors.centerIn: parent; text: "X"
+                    color: "#1f2228"; font.family: root.mono; font.bold: true; font.pixelSize: 20
+                }
+                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: ncard.neverShow = !ncard.neverShow }
+            }
+            Item {
+                width: neverLabel.implicitWidth; height: 32
+                Text {
+                    id: neverLabel; anchors.centerIn: parent; text: "DO NOT SHOW THIS AGAIN"
+                    color: root.amber; font.family: root.mono; font.bold: true; font.pixelSize: 15
+                }
+                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: ncard.neverShow = !ncard.neverShow }
+            }
+        }
+        Row {
             x: 16; anchors.bottom: parent.bottom; anchors.bottomMargin: 10; spacing: 6
             Chip { objectName: "noticeCancel"; label: "NOT YET"; onClicked: host.noticeCancel() }
             Chip {
@@ -1477,7 +1506,7 @@ Window {
             anchors.right: parent.right; anchors.rightMargin: 16
             anchors.bottom: parent.bottom; anchors.bottomMargin: 10
             label: ncard.nc.startLabel || "START THE BUILD"; lit: true
-            onClicked: host.noticeStart(ncard.everyTime)
+            onClicked: host.noticeStart(ncard.everyTime, ncard.neverShow)
         }
     }
 
@@ -3842,7 +3871,7 @@ Window {
             anchors.fill: parent
             z: 6
             onSendStroke: function (json) {
-                host.say("draw-over stroke captured (" + points.length + " points); host ray slot still to land — payload kept on p1DrawOver.strokeJson");
+                host.drawOverStroke(json);
             }
         }
         // ---- pick mode (keys 1-4 on the view) and what's picked, s&box style: tiny, top right, out of the way
@@ -4174,6 +4203,21 @@ Window {
     }
 
     // ---- the chest, over the viewport's edges ----------------------------------------------
+    // Keep correction windows alive when panes fold away or enter solo view.
+    Repeater {
+        model: 4
+        ViewportCorrection {
+            required property int index
+            pane: index + 1
+            readonly property var cell: root.paneRect(pane)
+            x: root.cabX + root.g0.view.x + cell.x
+            y: root.cabY + root.g0.view.y + cell.y
+            width: cell.w; height: cell.h
+            paneVisible: pane <= root.layoutN && (!root.solo || root.solo === pane)
+            runDir: pane === 1 ? host.watchedRun : host.paneList[pane - 2].runDir
+            active: { const r = root.runOf(runDir); return !!r && r.status === "running" && !r.bench }
+        }
+    }
     Image {
         x: root.cabX; y: root.cabY
         source: root.enamel("frame.png"); smooth: false

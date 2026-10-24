@@ -204,6 +204,8 @@ public static class Program
 			renderer.GroundShadow = arguments.GroundShadow;
 			if (arguments.Hdri is not null) renderer.LoadEnvironmentAsync(arguments.Hdri).GetAwaiter().GetResult();
 			renderer.WireframeMode = wireframeMode;
+			renderer.NprInk = arguments.NprInk; renderer.NprTone = arguments.NprTone;
+			renderer.NprStrength = arguments.NprStrength; renderer.NprInkWidth = arguments.NprInkWidth;
 
 			overlay = new SkeletonOverlay( gl );
 

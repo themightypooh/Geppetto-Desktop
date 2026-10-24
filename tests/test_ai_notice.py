@@ -82,12 +82,13 @@ class FirstSendTests(unittest.TestCase):
         self.assertEqual(need["blocks"][0]["title"], "YOUR PLAN, NOT A KEY")
         self.assertIn("no API key", " ".join(need["blocks"][0]["lines"]))
 
-    def test_a_custom_endpoint_names_its_host_and_its_own_key(self):
+    def test_custom_endpoint_copy_names_no_specific_model(self):
         need = n.needs_notice(n.default_state(), cfg(CUSTOM))
         text = "\n".join(line for b in need["blocks"] for line in b["lines"])
-        self.assertIn("provider.example", text)
-        self.assertIn("MY_PROVIDER_API_KEY", text)
-        self.assertIn("not one of the built-in companies", text)
+        self.assertIn("you're signed into yourself", text)
+        self.assertIn("your provider", text)
+        self.assertNotIn("provider.example", text)   # the notice never names a host
+        self.assertNotIn("MY_PROVIDER_API_KEY", text)   # nor a key name
         self.assertNotIn("OPENAI_API_KEY", text)   # never another provider's key
 
 
@@ -137,13 +138,15 @@ class ReAskTests(unittest.TestCase):
         self.assertIn("nothing goes to a second company",
                       "\n".join(need["blocks"][0]["lines"]))
 
-    def test_a_different_judge_gets_its_own_ack_and_names_its_key(self):
+    def test_a_different_judge_gets_its_own_ack(self):
         state = self.acked()
         judge = {"model": GOOGLE_JUDGE, "same": False}
         c = cfg(judge=judge)
         need = n.needs_notice(state, c)
         self.assertEqual(need["missing"], ["judge"])
-        self.assertIn("GEMINI_API_KEY", "\n".join(need["blocks"][0]["lines"]))
+        text = "\n".join(need["blocks"][0]["lines"])
+        self.assertIn("second company", text)
+        self.assertNotIn("GEMINI_API_KEY", text)   # the notice never names the judge's key
         n.ack_notice(state, c, need["missing"])
         self.assertFalse(n.needs_notice(state, c)["show"])
         jrec = state["providers"][n.record_key(GOOGLE_JUDGE)]
@@ -171,7 +174,7 @@ class CopyHonestyTests(unittest.TestCase):
         need = n.needs_notice(n.default_state(), c)
         text = "\n".join(line for b in need["blocks"] for line in b["lines"])
         self.assertNotIn("$", text)
-        self.assertIn("does not count dollars or tokens yet", text)
+        self.assertIn("doesn't count dollars or tokens yet", text)
 
     def test_retention_line_ships_with_the_base_block(self):
         block = n.disclosure_block(cfg())
@@ -209,6 +212,22 @@ class StateTests(unittest.TestCase):
     def test_a_missing_file_is_a_first_run(self):
         state = n.load_state("/nonexistent/geppetto/ai-consent.json")
         self.assertEqual(state, n.default_state())
+
+    def test_do_not_show_again_suppresses_every_provider(self):
+        state = n.default_state()
+        state["never_show"] = True
+        self.assertFalse(n.needs_notice(state, cfg())["show"])
+        self.assertFalse(n.needs_notice(state, cfg(CUSTOM))["show"])
+
+    def test_acknowledge_with_never_show_sets_the_flag_and_persists(self):
+        state, c = n.default_state(), cfg()
+        n.ack_notice(state, c, n.needs_notice(state, c)["missing"], never_show=True)
+        self.assertTrue(state["never_show"])
+        self.assertFalse(n.needs_notice(state, c)["show"])
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "ai-consent.json")
+            self.assertTrue(n.save_state(path, state))
+            self.assertTrue(n.load_state(path)["never_show"])
 
 
 if __name__ == "__main__":

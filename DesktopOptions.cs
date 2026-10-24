@@ -16,6 +16,12 @@ public sealed class DesktopOptions
 	/// <summary>--section y&gt;0: headless renders keep one side of an axis plane, to look inside (--clip is the animation).</summary>
 	public Effigy.ClipPlane? Section;
 	public string WatchRun;
+	/// <summary>NPR treatment for the desktop composite (wave 5, item 30): off by default.
+	/// --npr ink|halftone|crosshatch|bayer|ink-halftone|ink-crosshatch|ink-bayer.</summary>
+	public bool NprInk;
+	public NprTone NprTone = NprTone.None;
+	public float NprStrength = 1f;
+	public float NprInkWidth = 1.5f;
 	public float ShadowRadius = 2f;
 	public bool GroundShadow = true;
 	/// <summary>R8: global fog optical depth across the model radius; 0 = off.</summary>
@@ -29,7 +35,7 @@ public sealed class DesktopOptions
 	public int ShotFrame;
 	public bool FogFallback;
 	public float? Time, Yaw, Pitch;
-	public const string Usage = "Geppetto: [--model file.effigy|file.fbx] [--clip file.riganim] [--animate] [--time seconds] [--frames N] [--size WxH] [--screenshot file.png] [--stats] [--no-vsync] [--list-bones] [--iso] [--headless] [--serve] [--exposure factor] [--yaw deg] [--pitch deg] [--turntable] [--wireframe] [--section y>0] [--fog opticalDepth] [--fog-fallback] [--live particles,hair,cloth,instances] [--modifiers subsurf,decimate,retopo,smooth,displace,shrinkwrap,morph] [--motion-blur shutter] [--shot-frame N] [--aa none|taa|msaa4] [--hdri world.hdr] [--shadow-radius texels] [--no-ground-shadow] [--view-transform agx|standard] [--look none|punchy] [--view-exposure stops] [--gamma factor] [--white-balance kelvin] [--tint value] [--serve --watch-run NEW_OR_EXISTING_RUN_DIRECTORY]";
+	public const string Usage = "Geppetto: [--model file.effigy|file.fbx] [--clip file.riganim] [--animate] [--time seconds] [--frames N] [--size WxH] [--screenshot file.png] [--stats] [--no-vsync] [--list-bones] [--iso] [--headless] [--serve] [--exposure factor] [--yaw deg] [--pitch deg] [--turntable] [--wireframe] [--section y>0] [--fog opticalDepth] [--fog-fallback] [--live particles,hair,cloth,instances] [--modifiers subsurf,decimate,retopo,smooth,displace,shrinkwrap,morph] [--motion-blur shutter] [--shot-frame N] [--aa none|taa|msaa4] [--hdri world.hdr] [--shadow-radius texels] [--no-ground-shadow] [--view-transform agx|standard] [--look none|punchy] [--npr off|ink|halftone|crosshatch|bayer|ink-halftone|ink-crosshatch|ink-bayer] [--npr-strength 0..1] [--npr-ink-width px] [--view-exposure stops] [--gamma factor] [--white-balance kelvin] [--tint value] [--serve --watch-run NEW_OR_EXISTING_RUN_DIRECTORY]";
 
 	public static DesktopOptions Parse( string[] args )
 	{
@@ -70,6 +76,22 @@ public sealed class DesktopOptions
 						_ => throw new ArgumentException( "--look must be none or punchy." )
 					} };
 					break;
+				case "--npr":
+					(result.NprInk, result.NprTone) = Value().ToLowerInvariant() switch
+					{
+						"off" => (false, NprTone.None),
+						"ink" => (true, NprTone.None),
+						"halftone" => (false, NprTone.Halftone),
+						"crosshatch" => (false, NprTone.Crosshatch),
+						"bayer" => (false, NprTone.Bayer),
+						"ink-halftone" => (true, NprTone.Halftone),
+						"ink-crosshatch" => (true, NprTone.Crosshatch),
+						"ink-bayer" => (true, NprTone.Bayer),
+						_ => throw new ArgumentException( "--npr must be off|ink|halftone|crosshatch|bayer|ink-halftone|ink-crosshatch|ink-bayer." )
+					};
+					break;
+				case "--npr-strength": result.NprStrength = FiniteRange( 0f, 1f ); break;
+				case "--npr-ink-width": result.NprInkWidth = FiniteRange( 0.5f, 5f ); break;
 				case "--view-exposure": result.View = result.View with { Exposure = FiniteRange( -16f, 16f ) }; break;
 				case "--gamma": result.View = result.View with { Gamma = FiniteRange( .1f, 5f ) }; break;
 				case "--white-balance": result.View = result.View with { WhiteBalanceTemperature = FiniteRange( WhiteBalance.MinKelvin, WhiteBalance.MaxKelvin ) }; break;
@@ -124,8 +146,15 @@ public sealed class DesktopOptions
 					break;
 				case "--modifiers":
 					result.Modifiers = Value();
-					foreach ( var kind in result.Modifiers.Split( ',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries ) )
-						if ( Array.IndexOf( ModifierStack.Kinds, kind.ToLowerInvariant() ) < 0 ) throw new ArgumentException( $"--modifiers: unknown kind '{kind}'." );
+					foreach ( var token in result.Modifiers.Split( ',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries ) )
+					{
+						// Optioned tokens (shrinkwrap:mode=..., retopo:targets=..., datatransfer:channels=...)
+						// validate on the kind before the first colon; ModifierStack.FromSpec parses
+						// and rejects the options themselves.
+						int colon = token.IndexOf( ':' );
+						string kind = ( colon < 0 ? token : token[ ..colon ] ).ToLowerInvariant();
+						if ( Array.IndexOf( ModifierStack.Kinds, kind ) < 0 ) throw new ArgumentException( $"--modifiers: unknown kind '{kind}'." );
+					}
 					break;
 				case "--motion-blur":
 					if ( !float.TryParse( Value(), NumberStyles.Float, CultureInfo.InvariantCulture, out float shutter ) || !float.IsFinite( shutter ) || shutter < 0 || shutter > 1 )

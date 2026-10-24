@@ -192,6 +192,17 @@ public sealed class PolyMesh
 
 	public bool HasVertexColors => VertexColors is not null && VertexColors.Length == Positions.Count;
 
+	/// <summary>Per-vertex glow, sRGB 0..1 (values above 1 allowed for hot emitters), parallel
+	/// to <see cref="Positions"/> — the mesh's own emission channel, which the sprite baker's
+	/// material map and <see cref="Effigy.Render.ShadeMaterial.VertexEmission"/> read. A mesh
+	/// without it glows only through its slot look's Emit, which is the common case; this
+	/// channel is for per-vertex variation (veins, runes, heat) that a single slot colour
+	/// cannot express. Carried by <see cref="Clone"/> like VertexColors; operations that
+	/// rebuild the vertex list start with none, same as VertexColors.</summary>
+	public Vec3[] VertexEmission;
+
+	public bool HasVertexEmission => VertexEmission is not null && VertexEmission.Length == Positions.Count;
+
 	/// <summary>
 	/// The paint atlas a <see cref="PaintFeature"/> replayed onto this body, or null when it
 	/// carries none.
@@ -545,6 +556,9 @@ public sealed class PolyMesh
 
 		if ( VertexColors is not null )
 			m.VertexColors = (Vec4[])VertexColors.Clone();
+
+		if ( VertexEmission is not null )
+			m.VertexEmission = (Vec3[])VertexEmission.Clone();
 
 		if ( Paint is not null )
 			m.Paint = Paint.Clone();

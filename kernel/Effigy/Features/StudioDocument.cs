@@ -63,6 +63,13 @@ public static class StudioDocument
 	public static void WriteFile( PartStudio studio, string path ) =>
 		File.WriteAllText( path, Write( studio ) );
 
+	/// <summary>Lane P carry-up from the desktop mirror: one picture's document line, without the newline: refimage VIEW HEIGHT OX OY DEPTH OPACITY VISIBLE PATH.</summary>
+	public static string ReferenceImageLine( ReferenceImage image ) =>
+		new StringBuilder( "refimage " ).Append( image.View ).Append( ' ' ).Append( Num( image.Height ) ).Append( ' ' )
+			.Append( Num( image.Offset.x ) ).Append( ' ' ).Append( Num( image.Offset.y ) ).Append( ' ' )
+			.Append( Num( image.Depth ) ).Append( ' ' ).Append( Num( image.Opacity ) ).Append( ' ' )
+			.Append( image.Visible ? 1 : 0 ).Append( ' ' ).Append( OneLine( image.Path ) ).ToString();
+
 	public static string Write( PartStudio studio )
 	{
 		if ( studio is null )
@@ -435,6 +442,19 @@ public static class StudioDocument
 				foreach ( var s in strokes )
 					sb.Append( s.Erase ? "\terase " : "\tstroke " )
 						.Append( field.Name ).Append( ' ' ).Append( Stroke( s ) ).Append( '\n' );
+
+				return;
+
+			case List<TexelStroke> texstrokes:
+				// Paint's texel-stroke log. One line per stroke — colour, brush and spacing once,
+				// then the path as texel x/y pairs — so a texture-painted document still diffs
+				// one stroke at a time. Written in list order on purpose, for the same reason as
+				// the mesh strokes: blending does not commute. Erase is its own line kind, not a
+				// ninth header field, for the same reason as above: a ninth field would shift
+				// every older document's first path point by one.
+				foreach ( var t in texstrokes )
+					sb.Append( t.Erase ? "\ttexerase " : "\ttexstroke " )
+						.Append( field.Name ).Append( ' ' ).Append( TexelStrokeLine( t ) ).Append( '\n' );
 
 				return;
 
@@ -1189,6 +1209,34 @@ public static class StudioDocument
 				return;
 			}
 
+			case "texstroke":
+			case "texerase":
+			{
+				// Same log discipline as stroke/erase: both kinds land in one list, in file
+				// order, cleared exactly once per field, and the list is created on first use
+				// because TexelStrokes is null until the first one lands.
+				if ( field.GetValue( feature ) is List<TexelStroke> texstrokes )
+				{
+					if ( clearedLists.Add( field.Name ) )
+						texstrokes.Clear();
+				}
+				else
+				{
+					texstrokes = new List<TexelStroke>();
+					field.SetValue( feature, texstrokes );
+					clearedLists.Add( field.Name );
+				}
+
+				var tex = ParseTexelStroke( value );
+
+				if ( tex is null )
+					return;
+
+				tex.Erase = key == "texerase";
+				texstrokes.Add( tex );
+				return;
+			}
+
 			case "sketch":
 				field.SetValue( feature, ReadSketch( lines, ref i ) );
 				return;
@@ -1386,6 +1434,71 @@ public static class StudioDocument
 			sb.Append( ' ' ).Append( Vec( p.Position ) ).Append( ' ' ).Append( Vec( p.Normal ) );
 
 		return sb.ToString();
+	}
+
+	/// <summary>One texel stroke as a single line: colour, radius (texels), strength, falloff
+	/// and spacing, then the path as x/y texel pairs. The point count is implied by what is
+	/// left after the header.</summary>
+	static string TexelStrokeLine( TexelStroke t )
+	{
+		var sb = new StringBuilder();
+
+		// A non-colour stroke leads with its channel tag (`@rough`), exactly like Stroke:
+		// a tag is not a number, so it cannot be mistaken for the header, and a colour
+		// stroke writes none.
+		if ( PaintChannels.Tag( t.Channel ) is { } tag )
+			sb.Append( '@' ).Append( tag ).Append( ' ' );
+
+		sb.Append( Num( t.R ) ).Append( ' ' ).Append( Num( t.G ) ).Append( ' ' ).Append( Num( t.B ) ).Append( ' ' ).Append( Num( t.A ) );
+		sb.Append( ' ' ).Append( Num( t.Radius ) );
+		sb.Append( ' ' ).Append( Num( t.Strength ) );
+		sb.Append( ' ' ).Append( (int)t.Falloff );
+		sb.Append( ' ' ).Append( Num( t.Spacing ) );
+
+		foreach ( var pt in t.Path )
+			sb.Append( ' ' ).Append( Num( pt.X ) ).Append( ' ' ).Append( Num( pt.Y ) );
+
+		return sb.ToString();
+	}
+
+	static TexelStroke ParseTexelStroke( string value )
+	{
+		var p = value.Split( ' ', StringSplitOptions.RemoveEmptyEntries );
+		var channel = PaintChannel.Color;
+
+		if ( p.Length > 0 && p[0].StartsWith( '@' ) )
+		{
+			// A channel this build does not know is a newer document's. Dropping the stroke
+			// is the honest read, for the same reason ParseStroke drops an unknown channel.
+			if ( PaintChannels.FromTag( p[0].Substring( 1 ) ) is not { } known )
+				return null;
+
+			channel = known;
+			p = p[1..];
+		}
+
+		if ( p.Length < 8 )
+			return null;
+
+		var stroke = new TexelStroke
+		{
+			Channel = channel,
+			R = ParseFloat( p[0] ),
+			G = ParseFloat( p[1] ),
+			B = ParseFloat( p[2] ),
+			A = ParseFloat( p[3] ),
+			Radius = ParseFloat( p[4] ),
+			Strength = ParseFloat( p[5] ),
+			Falloff = (BrushFalloff)ParseInt( p[6], 0 ),
+			Spacing = ParseFloat( p[7] ),
+		};
+
+		// The path follows the fixed header: two floats per point. An empty path is a header
+		// with nothing after it, which the loop simply never visits.
+		for ( var n = 8; n + 1 < p.Length; n += 2 )
+			stroke.Path.Add( new TexelStrokePoint( ParseFloat( p[n] ), ParseFloat( p[n + 1] ) ) );
+
+		return stroke;
 	}
 
 	static EdgeRef ParseEdge( string value )

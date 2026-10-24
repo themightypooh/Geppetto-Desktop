@@ -42,5 +42,50 @@ internal static class TexturePaintTests
 			var img = new TexturePaintService.Image( 2, 2 );
 			Require( img.Rgba[ 0 ] == 255 );
 		} );
+
+		Check( "session records waypoints and converts to a committable texel stroke", () =>
+		{
+			var canvas = new Effigy.PaintCanvas( 64, 64 );
+			var session = new TexturePaintService.Session( canvas, Effigy.PaintChannel.Color );
+			Require( session.ToTexelStroke() is null, "no stroke before any dab" );
+			var brush = new TexturePaintService.TextureBrush { X = 10, Y = 10, Radius = 4, Strength = 1, R = 255, G = 0, B = 0, Channel = Effigy.PaintChannel.Color };
+			session.BeginStroke( brush );
+			session.Dab( 10, 10 );
+			session.LineTo( 20, 10 );
+			session.EndStroke();
+			var tex = session.ToTexelStroke();
+			Require( tex is not null, "a dabbed stroke converts" );
+			Require( tex.Path.Count >= 2, $"waypoints recorded, got {tex.Path.Count}" );
+			Require( tex.Channel == Effigy.PaintChannel.Color && tex.R == 1f && tex.G == 0f && tex.Radius == 4f, "brush settings carried into the texel stroke" );
+			Require( session.Waypoints.Count == tex.Path.Count, "waypoints and texel path agree" );
+		} );
+
+		Check( "session stroke commits and replays through the kernel", () =>
+		{
+			var canvas = new Effigy.PaintCanvas( 64, 64 );
+			var session = new TexturePaintService.Session( canvas, Effigy.PaintChannel.Color );
+			var brush = new TexturePaintService.TextureBrush { X = 32, Y = 32, Radius = 4, Strength = 1, R = 255, G = 0, B = 0, Channel = Effigy.PaintChannel.Color };
+			session.BeginStroke( brush );
+			session.Dab( 32, 32 );
+			session.EndStroke();
+			var tex = session.ToTexelStroke();
+			var maps = new Effigy.PaintLayerMaps { Size = 64 };
+			Effigy.TexelReplay.Apply( maps, tex );
+			int idx = ( 32 * 64 + 32 ) * 4;
+			Require( maps.Color is not null && maps.Color.Rgba[ idx ] == 255 && maps.Color.Rgba[ idx + 1 ] == 0, "committed texel stroke paints the named texel red" );
+		} );
+
+		Check( "begin stroke clears the previous stroke waypoints", () =>
+		{
+			var canvas = new Effigy.PaintCanvas( 64, 64 );
+			var session = new TexturePaintService.Session( canvas, Effigy.PaintChannel.Color );
+			var brush = new TexturePaintService.TextureBrush { Radius = 4, Strength = 1, Channel = Effigy.PaintChannel.Color };
+			session.BeginStroke( brush );
+			session.Dab( 5, 5 );
+			session.EndStroke();
+			Require( session.Waypoints.Count > 0 );
+			session.BeginStroke( brush );
+			Require( session.Waypoints.Count == 0, "a new stroke starts with no waypoints" );
+		} );
 	}
 }

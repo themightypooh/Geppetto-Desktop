@@ -119,7 +119,9 @@ def config_from_model(model, calls=DEFAULT_CALLS, minutes=DEFAULT_MINUTES,
 
 # --------------------------------------------------------------------- copy
 # Verbatim from gap-fixes-spec.md §2/§3 (markdown bold stripped for display; the
-# wording is not paraphrased). Slots: {provider} {host} {key_env} {calls} {minutes}.
+# wording is not paraphrased, except the API branches, rewritten 2026-10-24
+# at Joshua's order (shorter; no "you picked" claim for defaults).
+# Slots: {provider} {host} {key_env} {calls} {minutes}.
 
 def _fmt(text, cfg, **extra):
     slots = {"provider": cfg["provider"], "host": cfg["host"],
@@ -128,96 +130,78 @@ def _fmt(text, cfg, **extra):
     return text.format(**slots)
 
 
+# 2026-10-24, at Joshua's order: API cost/disclosure copy shortened, and the old
+# "a server you picked" claim removed — a built-in default is not something the user
+# picked. The words now lead with his rule: every model is one you're signed into
+# yourself, in your own apps and accounts on this machine.
 def cost_block(cfg):
+    """Cost pre-flight: cap-first, no money figures, and no specific model,
+    provider, host or key named anywhere — the notice talks about the user's own
+    setup in general terms (spec §2.1/§2.2; no longer verbatim from the spec,
+    whose examples name providers)."""
     if cfg["local"]:
-        return {"id": "cost", "title": "THIS ONE RUNS AT HOME", "lines": [_fmt(
-            "This model is on your own machine. No company gets a call, so there is no "
-            "per-call bill — just your computer doing the work.", cfg), _fmt(
-            "A run still stops at {calls} calls or {minutes} minutes, so nothing can "
-            "spin forever while you're making coffee. STOP ends it sooner, same as "
-            "always.", cfg)]}
+        return {"id": "cost", "title": "NO METER, NO KEY", "lines": [
+            "This one lives on your own machine. No key, no account, no calls "
+            "counted — the work never leaves this machine at all."]}
     if cfg["cli"]:
         return {"id": "cost", "title": "YOUR PLAN, NOT A KEY", "lines": [_fmt(
-            "This one works through your own {provider} login on this machine — the plan "
+            "This one works through your own login on this machine — the plan "
             "you already pay for. There is no API key for it in Geppetto at all, so there "
-            "is nothing here to leak and no per-call meter in Geppetto.", cfg), _fmt(
-            "What it uses up is your plan's own allowance, under {provider}'s rules, not "
+            "is nothing here to leak and no per-call meter in Geppetto.",
+            cfg), _fmt(
+            "What it uses up is your plan's own allowance, not "
             "Geppetto's {calls}-call / {minutes}-minute caps — those caps are for API "
-            "runs. If you hit your plan's limit, that's {provider} saying so, in their "
-            "words.", cfg)]}
-    off = OFFICIAL.get(cfg["kind"])
-    official = bool(off and cfg["host"] in ("", off[1]))
-    if official:
-        first = _fmt(
-            "This build runs on your {provider} account — the key saved on this machine "
-            "({key_env}). Not on Geppetto's account. There isn't one: Geppetto has no "
-            "account and no server in the middle.", cfg)
-    else:
-        first = _fmt(
-            "This build runs on your account at {host} — a server you picked, with the "
-            "key saved on this machine ({key_env}). It is not one of the built-in "
-            "companies, and Geppetto has no account there either.", cfg)
+            "runs. If you hit your plan's limit, that's your provider saying so, in their "
+            "words.",
+            cfg)]}
+    first = (
+        "This run uses your own model, on your own account, with the key saved on "
+        "this machine. Geppetto has no account and no server in between — every model "
+        "here is one you're signed into yourself, in your own apps and accounts on "
+        "this machine.")
     return {"id": "cost", "title": "FIRST, ABOUT THE MONEY", "lines": [first, _fmt(
-        "The most this run can do is {calls} calls to {provider}, over at most "
-        "{minutes} minutes. Then it stops on its own, finished or not. Building, "
-        "researching and judging all share the same {calls} — there is no second meter "
-        "running.", cfg), _fmt(
-        "Geppetto does not count dollars or tokens yet, and it won't guess you a price. "
-        "What {calls} calls cost depends on the model you picked and {provider}'s "
-        "prices. Your usage page at {provider} is the only true number — and if they "
-        "let you set a spending limit on your account, set it there. That's a hard "
-        "ceiling Geppetto can't go past, because the account is yours.", cfg), _fmt(
-        "You can stop it whenever you like. STOP asks the run to stop at the next safe "
-        "point, and Ctrl-C does the same in a terminal. A call that is already talking "
-        "to {provider} can't be un-sent — you may still be charged for that one — but "
-        "nothing starts after you stop, and Geppetto never quietly retries a failed "
-        "call outside the {calls}.", cfg)]}
+        "At most {calls} calls, over at most {minutes} minutes — "
+        "building, researching and judging all share the same {calls}. Then it stops "
+        "on its own, finished or not.",
+        cfg), _fmt(
+        "Geppetto doesn't count dollars or tokens yet and won't guess a price. Your usage page "
+        "at your provider is the true number — set a spending limit there if they let "
+        "you; that's a ceiling Geppetto can't go past, because the account is yours.",
+        cfg), _fmt(
+        "STOP stops it at the next safe point (Ctrl-C in a terminal). A call already "
+        "sent can't be un-sent, but nothing starts after you stop, and Geppetto "
+        "never quietly retries a failed call outside the {calls}.",
+        cfg)]}
 
 
 def disclosure_block(cfg):
-    if cfg["local"]:
-        hostport = cfg["host"] + (":%d" % port_of(cfg["endpoint"]) if port_of(cfg["endpoint"]) else "")
-        return {"id": "disclosure", "title": "WHAT LEAVES THIS MACHINE", "lines": [
-            "Nothing. This model runs on this machine (%s), so your words, the brief "
-            "and the model stay here. There is no company on the other end of these "
-            "calls." % hostport,
-            "Two honest exceptions, both yours to switch on: turn research on and the "
-            "search words still go to the public sources (block above) — the photos "
-            "come back here, your model never goes out to them. And if you later pick "
-            "a hosted judge for a local build, the judge block applies to that judge, "
-            "in full."]}
+    """What-leaves disclosure (spec §2.2): plain list, nothing else leaves, key
+    routing named only in general terms — no provider, host or key_env named."""
     if cfg["cli"]:
-        return {"id": "disclosure", "title": "WHAT LEAVES THIS MACHINE", "lines": [_fmt(
-            "Your words go to {provider}, through {provider}'s own tool, signed in as "
+        return {"id": "disclosure", "title": "WHAT LEAVES THIS MACHINE", "lines": [
+            "Your words go to your provider, through their own tool, signed in as "
             "you — the same as if you'd typed them into that tool yourself. Geppetto "
-            "holds no key for it and adds no server of its own in between.", cfg), _fmt(
-            "What {provider} keeps is under your plan and their policy. Geppetto's side "
+            "holds no key for it and adds no server of its own in between.",
+            "What your provider keeps is under your plan and their policy. Geppetto's side "
             "of the bargain is the same as always: nothing from this machine goes "
-            "anywhere else, and your request is saved only here, in the run folder.", cfg)]}
-    lines = [_fmt(
-        "To build for you, Geppetto sends {provider} ({host}):", cfg),
+            "anywhere else, and your request is saved only here, in the run folder."]}
+    if cfg["local"]:
+        return {"id": "disclosure", "title": "WHAT LEAVES THIS MACHINE", "lines": [
+            "Nothing leaves this machine for the model — it runs here. The only "
+            "exception is if research is on: then the search words, not your files, "
+            "go to the public sources (the list is in Connect your own AI)."]}
+    lines = [
+        "To your provider, Geppetto sends:",
         "• What you typed — your request, word for word.",
         "• The plan and brief made from it.",
-        "• While it builds: notes about the model so far — its parts, sizes and the "
-        "steps taken — so the modeller can work on it. That is the model's working "
-        "data, not the finished file on your disk being shipped off.",
-        _fmt("And that is the list. Your key is only ever presented to {provider} "
-             "itself, to prove the calls are yours — it is never sent to Geppetto "
-             "(there is no Geppetto server), never to another provider, and never "
-             "written into the run folder or the model. Your other files and your "
-             "other models are not sent. Your request is saved — on this machine, in "
-             "the run folder, next to the model.", cfg),
-        _fmt("What {provider} keeps on their side, and for how long, is their policy, "
-             "not Geppetto's — Geppetto can't see it or shorten it. If that decides "
-             "it for you, a local model keeps everything home.", cfg)]
-    off = OFFICIAL.get(cfg["kind"])
-    if not (off and cfg["host"] in ("", off[1])):
-        lines.insert(1, _fmt(
-            "This is not one of the built-in companies. Everything below goes to "
-            "{host} — a server you (or whoever set this machine up) chose. Geppetto "
-            "will only ever present it the key named for it, {key_env} — never another "
-            "provider's key. That refusal you've maybe seen (\"custom endpoints need "
-            "their own key\") is this rule, working.", cfg))
+        "• While it builds: notes about the model so far — parts, sizes, steps taken. "
+        "That's working data, not your finished file being shipped off. That is the list.",
+        "Your key is only ever shown to your provider itself — never to Geppetto "
+        "(there is no Geppetto server), never to another provider, and never "
+        "written into the run folder or the model. Your other files and models "
+        "are not sent. Your request is saved on this machine, in the run folder.",
+        "What your provider keeps is their policy, not Geppetto's. A local model "
+        "keeps everything home."]
     return {"id": "disclosure", "title": "WHAT LEAVES THIS MACHINE", "lines": lines}
 
 
@@ -249,17 +233,18 @@ def judge_block(cfg):
         "back and low, 768×768 — the actual renders, not a description of them."]
     if j["same"]:
         lines.append(_fmt(
-            "The judge for this run is the same model at {provider} — nothing goes to "
+            "The judge for this run is the same model — nothing goes to "
             "a second company. Judging rounds are part of the same {calls} calls. A "
             "judged run can use more of them, and the run stops at the cap either "
-            "way.", cfg))
+            "way.",
+            cfg))
     else:
         lines.append(
-            "The judge for this run is %s at %s — a second company. Everything in this "
+            "The judge for this run is a different model — a second company. Everything in this "
             "block goes to them as well as to your builder. That's why you're seeing "
             "this notice even if you've already agreed to this provider for building: "
-            "judging is a second door, and it gets its own say-so. Its key is %s, "
-            "presented only to %s." % (j["model_id"], j["provider"], j["key_env"], j["provider"]))
+            "judging is a second door, and it gets its own say-so. Its key is "
+            "presented only to them.")
     return {"id": "judge", "title": "BECAUSE JUDGING IS ON, THE JUDGE ALSO GETS:", "lines": lines}
 
 
@@ -271,7 +256,7 @@ def compact_line(cfg):
     """§2.4 — after ack, hosted builds shrink to this one line; it never vanishes."""
     if cfg["local"] or cfg["cli"]:
         return ""
-    return _fmt("Your {provider} account · up to {calls} calls / {minutes} min · STOP "
+    return _fmt("Your account · up to {calls} calls / {minutes} min · STOP "
                 "stops it · What leaves my machine? · Costs, in plain words", cfg)
 
 
@@ -279,7 +264,7 @@ def chat_compact_line(cfg):
     """§2.5 — drawer chat is not under the build caps, and its line says so."""
     if cfg["local"] or cfg["cli"]:
         return ""
-    return _fmt("Each message you send here is one call on your {provider} account. "
+    return _fmt("Each message you send here is one call on your account. "
                 "Chat has no session cap — the {calls}-call cap is for builds. · "
                 "Costs, in plain words", cfg)
 
@@ -306,7 +291,7 @@ def blocks_for(cfg, missing):
 # --------------------------------------------------------------------- consent state
 
 def default_state():
-    return {"version": VERSION, "show_cost_every_build": False, "providers": {}}
+    return {"version": VERSION, "show_cost_every_build": False, "never_show": False, "providers": {}}
 
 
 def load_state(path):
@@ -320,6 +305,7 @@ def load_state(path):
         return default_state()
     out = default_state()
     out["show_cost_every_build"] = bool(state.get("show_cost_every_build", False))
+    out["never_show"] = bool(state.get("never_show", False))
     out["providers"] = {k: v for k, v in state["providers"].items() if isinstance(v, dict)}
     return out
 
@@ -343,6 +329,10 @@ def needs_notice(state, cfg):
     """Should the gate show before this send, and which blocks? Local never gates
     (no cost gate for a model at home — task/spec §2.3 handling in the cabinet is
     informational only there). Returns {show, missing, blocks, key, compact}."""
+    if state.get("never_show"):
+        # DO NOT SHOW THIS AGAIN: the card never comes back, for any provider
+        return {"show": False, "missing": [], "blocks": [], "key": cfg["key"],
+                "compact": "", "chat_compact": ""}
     if cfg["local"]:
         # a model at home never gates on its own — but a hosted judge on a local
         # build is a second door and gets its own say-so (spec §3.3, local base)
@@ -381,10 +371,12 @@ def needs_notice(state, cfg):
             "chat_compact": chat_compact_line(cfg)}
 
 
-def ack_notice(state, cfg, missing, every_time=False):
+def ack_notice(state, cfg, missing, every_time=False, never_show=False):
     """Record that the words were shown and agreed to. Never sends anything.
     Mutates and returns the state dict; the caller saves it."""
     state.setdefault("providers", {})
+    if never_show:
+        state["never_show"] = True
     if every_time:
         state["show_cost_every_build"] = True
     now_caps = {"acked_calls": cfg["calls"], "acked_minutes": cfg["minutes"]}

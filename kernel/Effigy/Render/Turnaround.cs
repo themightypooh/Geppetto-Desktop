@@ -136,7 +136,12 @@ public static class Turnaround
 			else if ( SlotLooks( studio, body.Mesh, guess: fallback is null, out var guessed ) is { Count: > 0 } looks )
 			{
 				// Hard-surface parts: each face shaded by its slot's look, on the whole mesh's normals.
-				scene.Add( body.Mesh, looks.ToDictionary( kv => kv.Key, kv => kv.Value.Shade() ), ShadeMaterial.Clay() );
+				// A mesh carrying per-vertex emission keeps it alongside the slot looks: the look
+				// gives the face its colour/glow, the vertex channel varies the glow per vertex.
+				var byFace = looks.ToDictionary( kv => kv.Key, kv => kv.Value.Shade() );
+				if ( body.Mesh.HasVertexEmission )
+					foreach ( var sm in byFace.Values ) sm.VertexEmission = body.Mesh.VertexEmission;
+				scene.Add( body.Mesh, byFace, ShadeMaterial.Clay() );
 				var said = string.Join( ", ", looks.OrderBy( kv => kv.Key ).Select( kv => $"{kv.Key}={kv.Value.Preset ?? "custom"}" ) );
 				if ( !lookBodies.TryGetValue( said, out var names ) ) lookBodies[said] = names = new List<string>();
 				names.Add( name );
@@ -150,9 +155,12 @@ public static class Turnaround
 				scene.Add( coloured, FleshMaterial.Shade( fallback, vertex: v ) );
 				log?.Add( $"{name}: {fallback.Name} (preset, per vertex)" );
 			}
-			else if ( body.Mesh.HasVertexColors )
+			else if ( body.Mesh.HasVertexColors || body.Mesh.HasVertexEmission )
 			{
-				scene.Add( body.Mesh, new ShadeMaterial { Roughness = 0.35f, Coat = 0.3f } );
+				// Vertex emission without a slot look still glows: the ShadeMaterial carries
+				// the mesh's own channel (sRGB, like VertexColors), added as light per vertex.
+				scene.Add( body.Mesh, new ShadeMaterial { Roughness = 0.35f, Coat = 0.3f,
+					VertexEmission = body.Mesh.HasVertexEmission ? body.Mesh.VertexEmission : null } );
 				log?.Add( $"{name}: its vertex colours" );
 			}
 			else

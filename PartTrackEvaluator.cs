@@ -71,6 +71,19 @@ public sealed class EvaluatedCamera
 	public Vec3 Position { get; init; }
 	public Quat Rotation { get; init; }
 	public float FieldOfView { get; init; } = 80f;
+	/// <summary>Wave-2 camera wiring: lens focal length in mm (35mm full-frame), 0 unset.
+	/// Carried from the camera definition; the track's scale channel carries FOV only,
+	/// so focal length never comes from a track key.</summary>
+	public float FocalLengthMm { get; init; } = 0f;
+	/// <summary>Wave-2 camera wiring: lens aperture as an f-stop, 0 disables depth of field.
+	/// Carried from the camera definition into OrbitCamera.FStop.</summary>
+	public float Aperture { get; init; } = 0f;
+	/// <summary>Wave-5 papercut: focus distance in world units from the eye, 0 means
+	/// focus on the orbit target (the OrbitCamera/SceneRenderer fallback). Carried
+	/// from the camera definition, like focal length and aperture -- NOT a track key:
+	/// tracks carry FOV in the scale channel only, so focus distance is not animated
+	/// by track keys.</summary>
+	public float FocusDistance { get; init; } = 0f;
 
 	public Xform Transform => Rotation.ToXform( Position, Vec3.One );
 	public RigPose Pose => new( Position, Rotation, new Vec3( FieldOfView, FieldOfView, FieldOfView ) );
@@ -90,6 +103,14 @@ public sealed class CameraDefinition
 	public Vec3 Position { get; set; } = new( 96f, -96f, 72f );
 	public Quat Rotation { get; set; } = Quat.Identity;
 	public float FieldOfView { get; set; } = 80f;
+	/// <summary>Wave-2 camera wiring: lens focal length in mm (35mm full-frame), 0 unset.
+	/// When set and no track FOV exists, evaluation derives FieldOfView from it.</summary>
+	public float FocalLengthMm { get; set; } = 0f;
+	/// <summary>Wave-2 camera wiring: lens aperture as an f-stop, 0 disables depth of field.</summary>
+	public float Aperture { get; set; } = 0f;
+	/// <summary>Wave-5 papercut: focus distance in world units from the eye, 0 means
+	/// focus on the orbit target (OrbitCamera.FocusDistance + SceneRenderer DOF fallback).</summary>
+	public float FocusDistance { get; set; } = 0f;
 	public float ZNear { get; set; } = 8f;
 	public float ZFar { get; set; } = 4096f;
 
@@ -121,6 +142,16 @@ public sealed class CameraDefinition
 		}
 		if ( element.TryGetProperty( "FieldOfView", out var fov ) && fov.ValueKind == JsonValueKind.Number )
 			cam.FieldOfView = fov.GetSingle();
+		if ( element.TryGetProperty( "FocalLengthMm", out var fl ) && fl.ValueKind == JsonValueKind.Number )
+			cam.FocalLengthMm = fl.GetSingle();
+		else if ( element.TryGetProperty( "FocalLength", out var fl2 ) && fl2.ValueKind == JsonValueKind.Number )
+			cam.FocalLengthMm = fl2.GetSingle();
+		if ( element.TryGetProperty( "Aperture", out var ap ) && ap.ValueKind == JsonValueKind.Number )
+			cam.Aperture = ap.GetSingle();
+		else if ( element.TryGetProperty( "FStop", out var fs ) && fs.ValueKind == JsonValueKind.Number )
+			cam.Aperture = fs.GetSingle();
+		if ( element.TryGetProperty( "FocusDistance", out var fd ) && fd.ValueKind == JsonValueKind.Number )
+			cam.FocusDistance = fd.GetSingle();
 		if ( element.TryGetProperty( "ZNear", out var zn ) && zn.ValueKind == JsonValueKind.Number )
 			cam.ZNear = zn.GetSingle();
 		if ( element.TryGetProperty( "ZFar", out var zf ) && zf.ValueKind == JsonValueKind.Number )
@@ -585,17 +616,29 @@ public static class PartTrackEvaluator
 					Name = name,
 					Position = evaluated.Position,
 					Rotation = evaluated.Rotation,
-					FieldOfView = fov
+					FieldOfView = fov,
+					FocalLengthMm = baseCam?.FocalLengthMm ?? 0f,
+					Aperture = baseCam?.Aperture ?? 0f,
+					FocusDistance = baseCam?.FocusDistance ?? 0f,
 				};
 			}
 			else if ( baseCam != null )
 			{
+				// Focal length derives the FOV (2*atan(12/focal), 24mm frame height).
+				// When both are set, focal wins: it is the lens fact, and a definition
+				// that only sets focal length must not keep the 80 default FOV.
+				float fov = baseCam.FocalLengthMm > 0f
+					? 2f * MathF.Atan( 12f / baseCam.FocalLengthMm ) * 180f / MathF.PI
+					: baseCam.FieldOfView;
 				result[name] = new EvaluatedCamera
 				{
 					Name = name,
 					Position = baseCam.Position,
 					Rotation = baseCam.Rotation,
-					FieldOfView = baseCam.FieldOfView
+					FieldOfView = fov,
+					FocalLengthMm = baseCam.FocalLengthMm,
+					Aperture = baseCam.Aperture,
+					FocusDistance = baseCam.FocusDistance,
 				};
 			}
 			else
@@ -688,7 +731,8 @@ public static class PartTrackEvaluator
 	}
 
 	/// <summary>
-	/// Opt-in shot application: copies evaluated camera FOV and orientation/position to OrbitCamera.
+	/// Opt-in shot application: copies evaluated camera FOV, lens facts (focal length,
+	/// f-stop, focus distance) and orientation/position to OrbitCamera.
 	/// Ordinary playback never calls this and does NOT touch or mutate the user's OrbitCamera.
 	/// </summary>
 	public static void ApplyToOrbitCamera( EvaluatedCamera shot, OrbitCamera orbitCamera )
@@ -697,6 +741,13 @@ public static class PartTrackEvaluator
 		ArgumentNullException.ThrowIfNull( orbitCamera );
 
 		orbitCamera.FovDegrees = Math.Clamp( shot.FieldOfView, 1f, 179f );
+		// Wave-2 camera wiring: the shot's lens rides along — focal length for the
+		// record, f-stop for SceneRenderer's DOF fallback (0 still means off).
+		orbitCamera.FocalLengthMm = shot.FocalLengthMm;
+		orbitCamera.FStop = shot.Aperture;
+		// Wave-5 papercut: focus distance rides along with the other lens facts.
+		// 0 still means 'focus on the orbit target' (SceneRenderer DOF fallback).
+		orbitCamera.FocusDistance = shot.FocusDistance;
 		// When transferring shot to orbit camera in opt-in mode:
 		orbitCamera.Target = shot.PositionV3;
 	}

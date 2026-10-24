@@ -13,6 +13,11 @@ namespace Effigy;
 /// Modes:
 /// - Grid: Count stations along the target's longest axis, Rings angles around it.
 /// - StationRing: Rings stations along the axis, Count instances around each ring.
+/// - CurveIMM: ZBrush tri-part welded brushes along a named Spline: the first
+///   instance is StartCap, the last is EndCap, the rest are Middle, all welded into
+///   one body, each link rolled 90 degrees from its neighbours like a real chain.
+///   An empty cap name falls back to Source. Target is not used in this mode —
+///   the chain hangs on the curve, not on a surface.
 /// - Poisson: Count area-weighted random points, Spacing as a minimum distance when set.
 /// - Curve: Count samples along a named Spline, projected onto the target surface.
 ///
@@ -37,7 +42,7 @@ public sealed class ScatterFeature : Feature
 
 	public readonly StringParam Source = new( "Source", "" );
 	public readonly BodySelectionParam Target = new( "Target" );
-	public readonly ChoiceParam Mode = new( "Mode", new[] { "Grid", "Poisson", "Curve", "StationRing" } );
+	public readonly ChoiceParam Mode = new( "Mode", new[] { "Grid", "Poisson", "Curve", "StationRing", "CurveIMM" } );
 	public readonly StringParam Domain = new( "Domain", "" );
 	public readonly StringParam ScaleCurve = new( "Scale curve", "" );
 	public readonly StringParam Curve = new( "Curve", "" );
@@ -55,11 +60,28 @@ public sealed class ScatterFeature : Feature
 	public readonly IntParam Sides = new( "Sides", 12, 3, 128 );
 	public readonly FloatParam PartAngle = new( "Part angle", 90f, 0f, 360f, unit: "deg" );
 
+	/// <summary>CurveIMM only: library part or body name for the first link. Empty = Source.</summary>
+	public readonly StringParam StartCap = new( "Start cap", "" );
+
+	/// <summary>CurveIMM only: library part or body name for the links between the caps. Empty = Source.</summary>
+	public readonly StringParam Middle = new( "Middle", "" );
+
+	/// <summary>CurveIMM only: library part or body name for the last link. Empty = Source.</summary>
+	public readonly StringParam EndCap = new( "End cap", "" );
+
 	public override IReadOnlyList<IParam> Parameters =>
-		new IParam[] { Source, Target, Mode, Domain, ScaleCurve, Curve, Count, Rings, Spacing, Jitter, AlignToNormal, Tilt, Size, Length, Thickness, Sides, PartAngle };
+		new IParam[] { Source, Target, Mode, Domain, ScaleCurve, Curve, Count, Rings, Spacing, Jitter, AlignToNormal, Tilt, Size, Length, Thickness, Sides, PartAngle, StartCap, Middle, EndCap };
 
 	protected override void Execute( FeatureContext ctx )
 	{
+		// CurveIMM hangs a chain on a curve, not on a surface, so it never looks
+		// at Target — the shared path below would fail it for having no target.
+		if ( Mode.Value == "CurveIMM" )
+		{
+			BuildCurveImm( ctx );
+			return;
+		}
+
 		if ( Target.BodyIds.Count == 0 )
 			Fail( "Scatter needs a target body.", "Target is empty, so there is no surface to scatter onto.",
 				"Pick the body to scatter onto" );
@@ -100,8 +122,8 @@ public sealed class ScatterFeature : Feature
 				GenerateCurve( ctx, axis, target, domain, scaleCurve, Count.Clamped, placements );
 				break;
 			default:
-				Fail( $"Scatter mode '{Mode.Value}' is not a mode.", "Grid, Poisson, Curve and StationRing are.",
-					"Pick one of those four" );
+				Fail( $"Scatter mode '{Mode.Value}' is not a mode.", "Grid, Poisson, Curve, StationRing and CurveIMM are.",
+					"Pick one of those five" );
 				break;
 		}
 
@@ -530,6 +552,107 @@ public sealed class ScatterFeature : Feature
 
 			outPlacements.Add( new Placement( p, hit.Value.Normal, ScaleAt( scaleCurve, axis.S( p ) ) ) );
 		}
+	}
+
+	/// <summary>
+	/// CurveIMM: one welded chain body along a spline. The first sample is the start
+	/// cap, the last is the end cap, everything between is the middle link. Each
+	/// instance's +z (a library part's outward axis) runs along the curve tangent,
+	/// the instance is centred on the curve point rather than hung from its base,
+	/// and neighbouring links roll 90 degrees apart, the way real chain links
+	/// interlock. "Welded" here means one merged body, as with every other Scatter
+	/// mode — links interlock geometrically but do not share vertices, so a chain
+	/// that must deform as one piece still wants a weld pass after it.
+	/// </summary>
+	void BuildCurveImm( FeatureContext ctx )
+	{
+		if ( Count.Clamped < 2 )
+			Fail( "CurveIMM needs at least 2 instances.", "One cap alone is not a chain.", "Set Count to 2 or more" );
+
+		if ( string.IsNullOrWhiteSpace( Curve.Value ) )
+			Fail( "Scatter's CurveIMM mode needs a curve.", "Curve is empty, so there is no path to hang the chain on.", "Name a Spline feature that has run before this one" );
+
+		if ( !ctx.Splines.TryGetValue( Curve.Value, out var spline ) )
+			Fail( "Scatter's curve is not above it.",
+				$"Curve names '{Curve.Value}', which is not a Spline feature that has run before this one.",
+				"Add the Spline first", "Check the name in Curve" );
+
+		var polyline = spline.Sample( 8 );
+
+		if ( polyline.Count < 2 )
+			Fail( "Scatter's curve has fewer than two points.", "A curve needs a path to lie on.", "Give the Spline two or more points" );
+
+		var samples = ResamplePolyline( polyline, spline.Closed, Count.Clamped );
+
+		if ( samples.Count < 2 )
+			Fail( "CurveIMM placed nothing.", "The curve resampled to fewer than two points.", "Give the Spline two or more points" );
+
+		PolyMesh fallback = null;
+
+		PolyMesh ResolveCap( string name )
+		{
+			if ( string.IsNullOrWhiteSpace( name ) )
+				return fallback ??= ResolveSource( ctx );
+
+			if ( PartLibrary.Names.Contains( name ) )
+				return PartLibrary.Build( name, Size.Clamped, Length.Clamped, Thickness.Clamped, Sides.Clamped, PartAngle.Clamped, 0 );
+
+			var body = ctx.Bodies.FirstOrDefault( b => b.Name == name )
+				?? ctx.Bodies.FirstOrDefault( b => string.Equals( b.Name, name, StringComparison.OrdinalIgnoreCase ) );
+
+			if ( body?.Mesh is null )
+				Fail( $"Scatter's CurveIMM cap '{name}' is neither a library part nor a body above it.",
+					"Library parts are Cog, Bolt, Rivet, ToothCone and the rest of PartLibrary.Names; a body cap must have run before this one.",
+					"Check the cap name", "Put the cap body first" );
+
+			return body!.Mesh;
+		}
+
+		var start = ResolveCap( StartCap.Value );
+		var middle = ResolveCap( Middle.Value );
+		var end = ResolveCap( EndCap.Value );
+
+		var result = new PolyMesh();
+		var n = samples.Count;
+
+		for ( var i = 0; i < n; i++ )
+		{
+			var prev = spline.Closed ? samples[(i - 1 + n) % n] : samples[Math.Max( 0, i - 1 )];
+			var next = spline.Closed ? samples[(i + 1) % n] : samples[Math.Min( n - 1, i + 1 )];
+			var tangent = next - prev;
+
+			if ( tangent.LengthSquared < 1e-12f )
+				tangent = new Vec3( 0, 0, 1 );
+			else
+				tangent = tangent.Normal;
+
+			var helper = MathF.Abs( tangent.y ) < 0.9f ? new Vec3( 0, 1, 0 ) : new Vec3( 1, 0, 0 );
+			var x = Vec3.Cross( helper, tangent ).Normal;
+			var y = Vec3.Cross( tangent, x );
+
+			if ( i % 2 == 1 )
+			{
+				var roll = Xform.Rotate( tangent, MathF.PI / 2f );
+				x = roll.TransformDirection( x );
+				y = roll.TransformDirection( y );
+			}
+
+			var instance = (i == 0 ? start : i == n - 1 ? end : middle).Clone();
+			MeshTransform.Apply( instance, new Xform( x, y, tangent, new Vec3( 0, 0, 0 ) ) );
+
+			var centroid = new Vec3( 0, 0, 0 );
+
+			foreach ( var p in instance.Positions )
+				centroid += p;
+
+			if ( instance.Positions.Count > 0 )
+				centroid *= 1f / instance.Positions.Count;
+
+			MeshTransform.Apply( instance, Xform.Translate( samples[i] - centroid ) );
+			MeshTransform.Append( result, instance );
+		}
+
+		ctx.Bodies.Add( new Body( ctx.NewBodyId(), Name ?? $"Chain {Curve.Value}", result ) );
 	}
 
 	static List<Vec3> ResamplePolyline( List<Vec3> polyline, bool closed, int count )

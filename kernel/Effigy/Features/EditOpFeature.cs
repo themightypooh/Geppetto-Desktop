@@ -220,19 +220,14 @@ public sealed class EditOpFeature : Feature
 				s.Bisect( At.Value, AxisVector( Axis.Index ) );
 				return s;
 
-			case 12: // Spin: lathe the selected edges round the up axis through At.
+			case 12: // Spin: lathe the selected edges round the axis through At.
 				// Distance is the angle in degrees, Segments the band count. The session's
-				// Spin turns about Z only, so Axis is honoured by failing loudly rather
-				// than by silently spinning about the wrong axis — a session Spin with
-				// an axis parameter is the follow-up, in MeshAdjacency, not this file.
-				if ( Axis.Index != 2 )
-					FailOn( "Axis", $"Spin turns about Z; {Axes[Axis.Index]} is not supported yet",
-						"The spin in the edit session only knows the up axis.",
-						"Set axis=Z", "Turn the body so the lathe axis is Z first" );
-
+				// Spin used to turn about Z only and this case failed loudly on X/Y; wave 2
+				// generalised the session Spin to an arbitrary axis (MeshAdjacency), so the
+				// Axis choice passes straight through now — same code, different axis.
 				SelectEdges( s, selector, name );
 				s.Pivot = At.Value;
-				s.Spin( Distance.Value, Segments.Clamped );
+				s.Spin( Distance.Value, Segments.Clamped, 0f, AxisVector( Axis.Index ) );
 				return s;
 
 			case 13: // Slide: edge loop along its rails, or vertices along their edges.

@@ -1,5 +1,41 @@
 # Assignment and evidence board
 
+## C1 — viewport-local stop and correction (2026-10-24)
+
+`implemented-unverified` (running-chest deployment gate open), current agent. User explicitly authorizes only Stop and its
+viewport-local correction chat, superseding the old no-UI scope for this ticket.
+Brief: `handoffs/31-viewport-correction.md`. Owned: `cabinet/ViewportCorrection.qml`
+(new), additive `cabinet/cabinet.qml`, `cabinet/host.py`, `cabinet/viewport_correction.py`
+(new), `AiLiveControl.cs`, `ScriptLive.cs`, new correction tests, and this board.
+No kernel edits; preserve existing user changes in StudioDocument/BuildScript.
+Greeting session (user-authorized independent testing) owns only new
+`tests/test_c1_script_review.py` and `handoffs/C1-script-review-evidence.md`;
+assignment: `handoffs/C1-testing-reply.md`. No shared implementation edits.
+C1 integration additionally leases `tests/TestRegistry.cs` (registration only)
+and new `tests/ViewportCorrectionTests.cs`, plus additive `AiLiveRun.cs` control
+capability publication. Pop-out design replaces the initial
+in-viewport chat per the user's follow-up; only Stop remains over the model.
+Evidence: `handoffs/C1-OWNER-ACCEPTANCE.md`. Focused script/native control checks
+6/6, Python/controller/pop-out checks 10/10 at each of three text/DPI scales,
+full cabinet QML load 1/1. Greeting's real notes follower round-trip passed.
+Aggregate suite is not certified (unrelated existing compile/test failures).
+Shared chest and knight run were not restarted, resumed or controlled.
+Final `dotnet build Marionette.Desktop.csproj -c Release`: exit 0, 0 warnings,
+0 errors; normal `bin/Release/net8.0` output updated. `git diff --check`: exit 0.
+C1 implementation/shared-registration leases released; deployment remains open.
+
+C1 chat-audit follow-up (user requested): current agent re-leases
+`cabinet/viewport_correction.py`, `cabinet/ViewportCorrection.qml`,
+`tests/test_viewport_correction.py`, C1 docs, and the canonical Geppetto skill's
+correction-workflow reference/link only. Scope: explicit multi-message queue,
+retained history, no auto-send on window events, model-neutral instructions.
+No C# changes, other pane/run control or cabinet restart.
+Follow-up implemented: explicit queue/apply, per-message states/removal, retained
+same-run history, fixed pinned composer, shared auto-discovered skill. Evidence:
+`handoffs/C1-OWNER-ACCEPTANCE.md` follow-up. Python **15/15 at all three scales**,
+cabinet QML load **1/1**, real stacked notes/fix round-trip exit 0. No auto-send
+on Enter/close/reopen. No running-cabinet deployment claim; leases released.
+
 Last reconciled against the source on **2026-10-20** by the coordinator.
 
 Allowed states: `unassigned`, `assigned`, `blocked`, `implemented-unverified`, `verified`.

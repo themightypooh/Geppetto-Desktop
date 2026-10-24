@@ -78,6 +78,12 @@ public sealed class SceneRenderer : IDisposable
 	public float MotionBlurShutter { get; set; } = 0.0f;
 	readonly MotionBlurPass _motionBlur;
 	public ViewSettings View { get; set; } = new();
+	/// <summary>NPR passes (wave 5, item 30): forwarded to the post chain; all off by default
+	/// so plain renders are unchanged.</summary>
+	public bool NprInk { get => _bloom.NprInk; set => _bloom.NprInk = value; }
+	public NprTone NprTone { get => _bloom.NprTone; set => _bloom.NprTone = value; }
+	public float NprStrength { get => _bloom.NprStrength; set => _bloom.NprStrength = value; }
+	public float NprInkWidth { get => _bloom.NprInkWidth; set => _bloom.NprInkWidth = value; }
 	public BloomPass PostChainTargets => _bloom;
 	readonly BloomPass _bloom;
 	readonly TaaPass _taa = new();
@@ -236,6 +242,69 @@ public sealed class SceneRenderer : IDisposable
 		}
 	}
 
+	/// <summary>Lane 4 (cues + presets): fire a particle cue in the live viewport.
+	/// The old wave-2 wiring kept ONE shared default-settings system, so a preset's
+	/// medium (see <see cref="ParticleEmitterPresets.SettingsFor"/>) was ignored and
+	/// a bubbles cue fell instead of rising. This keeps ONE SYSTEM PER PRESET, each
+	/// built with that preset's medium, each with its own sprite particle layer on
+	/// <see cref="Live"/> (stepped by the frame loop's <c>Live.Advance</c>). Later cues
+	/// for the same preset reuse its system; different presets never fight over one
+	/// gravity. Returns the emitter, or null when the cue names no preset, so an
+	/// unrelated timeline mark never becomes an explosion.</summary>
+	public ParticleEmitter TriggerParticleCue(string cueName, Vector3 origin, Vector3 direction = default)
+	{
+		if (string.IsNullOrWhiteSpace(cueName)) return null;
+		var preset = ParticleEmitterPresets.ResolveName(cueName);
+		if (preset is null) return null;
+		if (!_particleSystems.TryGetValue(preset, out var system))
+		{
+			system = new ParticleSystem(ParticleEmitterPresets.SettingsFor(preset, new ParticleSystemSettings()));
+			_particleSystems[preset] = system;
+			var layer = new ParticleLayer(system)
+				{ Material = new LiveMaterial(Vector3.One, Alpha: .5f, Blend: true) { Sprite = true } };
+			_particleLayers[preset] = layer;
+			Live.Layers.Add(layer);
+		}
+		return system.TriggerCue(preset, origin, direction == default ? null : direction);
+	}
+
+	/// <summary>The live system for a preset's cues, or null when that preset has
+	/// never been cued in this viewport. Keyed by resolved preset name, not by the
+	/// raw cue text (so "fx:bubbles" and "footstep_bubbles" share one system).</summary>
+	public ParticleSystem ParticleSystemFor(string cueName)
+	{
+		var preset = ParticleEmitterPresets.ResolveName(cueName);
+		return preset is not null && _particleSystems.TryGetValue(preset, out var system) ? system : null;
+	}
+
+	/// <summary>All per-preset live systems created so far, keyed by preset name.</summary>
+	public IReadOnlyDictionary<string, ParticleSystem> ParticleSystems => _particleSystems;
+
+	/// <summary>Wire a timeline dispatcher to this viewport's cues through a
+	/// <see cref="ParticleCueBridge"/>. The bridge subscribes to the dispatcher's
+	/// notifications and calls <see cref="TriggerParticleCue"/>; it never invents
+	/// an origin — <paramref name="originResolver"/> maps an event's attach bone
+	/// (or a mark's cue name) to a world position, and cues with no resolvable
+	/// origin are skipped. Call <see cref="DetachCueBridge"/> to unsubscribe
+	/// (the previous bridge, if any, is detached first).</summary>
+	public ParticleCueBridge AttachCueBridge(TimelineEventDispatcher dispatcher, Func<string, Vector3?> originResolver = null)
+	{
+		DetachCueBridge();
+		_particleCueBridge = new ParticleCueBridge(dispatcher, (cue, origin, dir) => TriggerParticleCue(cue, origin, dir ?? default), originResolver);
+		return _particleCueBridge;
+	}
+
+	/// <summary>Unsubscribe the cue bridge attached by <see cref="AttachCueBridge"/>, if any.</summary>
+	public void DetachCueBridge()
+	{
+		_particleCueBridge?.Detach();
+		_particleCueBridge = null;
+	}
+
+	readonly Dictionary<string, ParticleSystem> _particleSystems = new(StringComparer.Ordinal);
+	readonly Dictionary<string, ParticleLayer> _particleLayers = new(StringComparer.Ordinal);
+	ParticleCueBridge _particleCueBridge;
+
 	/// <summary>Decode and bake without GL access. The newest completed request is
 	/// promoted by Draw on its GL thread; stale requests cannot replace a newer sky.</summary>
 	public async System.Threading.Tasks.Task LoadEnvironmentAsync(string path,
@@ -370,6 +439,10 @@ public sealed class SceneRenderer : IDisposable
 		var eye = f.Camera.Eye;
 		var key = KeyDirection.LengthSquared() > 1e-4f ? Vector3.Normalize( KeyDirection ) : KeyShadowMap.Direction;
 		_shader.Use();
+		// Wave-2 look wiring: GLSL uniforms default to zero, which would read as a black
+		// shadow tint on any draw that bypasses the per-batch SetLook below. Reset the
+		// look to its no-op defaults once per frame; batches and live layers override.
+		_shader.SetLook( 0f, 3, 0f, 0f, 0f, 0.05f, 0.05f, 0.07f, 0f, 0.05f, 0f, 0.85f, 0.22f, 0.15f, 1f, 1f, 1f, 1f, 0f );
 		_shader.SetMatrix( _mvp, DisplayTransform * viewProj ); _shader.SetMatrix( _model, Matrix4x4.Identity );
 		_shader.SetMatrix( _view, view ); _shader.SetMatrix( _projection, proj ); _shader.SetMatrix( _invProjection, invProj );
 		_shader.SetVec3( _eye, eye.X, eye.Y, eye.Z );
@@ -557,9 +630,14 @@ public sealed class SceneRenderer : IDisposable
 			_motionBlur.Apply( f.Mesh, MotionBlurShutter, _bloom.ColorFbo, _bloom.ColorTex, width, height, f.Camera.Near, f.Camera.Far, Live.IsEmpty ? null : Live );
 		_bloom.Process();
 		_bloom.StoreHistory();
-		float focus = DepthOfFieldFocusDistance > 0 ? DepthOfFieldFocusDistance : f.Camera.Distance;
+		// Wave-2 camera wiring: the orbit camera's own focus distance and f-stop (from
+		// PartTrackEvaluator.ApplyToOrbitCamera) are the fallback when the renderer's
+		// explicit DOF settings are off; explicit settings still win.
+		float focus = DepthOfFieldFocusDistance > 0 ? DepthOfFieldFocusDistance
+			: f.Camera.FocusDistance > 0 ? f.Camera.FocusDistance : f.Camera.Distance;
+		float fstop = DepthOfFieldFStop > 0 ? DepthOfFieldFStop : f.Camera.FStop;
 		_bloom.FovDegrees = f.Camera.FovDegrees;
-		_bloom.Composite( target, View, _depthTarget.DepthTexture, focus, DepthOfFieldFStop, f.Camera.Near, f.Camera.Far );
+		_bloom.Composite( target, View, _depthTarget.DepthTexture, focus, fstop, f.Camera.Near, f.Camera.Far );
 		// The mesh was rendered into the bloom color FBO, so the caller's target only
 		// holds the composite quad's flat 0.5 depth stamp. Anything drawn into the target
 		// afterwards (SkeletonOverlay grid/bones) depth-tests against real scene depth,

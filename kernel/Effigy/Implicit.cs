@@ -1324,6 +1324,77 @@ public sealed class SdfGyroid : SdfLeaf
 }
 
 /// <summary>
+/// <summary>
+/// Cellular (Worley) growth folds — the roadmap's <c>SdfCellularGrowth</c>: the field
+/// is a thin shell around the borders between Worley cells, so a meshed blob of it
+/// reads as folded, veined growth rather than a smooth lump. F1 is the distance to
+/// the nearest seed point, F2 to the second-nearest; on a cell border F1 == F2, so
+/// |F2 - F1| is 0 there and grows inside a cell. The shell is |F2 - F1| / Scale
+/// minus half the thickness, in world units, the same shell convention as
+/// <see cref="SdfGyroid"/>. Seed points are one deterministic hash point per lattice
+/// cell, so the same seed always grows the same folds, and a different seed grows
+/// different ones. Reachable from Blob shapes as <c>cellular min max scale
+/// thickness [seed]</c>.
+/// </summary>
+public sealed class SdfCellular : SdfLeaf
+{
+	public readonly float Scale;
+	public readonly float Thickness;
+	public readonly int Seed;
+	readonly Vec3 _min, _max;
+
+	public SdfCellular( float scale, float thickness, Vec3 min, Vec3 max, int seed = 0 )
+	{
+		Scale = MathF.Max( 1e-3f, scale );
+		Thickness = MathF.Max( 0f, thickness );
+		_min = min;
+		_max = max;
+		Seed = seed;
+	}
+
+	public override Vec3 Min => _min;
+	public override Vec3 Max => _max;
+
+	static float Hash01( int x, int y, int z, int seed )
+	{
+		unchecked
+		{
+			var h = (uint)( x * 374761393 + y * 668265263 + z * 2147483647 + seed * 974634211 );
+			h = (h ^ (h >> 13)) * 1274126177u;
+			h ^= h >> 16;
+			return (h & 0xFFFFFFu) / (float)0x1000000u;
+		}
+	}
+
+	public override float Eval( Vec3 p )
+	{
+		var q = p * Scale;
+		var bx = MathF.Floor( q.x );
+		var by = MathF.Floor( q.y );
+		var bz = MathF.Floor( q.z );
+		var f1 = float.MaxValue;
+		var f2 = float.MaxValue;
+
+		for ( var dx = -1; dx <= 1; dx++ )
+		for ( var dy = -1; dy <= 1; dy++ )
+		for ( var dz = -1; dz <= 1; dz++ )
+		{
+			var cx = (int)bx + dx;
+			var cy = (int)by + dy;
+			var cz = (int)bz + dz;
+			var px = cx + Hash01( cx, cy, cz, Seed );
+			var py = cy + Hash01( cy, cx, cz, Seed + 101 );
+			var pz = cz + Hash01( cz, cy, cx, Seed + 211 );
+			var d = MathF.Sqrt( (q.x - px) * (q.x - px) + (q.y - py) * (q.y - py) + (q.z - pz) * (q.z - pz) );
+
+			if ( d < f1 ) { f2 = f1; f1 = d; }
+			else if ( d < f2 ) { f2 = d; }
+		}
+
+		return (f2 - f1) / Scale - Thickness * 0.5f;
+	}
+}
+
 /// Twist a field about an axis: a point at distance t along the axis is read from the child
 /// rotated by -t * <see cref="DegreesPerUnit"/> degrees, so the meshed shape twists by that
 /// rate along its length. <see cref="Length"/> clamps the twisted span (0 = whole axis).

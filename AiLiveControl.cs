@@ -19,6 +19,7 @@ public static class AiLiveControl
         => new Session(root, live, run).WatchAsync(stop);
 
     public sealed record Direction(string Id, string Text);
+    public sealed class ReviewRequestedException : Exception { }
     public sealed class Session
     {
         readonly object gate = new();
@@ -26,20 +27,40 @@ public static class AiLiveControl
         readonly AiLiveRun live;
         readonly CancellationTokenSource run;
         readonly bool allowDirections;
+        readonly bool allowReview;
         readonly HashSet<string> processed = new(StringComparer.Ordinal);
         readonly Queue<Direction> directions = new();
         readonly Stopwatch clock = Stopwatch.StartNew();
         bool pauseRequested, paused, closed;
+        bool reviewRequested;
         bool checkpointContinue;        // a `continue` command arrived while the run waits at a checkpoint (Lane D)
         int steps;                      // STEP while paused: changes allowed through before holding again
         double pace, lastMutation = double.NegativeInfinity;
-        public Session(string root, AiLiveRun live, CancellationTokenSource run, bool allowDirections = true, double pace = 0)
+        public Session(string root, AiLiveRun live, CancellationTokenSource run, bool allowDirections = true, double pace = 0, bool allowReview = false)
         {
             this.root = root; this.live = live; this.run = run; this.allowDirections = allowDirections; this.pace = pace;
+            this.allowReview = allowReview;
             // A starting pace is published, so the cabinet's pace control shows it before the first change.
             if (pace > 0) Publish("pace-changed", null, "initial");
         }
         public bool HasDirections { get { lock (gate) return directions.Count > 0; } }
+
+        // Script runs yield back to their inbox so a correction runs before the
+        // unexecuted tail of the old batch.
+        public bool TakeReview()
+        {
+            lock (gate) { bool value = reviewRequested; reviewRequested = false; return value; }
+        }
+
+        public void ReviewBoundary()
+        {
+            if (TakeReview()) throw new ReviewRequestedException();
+        }
+
+        public void ReviewReady()
+        {
+            lock (gate) { paused = true; Publish("paused"); }
+        }
 
         /// <summary>Takes a pending checkpoint-continue signal (a `continue` control command):
         /// true once per command, so a run gated at a checkpoint resumes exactly once.</summary>
@@ -49,7 +70,7 @@ public static class AiLiveControl
         }
 
         void Publish(string state, string? id = null, string? outcome = null)
-            => live.Control(state, pauseRequested, paused, pace, directions.Count, id, outcome);
+            => live.Control(state, pauseRequested, paused, pace, directions.Count, id, outcome, scriptReview: allowReview);
 
         public async Task BoundaryAsync(CancellationToken ct, bool mutation = false)
         {
@@ -58,6 +79,7 @@ public static class AiLiveControl
                 ct.ThrowIfCancellationRequested();
                 lock (gate)
                 {
+                    if (reviewRequested) { reviewRequested = false; throw new ReviewRequestedException(); }
                     if (pauseRequested && steps > 0)
                     {
                         // a step lets the run go on to its next change, does that one, and holds again
@@ -141,6 +163,10 @@ public static class AiLiveControl
                                         // directions are locked, and ScriptLive polls TakeCheckpointContinue.
                                         checkpointContinue = true; Publish("checkpoint-continue", id, "accepted"); break;
                                     case "pause": pauseRequested = true; Publish("pausing", id, "accepted"); break;
+                                    case "review":
+                                        pauseRequested = true; steps = 0;
+                                        if (allowReview) reviewRequested = true;
+                                        Publish("pausing", id, "accepted"); break;
                                     case "resume": pauseRequested = paused = false; steps = 0; Publish("resumed", id, "accepted"); break;
                                     case "step":
                                         if (!pauseRequested) { Publish("control-rejected", id, "step-only-while-paused"); break; }

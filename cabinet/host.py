@@ -29,8 +29,9 @@ import uuid
 import subprocess
 import tempfile
 
-from live_runs import TERMINAL, read_state, preview_path, activity, request_cancel, send_command, next_pace, control_state
+from live_runs import TERMINAL, read_state, preview_path, activity, request_cancel, send_command, next_pace, control_state, continue_checkpoint
 import live_runs
+from viewport_correction import ViewportCorrections
 from drawing_tools import (drawings as drawing_gallery, program as drawing_program,
                            resolve as drawing_resolve, socket_key as drawing_socket_key,
                            DRAWINGS as DRAWING_DIR)
@@ -397,9 +398,11 @@ class Host(QObject):
         self.ai_model = self._model_preferences.get("research", "")
         self.jobs = {}                  # run dir -> QProcess
         self.watching = ""
+        self._draw_over = None     # a draw-over stroke waiting on serve drop replies, or None
         self.live_states = {}
         self.displayed_revision = 0
         self.stop_requests = {}
+        self._corrections = ViewportCorrections(self)
         self.seen_runs = None           # run dirs present at the last scan (None until the first one)
         self.saw_building = set()       # runs seen mid-build in the viewport, so finishing them sends the model off
         self.auto_pending = set()       # new runs to follow as soon as they publish a live identity
@@ -510,6 +513,7 @@ class Host(QObject):
     models = Property("QVariantList", _get_models, notify=listsChanged)
     clips = Property("QVariantList", _get_clips, notify=listsChanged)
     runs = Property("QVariantList", _get_runs, notify=runsChanged)
+    corrections = Property(QObject, lambda self: self._corrections, constant=True)
     aiModel = Property(str, _get_ai_model, notify=runsChanged)
     watchedRun = Property(str, lambda self: self.watching, notify=runsChanged)
     p1Owner = Property("QVariantMap", lambda self: self._p1_owner, notify=p1OwnerChanged)
@@ -844,6 +848,113 @@ class Host(QObject):
             return
         self.benchApply("facematerial slot=%d faces=%s" % (int(slot), faces))
 
+    # ---- draw-over strokes: a freehand stroke over pane 1 becomes a note with 3D hits ----
+    @Slot(str)
+    def drawOverStroke(self, payload):
+        """A draw-over stroke from pane 1 (Lane O ray slot): pixel points [{x, y}, ...] in
+        the pane's coordinates — the same coordinates subPick already sends the serve viewer,
+        so no new camera math lives here. The viewer owns the camera and the mesh, so each
+        point goes to it as a `drop` probe: ServeMode answers a drop with the face under
+        that pixel (body, point, normal) without changing the selection, unlike `pick`
+        which clicks. The drop replies come back async through onOutput and are collected
+        below; once every point has answered, the stroke is written as a note on the
+        watched run, one entry per point (None on a miss). A stroke with no hits at all
+        leaves no note, so a miss-stroke is not mistaken for a placed one."""
+        try:
+            points = json.loads(payload)
+        except ValueError:
+            self.set_status("draw-over: bad stroke payload")
+            return
+        if not isinstance(points, list) or not points:
+            self.set_status("draw-over: empty stroke")
+            return
+        pixels = []
+        for pt in points:
+            try:
+                if "x" in pt and "y" in pt:
+                    pixels.append((round(float(pt["x"])), round(float(pt["y"]))))
+                elif "fx" in pt and "fy" in pt:
+                    # fractions of the pane: fall back to the last frame's size
+                    pixels.append((round(float(pt["fx"]) * self.view_size[0]),
+                                   round(float(pt["fy"]) * self.view_size[1])))
+                else:
+                    raise ValueError("a stroke point needs x/y (or fx/fy)")
+            except (TypeError, ValueError, KeyError):
+                self.set_status("draw-over: bad stroke point")
+                return
+        if self.proc is None or self.proc.state() == QProcess.NotRunning:
+            self.set_status("draw-over: open a model first")
+            return
+        if not self.watching:
+            self.set_status("draw-over: watch a run first, so the stroke has a run to note on")
+            return
+        token = id(pixels)
+        self._draw_over = {"token": token, "expected": len(pixels), "hits": [],
+                           "root": self.watching, "rev": self.displayed_revision}
+        for (x, y) in pixels:
+            self.cmd("drop %d %d" % (x, y))
+        # a viewer that dies mid-stroke must not swallow a later real drop forever
+        QTimer.singleShot(5000, lambda t=token: self._draw_over_expire(t))
+        self.set_status("draw-over stroke sent (%d points)…" % len(pixels))
+
+    def _draw_over_expire(self, token):
+        if self._draw_over is not None and self._draw_over.get("token") == token:
+            self._draw_over = None
+            self.set_status("draw-over: the viewer did not answer every point; stroke dropped")
+
+    def _draw_over_drop(self, ev):
+        """One serve `drop` reply while a draw-over stroke is pending: turn its face token
+        (Body:x,y,z:nx,ny,nz) into a stroke hit. Drop replies with no stroke pending keep
+        today's behaviour — they are ignored, exactly as before this slot landed."""
+        pending = self._draw_over
+        if pending is None:
+            return
+        if ev.get("ok") and ev.get("faces"):
+            try:
+                body, point, normal = str(ev["faces"]).split(":")
+                xyz = [float(v) for v in point.split(",")]
+                nrm = [float(v) for v in normal.split(",")]
+                if len(xyz) != 3 or len(nrm) != 3:
+                    raise ValueError("face token is not a point and a normal")
+                pending["hits"].append({"body": body, "station_s": None,
+                                        "world_pos": xyz, "normal": nrm})
+            except ValueError:
+                pending["hits"].append(None)
+        else:
+            pending["hits"].append(None)
+        if len(pending["hits"]) < pending["expected"]:
+            return
+        self._draw_over = None
+        root, rev, hits = pending["root"], pending["rev"], pending["hits"]
+        made = sum(1 for h in hits if h is not None)
+        if made == 0:
+            self.set_status("draw-over: every point missed the model; no note written")
+            return
+        try:
+            note = live_runs.add_note(root, rev, "draw-over",
+                                      "draw-over stroke: %d points, %d hit" % (len(hits), made))
+            stamped = live_runs.attach_stroke(note, hits)
+            if "stroke" in stamped:
+                # add_note already appended the plain note; rewrite its row with the stroke,
+                # the same way live_runs.add_draw_over_note does, so the note is never lost
+                # if the rewrite fails
+                path = os.path.join(root, "notes.jsonl")
+                rows = live_runs.notes(root)
+                for row in reversed(rows):
+                    if (row.get("time"), row.get("rev"), row.get("text")) == \
+                            (note["time"], note["rev"], note["text"]):
+                        row["stroke"] = stamped["stroke"]
+                        break
+                else:
+                    raise OSError("draw-over note row not found for rewrite")
+                temp = path + ".tmp"
+                with open(temp, "w") as stream:
+                    stream.writelines(json.dumps(n) + "\n" for n in rows)
+                os.replace(temp, path)
+            self.set_status("draw-over note: %d of %d points hit the model" % (made, len(hits)))
+        except (OSError, ValueError) as e:
+            self.set_status("draw-over: note failed (%s)" % e)
+
     def _viewer_stderr(self, p):
         text = bytes(p.readAllStandardError()).decode(errors="replace")
         lines = [x for x in text.splitlines() if x.strip()]
@@ -884,6 +995,8 @@ class Host(QObject):
                     self.setSelMode(self._tool_mode)
             elif kind == "place":
                 self._place_landed(ev)
+            elif kind == "drop":
+                self._draw_over_drop(ev)
             elif kind == "ai-activity":
                 if self.watching:
                     self.live_states[self.watching] = ev
@@ -1441,14 +1554,15 @@ class Host(QObject):
         self.noticeChanged.emit()
         return True
 
-    @Slot(bool)
-    def noticeStart(self, every_time):
+    @Slot(bool, bool)
+    def noticeStart(self, every_time, never_show=False):
         """[ Start the build ] on the notice card: record the ack (never sends by
-        itself), hide the card, then resume the send that was waiting on it."""
+        itself), hide the card, then resume the send that was waiting on it. Check DO NOT SHOW THIS AGAIN and the card never comes back, for any provider."""
         pending, self._pending_notice = self._pending_notice, None
         if self._notice_cfg is not None:
             noticelib.ack_notice(self._notice_state, self._notice_cfg,
-                                 self._notice_missing, every_time=bool(every_time))
+                                 self._notice_missing, every_time=bool(every_time),
+                                 never_show=bool(never_show))
             noticelib.save_state(self._notice_path, self._notice_state)
         self._notice_show = False
         self.noticeChanged.emit()

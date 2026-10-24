@@ -14,7 +14,7 @@ namespace Marionette.Desktop;
 /// </summary>
 public sealed class ViewportMesh : IDisposable
 {
-	public const int FloatsPerVertex = 20; // pos(3) + nrm(3) + boneIndices(4) + boneWeights(4) + UV(2) + tangent/sign(4)
+	public const int FloatsPerVertex = 24; // pos(3) + nrm(3) + boneIndices(4) + boneWeights(4) + UV(2) + tangent/sign(4) + color(4)
 
 	public readonly struct DrawBatch
 	{
@@ -39,6 +39,15 @@ public sealed class ViewportMesh : IDisposable
 		public readonly TextureBinding NormalBinding, RoughnessBinding, MetallicBinding, EmissionBinding, OcclusionBinding;
 		/// <summary>R6 extra lobes (transmission, subsurface, sheen, clearcoat, anisotropy).</summary>
 		public readonly MaterialLobes Lobes;
+		/// <summary>Wave-2 look wiring: the SlotLook spectrum for this batch, from its descriptor.
+		/// Defaults are the old behaviour, so batches from name-based palette entries (which
+		/// never set a look) shade exactly as before.</summary>
+		public readonly float LookToon, LookToonRim, LookStylized, LookOutlineWidth, LookOpacity, LookIridescence;
+		public readonly int LookToonBands;
+		public readonly float LookOutlineR, LookOutlineG, LookOutlineB;
+		public readonly float LookShadowR, LookShadowG, LookShadowB;
+		public readonly float LookClearcoat, LookClearcoatRough, LookSubsurface;
+		public readonly float LookSubsurfaceR, LookSubsurfaceG, LookSubsurfaceB;
 		/// <summary>Drawn after opaque batches: blended or refracting what is behind it.</summary>
 		public bool Translucent => AlphaMode == AlphaMode.Blend || Lobes.Transmission > 0f;
 
@@ -102,6 +111,15 @@ public sealed class ViewportMesh : IDisposable
 			EmissionImage = emission; EmissionBinding = descriptor.EmissionMap;
 			OcclusionImage = occlusion; OcclusionBinding = descriptor.AmbientOcclusionMap;
 			Lobes = MaterialLobes.From( descriptor );
+			LookToon = descriptor.LookToon; LookToonBands = descriptor.LookToonBands; LookToonRim = descriptor.LookToonRim;
+			LookStylized = descriptor.LookStylized; LookOutlineWidth = descriptor.LookOutlineWidth;
+			LookOutlineR = descriptor.LookOutlineColor.x; LookOutlineG = descriptor.LookOutlineColor.y; LookOutlineB = descriptor.LookOutlineColor.z;
+			LookOpacity = descriptor.LookOpacity;
+			LookShadowR = descriptor.LookShadowTint.x; LookShadowG = descriptor.LookShadowTint.y; LookShadowB = descriptor.LookShadowTint.z;
+			LookIridescence = descriptor.LookIridescence;
+			LookClearcoat = descriptor.Clearcoat; LookClearcoatRough = descriptor.ClearcoatRoughness;
+			LookSubsurface = descriptor.Subsurface;
+			LookSubsurfaceR = descriptor.LookSubsurfaceColor.x; LookSubsurfaceG = descriptor.LookSubsurfaceColor.y; LookSubsurfaceB = descriptor.LookSubsurfaceColor.z;
 		}
 	}
 
@@ -606,6 +624,13 @@ public sealed class ViewportMesh : IDisposable
 					var tangent = cornerTangents[fi][c];
 					vertList.Add( tangent.x ); vertList.Add( tangent.y );
 					vertList.Add( tangent.z ); vertList.Add( tangent.w );
+					// Wave-5 look fix: per-corner vertex colour (foliage, paint); white when the mesh carries none.
+					// Merged meshes pad colourless bodies with Vec4.Zero (MeshTransform.Append) — an exact-zero
+					// vector means "no paint", NOT black paint, so it resolves to white. Only the exact zero
+					// vector is remapped: a wind-zero foliage trunk vertex (0.4, 0.3, 0.2, 0) keeps its brown.
+					var vc = mesh.VertexColors is { Length: > 0 } && vi < mesh.VertexColors.Length ? mesh.VertexColors[vi] : new Vec4( 1f, 1f, 1f, 1f );
+					if ( vc.x == 0f && vc.y == 0f && vc.z == 0f && vc.w == 0f ) vc = new Vec4( 1f, 1f, 1f, 1f );
+					vertList.Add( vc.x ); vertList.Add( vc.y ); vertList.Add( vc.z ); vertList.Add( vc.w );
 
 					var pv = new Vector3( p.x, p.y, p.z );
 					bmin = Vector3.Min( bmin, pv );
@@ -751,6 +776,9 @@ public sealed class ViewportMesh : IDisposable
 		gl.VertexAttribPointer( 4, 2, VertexAttribPointerType.Float, false, stride, (void*)(14 * sizeof( float )) );
 		gl.EnableVertexAttribArray( 5 );
 		gl.VertexAttribPointer( 5, 4, VertexAttribPointerType.Float, false, stride, (void*)(16 * sizeof( float )) );
+		// Wave-5 look fix: location 7 carries the per-vertex colour. (Location 6 is LiveGeometry's prev-position buffer in its own VAO; 7 keeps the two from ever colliding.)
+		gl.EnableVertexAttribArray( 7 );
+		gl.VertexAttribPointer( 7, 4, VertexAttribPointerType.Float, false, stride, (void*)(20 * sizeof( float )) );
 		_whiteTexture = CreateTexture( gl, DecodedImage.NeutralWhite, null, true );
 		_flatNormalTexture = CreateTexture( gl, DecodedImage.NeutralFlatNormal, null, false );
 		_unitDataTexture = CreateTexture( gl, DecodedImage.NeutralWhite, null, false );
@@ -976,6 +1004,13 @@ public sealed class ViewportMesh : IDisposable
 				shader.SetFloat( bootCuffLoc, batch.Ps1BootCuff );
 			}
 			if ( doubleSidedLoc >= 0 ) shader.SetInt( doubleSidedLoc, batch.DoubleSided ? 1 : 0 );
+			// Wave-2 look wiring: one SetLook per batch, before its draw, so toon/stylized
+			// actually reach the fragment shader. Defaults are a no-op there.
+			shader.SetLook( batch.LookToon, batch.LookToonBands, batch.LookToonRim, batch.LookStylized,
+				batch.LookOutlineWidth, batch.LookOutlineR, batch.LookOutlineG, batch.LookOutlineB,
+				batch.LookClearcoat, batch.LookClearcoatRough, batch.LookSubsurface,
+				batch.LookSubsurfaceR, batch.LookSubsurfaceG, batch.LookSubsurfaceB,
+				batch.LookOpacity, batch.LookShadowR, batch.LookShadowG, batch.LookShadowB, batch.LookIridescence );
 			lobes?.Apply( shader, batch.Lobes );
 			bool blend = batch.AlphaMode == AlphaMode.Blend;
 			// Blended surfaces test against depth but do not occlude each other.

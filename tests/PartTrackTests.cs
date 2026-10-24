@@ -499,5 +499,49 @@ internal static class PartTrackTests
 			AssertNear( orbit.FovDegrees, 65f, 1e-3f, "Opt-in must apply FOV to OrbitCamera" );
 			Assert( Vector3.Distance( orbit.Target, new Vector3( 12.5f, 34.5f, 56.5f ) ) < 1e-3f, "Opt-in must apply position to OrbitCamera" );
 		} );
+
+		// 11. FocusDistance: definition-carried, forwarded opt-in to OrbitCamera
+		Check( "focus distance forwarding to orbit camera", () =>
+		{
+			string json = """
+			{
+				"Cameras": [
+					{
+						"Name": "FocusShot",
+						"Enabled": true,
+						"Position": "10, 20, 30",
+						"Rotation": "0, 0, 0",
+						"FieldOfView": 50.0,
+						"FocusDistance": 42.0
+					}
+				]
+			}
+			""";
+
+			var parsed = PartTrackEvaluator.ParseCameras( json );
+			Assert( parsed.Count == 1, "Must parse 1 camera definition" );
+			AssertNear( parsed[0].FocusDistance, 42f, 1e-3f );
+
+			var clip = new RigAnimFile();
+			var eval = PartTrackEvaluator.Evaluate( clip, 0f, cameras: parsed );
+			var shot = eval.GetCamera( "FocusShot" );
+			Assert( shot != null );
+			AssertNear( shot!.FocusDistance, 42f, 1e-3f, "Evaluation must carry definition focus distance" );
+
+			var orbit = new OrbitCamera { FovDegrees = 50f, Target = Vector3.Zero, FocusDistance = 0f };
+			PartTrackEvaluator.ApplyToOrbitCamera( shot, orbit );
+			AssertNear( orbit.FocusDistance, 42f, 1e-3f, "Opt-in must apply focus distance to OrbitCamera" );
+
+			// Unset focus distance stays 0, preserving the SceneRenderer fallback
+			// (focus on the orbit target) instead of inventing a distance.
+			var noFocus = PartTrackEvaluator.ParseCameras( """{ "Cameras": [ { "Name": "Plain", "Position": "1, 2, 3", "FieldOfView": 60.0 } ] }""" );
+			var eval2 = PartTrackEvaluator.Evaluate( new RigAnimFile(), 0f, cameras: noFocus );
+			var shot2 = eval2.GetCamera( "Plain" );
+			Assert( shot2 != null );
+			AssertNear( shot2!.FocusDistance, 0f, 1e-3f );
+			var orbit2 = new OrbitCamera { FocusDistance = 7f };
+			PartTrackEvaluator.ApplyToOrbitCamera( shot2, orbit2 );
+			AssertNear( orbit2.FocusDistance, 0f, 1e-3f, "Unset focus distance must forward as 0, not keep a stale orbit value" );
+		} );
 	}
 }

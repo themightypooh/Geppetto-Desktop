@@ -23,27 +23,42 @@ namespace Marionette.Desktop;
 /// can push a stroke's dirty rect live using the same images the snapshot path would produce,
 /// instead of inventing a second texture conversion.
 ///
-/// THE DURABILITY TRAP, STATED PLAINLY. A PaintFeature's canvas is a DERIVED artifact: it is
-/// replayed from the feature's stroke log on every rebuild, and a direct texel scrub is undone by
-/// the next rebuild (the kernel says this itself, on PaintStroke.Erase). So painting onto
-/// <c>body.Mesh.Paint</c> through this service is PREVIEW-ONLY: it shows in the viewport, but it
-/// is not saved with the document and it does not survive the next PaintFeature rebuild. Two
-/// further consequences callers must know:
-///   1. DocumentSession's paint fingerprint (<c>PaintFeature.Revision</c> + canvas identity) does
-///      NOT move when texels are scrubbed directly, so <c>TryPromoteSnapshot</c> will happily
-///      keep serving the pre-stroke snapshot. After a direct-canvas stroke the caller must build
-///      a fresh snapshot explicitly (or push the session's dirty rect through the GL uploader),
-///      not wait for staleness to notice.
-///   2. The durable path for a stroke is the kernel's own: a mesh-space <c>PaintStroke</c>
-///      recorded via <c>PaintFeature.AddStroke</c> (which bumps Revision, rebuilds the canvas,
-///      and moves the fingerprint, so the normal snapshot path refreshes). This service deliberately
-///      does NOT fabricate PaintStrokes from texel dabs — a stroke's path is 3D surface points
+/// THE DURABILITY TRAP, STATED PLAINLY -- AND THE DURABLE PATH OUT OF IT. A
+/// PaintFeature canvas is a DERIVED artifact: it is replayed from the feature stroke
+/// log on every rebuild, and a direct texel scrub is undone by the next rebuild (the
+/// kernel says this itself, on PaintStroke.Erase). So painting onto body.Mesh.Paint
+/// through this service is PREVIEW-ONLY: it shows in the viewport, but it is not saved
+/// with the document and it does not survive the next PaintFeature rebuild. Two further
+/// consequences callers must know:
+///   1. DocumentSession paint fingerprint (PaintFeature.Revision + canvas identity) does
+///      NOT move when texels are scrubbed directly, so TryPromoteSnapshot will happily
+///      keep serving the pre-stroke snapshot. After a direct-canvas stroke the caller must
+///      build a fresh snapshot explicitly (or push the session dirty rect through the GL
+///      uploader), not wait for staleness to notice.
+///   2. The durable path for a TEXEL stroke is the kernel texel log, not a mesh stroke:
+///      Session.ToTexelStroke turns a session stroke into an Effigy.TexelStroke, and
+///      PaintFeature.AddTexelStroke records it (which bumps Revision, rebuilds the canvas
+///      with the stroke replayed on top of the mesh strokes, and moves the fingerprint, so
+///      the normal snapshot path refreshes). The ServeMode texpaint command and the
+///      texpaint script verb are the callers that do this. This service deliberately does
+///      NOT fabricate mesh PaintStrokes from texels: a mesh stroke path is 3D surface points
 ///      with normals, and inventing those from texels would paint the wrong faces.
-/// A caller that wants strokes to persist should route them through PaintSession/PaintFeature;
-/// a caller that wants a live texture preview (or owns a standalone canvas outright) uses this
-/// service. Undo restores write bytes straight into the canvas buffer, which does not touch the
-/// canvas's own dirty flags — the session therefore reports its own dirty rect
-/// (<see cref="Session.DirtyRect"/>) for the uploader to use after an undo/redo.
+/// WHY SERVEMODE DOES NOT CALL ToTexelStroke (wave-5 papercut decision: documented,
+/// not routed). ServeMode texpaint and the script texpaint verb build their TexelStroke
+/// directly from parsed command args (path points + channel/color/radius/strength/
+/// falloff/spacing/erase) -- no TexturePaintService.Session exists on those paths, and
+/// constructing one would need a throwaway PaintCanvas plus dab-stream semantics that
+/// do not match a parsed path, for zero benefit: the durable commit already happens
+/// through PaintFeature.AddTexelStroke on both paths. ToTexelStroke is the bridge for
+/// LIVE-DABBED Session strokes (a caller that dabbed onto a canvas and now wants the
+/// stroke in the layer log); it is exercised by TexturePaintTests today and stays
+/// available for future live-paint callers. Do not 'fix' its zero production callers
+/// by inventing a Session on the command path.
+/// A caller that wants strokes to persist commits them through AddTexelStroke; a caller that
+/// wants a live texture preview (or owns a standalone canvas outright) uses this service.
+/// Undo restores write bytes straight into the canvas buffer, which does not touch the
+/// canvas own dirty flags: the session therefore reports its own dirty rect
+/// (Session.DirtyRect) for the uploader to use after an undo/redo.
 /// </summary>
 public static class TexturePaintService
 {
@@ -264,6 +279,45 @@ public static class TexturePaintService
 		float _lastX, _lastY;
 		bool _hasLast;
 
+		// The stroke's waypoints, in the order they were dabbed: the durable record of
+		// this session stroke. A dab's own (x, y) is recorded, not the interpolated
+		// points between LineTo endpoints -- the kernel's texel replay interpolates at
+		// Spacing itself, with the same step rule, so replaying these waypoints
+		// reproduces the live stroke's dab stream (exactly for a LineTo-driven stroke,
+		// where consecutive waypoints already sit one step apart).
+		readonly List<Effigy.Vec2> _waypoints = new();
+
+		/// <summary>The waypoints of the stroke in progress, or of the last finished stroke
+		/// until the next one begins. Empty before any dab.</summary>
+		public IReadOnlyList<Effigy.Vec2> Waypoints => _waypoints;
+
+		/// <summary>
+		/// This session's stroke as a committable kernel texel stroke, or null when no
+		/// stroke has been dabbed yet. The caller commits it with
+		/// <c>PaintFeature.AddTexelStroke</c> -- that is what makes the stroke survive a
+		/// rebuild and a save, where the session's own canvas scrub does not. Colour
+		/// bytes become 0..1 floats; a scalar channel's value rides in R, the same
+		/// convention the kernel replay uses.
+		/// </summary>
+		public Effigy.TexelStroke ToTexelStroke()
+		{
+			if ( _brush is null || _waypoints.Count == 0 )
+				return null;
+
+			var stroke = new Effigy.TexelStroke
+			{
+				Channel = _channel,
+				R = _brush.R / 255f, G = _brush.G / 255f, B = _brush.B / 255f, A = 1f,
+				Radius = _brush.Radius, Strength = _brush.Strength, Falloff = _brush.Falloff,
+				Spacing = _brush.Spacing, Erase = _brush.Erase,
+			};
+
+			foreach ( var w in _waypoints )
+				stroke.Path.Add( new Effigy.TexelStrokePoint( w.x, w.y ) );
+
+			return stroke;
+		}
+
 		// Snapshot being built for the stroke in progress: rect + pre-stroke bytes.
 		int _snapX, _snapY, _snapW, _snapH;
 		byte[] _snapBytes;
@@ -295,6 +349,7 @@ public static class TexturePaintService
 		{
 			if ( _active ) throw new InvalidOperationException( "A stroke is already in progress." );
 			_brush = brush ?? throw new ArgumentNullException( nameof( brush ) );
+			_waypoints.Clear();
 			if ( _brush.Channel != _channel )
 				throw new ArgumentException( $"Session channel is {_channel}, brush channel is {_brush.Channel}." );
 			_active = true;
@@ -318,6 +373,7 @@ public static class TexturePaintService
 				Spacing = _brush.Spacing, Channel = _channel,
 			};
 			DabOnCanvas( _canvas, dab );
+			_waypoints.Add( new Effigy.Vec2( x, y ) );
 			MarkDirty( x, y );
 			_lastX = x; _lastY = y; _hasLast = true;
 		}

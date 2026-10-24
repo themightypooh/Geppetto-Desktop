@@ -35,6 +35,8 @@ public static class HeadlessRender
 		renderer.AntiAliasing = options.AntiAliasing;
 		renderer.ShadowRadius = options.ShadowRadius;
 		renderer.GroundShadow = options.GroundShadow;
+		renderer.NprInk = options.NprInk; renderer.NprTone = options.NprTone;
+		renderer.NprStrength = options.NprStrength; renderer.NprInkWidth = options.NprInkWidth;
 		if (options.Hdri is not null) renderer.LoadEnvironmentAsync(options.Hdri).GetAwaiter().GetResult();
 		using var overlay = new SkeletonOverlay( gl );
 		using var target = new CaptureTarget( gl, options.Width, options.Height );

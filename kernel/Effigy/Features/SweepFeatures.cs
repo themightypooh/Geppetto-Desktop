@@ -251,6 +251,159 @@ internal static class Skinner
 	}
 
 	/// <summary>
+	/// Skin a tube whose section has TWO OR MORE holes (wave 2: multi-hole caps).
+	///
+	/// The single-hole case keeps its annular quad bands (see SkinWithHole); with two or more
+	/// holes a band per hole cannot tile the cap, because the cap is one region with several
+	/// boundaries, not several annuli. So the caps here are TRIANGULATED from the section's
+	/// own loops, with the same contract the extrude caps use: <paramref name="nearTris"/>
+	/// and <paramref name="farTris"/> index the concatenated loop list (outer first, then
+	/// each hole in order, every loop with the outer's point count), exactly as
+	/// Triangulate.WithHoles returns them; the far cap takes them as given and the near cap
+	/// takes them reversed, the same far-as-is / near-reversed convention as the extrude.
+	/// The tubes are the same as BuildHoled's (outer wall out, hole walls into the void).
+	///
+	/// WINDING IS NOT FIXED BY REVERSING RINGS. SkinChecked can reverse rings because its
+	/// caps are built from ring order; a triangulated cap is indexed by profile position, so
+	/// reversing a ring would scramble its triangles instead of flipping them. Here a
+	/// negative-volume build is rebuilt with every winding flipped instead: tube quads swap
+	/// sides and the two caps swap which one is reversed. The caller supplies a
+	/// triangulation per end because loft sections differ per end; a sweep passes the same
+	/// triangulation twice, since its profile is the same at both ends (taper is a uniform
+	/// scale about the section centre, so it cannot change which bridge the triangulation
+	/// needs). With <paramref name="wrap"/> set there are no caps and the triangulations
+	/// are ignored.
+	/// </summary>
+	public static PolyMesh SkinWithHoles( IReadOnlyList<List<Vec3>> outerRings,
+		IReadOnlyList<IReadOnlyList<List<Vec3>>> holeRings,
+		IReadOnlyList<(int A, int B, int C)> nearTris,
+		IReadOnlyList<(int A, int B, int C)> farTris,
+		int material, bool wrap = false )
+	{
+		var mesh = BuildHoledMulti( outerRings, holeRings, nearTris, farTris, material, wrap, flip: false );
+
+		if ( mesh.SignedVolume() < -1e-9f )
+			mesh = BuildHoledMulti( outerRings, holeRings, nearTris, farTris, material, wrap, flip: true );
+
+		return mesh;
+	}
+
+	static PolyMesh BuildHoledMulti( IReadOnlyList<List<Vec3>> outerRings,
+		IReadOnlyList<IReadOnlyList<List<Vec3>>> holeRings,
+		IReadOnlyList<(int A, int B, int C)> nearTris,
+		IReadOnlyList<(int A, int B, int C)> farTris,
+		int material, bool wrap, bool flip )
+	{
+		var count = outerRings[0].Count;
+		var mesh = new PolyMesh();
+
+		var outerStarts = new int[outerRings.Count];
+		var holeStarts = new int[holeRings.Count][];
+
+		for ( var r = 0; r < outerRings.Count; r++ )
+		{
+			outerStarts[r] = mesh.Positions.Count;
+			foreach ( var p in outerRings[r] )
+				mesh.AddVertex( p );
+
+			for ( var h = 0; h < holeRings.Count; h++ )
+			{
+				holeStarts[h] ??= new int[outerRings.Count];
+				holeStarts[h][r] = mesh.Positions.Count;
+				foreach ( var p in holeRings[h][r] )
+					mesh.AddVertex( p );
+			}
+		}
+
+		var spans = wrap ? outerRings.Count : outerRings.Count - 1;
+		var along = new float[spans + 1];
+
+		for ( var r = 1; r <= spans; r++ )
+			along[r] = along[r - 1] + (outerRings[r % outerRings.Count][0] - outerRings[r - 1][0]).Length;
+
+		var total = along[^1] > 0f ? along[^1] : 1f;
+		var around = new float[count + 1];
+
+		for ( var i = 0; i < count; i++ )
+			around[i + 1] = around[i] + (outerRings[0][(i + 1) % count] - outerRings[0][i]).Length;
+
+		var perimeter = around[^1] > 0f ? around[^1] : 1f;
+
+		void Tube( int[] starts, bool holeWall )
+		{
+			// Hole walls are wound backwards relative to the outer wall; the global flip
+			// swaps both, so a flipped build still has hole normals into the void.
+			var flipQuad = holeWall ? !flip : flip;
+
+			for ( var r = 0; r < spans; r++ )
+			{
+				var next = (r + 1) % outerRings.Count;
+
+				for ( var i = 0; i < count; i++ )
+				{
+					var j = (i + 1) % count;
+					var v0 = along[r] / total;
+					var v1 = along[r + 1] / total;
+					var u0 = around[i] / perimeter;
+					var u1 = around[i + 1] / perimeter;
+
+					mesh.AddFace(
+						flipQuad
+							? new[] { starts[r] + i, starts[next] + i, starts[next] + j, starts[r] + j }
+							: new[] { starts[r] + i, starts[r] + j, starts[next] + j, starts[next] + i },
+						flipQuad
+							? new[] { new Vec2( u0, v0 ), new Vec2( u0, v1 ), new Vec2( u1, v1 ), new Vec2( u0, v0 ) }
+							: new[] { new Vec2( u0, v0 ), new Vec2( u1, v0 ), new Vec2( u1, v1 ), new Vec2( u0, v1 ) },
+						material );
+				}
+			}
+		}
+
+		Tube( outerStarts, holeWall: false );
+
+		for ( var h = 0; h < holeRings.Count; h++ )
+			Tube( holeStarts[h], holeWall: true );
+
+		if ( wrap )
+			return mesh;
+
+		// Cap triangles index the concatenated loop list: outer first, then each hole in
+		// order, every loop with the outer's point count. Cap UVs are flat zeros — a cap
+		// is not a surface anyone textures by loop position, and inventing UVs here would
+		// be worse than none.
+		int Map( int flatIndex, int station )
+		{
+			if ( flatIndex < count )
+				return outerStarts[station] + flatIndex;
+
+			var h = (flatIndex - count) / count;
+			return holeStarts[h][station] + (flatIndex - count - h * count);
+		}
+
+		var last = outerRings.Count - 1;
+
+		void Cap( IReadOnlyList<(int A, int B, int C)> tris, int station, bool reverse )
+		{
+			foreach ( var (a, b, c) in tris )
+			{
+				mesh.AddFace(
+					reverse
+						? new[] { Map( c, station ), Map( b, station ), Map( a, station ) }
+						: new[] { Map( a, station ), Map( b, station ), Map( c, station ) },
+					new[] { Vec2.Zero, Vec2.Zero, Vec2.Zero },
+					material );
+			}
+		}
+
+		// Far cap as given, near cap reversed — the extrude convention. The global flip
+		// swaps the two, which is the whole winding fix.
+		Cap( farTris, last, reverse: flip );
+		Cap( nearTris, 0, reverse: !flip );
+
+		return mesh;
+	}
+
+	/// <summary>
 	/// Resample a closed loop to exactly <paramref name="count"/> points, evenly spaced by arc
 	/// length.
 	///
@@ -395,7 +548,11 @@ public sealed class SweepFeature : SketchConsumingFeature
 	public readonly FloatParam Twist = new( "Twist", 0f, unit: "deg" );
 
 	/// <summary>Scale along the sweep as "t:scale,…" pairs, t in 0..1 along the path — e.g.
-	/// "0:1,0.5:1.4,1:0.2" swells mid-sweep and tapers to a point. Empty means no taper.</summary>
+	/// "0:1,0.5:1.4,1:0.2" swells mid-sweep and tapers to a point — BUT ONLY IF THE PATH
+	/// HAS STATIONS NEAR THOSE t VALUES. The taper is sampled at the path's stations, so a
+	/// two-station path interpolates end to end and never shows a mid value: that is the
+	/// contract, not a bug (wave 2), and a sweep with mid-taper points on a two-station path
+	/// warns instead of silently drawing a straight taper. Empty means no taper.</summary>
 	public readonly StringParam Taper = new( "Taper (t:scale,…)", "" );
 
 	public readonly IntParam Material = new( "Material slot", 0, 0, 63 ) { Slider = false };
@@ -439,6 +596,15 @@ public sealed class SweepFeature : SketchConsumingFeature
 
 		var taper = ParseTaper( Taper.Value );
 
+		// TAPER STATIONS ARE THE CONTRACT (wave 2 decision, with evidence in the tests):
+		// the taper function is sampled at the path's stations, so a path with only its two
+		// ends has nothing to sample a mid value at, and interpolating end to end is the
+		// correct result for that path — NOT a missing feature. Auto-subdividing the path
+		// would change every existing tapered sweep's rings, so the fix is a warning plus
+		// the docstring above, not a geometry change.
+		if ( taper is not null && !closed && path.Count == 2 && taper.Any( p => p.T > 0f && p.T < 1f ) )
+			Warning = "Taper mid-points need path stations: this path has only its two ends, so the sweep interpolates end to end and the mid-taper values never appear. Add a mid-point to the path to see them.";
+
 		foreach ( var profile in profiles )
 		{
 			// A twist cannot be carried round a closed path: the last ring has to be the first
@@ -457,17 +623,37 @@ public sealed class SweepFeature : SketchConsumingFeature
 			{
 				mesh = Skinner.SkinChecked( rings, !closed, Material.Clamped, wrap: closed );
 			}
-			else
+			else if ( profile.Holes.Count == 1 )
 			{
-				// One hole is carried through as a tunnel with annular end caps; extra holes
-				// are still dropped, but said out loud rather than silently.
-				if ( profile.Holes.Count > 1 )
-					Warning = $"Only the first of {profile.Holes.Count} holes was carried through the sweep; the rest were dropped.";
-
+				// One hole keeps its annular quad bands — the path every existing holed sweep
+				// already rebuilds on, left exactly alone.
 				var holeLoop = PrepareHoleLoop( profile.Outer, profile.Holes[0], profile.Outer.Count );
 				var holeRings = RingsForLoop( holeLoop, centre, path, frames, holonomy, closed ? 0f : Twist.Value, taper, closed );
 
 				mesh = Skinner.SkinWithHole( rings, holeRings, Material.Clamped, wrap: closed );
+			}
+			else
+			{
+				// Two or more holes: every hole is carried through as its own tunnel, and the
+				// caps are triangulated from the prepared loops (wave 2). The prepared loops
+				// are what the rings are built from, so the triangulation's indices map
+				// straight onto the ring vertices.
+				var prepared = profile.Holes
+					.Select( h => PrepareHoleLoop( profile.Outer, h, profile.Outer.Count ) )
+					.ToList();
+				var allHoleRings = prepared
+					.Select( loop => RingsForLoop( loop, centre, path, frames, holonomy, closed ? 0f : Twist.Value, taper, closed ) )
+					.ToList();
+				var tris = Triangulate.WithHoles( profile.Outer, prepared.Cast<IReadOnlyList<Vec2>>().ToList() );
+
+				if ( tris.Count == 0 )
+					Fail(
+						$"This profile's {profile.Holes.Count} holes could not be capped — the loops may cross each other.",
+						"Ear clipping returned no triangles for a multi-hole profile.",
+						"Check that every inner loop lies fully inside the outer one",
+						"Redraw a hole so it does not cross the outer loop or another hole" );
+
+				mesh = Skinner.SkinWithHoles( rings, allHoleRings, tris, tris, Material.Clamped, wrap: closed );
 			}
 
 			Emit( ctx, mesh );
@@ -916,7 +1102,14 @@ public sealed class LoftFeature : SketchConsumingFeature
 		var count = Segments.Clamped;
 		var taper = SweepFeature.ParseTaper( Taper.Value );
 		var rings = new List<List<Vec3>>( sketches.Count );
-		var holeRings = new List<List<Vec3>>( sketches.Count );
+		// Per hole, per section — the single-hole path reads holeRingsByHole[0], so the
+		// old single-ring list is gone rather than kept alongside as a second truth.
+		var holeRingsByHole = new List<List<List<Vec3>>>();
+		// The FINAL 2D loops per section (after start-angle rotation), for triangulating
+		// the two end caps of a multi-hole loft.
+		var sectionOuters = new List<List<Vec2>>();
+		var sectionHoles = new List<List<List<Vec2>>>();
+		var holeCount = -1;
 
 		// Holes change the alignment strategy: Skinner.Align rotates each section to its
 		// neighbour in 3D, which would break the index-for-index pairing the annular caps
@@ -937,7 +1130,17 @@ public sealed class LoftFeature : SketchConsumingFeature
 					"Remove that sketch from the loft" );
 
 			if ( found.Profiles[0].HasHoles )
+			{
 				anyHoles = true;
+
+				if ( holeCount < 0 )
+					holeCount = found.Profiles[0].Holes.Count;
+				else if ( found.Profiles[0].Holes.Count != holeCount )
+					Fail(
+						"Every loft section needs the same holes.",
+						$"One section has {found.Profiles[0].Holes.Count} hole(s) and another has {holeCount}.",
+						"Give every section the same holes", "Remove the holes from every section" );
+			}
 		}
 
 		var firstAngle = 0f;
@@ -957,8 +1160,11 @@ public sealed class LoftFeature : SketchConsumingFeature
 						"One section has a hole and another does not, so there is no tunnel to skin between them.",
 						"Give every section the same hole", "Remove the hole from every section" );
 
-				if ( profile.Holes.Count > 1 )
-					Warning = $"Only the first of {profile.Holes.Count} holes was carried through the loft; the rest were dropped.";
+				if ( profile.Holes.Count != holeCount )
+					Fail(
+						"Every loft section needs the same holes.",
+						$"One section has {profile.Holes.Count} hole(s) and another has {holeCount}.",
+						"Give every section the same holes", "Remove the holes from every section" );
 
 				if ( rings.Count == 0 )
 				{
@@ -969,14 +1175,30 @@ public sealed class LoftFeature : SketchConsumingFeature
 					outer = SweepFeature.RotateLoopToAngle( outer, centre, firstAngle );
 				}
 
-				var hole = SweepFeature.PrepareHoleLoop( profile.Outer, profile.Holes[0], count );
+				// The FINAL 2D loops — after the start-angle rotation — are what the end
+				// caps are triangulated from, so the triangulation's indices map straight
+				// onto the ring vertices at that end.
+				var finalHoles = new List<List<Vec2>>( profile.Holes.Count );
 
-				// About the OUTER centre, not the hole's own: the pairing is by angle about
-				// the shared centre, which is what the annular caps are tiled on.
-				if ( rings.Count > 0 )
-					hole = SweepFeature.RotateLoopToAngle( hole, centre, firstAngle );
+				for ( var h = 0; h < profile.Holes.Count; h++ )
+				{
+					var hole = SweepFeature.PrepareHoleLoop( profile.Outer, profile.Holes[h], count );
 
-				holeRings.Add( hole.Select( sketch.Plane.ToWorld ).ToList() );
+					// About the OUTER centre, not the hole's own: the pairing is by angle about
+						// the shared centre, which is what the annular caps are tiled on.
+					if ( rings.Count > 0 )
+						hole = SweepFeature.RotateLoopToAngle( hole, centre, firstAngle );
+
+					finalHoles.Add( hole );
+
+					if ( holeRingsByHole.Count <= h )
+						holeRingsByHole.Add( new List<List<Vec3>>( sketches.Count ) );
+
+					holeRingsByHole[h].Add( hole.Select( sketch.Plane.ToWorld ).ToList() );
+				}
+
+				sectionOuters.Add( outer );
+				sectionHoles.Add( finalHoles );
 			}
 
 			var ring = outer.Select( sketch.Plane.ToWorld ).ToList();
@@ -1003,19 +1225,39 @@ public sealed class LoftFeature : SketchConsumingFeature
 				if ( anyHoles )
 				{
 					// About the section centroid, not the hole's own: tapering shrinks the
-					// whole section toward its centre, hole position included.
-					for ( var k = 0; k < holeRings[i].Count; k++ )
-						holeRings[i][k] = c + (holeRings[i][k] - c) * scale;
+					// whole section toward its centre, hole position included. Taper is a
+					// uniform scale, so it cannot change which bridge the cap triangulation
+					// needs — the untapered loops' triangulation stays valid.
+					foreach ( var holeRing in holeRingsByHole )
+						for ( var k = 0; k < holeRing[i].Count; k++ )
+							holeRing[i][k] = c + (holeRing[i][k] - c) * scale;
 				}
 			}
 		}
 
 		// Closed skins the last section back to the FIRST ONE'S vertices rather than to a copy
 		// of them, which is the only way the seam is genuinely closed — see Skinner.Skin.
-		if ( anyHoles )
-			Emit( ctx, Skinner.SkinWithHole( rings, holeRings, Material.Clamped, wrap: Closed.Value ) );
-		else
+		if ( !anyHoles )
 			Emit( ctx, Skinner.SkinChecked( rings, !Closed.Value, Material.Clamped, wrap: Closed.Value ) );
+		else if ( holeCount == 1 )
+			Emit( ctx, Skinner.SkinWithHole( rings, holeRingsByHole[0], Material.Clamped, wrap: Closed.Value ) );
+		else
+		{
+			// Two or more holes: each end cap is triangulated from ITS OWN section's
+			// loops (sections differ, so one triangulation cannot serve both ends),
+			// exactly as the extrude caps triangulate top and bottom separately.
+			var nearTris = Triangulate.WithHoles( sectionOuters[0], sectionHoles[0].Cast<IReadOnlyList<Vec2>>().ToList() );
+			var farTris = Triangulate.WithHoles( sectionOuters[^1], sectionHoles[^1].Cast<IReadOnlyList<Vec2>>().ToList() );
+
+			if ( nearTris.Count == 0 || farTris.Count == 0 )
+				Fail(
+					$"This loft's {holeCount} holes could not be capped — the loops may cross each other.",
+					"Ear clipping returned no triangles for a multi-hole section.",
+					"Check that every inner loop lies fully inside the outer one",
+					"Redraw a hole so it does not cross the outer loop or another hole" );
+
+			Emit( ctx, Skinner.SkinWithHoles( rings, holeRingsByHole, nearTris, farTris, Material.Clamped, wrap: Closed.Value ) );
+		}
 	}
 
 	List<Sketch> ResolveSections( FeatureContext ctx )

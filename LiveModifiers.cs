@@ -62,12 +62,36 @@ public sealed class DecimateModifier : MeshModifier
 	public override PolyMesh Apply( PolyMesh mesh ) => Decimate.ToRatio( mesh, Math.Clamp( Ratio, .01f, 1f ) );
 }
 
-/// <summary>RetopoService: triangle pairing into quads (optionally pre-decimated), skin preserved.</summary>
+/// <summary>RetopoService: triangle pairing into quads (optionally pre-decimated), skin preserved.
+/// With <see cref="LodTargets"/> set (plus-separated triangle counts, e.g. "4000+1500+500"),
+/// runs <see cref="RetopoService.RetopoLodChain"/> and prints one
+/// <see cref="RetopoService.CheckLodPreservation"/> summary per LOD, returning the smallest LOD.</summary>
 public sealed class RetopoModifier : MeshModifier
 {
 	public RetopoService.Options Options { get; set; } = new();
-	public override string Name => "retopo";
-	public override PolyMesh Apply( PolyMesh mesh ) => RetopoService.Retopo( mesh, Options ).Mesh;
+	/// <summary>Plus-separated LOD triangle targets; null/empty = single Retopo pass. Plus, not
+	/// comma: the --modifiers spec itself splits on commas, so a comma list would be torn apart
+	/// into unknown kinds before it ever reached this modifier.</summary>
+	public string LodTargets { get; set; }
+	public List<string> LastLodSummaries { get; } = new();
+	public override string Name => LodTargets is null ? "retopo" : $"retopo lod[{LodTargets}]";
+	public override PolyMesh Apply( PolyMesh mesh )
+	{
+		if ( string.IsNullOrWhiteSpace( LodTargets ) ) return RetopoService.Retopo( mesh, Options ).Mesh;
+		var targets = RetopoService.ParseLodTargets( LodTargets.Replace( '+', ',' ) );
+		var chain = RetopoService.RetopoLodChain( mesh, targets, Options );
+		LastLodSummaries.Clear();
+		PolyMesh smallest = mesh;
+		for ( int li = 0; li < chain.Count; li++ )
+		{
+			var lod = chain[ li ];
+			var check = RetopoService.CheckLodPreservation( mesh, targets[ li ], lod, Options );
+			LastLodSummaries.Add( check.Summary() );
+			Console.WriteLine( $"retopo lod: {check.Summary()}" );
+			smallest = lod.Mesh;
+		}
+		return smallest;
+	}
 }
 
 /// <summary>Blender's Smooth / Laplacian Smooth family via the kernel's mesh filters.</summary>
@@ -110,7 +134,11 @@ public sealed class DisplaceModifier : MeshModifier
 	}
 }
 
-/// <summary>Blender's Shrinkwrap onto another surface (ShrinkwrapService), with offset and max distance.</summary>
+/// <summary>Blender's Shrinkwrap onto another surface (ShrinkwrapService), with offset and max distance.
+/// Routes through <see cref="ShrinkwrapService.WrapToSurface"/> (true closest-point projection),
+/// NOT the legacy nearest-vertex <see cref="ShrinkwrapService.Wrap"/>: Wrap ignores
+/// <see cref="ShrinkwrapService.Options.Mode"/> and <see cref="ShrinkwrapService.Options.SmoothIterations"/>
+/// entirely, so the old modifier could never exercise TargetNormalProject or smoothing.</summary>
 public sealed class ShrinkwrapModifier : MeshModifier
 {
 	public PolyMesh Target { get; set; }
@@ -119,9 +147,27 @@ public sealed class ShrinkwrapModifier : MeshModifier
 	public override PolyMesh Apply( PolyMesh mesh )
 	{
 		if ( Target is null ) return mesh;
-		var wrapped = ShrinkwrapService.Wrap( mesh, Target, Options ).Mesh;
+		var wrapped = ShrinkwrapService.WrapToSurface( mesh, Target, Options ).Mesh;
 		wrapped.Skin ??= mesh.Skin?.Clone();
 		return wrapped;
+	}
+}
+
+/// <summary>DataTransferService barycentric transfer as a modifier: restores surface data
+/// (UVs, skin weights, vertex colours, morph deltas) from <see cref="Source"/> onto the mesh
+/// as it enters this modifier. The intended chain is retopo first (which changes topology
+/// and drops per-vertex data) then datatransfer from the pre-retopo source, so the LOD keeps
+/// the original's data interpolated barycentrically instead of nearest-vertex staircasing.</summary>
+public sealed class DataTransferModifier : MeshModifier
+{
+	public PolyMesh Source { get; set; }
+	public DataTransferService.Channel[] Channels { get; set; } = new[] { DataTransferService.Channel.SkinWeights, DataTransferService.Channel.UVs };
+	public float MaxDistance { get; set; } = float.MaxValue;
+	public override string Name => $"datatransfer {string.Join( "+", Channels.Select( c => c.ToString().ToLowerInvariant() ) )}";
+	public override PolyMesh Apply( PolyMesh mesh )
+	{
+		if ( Source is null ) return mesh;
+		return DataTransferService.Transfer( Source, mesh, new DataTransferService.Options { Channels = Channels, MaxDistance = MaxDistance } ).Mesh;
 	}
 }
 
@@ -180,9 +226,15 @@ public sealed class ModifierStack
 		return mesh.Remesh( Evaluate( mesh.SourceMesh ) );
 	}
 
-	/// <summary>`--modifiers subsurf,decimate,retopo,smooth,displace,shrinkwrap,morph` demo stack,
-	/// sized from the mesh radius (inches). Displace uses the head bone's weights when rigged.</summary>
-	public static readonly string[] Kinds = { "subsurf", "decimate", "retopo", "smooth", "displace", "shrinkwrap", "morph" };
+	/// <summary>`--modifiers subsurf,decimate,retopo,smooth,displace,shrinkwrap,morph,datatransfer` demo stack,
+	/// sized from the mesh radius (inches). Displace uses the head bone's weights when rigged.
+	/// Option syntax (colon segments, key=value; lists use '+' because the spec splits on commas):
+	/// `shrinkwrap:mode=TargetNormalProject:smooth=2` (mode = NearestSurface|NormalProjection|
+	/// TargetNormalProject; offset/maxdist in mesh units, defaulting to r*.004 / r*.05),
+	/// `retopo:targets=4000+1500+500` (LOD chain + preservation summaries),
+	/// `datatransfer:channels=uvs+colors` (channels = skin|uvs|colors|morphs; source = the
+	/// mesh as loaded, so `retopo,datatransfer` restores the original's data onto the LOD).</summary>
+	public static readonly string[] Kinds = { "subsurf", "decimate", "retopo", "smooth", "displace", "shrinkwrap", "morph", "datatransfer" };
 
 	public static ModifierStack FromSpec( string spec, ViewportMesh mesh )
 	{
@@ -190,13 +242,34 @@ public sealed class ModifierStack
 		float r = MathF.Max( 1e-3f, mesh.Radius );
 		foreach ( var raw in spec.Split( ',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries ) )
 		{
-			switch ( raw.ToLowerInvariant() )
+			int colon = raw.IndexOf( ':' );
+			string kind = ( colon < 0 ? raw : raw[ ..colon ] ).ToLowerInvariant();
+			var opts = new Dictionary<string, string>( StringComparer.OrdinalIgnoreCase );
+			if ( colon >= 0 )
+				foreach ( var seg in raw[ ( colon + 1 ).. ].Split( ':', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries ) )
+				{
+					int eq = seg.IndexOf( '=' );
+					if ( eq < 0 ) throw new ArgumentException( $"--modifiers: option '{seg}' in '{raw}' needs key=value." );
+					opts[ seg[ ..eq ].Trim() ] = seg[ ( eq + 1 ).. ].Trim();
+				}
+			void NoOpts()
 			{
-				case "subsurf": stack.Modifiers.Add( new SubdivisionModifier() ); break;
-				case "decimate": stack.Modifiers.Add( new DecimateModifier { Ratio = .25f } ); break;
-				case "retopo": stack.Modifiers.Add( new RetopoModifier() ); break;
-				case "smooth": stack.Modifiers.Add( new SmoothModifier() ); break;
-				case "displace":
+				if ( opts.Count > 0 ) throw new ArgumentException( $"--modifiers: '{kind}' takes no options, got '{raw}'." );
+			}
+			switch ( kind )
+			{
+				case "subsurf": NoOpts(); stack.Modifiers.Add( new SubdivisionModifier() ); break;
+				case "decimate": NoOpts(); stack.Modifiers.Add( new DecimateModifier { Ratio = .25f } ); break;
+				case "retopo":
+				{
+					var mod = new RetopoModifier();
+					foreach ( var kv in opts )
+						if ( kv.Key == "targets" ) mod.LodTargets = kv.Value;
+						else throw new ArgumentException( $"--modifiers: unknown retopo option '{kv.Key}' (expected targets)." );
+					stack.Modifiers.Add( mod ); break;
+				}
+				case "smooth": NoOpts(); stack.Modifiers.Add( new SmoothModifier() ); break;
+				case "displace": NoOpts();
 				{
 					int bone = HeadBone( mesh.Rig );
 					stack.Modifiers.Add( new DisplaceModifier { Distance = r * .03f, Weights = bone >= 0 ? DisplaceModifier.BoneGroup( bone ) : null } );
@@ -206,10 +279,46 @@ public sealed class ModifierStack
 				{
 					// Wrap onto a coarse decimated copy of itself: a "low-poly cast" with a small offset.
 					var target = Decimate.ToRatio( mesh.SourceMesh, .05f );
-					stack.Modifiers.Add( new ShrinkwrapModifier { Target = target, Options = new ShrinkwrapService.Options { Offset = r * .004f, MaxDistance = r * .05f } } );
+					var swOpts = new ShrinkwrapService.Options { Offset = r * .004f, MaxDistance = r * .05f };
+					foreach ( var kv in opts )
+						if ( kv.Key == "mode" )
+						{
+							if ( !Enum.TryParse<ShrinkwrapService.Mode>( kv.Value, ignoreCase: true, out var mode ) )
+								throw new ArgumentException( $"--modifiers: unknown shrinkwrap mode '{kv.Value}' (expected NearestSurface, NormalProjection, TargetNormalProject)." );
+							swOpts.Mode = mode;
+						}
+						else if ( kv.Key == "smooth" ) swOpts.SmoothIterations = int.Parse( kv.Value );
+						else if ( kv.Key == "offset" ) swOpts.Offset = float.Parse( kv.Value );
+						else if ( kv.Key == "maxdist" ) swOpts.MaxDistance = float.Parse( kv.Value );
+						else throw new ArgumentException( $"--modifiers: unknown shrinkwrap option '{kv.Key}' (expected mode, smooth, offset, maxdist)." );
+					stack.Modifiers.Add( new ShrinkwrapModifier { Target = target, Options = swOpts } );
 					break;
 				}
-				case "morph":
+				case "datatransfer":
+				{
+					if ( mesh.SourceMesh is null ) throw new ArgumentException( "--modifiers: datatransfer needs a retained source mesh (none loaded)." );
+					var channels = new List<DataTransferService.Channel> { DataTransferService.Channel.SkinWeights, DataTransferService.Channel.UVs };
+					float maxDist = float.MaxValue;
+					foreach ( var kv in opts )
+						if ( kv.Key == "channels" )
+						{
+							channels = new List<DataTransferService.Channel>();
+							foreach ( var c in kv.Value.Split( '+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries ) )
+								channels.Add( c.ToLowerInvariant() switch
+								{
+									"skin" => DataTransferService.Channel.SkinWeights,
+									"uvs" or "uv" => DataTransferService.Channel.UVs,
+									"colors" or "color" => DataTransferService.Channel.VertexColors,
+									"morphs" or "morph" => DataTransferService.Channel.MorphDeltas,
+									_ => throw new ArgumentException( $"--modifiers: unknown datatransfer channel '{c}' (expected skin, uvs, colors, morphs)." ),
+								} );
+						}
+						else if ( kv.Key == "maxdist" ) maxDist = float.Parse( kv.Value );
+						else throw new ArgumentException( $"--modifiers: unknown datatransfer option '{kv.Key}' (expected channels, maxdist)." );
+					stack.Modifiers.Add( new DataTransferModifier { Source = mesh.SourceMesh, Channels = channels.ToArray(), MaxDistance = maxDist } );
+					break;
+				}
+				case "morph": NoOpts();
 				{
 					var morph = new MorphModifier();
 					var first = mesh.SourceMesh?.ValidMorphs.FirstOrDefault();
@@ -217,7 +326,7 @@ public sealed class ModifierStack
 					stack.Modifiers.Add( morph );
 					break;
 				}
-				default: throw new ArgumentException( $"--modifiers: unknown kind '{raw}' (expected {string.Join( ", ", Kinds )})" );
+				default: throw new ArgumentException( $"--modifiers: unknown kind '{kind}' (expected {string.Join( ", ", Kinds )})" );
 			}
 		}
 		return stack;

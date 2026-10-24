@@ -27,12 +27,11 @@ public sealed class FacePoserService
 	readonly Random _random = new();
 
 	/// <summary>
-	/// The morph document this pane edits, when the pane has one. ServeMode builds this service
-	/// per pane over a viewport mesh, so it is null unless the host attaches a
-	/// <see cref="MorphEditService"/> for the document — <c>symmetrize</c>/<c>split</c> then fail
-	/// clearly instead of pretending to edit targets. Attaching it in ServeMode is a follow-up
-	/// for that file's owner, not something this service can do on its own (it never sees the
-	/// PolyMesh, only the viewport mesh).
+	/// The morph document this pane edits, when the pane has one. ServeMode attaches it when
+	/// the pane opened a document with exactly one editable body; otherwise it is null and
+	/// <c>symmetrize</c>/<c>split</c> fail clearly instead of pretending to edit targets.
+	/// This service never sees the PolyMesh itself (only the viewport mesh), so it cannot
+	/// attach one on its own.
 	/// </summary>
 	public MorphEditService Morphs { get; set; }
 
@@ -169,6 +168,8 @@ public sealed class FacePoserService
 			["controllers"] = controllers,
 			["presets"] = new JsonArray( _rig.Presets.Keys.Select( k => (JsonNode)k ).ToArray() ),
 			["preset"] = _preset,
+			["morphs"] = Morphs is not null,
+			["targets"] = new JsonArray( (Morphs?.TargetNames ?? new List<string>()).Select( t => (JsonNode)t ).ToArray() ),
 			["scale"] = _scale,
 			["missing"] = missing,
 			["saveable"] = !string.IsNullOrEmpty( _model ),

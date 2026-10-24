@@ -983,7 +983,8 @@ public sealed class ParticleSystem
 public static class ParticleEmitterPresets
 {
 	public static readonly string[] Names =
-		{ "water_splash", "bubbles", "blood_mist", "sparks", "dust_motes", "breath_frost" };
+		{ "water_splash", "bubbles", "blood_mist", "sparks", "dust_motes", "breath_frost",
+		  "fire", "smoke", "rain", "snow", "leaves", "confetti", "steam", "magic_sparkle" };
 
 	public static string? ResolveName( string cueName )
 	{
@@ -1045,6 +1046,59 @@ public static class ParticleEmitterPresets
 				em.LifetimeMin = 0.5f; em.LifetimeMax = 1.1f; em.SizeMin = 1f; em.SizeMax = 2.5f;
 				em.Bursts.Add( new ParticleBurst( 0, 45 ) );
 				break;
+			// Lane 4 (cues + presets): all eight are BURSTS, not rates, so a
+			// timeline mark fires them once and they die on their own. A looping
+			// effect is a RigEvent whose start fires the cue and whose end the
+			// ParticleCueBridge uses to stop rate emitters; burst presets need
+			// no stop. Directions are Z-up like the rest of this file.
+			case "fire":
+				em.Shape = ParticleEmitterShape.Point; em.Direction = new Vector3( 0, 0, 1 );
+				em.Speed = 120f; em.SpeedJitter = 0.5f; em.SpreadDegrees = 30f;
+				em.LifetimeMin = 0.5f; em.LifetimeMax = 1.2f; em.SizeMin = 1.5f; em.SizeMax = 3.5f;
+				em.AngularSpeedMax = 8f; em.Bursts.Add( new ParticleBurst( 0, 120 ) );
+				break;
+			case "smoke":
+				em.Shape = ParticleEmitterShape.Point; em.Direction = new Vector3( 0, 0, 1 );
+				em.Speed = 40f; em.SpeedJitter = 0.4f; em.SpreadDegrees = 25f;
+				em.LifetimeMin = 2f; em.LifetimeMax = 4f; em.SizeMin = 2f; em.SizeMax = 5f;
+				em.AngularSpeedMax = 3f; em.Bursts.Add( new ParticleBurst( 0, 60 ) );
+				break;
+			case "rain":
+				em.Shape = ParticleEmitterShape.Box; em.BoxHalfExtents = new Vector3( 60f, 60f, 10f ); em.Direction = new Vector3( 0, 0, -1 );
+				em.Speed = 300f; em.SpeedJitter = 0.2f; em.SpreadDegrees = 5f;
+				em.LifetimeMin = 0.8f; em.LifetimeMax = 1.5f; em.SizeMin = 0.3f; em.SizeMax = 0.8f;
+				em.Bursts.Add( new ParticleBurst( 0, 200 ) );
+				break;
+			case "snow":
+				em.Shape = ParticleEmitterShape.Box; em.BoxHalfExtents = new Vector3( 60f, 60f, 10f ); em.Direction = new Vector3( 0, 0, -1 );
+				em.Speed = 15f; em.SpeedJitter = 0.6f; em.SpreadDegrees = 20f;
+				em.LifetimeMin = 3f; em.LifetimeMax = 6f; em.SizeMin = 0.4f; em.SizeMax = 1f;
+				em.AngularSpeedMax = 4f; em.Bursts.Add( new ParticleBurst( 0, 120 ) );
+				break;
+			case "leaves":
+				em.Shape = ParticleEmitterShape.Point; em.Direction = new Vector3( 0, 0, -1 );
+				em.Speed = 25f; em.SpeedJitter = 0.6f; em.SpreadDegrees = 60f;
+				em.LifetimeMin = 2f; em.LifetimeMax = 4f; em.SizeMin = 1f; em.SizeMax = 2.5f;
+				em.AngularSpeedMax = 12f; em.Bursts.Add( new ParticleBurst( 0, 60 ) );
+				break;
+			case "confetti":
+				em.Shape = ParticleEmitterShape.Point; em.Direction = new Vector3( 0, 0, 1 );
+				em.Speed = 200f; em.SpeedJitter = 0.5f; em.SpreadDegrees = 70f;
+				em.LifetimeMin = 1f; em.LifetimeMax = 2.5f; em.SizeMin = 0.8f; em.SizeMax = 1.8f;
+				em.AngularSpeedMax = 25f; em.Bursts.Add( new ParticleBurst( 0, 150 ) );
+				break;
+			case "steam":
+				em.Shape = ParticleEmitterShape.Point; em.Direction = new Vector3( 0, 0, 1 );
+				em.Speed = 40f; em.SpeedJitter = 0.4f; em.SpreadDegrees = 25f;
+				em.LifetimeMin = 1.5f; em.LifetimeMax = 3f; em.SizeMin = 1.5f; em.SizeMax = 4f;
+				em.Bursts.Add( new ParticleBurst( 0, 50 ) );
+				break;
+			case "magic_sparkle":
+				em.Shape = ParticleEmitterShape.Sphere; em.SphereRadius = 8f; em.Direction = new Vector3( 0, 0, 1 );
+				em.Speed = 20f; em.SpeedJitter = 0.8f; em.SpreadDegrees = 180f;
+				em.LifetimeMin = 0.8f; em.LifetimeMax = 2f; em.SizeMin = 0.3f; em.SizeMax = 1f;
+				em.AngularSpeedMax = 15f; em.Bursts.Add( new ParticleBurst( 0, 80 ) );
+				break;
 		}
 		if ( direction is { } d && d.LengthSquared() > 1e-12f ) em.Direction = d;
 		return em;
@@ -1076,6 +1130,37 @@ public static class ParticleEmitterPresets
 				break;
 			case "breath_frost":
 				s.Drag = 1.5f; s.TurbulenceStrength = 10f; s.TurbulenceFrequency = 0.4f;
+				break;
+			case "fire":
+				s.Gravity = new Vector3( 0, 0, 80f ); s.Drag = 1.2f;
+				s.TurbulenceStrength = 20f; s.TurbulenceFrequency = 0.3f;
+				break;
+			case "smoke":
+				s.Gravity = new Vector3( 0, 0, 30f ); s.Drag = 2f;
+				s.TurbulenceStrength = 25f; s.TurbulenceFrequency = 0.15f;
+				break;
+			case "rain":
+				s.Drag = 0.05f; s.Wind = new Vector3( 10f, 0f, 0f );
+				break;
+			case "snow":
+				s.Gravity = new Vector3( 0, 0, -30f ); s.Drag = 0.8f;
+				s.TurbulenceStrength = 8f; s.TurbulenceFrequency = 0.1f; s.Wind = new Vector3( 5f, 2f, 0f );
+				break;
+			case "leaves":
+				s.Gravity = new Vector3( 0, 0, -60f ); s.Drag = 1.5f;
+				s.TurbulenceStrength = 35f; s.TurbulenceFrequency = 0.2f; s.Wind = new Vector3( 8f, 0f, 0f );
+				break;
+			case "confetti":
+				s.Drag = 0.6f;
+				s.TurbulenceStrength = 10f; s.TurbulenceFrequency = 0.4f;
+				break;
+			case "steam":
+				s.Gravity = new Vector3( 0, 0, 40f ); s.Drag = 1.5f;
+				s.TurbulenceStrength = 15f; s.TurbulenceFrequency = 0.25f;
+				break;
+			case "magic_sparkle":
+				s.Gravity = new Vector3( 0, 0, -20f ); s.Drag = 1f;
+				s.TurbulenceStrength = 12f; s.TurbulenceFrequency = 0.5f;
 				break;
 		}
 		return s;

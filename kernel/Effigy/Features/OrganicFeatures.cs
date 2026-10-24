@@ -274,8 +274,10 @@ public sealed class BlobFeature : Feature
 			"box" when a.Count == 2 => new SdfBox( Pt( a[0], number, text ), Pt( a[1], number, text ), round, rotation ),
 			"cylinder" when a.Count == 3 => Cylinder( Pt( a[0], number, text ), Pt( a[1], number, text ), Num( a[2], number, text ), round, rotation ),
 			"torus" when a.Count == 3 => new SdfTorus( Pt( a[0], number, text ), Num( a[1], number, text ), Num( a[2], number, text ), rotation ),
-			"sphere" or "ellipsoid" or "capsule" or "cone" or "tube" or "box" or "cylinder" or "torus" => BadShape( number, text, $"{kind} takes {Usage( kind )}" ),
-			_ => BadShape( number, text, $"'{kind}' is not a shape; use sphere, ellipsoid, capsule, cone, tube, box, cylinder or torus" ),
+			"cellular" when a.Count == 4 => new SdfCellular( Num( a[2], number, text ), Num( a[3], number, text ), Pt( a[0], number, text ), Pt( a[1], number, text ) ),
+			"cellular" when a.Count == 5 => new SdfCellular( Num( a[2], number, text ), Num( a[3], number, text ), Pt( a[0], number, text ), Pt( a[1], number, text ), (int)Num( a[4], number, text ) ),
+			"sphere" or "ellipsoid" or "capsule" or "cone" or "tube" or "box" or "cylinder" or "torus" or "cellular" => BadShape( number, text, $"{kind} takes {Usage( kind )}" ),
+			_ => BadShape( number, text, $"'{kind}' is not a shape; use sphere, ellipsoid, capsule, cone, tube, box, cylinder, torus or cellular" ),
 		};
 
 		leaf.Material = material;
@@ -322,6 +324,7 @@ public sealed class BlobFeature : Feature
 		"box" => "a centre and a full size: box 0,0,5 8,4,2 [r=0.3] [rot=0,0,45]",
 		"cylinder" => "two ends and a radius: cylinder 0,0,0 0,0,3 2 [r=0.2] [rot=90,0,0]",
 		"torus" => "a centre, a ring radius and a tube radius: torus 0,0,5 4 0.5 [rot=90,0,0]",
+			"cellular" => "bounds min and max, a scale and a thickness, plus an optional seed: cellular 0,0,0 6,6,6 0.8 0.3 [7]",
 		_ => "points and radii: tube 0,0,0|4,0,6|0,0,12 2|1.5|1",
 	};
 

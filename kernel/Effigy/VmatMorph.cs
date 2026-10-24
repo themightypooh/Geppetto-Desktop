@@ -99,10 +99,8 @@ public static class VmatMorph
 	/// look (negative opacity, roughness above 1). Neither input is mutated; the result is a
 	/// fresh <see cref="SlotLook"/> whose <see cref="SlotLook.Preset"/> is null unless both
 	/// inputs carry the same preset name -- a blend is a new look, not a preset.
-	/// Only the fields <see cref="SlotLook"/> actually carries are blended. The roadmap's
-	/// ShadowTint and Iridescence are not fields on SlotLook (old Lane C did not add them),
-	/// so there is nothing to blend for them here; if they are added later, this method
-	/// must gain them too.
+	/// Only the fields <see cref="SlotLook"/> actually carries are blended, including
+	/// ShadowTint and Iridescence (wave-2 look wiring added them to SlotLook).
 	/// </summary>
 	public static SlotLook Blend( SlotLook a, SlotLook b, float t )
 	{
@@ -128,6 +126,8 @@ public static class VmatMorph
 			Subsurface = Math.Clamp( L( a.Subsurface, b.Subsurface ), 0f, 1f ),
 			SubsurfaceColor = Vec3.Lerp( a.SubsurfaceColor, b.SubsurfaceColor, t ),
 			Opacity = Math.Clamp( L( a.Opacity, b.Opacity ), 0f, 1f ),
+			ShadowTint = Vec3.Lerp( a.ShadowTint, b.ShadowTint, t ),
+			Iridescence = Math.Clamp( L( a.Iridescence, b.Iridescence ), 0f, 1f ),
 		};
 	}
 

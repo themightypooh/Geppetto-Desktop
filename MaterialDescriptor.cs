@@ -119,6 +119,22 @@ public sealed record MaterialDescriptor
 	public float Ps1BootToe { get; init; } = 3.0f;
 	public float Ps1BootCuff { get; init; } = 8.86f;
 	public Vec3 EmissionFactor { get; init; } = Vec3.Zero;
+	/// <summary>Wave-2 look wiring: the SlotLook spectrum for this descriptor, carried from
+	/// <see cref="MaterialPalette.ForLook"/> through the batch into the lit shader's uLook*
+	/// uniforms. All default to the old behaviour (toon/stylized 0, opacity 1, shadow tint
+	/// white), so descriptors that never set them shade exactly as before. Outline width
+	/// is carried but NOT drawn: an ink outline needs a second geometry pass, which the
+	/// viewport does not have yet.</summary>
+	public float LookToon { get; init; } = 0f;
+	public int LookToonBands { get; init; } = 3;
+	public float LookToonRim { get; init; } = 0f;
+	public float LookStylized { get; init; } = 0f;
+	public float LookOutlineWidth { get; init; } = 0f;
+	public Vec3 LookOutlineColor { get; init; } = new Vec3( 0.05f, 0.05f, 0.07f );
+	public float LookOpacity { get; init; } = 1f;
+	public Vec3 LookShadowTint { get; init; } = Vec3.One;
+	public float LookIridescence { get; init; } = 0f;
+	public Vec3 LookSubsurfaceColor { get; init; } = new Vec3( 0.85f, 0.22f, 0.15f );
 
 	/// <summary>Multiplier for tangent-space normal map XY (1 = authored).</summary>
 	public float NormalStrength { get; init; } = 1f;

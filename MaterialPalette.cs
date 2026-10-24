@@ -38,6 +38,54 @@ public static class MaterialPalette
 			RoughnessFactor = look.Rough,
 			MetallicFactor = look.Metal,
 			EmissionFactor = new Effigy.Vec3( L( look.Emit.x ), L( look.Emit.y ), L( look.Emit.z ) ) * 1.5f,
+			// Wave-2 look wiring: the whole spectrum rides with the descriptor now, not
+			// just colour/rough/metal/glow — this is what makes toon/stylized show.
+			Clearcoat = look.Clearcoat,
+			ClearcoatRoughness = look.ClearcoatRoughness,
+			Subsurface = look.Subsurface,
+			LookToon = look.Toon,
+			LookToonBands = look.ToonBands,
+			LookToonRim = look.ToonRim,
+			LookStylized = look.Stylized,
+			LookOutlineWidth = look.OutlineWidth,
+			LookOutlineColor = look.OutlineColor,
+			LookOpacity = look.Opacity,
+			LookShadowTint = look.ShadowTint,
+			LookIridescence = look.Iridescence,
+			LookSubsurfaceColor = look.SubsurfaceColor,
+		};
+	}
+
+	/// <summary>Wave-5 look fix: a garment-detail slot's viewport material. Detail slots
+	/// (Wear rust/algae, metal/dark details) carry a Kind but no SlotLook and no name, so
+	/// the viewer fell back to the neutral default for every one of them and the whole
+	/// model rendered one flat colour. Rust/algae get kind colours (Wear leaves Colour at
+	/// its grey default); other kinds use their stored Colour/Metalness/Roughness; worn
+	/// and dirt fade from the source slot's look when one exists, via the kernel's own
+	/// Worn() rule. Colours go linear as the shader expects, like ForLook. Provisional
+	/// flat colours until real maps land — same spirit as ForName.</summary>
+	public static MaterialDescriptor ForDetail( Effigy.DetailMaterial detail, Effigy.SlotLook? sourceLook )
+	{
+		static float L( float c ) => Effigy.Render.ShadedRender.SrgbToLinear( c );
+		Effigy.Vec3 colour; float rough, metal; Effigy.Vec3 emit = new( 0f, 0f, 0f );
+		switch ( (detail.Kind ?? "").ToLowerInvariant() )
+		{
+			case "rust": colour = new Effigy.Vec3( 0.55f, 0.26f, 0.12f ); rough = 0.85f; metal = 0.05f; break;
+			case "algae": colour = new Effigy.Vec3( 0.28f, 0.46f, 0.20f ); rough = 0.90f; metal = 0f; break;
+			case "glow": colour = detail.Colour; rough = detail.Roughness; metal = detail.Metalness; emit = detail.Colour * 1.5f; break;
+			case "worn":
+			case "dirt":
+				if ( sourceLook is { } look ) { colour = Effigy.DetailMaterials.Worn( look.Color ); rough = look.Rough; metal = look.Metal; }
+				else { colour = detail.Colour; rough = detail.Roughness; metal = detail.Metalness; }
+				break;
+			default: colour = detail.Colour; rough = detail.Roughness; metal = detail.Metalness; break;
+		}
+		return new MaterialDescriptor( detail.Key )
+		{
+			BaseColorFactor = new Effigy.Vec4( L( colour.x ), L( colour.y ), L( colour.z ), 1f ),
+			RoughnessFactor = rough,
+			MetallicFactor = metal,
+			EmissionFactor = new Effigy.Vec3( L( emit.x ), L( emit.y ), L( emit.z ) ),
 		};
 	}
 

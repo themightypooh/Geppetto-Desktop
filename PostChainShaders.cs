@@ -207,6 +207,12 @@ uniform float uGamma;
 uniform int uViewTransform; // 0 AgX, 1 Standard
 uniform int uLook;          // 0 None, 1 Punchy
 uniform int uWriteDepth;    // 1: the scene depth goes into the target with the colour, for overlays drawn after
+uniform int uNprInk;      // 1: draw Linework-style ink outlines over the composite (wave 5, item 30)
+uniform int uNprTone;     // 0 none, 1 halftone, 2 crosshatch, 3 Bayer dither
+uniform int uHasDepth;    // 1: uDepth holds scene depth (0 in synthetic post tests, where depth is unbound)
+uniform float uNprStrength; // 0..1 blend of the NPR treatment toward the plain composite
+uniform float uNprInkWidth; // outline sampling radius, in pixels
+uniform vec3 uNprInkColor;  // ink colour, default black
 " + CocGlsl + @"
 const float kAgxNone[65] = float[]( 0.000000, 0.002006, 0.003338, 0.005200, 0.007322, 0.009628, 0.012177, 0.014816, 0.017746, 0.020813, 0.024178, 0.027859, 0.031683, 0.035994, 0.040497, 0.045490, 0.050808, 0.056587, 0.062933, 0.069599, 0.077199, 0.085174, 0.094092, 0.103761, 0.114190, 0.125961, 0.138279, 0.152604, 0.167749, 0.184681, 0.203332, 0.223353, 0.246247, 0.270254, 0.297748, 0.326879, 0.358704, 0.393059, 0.428989, 0.466786, 0.504722, 0.541486, 0.577209, 0.611481, 0.643631, 0.674954, 0.703241, 0.730778, 0.756074, 0.779986, 0.802581, 0.823211, 0.843214, 0.861090, 0.878373, 0.894293, 0.909218, 0.923443, 0.936353, 0.948884, 0.960250, 0.971169, 0.981391, 0.990707, 0.999572 );
 const float kAgxPunchy[65] = float[]( 0.015550, 0.015710, 0.015940, 0.016095, 0.016244, 0.016470, 0.016619, 0.016834, 0.016980, 0.017194, 0.017404, 0.017608, 0.017949, 0.018474, 0.019043, 0.019832, 0.020868, 0.022159, 0.023800, 0.025752, 0.028368, 0.031514, 0.035615, 0.040724, 0.047370, 0.055874, 0.066185, 0.078461, 0.092214, 0.107438, 0.124249, 0.142634, 0.162615, 0.185106, 0.209323, 0.234994, 0.262522, 0.292388, 0.322841, 0.355228, 0.389366, 0.425549, 0.463529, 0.502024, 0.539312, 0.575732, 0.610632, 0.643480, 0.675534, 0.704452, 0.732515, 0.758525, 0.782846, 0.806161, 0.827077, 0.847291, 0.865845, 0.883214, 0.899797, 0.914715, 0.929120, 0.942397, 0.954825, 0.966747, 0.977516 );
@@ -244,6 +250,78 @@ vec3 srgbEncode(vec3 c) {
 	c = clamp(c, 0.0, 1.0);
 	return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));
 }
+const vec3 kNprLuma = vec3(0.2126, 0.7152, 0.0722);
+float nprLum(vec3 c) { return dot(c, kNprLuma); }
+// Linework-style ink outline: depth discontinuities (silhouettes, inter-body edges)
+// plus strong luminance creases. Depth is linearised with the existing linearDepth().
+// Background (depth 1.0, no geometry) never draws ink: its neighbours agree with it.
+float nprInkEdge() {
+    float w = max(uNprInkWidth, 0.5);
+    vec2 texel = 1.0 / vec2(textureSize(uColor, 0));
+    vec2 ox = vec2(texel.x * w, 0.0);
+    vec2 oy = vec2(0.0, texel.y * w);
+    float edge = 0.0;
+    if (uHasDepth == 1) {
+        float dc = linearDepth(texture(uDepth, vUv).r);
+        float dm = max(dc, 0.5);
+        float de = max(max(abs(linearDepth(texture(uDepth, vUv + ox).r) - dc) / dm,
+                           abs(linearDepth(texture(uDepth, vUv - ox).r) - dc) / dm),
+                       max(abs(linearDepth(texture(uDepth, vUv + oy).r) - dc) / dm,
+                           abs(linearDepth(texture(uDepth, vUv - oy).r) - dc) / dm));
+        edge = max(edge, smoothstep(0.005, 0.03, de));
+    }
+    float lc = nprLum(texture(uColor, vUv).rgb);
+    float le = max(max(abs(nprLum(texture(uColor, vUv + ox).rgb) - lc) / (lc + 0.1),
+                       abs(nprLum(texture(uColor, vUv - ox).rgb) - lc) / (lc + 0.1)),
+                   max(abs(nprLum(texture(uColor, vUv + oy).rgb) - lc) / (lc + 0.1),
+                       abs(nprLum(texture(uColor, vUv - oy).rgb) - lc) / (lc + 0.1)));
+    edge = max(edge, smoothstep(0.25, 0.6, le));
+    return clamp(edge, 0.0, 1.0);
+}
+// Halftone: luminance becomes black dots on white paper; bright areas get no dots.
+vec3 nprHalftone(vec3 c) {
+    float lum = nprLum(c);
+    vec2 g = fract(gl_FragCoord.xy / 6.0) - 0.5;
+    float r = sqrt(clamp(1.0 - lum, 0.0, 1.0) / 3.14159265);
+    float dot = 1.0 - smoothstep(r - 0.08, r + 0.08, length(g));
+    return mix(vec3(1.0), vec3(0.0), dot);
+}
+// One crosshatch layer: parallel lines whose centres sit on integer multiples of spacing.
+float nprHatchLine(vec2 px, vec2 dir, float spacing) {
+    float s = dot(px, dir) / spacing;
+    float ph = abs(fract(s) * 2.0 - 1.0);
+    float w = fwidth(s) * 0.5 + 1e-3;
+    return 1.0 - smoothstep(0.18 - w, 0.18 + w, ph);
+}
+// Crosshatch: darker shading stacks more line directions on white paper.
+vec3 nprCrosshatch(vec3 c) {
+    float lum = nprLum(c);
+    vec2 px = gl_FragCoord.xy;
+    float ink = 0.0;
+    if (lum < 0.80) ink = max(ink, nprHatchLine(px, normalize(vec2(1.0, 1.0)), 6.0));
+    if (lum < 0.60) ink = max(ink, nprHatchLine(px, normalize(vec2(1.0, -1.0)), 6.0));
+    if (lum < 0.40) ink = max(ink, nprHatchLine(px, vec2(1.0, 0.0), 6.0));
+    if (lum < 0.20) ink = max(ink, nprHatchLine(px, vec2(0.0, 1.0), 6.0));
+    return mix(vec3(1.0), vec3(0.0), ink);
+}
+// Bayer dither: ordered 4x4 threshold quantises luminance to 4 levels; hue is preserved
+// by scaling the colour so its luminance hits the quantised level.
+vec3 nprBayer(vec3 c) {
+    float bayer[16] = float[](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+    ivec2 ip = ivec2(mod(gl_FragCoord.xy, 4.0));
+    float b = (bayer[ip.y * 4 + ip.x] + 0.5) / 16.0;
+    float lum = nprLum(c);
+    float q = floor(lum * 4.0 + b) / 4.0;
+    float s = lum > 1e-4 ? q / lum : 0.0;
+    return clamp(c * s, 0.0, 1.0);
+}
+vec3 nprToneApply(vec3 c) {
+    if (uNprTone == 1) return nprHalftone(c);
+    if (uNprTone == 2) return nprCrosshatch(c);
+    if (uNprTone == 3) return nprBayer(c);
+    return c;
+}
+
 void main() {
 	vec3 hdr = depthOfField();
 	hdr += texture(uBloom, vUv).rgb * (uBloomIntensity / uBloomLevels);
@@ -254,6 +332,15 @@ void main() {
 	vec3 display = uViewTransform == 0 ? agx(hdr) : hdr;
 	vec3 encoded = srgbEncode(display);
 	if (uGamma != 1.0) encoded = pow(encoded, vec3(1.0 / uGamma));
+	// NPR (wave 5, item 30): tone passes replace shading on geometry only — the
+	// background keeps the plain composite — then ink outlines draw over the top.
+	// With every NPR switch off this block is skipped, so plain renders are unchanged.
+	if (uNprTone != 0 || uNprInk == 1) {
+		bool onGeometry = uHasDepth == 0 || texture(uDepth, vUv).r < 0.999;
+		vec3 toned = onGeometry ? mix(encoded, nprToneApply(encoded), uNprStrength) : encoded;
+		float inkAmt = (uNprInk == 1 && onGeometry) ? nprInkEdge() * uNprStrength : 0.0;
+		encoded = mix(toned, uNprInkColor, inkAmt);
+	}
 	FragColor = vec4(encoded, 1.0);
 	// Overlays (grid, bones, handles) are drawn into the same target afterwards and depth-test
 	// against this. A depth blit can't fill a multisampled target such as the window's

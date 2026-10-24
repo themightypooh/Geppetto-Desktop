@@ -7,10 +7,18 @@ using Silk.NET.OpenGL;
 namespace Marionette.Desktop;
 
 /// <summary>R9: surface parameters for live geometry, the same terms a mesh batch feeds the lit shader.</summary>
+/// <summary>Wave-2 look wiring: the SlotLook spectrum for one live layer, in shader
+/// uniform terms. Defaults are the old behaviour (all zero, opacity 1, shadow tint white).</summary>
+public readonly record struct LiveLook( float Toon = 0f, int ToonBands = 3, float ToonRim = 0f, float Stylized = 0f,
+	float OutlineWidth = 0f, Vector3 OutlineColor = default, float Clearcoat = 0f, float ClearcoatRoughness = 0.05f,
+	float Subsurface = 0f, Vector3 SubsurfaceColor = default, float Opacity = 1f,
+	Vector3 ShadowTint = default, float Iridescence = 0f );
+
 public readonly record struct LiveMaterial( Vector3 Albedo, float Roughness = .6f, float Metallic = 0f,
 	Vector3 Emission = default, float Alpha = 1f, bool Blend = false, bool DoubleSided = true )
 {
 	public MaterialLobes Lobes { get; init; } = MaterialLobes.None;
+	public LiveLook Look { get; init; }
 	/// <summary>Soft round sprite in albedo alpha and emission (billboards); quads otherwise draw square.</summary>
 	public bool Sprite { get; init; }
 }
@@ -42,6 +50,7 @@ public sealed class LiveBuilder
 		d[10] = 1; d[11] = d[12] = d[13] = 0; // bone weights
 		d[14] = uv.X; d[15] = uv.Y;
 		d[16] = tangent.X; d[17] = tangent.Y; d[18] = tangent.Z; d[19] = 1;
+		d[20] = 1; d[21] = 1; d[22] = 1; d[23] = 1; // no per-vertex colour on live layers: white keeps albedo unchanged
 		FloatCount += ViewportMesh.FloatsPerVertex;
 		Min = Vector3.Min( Min, p ); Max = Vector3.Max( Max, p );
 	}
@@ -431,7 +440,7 @@ public sealed class LiveGeometry : IDisposable
 		gl.BindVertexArray( _vao );
 		gl.BindBuffer( BufferTargetARB.ArrayBuffer, _vbo );
 		const uint stride = ViewportMesh.FloatsPerVertex * sizeof( float );
-		(int loc, int size, int offset)[] attribs = { (0, 3, 0), (1, 3, 3), (2, 4, 6), (3, 4, 10), (4, 2, 14), (5, 4, 16) };
+		(int loc, int size, int offset)[] attribs = { (0, 3, 0), (1, 3, 3), (2, 4, 6), (3, 4, 10), (4, 2, 14), (5, 4, 16), (7, 4, 20) };
 		foreach ( var (loc, size, offset) in attribs )
 		{
 			gl.EnableVertexAttribArray( (uint)loc );
@@ -521,6 +530,17 @@ public sealed class LiveGeometry : IDisposable
 			shader.SetFloat( u.AlphaCutoff, .5f );
 			shader.SetFloat( u.BaseAlpha, m.Alpha );
 			shader.SetInt( u.DoubleSided, m.DoubleSided ? 1 : 0 );
+			// Wave-2 look wiring: live layers (particles, strands, cloth) get the same
+			// look uniforms as mesh batches; a default LiveLook is a no-op in the shader.
+			var lk = m.Look;
+			shader.SetLook( lk.Toon, lk.ToonBands, lk.ToonRim, lk.Stylized,
+				lk.OutlineWidth, lk.OutlineColor.X, lk.OutlineColor.Y, lk.OutlineColor.Z,
+				lk.Clearcoat, lk.ClearcoatRoughness, lk.Subsurface,
+				lk.SubsurfaceColor.X, lk.SubsurfaceColor.Y, lk.SubsurfaceColor.Z,
+				lk.Opacity,
+				lk.ShadowTint == default ? 1f : lk.ShadowTint.X,
+				lk.ShadowTint == default ? 1f : lk.ShadowTint.Y,
+				lk.ShadowTint == default ? 1f : lk.ShadowTint.Z, lk.Iridescence );
 			lobes?.Apply( shader, m.Lobes );
 			Bind( gl, 1, m.Sprite ? _disc : _white ); Bind( gl, 5, m.Sprite ? _disc : _white );
 			gl.DrawArrays( PrimitiveType.Triangles, _start[i], (uint)_count[i] );
