@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Effigy;
 using Marionette.Desktop;
 
@@ -6,12 +7,18 @@ namespace Marionette.Desktop;
 
 public static class ShrinkwrapService
 {
-	public enum Mode { NearestSurface, NormalProjection }
+	public enum Mode { NearestSurface, NormalProjection, TargetNormalProject }
 	public sealed class Options
 	{
 		public Mode Mode { get; set; } = Mode.NearestSurface;
 		public float MaxDistance { get; set; } = float.MaxValue;
 		public float Offset { get; set; } = 0f;
+
+		/// <summary>Laplacian smoothing passes over the source topology after wrapping (0 = none).
+		/// Each pass moves a wrapped vertex halfway toward the average of its neighbours, which
+		/// takes the stair-step out of a decal wrapped onto a coarse target without pulling it off
+		/// the surface outright. Only vertices the wrap actually moved are smoothed.</summary>
+		public int SmoothIterations { get; set; } = 0;
 	}
 	public sealed class Result { public PolyMesh Mesh { get; } public int Moved { get; } public Result( PolyMesh m, int moved ){ Mesh=m; Moved=moved; } }
 
@@ -56,6 +63,8 @@ public static class ShrinkwrapService
 		}
 		if ( source.VertexColors is not null ) outMesh.VertexColors = (Vec4[])source.VertexColors.Clone();
 		outMesh.Faces.AddRange( source.Faces );
+		var bvh = MeshBVH.Build( target );
+		var movedSet = new HashSet<int>();
 		int moved = 0;
 		for ( int i = 0; i < source.Positions.Count; i++ )
 		{
@@ -63,7 +72,19 @@ public static class ShrinkwrapService
 			Vec3 bestPt = p;
 			float bestDist = float.MaxValue;
 			bool hit = false;
-			if ( options.Mode == Mode.NormalProjection )
+			if ( options.Mode == Mode.TargetNormalProject )
+			{
+				// Along the TARGET's normal at the closest point: an eye decal or armour plate
+				// sits parallel to the skin it lands on, instead of parallel to its own old normal.
+				var surface = bvh.NearestSurface( target, p, options.MaxDistance );
+				if ( surface is { } h )
+				{
+					bestPt = h.Point + h.Normal * options.Offset;
+					bestDist = h.Distance;
+					hit = true;
+				}
+			}
+			else if ( options.Mode == Mode.NormalProjection )
 			{
 				var dir = srcNormals[ i ];
 				// ray vs target triangles
@@ -92,40 +113,55 @@ public static class ShrinkwrapService
 			}
 			else
 			{
-				float best = float.MaxValue; Vec3 bp = p;
-				foreach ( var f in target.Faces )
+				var surface = bvh.NearestSurface( target, p, options.MaxDistance );
+				if ( surface is { } h )
 				{
-					if ( f.Count < 3 ) continue;
-					for ( int ti = 1; ti + 1 < f.Count; ti++ )
-					{
-						var a = target.Positions[ f.Indices[ 0 ] ];
-						var b = target.Positions[ f.Indices[ ti ] ];
-						var c = target.Positions[ f.Indices[ ti + 1 ] ];
-						var cp = ClosestPointOnTriangle( p, a, b, c );
-						float d = ( cp - p ).LengthSquared;
-						if ( d < best ) { best = d; bp = cp; }
-					}
-				}
-				if ( MathF.Sqrt( best ) <= options.MaxDistance )
-				{
-					bestPt = bp;
-					bestDist = ( float ) Math.Sqrt( best );
+					bestPt = h.Point;
+					bestDist = h.Distance;
 					hit = true;
-				}
-				if ( hit && options.Offset != 0f )
-				{
-					var dvec = p - bestPt;
-					float dl = dvec.Length;
-					if ( dl > 1e-12f ) bestPt = bestPt + ( dvec / dl ) * options.Offset;
+					if ( options.Offset != 0f )
+					{
+						var dvec = p - bestPt;
+						float dl = dvec.Length;
+						if ( dl > 1e-12f ) bestPt = bestPt + ( dvec / dl ) * options.Offset;
+					}
 				}
 			}
 			if ( hit && bestDist <= options.MaxDistance + 1e-6f )
 			{
 				outMesh.Positions[ i ] = bestPt;
 				moved++;
+				movedSet.Add( i );
 			}
 			else
 			{
+			}
+		}
+		if ( options.SmoothIterations > 0 && movedSet.Count > 0 )
+		{
+			// Laplacian smoothing over the source topology, moved vertices only: each pass
+			// moves a wrapped vertex halfway toward the average of its neighbours.
+			var neighbours = new List<HashSet<int>>();
+			for ( int i = 0; i < source.Positions.Count; i++ ) neighbours.Add( new HashSet<int>() );
+			foreach ( var f in source.Faces )
+				for ( int c = 0; c < f.Count; c++ )
+				{
+					int a = f.Indices[c], b = f.Indices[( c + 1 ) % f.Count];
+					if ( a >= 0 && a < neighbours.Count && b >= 0 && b < neighbours.Count ) { neighbours[a].Add( b ); neighbours[b].Add( a ); }
+				}
+			for ( int pass = 0; pass < options.SmoothIterations; pass++ )
+			{
+				var next = new Vec3[outMesh.Positions.Count];
+				outMesh.Positions.CopyTo( next );
+				foreach ( int i in movedSet )
+				{
+					if ( neighbours[i].Count == 0 ) continue;
+					var avg = Vec3.Zero;
+					foreach ( int nb in neighbours[i] ) avg += outMesh.Positions[nb];
+					avg = avg / neighbours[i].Count;
+					next[i] = ( outMesh.Positions[i] + avg ) * 0.5f;
+				}
+				for ( int i = 0; i < next.Length; i++ ) outMesh.Positions[i] = next[i];
 			}
 		}
 		return new Result( outMesh, moved );

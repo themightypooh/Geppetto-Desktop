@@ -26,6 +26,16 @@ public sealed class FacePoserService
 	string _preset;
 	readonly Random _random = new();
 
+	/// <summary>
+	/// The morph document this pane edits, when the pane has one. ServeMode builds this service
+	/// per pane over a viewport mesh, so it is null unless the host attaches a
+	/// <see cref="MorphEditService"/> for the document — <c>symmetrize</c>/<c>split</c> then fail
+	/// clearly instead of pretending to edit targets. Attaching it in ServeMode is a follow-up
+	/// for that file's owner, not something this service can do on its own (it never sees the
+	/// PolyMesh, only the viewport mesh).
+	/// </summary>
+	public MorphEditService Morphs { get; set; }
+
 	public bool HasRig => _rig.Controllers.Count > 0;
 
 	static IEnumerable<string> MorphNames( ViewportMesh mesh ) =>
@@ -111,7 +121,23 @@ public sealed class FacePoserService
 				message = $"wrote {_rig.Presets.Count} preset(s) to {path}";
 				break;
 			}
-			default: throw new ArgumentException( $"face: no command '{p[0]}' (set, preset, zero, random, scale, save, export)." );
+			case "symmetrize":                           // symmetrize TARGET [NEWNAME]
+			{
+				if ( p.Length < 2 ) throw new ArgumentException( "face symmetrize needs a morph target: face symmetrize smile [symmetric]" );
+				var morphs = Morphs ?? throw new InvalidOperationException( "This pane has no morph document attached, so face symmetrize cannot edit targets here." );
+				morphs.SymmetrizeTarget( p[1], p.Length > 2 ? p[2] : null );
+				message = p.Length > 2 ? $"symmetrized '{p[1]}' as '{p[2]}'" : $"symmetrized '{p[1]}'";
+				break;
+			}
+			case "split":                                   // split TARGET LEFT RIGHT [WIDTH]
+			{
+				if ( p.Length < 4 ) throw new ArgumentException( "face split needs a target and two names: face split smile smile_L smile_R [width]" );
+				var morphs = Morphs ?? throw new InvalidOperationException( "This pane has no morph document attached, so face split cannot edit targets here." );
+				morphs.SplitStereoTarget( p[1], p[2], p[3], p.Length > 4 ? F( 4 ) : 0f );
+				message = $"split '{p[1]}' into '{p[2]}' and '{p[3]}'";
+				break;
+			}
+			default: throw new ArgumentException( $"face: no command '{p[0]}' (set, preset, zero, random, scale, save, export, symmetrize, split)." );
 		}
 		Apply( mesh );
 		return Snapshot( message );

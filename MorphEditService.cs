@@ -195,6 +195,116 @@ public sealed class MorphEditService
 		AddTargetCommand( $"Bake morph mix as '{newName}'", new MeshMorph { Name = newName, Deltas = data } );
 	}
 
+	// --- Stereo targets (roadmap J3.2) ---------------------------------------------------------------
+
+	/// <summary>
+	/// Make a target symmetric across X = 0, in place or as a new target. The result is the
+	/// AVERAGE of the target and its X-mirror, per coincident-vertex group: a one-sided sculpt
+	/// ends up at half strength on both sides, and a target that is already symmetric is
+	/// unchanged. Centre-line groups mirror onto themselves, so their X delta averages to zero
+	/// (a symmetric shape keeps its centre vertices on the plane) while Y/Z survive.
+	/// Groups with no mirror partner on the mesh keep their delta, documented rather than
+	/// zeroed: the mesh itself is asymmetric there, so no symmetric answer exists for them.
+	/// Mirror partners are found by base position, within <paramref name="mirrorTolerance"/>
+	/// inches; the mirror of a delta is (-x, y, z), the same mirror the sculpt brushes use.
+	/// One undo entry either way.
+	/// </summary>
+	public void SymmetrizeTarget( string sourceName, string? newName = null, float mirrorTolerance = 1e-3f )
+	{
+		EnsureUsable();
+		var morph = Require( sourceName );
+		if ( !float.IsFinite( mirrorTolerance ) || mirrorTolerance < 0f )
+			throw new ArgumentOutOfRangeException( nameof( mirrorTolerance ), "Mirror tolerance must be finite and >= 0." );
+		var result = SymmetrizedDeltas( morph.Deltas, mirrorTolerance );
+
+		if ( newName is null )
+		{
+			var before = (Vec3[])morph.Deltas.Clone();
+			History.Execute( new DelegateEditCommand( $"Symmetrize morph '{sourceName}'",
+				() => { Array.Copy( result, morph.Deltas, result.Length ); Touch(); },
+				() => { Array.Copy( before, morph.Deltas, before.Length ); Touch(); } ) );
+		}
+		else
+		{
+			ValidateNewName( newName, nameof( newName ) );
+			AddTargetCommand( $"Symmetrize morph '{sourceName}' as '{newName}'",
+				new MeshMorph { Name = newName, Deltas = result, Driver = morph.Driver?.Clone() } );
+		}
+	}
+
+	/// <summary>
+	/// Split a mono target into a stereo pair, using the same maths as the Shape Key Split
+	/// feature (<see cref="ShapeKeySplitFeature.Split"/>): left is the +X side when
+	/// <paramref name="leftSign"/> is +1 (the tree's convention — PoseSpaceCorrective maps +1
+	/// to _L, and Split's default LeftSide is +X), right the −X side. <paramref name="width"/>
+	/// is the smoothstep band around the centre line; at 0, centre vertices split half/half,
+	/// so the pair at full weight reproduces the source exactly. The source is untouched —
+	/// delete it yourself if the pair replaces it. One undo entry adds both halves.
+	/// </summary>
+	public void SplitStereoTarget( string sourceName, string leftName, string rightName, float width = 0f, float leftSign = 1f )
+	{
+		EnsureUsable();
+		var morph = Require( sourceName );
+		if ( string.Equals( leftName, rightName, StringComparison.Ordinal ) )
+			throw new ArgumentException( "The two halves would have the same name.", nameof( rightName ) );
+		ValidateNewName( leftName, nameof( leftName ) );
+		ValidateNewName( rightName, nameof( rightName ) );
+		if ( !float.IsFinite( width ) || width < 0f )
+			throw new ArgumentOutOfRangeException( nameof( width ), "Split width must be finite and >= 0." );
+		if ( leftSign != 1f && leftSign != -1f )
+			throw new ArgumentOutOfRangeException( nameof( leftSign ), "Left sign must be +1 (left is +X) or -1 (left is -X)." );
+
+		var (left, right) = ShapeKeySplitFeature.Split( Mesh, morph, width, leftSign, leftName, rightName );
+		History.Execute( new DelegateEditCommand( $"Split morph '{sourceName}' into '{leftName}' and '{rightName}'",
+			() => { Mesh.Morphs.Add( left ); Mesh.Morphs.Add( right ); Touch(); },
+			() => { Mesh.Morphs.Remove( left ); Mesh.Morphs.Remove( right ); Touch(); } ) );
+	}
+
+	Vec3[] SymmetrizedDeltas( Vec3[] deltas, float mirrorTolerance )
+	{
+		var groups = _groupMembers.Length;
+		var groupDelta = new Vec3[groups];
+		for ( var g = 0; g < groups; g++ ) groupDelta[g] = GroupPosition( deltas, g );
+		var positions = Mesh.Positions.ToArray();
+
+		// Mirror partner per group, by base position, via the same grid trick BuildGroups uses.
+		float cell = Math.Max( mirrorTolerance * 2f, 1e-6f );
+		var grid = new Dictionary<(long, long, long), List<int>>();
+		(long, long, long) Key( Vec3 pt ) => ((long)MathF.Floor( pt.x / cell ), (long)MathF.Floor( pt.y / cell ), (long)MathF.Floor( pt.z / cell ));
+		for ( var g = 0; g < groups; g++ )
+		{
+			var k = Key( GroupPosition( positions, g ) );
+			if ( !grid.TryGetValue( k, out var bucket ) ) grid[k] = bucket = new List<int>();
+			bucket.Add( g );
+		}
+		float tol2 = mirrorTolerance * mirrorTolerance;
+		var sym = new Vec3[groups];
+		for ( var g = 0; g < groups; g++ )
+		{
+			var gp = GroupPosition( positions, g );
+			var mp = new Vec3( -gp.x, gp.y, gp.z );
+			var (mkx, mky, mkz) = Key( mp );
+			int partner = -1;
+			float best = float.MaxValue;
+			for ( long dx = -1; dx <= 1; dx++ )
+				for ( long dy = -1; dy <= 1; dy++ )
+					for ( long dz = -1; dz <= 1; dz++ )
+						if ( grid.TryGetValue( (mkx + dx, mky + dy, mkz + dz), out var bucket ) )
+							foreach ( var h in bucket )
+							{
+								var d2 = (GroupPosition( positions, h ) - mp).LengthSquared;
+								if ( d2 <= tol2 && d2 < best ) { best = d2; partner = h; }
+							}
+			var mine = groupDelta[g];
+			if ( partner < 0 ) { sym[g] = mine; continue; }
+			var other = groupDelta[partner];
+			sym[g] = (mine + new Vec3( -other.x, other.y, other.z )) * 0.5f;
+		}
+		var result = new Vec3[_vertexCount];
+		for ( var v = 0; v < _vertexCount; v++ ) result[v] = sym[_groupOf[v]];
+		return result;
+	}
+
 	// --- Sculpting --------------------------------------------------------------------------------
 
 	/// <summary>
