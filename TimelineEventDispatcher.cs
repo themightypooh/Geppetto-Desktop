@@ -34,7 +34,13 @@ public enum TimelineEventKind
 	MorphEventStart = MorphEvent,
 
 	/// <summary>Morph target event ending at end frame.</summary>
-	MorphEventEnd
+	MorphEventEnd,
+
+	/// <summary>
+	/// Instantaneous sound cue at its start frame. Appended, never inserted, so every
+	/// earlier kind keeps its number.
+	/// </summary>
+	Sound
 }
 
 /// <summary>
@@ -89,6 +95,239 @@ public sealed class RigEvent
 }
 
 /// <summary>
+/// An instantaneous sound cue on the timeline: a sound path or event name fired once when
+/// the playhead crosses <see cref="StartFrame"/>, at <see cref="Volume"/>, from
+/// <see cref="BoneOrigin"/> (empty means the character root, the usual case for a voice or
+/// body sound; a hand or mouth bone for a held prop or a footstep).
+///
+/// A cue, not a sample player: the dispatcher says WHEN, the game's audio system decides HOW.
+/// That split is why this type carries a path and not a waveform — the desktop preview has
+/// no audio output to play through, and the runtime player fires the same cue through its own
+/// sound system instead of guessing at one here.
+/// </summary>
+public sealed class RigSoundEvent
+{
+	public string Name { get; set; } = "sound";
+	public int StartFrame { get; set; }
+	public int EndFrame { get; set; }
+	public string SoundPath { get; set; } = "";
+	public float Volume { get; set; } = 1f;
+	public string BoneOrigin { get; set; } = "";
+
+	public RigSoundEvent() { }
+
+	public RigSoundEvent( string name, int startFrame, string soundPath, float volume = 1f, string boneOrigin = "" )
+	{
+		Name = name;
+		StartFrame = startFrame;
+		EndFrame = startFrame;
+		SoundPath = soundPath;
+		Volume = volume;
+		BoneOrigin = boneOrigin;
+	}
+
+	public bool IsActive( float frame ) => frame >= StartFrame && frame <= (EndFrame > 0 ? EndFrame : StartFrame);
+
+	public override string ToString() => $"RigSoundEvent('{Name}', Frame={StartFrame}, Path='{SoundPath}')";
+}
+
+/// <summary>
+/// Lip-sync from phoneme cues: each cue names a phoneme over a frame range, and
+/// <see cref="Sample"/> turns the cues live at a frame into <c>viseme_*</c> morph weights —
+/// the morph names the face rig already uses, so no new morph target is invented here.
+///
+/// ENVELOPE. A cue ramps in over its first frame and out over its last (the same smoothstep
+/// a morph event uses), holds at its weight between, and when two cues map to the same
+/// viseme the stronger wins rather than adding — two mouth shapes do not stack, the mouth
+/// is one shape at a time. An optional per-frame amplitude envelope (from
+/// <see cref="WavEnvelope"/>) scales every weight, so a whispered line moves the mouth less
+/// than a shouted one without re-authoring the cues. Frames past the envelope's end read
+/// its last value; a null envelope means full amplitude.
+/// </summary>
+public sealed class AudioVisemeTrack
+{
+	/// <summary>One phoneme held over [StartFrame, EndFrame] at Weight.</summary>
+	public sealed record Cue( string Phoneme, int StartFrame, int EndFrame, float Weight = 1f );
+
+	/// <summary>ARPAbet-style phonemes to the viseme morph they drive. Unknown phonemes map to
+	/// nothing and are skipped by Sample, rather than driving a mouth shape nobody asked for.</summary>
+	public static readonly IReadOnlyDictionary<string, string> PhonemeToViseme =
+		new Dictionary<string, string>( StringComparer.OrdinalIgnoreCase )
+		{
+			["AA"] = "viseme_AA", ["AH"] = "viseme_AA", ["AO"] = "viseme_AA",
+			["EH"] = "viseme_E", ["AE"] = "viseme_E",
+			["IH"] = "viseme_I", ["IY"] = "viseme_I",
+			["OW"] = "viseme_O", ["OH"] = "viseme_O", ["OO"] = "viseme_O", ["UW"] = "viseme_O",
+			["UH"] = "viseme_U",
+			["P"] = "viseme_PP", ["B"] = "viseme_PP", ["M"] = "viseme_PP",
+			["F"] = "viseme_FF", ["V"] = "viseme_FF",
+			["TH"] = "viseme_TH", ["DH"] = "viseme_TH",
+			["T"] = "viseme_DD", ["D"] = "viseme_DD", ["N"] = "viseme_DD", ["L"] = "viseme_DD",
+			["K"] = "viseme_kk", ["G"] = "viseme_kk",
+			["CH"] = "viseme_CH", ["JH"] = "viseme_CH", ["SH"] = "viseme_CH", ["ZH"] = "viseme_CH",
+			["S"] = "viseme_SS", ["Z"] = "viseme_SS",
+			["NG"] = "viseme_nn",
+			["R"] = "viseme_RR",
+			["SIL"] = "viseme_sil", ["SP"] = "viseme_sil", ["PAU"] = "viseme_sil",
+		};
+
+	/// <summary>Map one phoneme to its viseme morph, or "" when it has none.</summary>
+	public static string MapPhoneme( string phoneme ) =>
+		string.IsNullOrWhiteSpace( phoneme ) ? "" :
+		PhonemeToViseme.TryGetValue( phoneme.Trim(), out var viseme ) ? viseme : "";
+
+	public List<Cue> Cues { get; } = new();
+
+	/// <summary>Per-frame amplitude, one value per frame, 0..1; null means full amplitude.</summary>
+	public float[]? AmplitudeEnvelope { get; set; }
+
+	public void AddCue( string phoneme, int startFrame, int endFrame, float weight = 1f ) =>
+		Cues.Add( new Cue( phoneme, startFrame, endFrame, weight ) );
+
+	/// <summary>Viseme morph weights at a frame: viseme name to 0..1 weight. Empty when silent.</summary>
+	public Dictionary<string, float> Sample( float frame )
+	{
+		var weights = new Dictionary<string, float>( StringComparer.Ordinal );
+		var amplitude = AmplitudeAt( frame );
+
+		foreach ( var cue in Cues )
+		{
+			var viseme = MapPhoneme( cue.Phoneme );
+			if ( viseme.Length == 0 || cue.Weight <= 0f ) continue;
+
+			var end = Math.Max( cue.EndFrame, cue.StartFrame );
+			if ( frame < cue.StartFrame || frame > end ) continue;
+
+			// One-frame smoothstep in and out; a one-frame cue is at full weight on its frame.
+			var up = end == cue.StartFrame ? 1f : Smooth( (frame - cue.StartFrame) / 1f );
+			var down = end == cue.StartFrame ? 1f : Smooth( (end - frame) / 1f );
+			var value = cue.Weight * MathF.Min( up, down ) * amplitude;
+
+			if ( !weights.TryGetValue( viseme, out var existing ) || value > existing )
+				weights[viseme] = value;
+		}
+
+		return weights;
+	}
+
+	float AmplitudeAt( float frame )
+	{
+		if ( AmplitudeEnvelope is null || AmplitudeEnvelope.Length == 0 ) return 1f;
+		var index = (int)MathF.Floor( frame );
+		if ( index < 0 ) return AmplitudeEnvelope[0];
+		return AmplitudeEnvelope[Math.Min( index, AmplitudeEnvelope.Length - 1 )];
+	}
+
+	static float Smooth( float t )
+	{
+		t = Math.Clamp( t, 0f, 1f );
+		return t * t * (3f - 2f * t);
+	}
+}
+
+/// <summary>
+/// A WAV file's loudness over time, as one RMS value per timeline frame, normalised so the
+/// loudest frame is 1. What <see cref="AudioVisemeTrack.AmplitudeEnvelope"/> eats: the line's
+/// dynamics without re-authoring its phonemes.
+///
+/// Only plain RIFF/WAVE is read: PCM integer 8/16/24/32-bit and IEEE float 32/64-bit, any
+/// channel count (mixed down by averaging). Anything else — ADPCM, an MP3 in a .wav coat, a
+/// truncated data chunk — throws <see cref="FormatException"/> instead of guessing, because
+/// a silently wrong envelope moves the mouth to the wrong line.
+/// </summary>
+public static class WavEnvelope
+{
+	public static float[] Read( byte[] wav, float frameRate )
+	{
+		if ( wav is null ) throw new ArgumentNullException( nameof( wav ) );
+		if ( frameRate <= 0f ) throw new ArgumentOutOfRangeException( nameof( frameRate ) );
+		if ( wav.Length < 44 || Text( wav, 0, 4 ) != "RIFF" || Text( wav, 8, 4 ) != "WAVE" )
+			throw new FormatException( "not a RIFF/WAVE file" );
+
+		int format = 0, channels = 0, sampleRate = 0, bits = 0;
+		int dataAt = -1, dataLength = 0;
+
+		for ( int at = 12; at + 8 <= wav.Length; )
+		{
+			var id = Text( wav, at, 4 );
+			var size = BitConverter.ToInt32( wav, at + 4 );
+			if ( size < 0 || at + 8 + size > wav.Length ) break;
+			var body = at + 8;
+
+			if ( id == "fmt " && size >= 16 )
+			{
+				format = BitConverter.ToUInt16( wav, body );
+				channels = BitConverter.ToUInt16( wav, body + 2 );
+				sampleRate = BitConverter.ToInt32( wav, body + 4 );
+				bits = BitConverter.ToUInt16( wav, body + 14 );
+			}
+			else if ( id == "data" )
+			{
+				dataAt = body;
+				dataLength = size;
+			}
+
+			at = body + size + (size % 2);
+		}
+
+		if ( dataAt < 0 ) throw new FormatException( "WAVE file has no data chunk" );
+		if ( format != 1 && format != 3 ) throw new FormatException( $"WAVE format {format} is not PCM or IEEE float" );
+		if ( channels <= 0 || sampleRate <= 0 ) throw new FormatException( "WAVE file has no channels or no sample rate" );
+		if ( format == 1 && bits != 8 && bits != 16 && bits != 24 && bits != 32 ) throw new FormatException( $"PCM bit depth {bits} is not supported" );
+		if ( format == 3 && bits != 32 && bits != 64 ) throw new FormatException( $"float bit depth {bits} is not supported" );
+
+		var bytesPerSample = bits / 8;
+		var totalFrames = (int)Math.Ceiling( (dataLength / (double)(bytesPerSample * channels)) / (sampleRate / (double)frameRate) );
+		var envelope = new float[Math.Max( 1, totalFrames )];
+		var samplesPerFrame = sampleRate / frameRate;
+
+		for ( int f = 0; f < envelope.Length; f++ )
+		{
+			var start = (int)Math.Floor( f * samplesPerFrame );
+			var end = Math.Min( (int)Math.Floor( (f + 1) * samplesPerFrame ), dataLength / (bytesPerSample * channels) );
+			if ( end <= start ) { envelope[f] = 0f; continue; }
+
+			double sum = 0;
+			for ( int s = start; s < end; s++ )
+			{
+				double mixed = 0;
+				for ( int c = 0; c < channels; c++ )
+					mixed += Sample( wav, dataAt + (s * channels + c) * bytesPerSample, format, bits );
+				mixed /= channels;
+				sum += mixed * mixed;
+			}
+			envelope[f] = (float)Math.Sqrt( sum / (end - start ) );
+		}
+
+		var peak = envelope.Length > 0 ? envelope.Max() : 0f;
+		if ( peak > 0f )
+			for ( int i = 0; i < envelope.Length; i++ ) envelope[i] /= peak;
+
+		return envelope;
+	}
+
+	static double Sample( byte[] wav, int at, int format, int bits )
+	{
+		if ( format == 3 )
+			return bits == 32 ? BitConverter.ToSingle( wav, at ) : BitConverter.ToDouble( wav, at );
+
+		return bits switch
+		{
+			8 => (wav[at] - 128) / 128.0,
+			16 => BitConverter.ToInt16( wav, at ) / 32768.0,
+			24 => (wav[at] | (wav[at + 1] << 8) | (wav[at + 2] << 16)) switch
+			{
+				var v => (v >= 0x800000 ? v - 0x1000000 : v) / 8388608.0,
+			},
+			_ => BitConverter.ToInt32( wav, at ) / 2147483648.0,
+		};
+	}
+
+	static string Text( byte[] wav, int at, int length ) =>
+		System.Text.Encoding.ASCII.GetString( wav, at, length );
+}
+
+/// <summary>
 /// Strongly typed notification produced when a timeline mark or event boundary is crossed.
 /// </summary>
 public sealed record TimelineEventNotification
@@ -101,6 +340,7 @@ public sealed record TimelineEventNotification
 	public RigMark? Mark { get; init; }
 	public RigEvent? Event { get; init; }
 	public RigMorphEvent? MorphEvent { get; init; }
+	public RigSoundEvent? SoundEvent { get; init; }
 
 	public bool IsReplay { get; init; }
 	public float PlayheadTime { get; init; }
@@ -183,12 +423,14 @@ public sealed class TimelineEventDispatcher
 		long Sequence,
 		RigMark? Mark = null,
 		RigEvent? Event = null,
-		RigMorphEvent? MorphEvent = null
+		RigMorphEvent? MorphEvent = null,
+		RigSoundEvent? SoundEvent = null
 	);
 
 	readonly List<RigMark> _marks = new();
 	readonly List<RigEvent> _events = new();
 	readonly List<RigMorphEvent> _morphEvents = new();
+	readonly List<RigSoundEvent> _soundEvents = new();
 	readonly List<DispatchItem> _items = new();
 	readonly List<TimelineEventException> _errors = new();
 
@@ -232,6 +474,7 @@ public sealed class TimelineEventDispatcher
 	public IReadOnlyList<RigMark> Marks => _marks;
 	public IReadOnlyList<RigEvent> Events => _events;
 	public IReadOnlyList<RigMorphEvent> MorphEvents => _morphEvents;
+	public IReadOnlyList<RigSoundEvent> SoundEvents => _soundEvents;
 	public IReadOnlyList<TimelineEventException> Errors => _errors;
 
 	/// <summary>Fired when an event notification is dispatched.</summary>
@@ -255,6 +498,7 @@ public sealed class TimelineEventDispatcher
 		_marks.Clear();
 		_events.Clear();
 		_morphEvents.Clear();
+		_soundEvents.Clear();
 		_items.Clear();
 		_errors.Clear();
 		_sequenceCounter = 0;
@@ -287,6 +531,13 @@ public sealed class TimelineEventDispatcher
 	{
 		ArgumentNullException.ThrowIfNull( morphEvent );
 		_morphEvents.Add( morphEvent );
+		_itemsDirty = true;
+	}
+
+	public void AddSoundEvent( RigSoundEvent soundEvent )
+	{
+		ArgumentNullException.ThrowIfNull( soundEvent );
+		_soundEvents.Add( soundEvent );
 		_itemsDirty = true;
 	}
 
@@ -453,6 +704,23 @@ public sealed class TimelineEventDispatcher
 				} );
 			}
 		}
+
+		if ( root.TryGetProperty( "SoundEvents", out var soundsProp ) && soundsProp.ValueKind == JsonValueKind.Array )
+		{
+			foreach ( var s in soundsProp.EnumerateArray() )
+			{
+				string name = s.TryGetProperty( "Name", out var n ) ? n.GetString() ?? "sound" : "sound";
+				int start = s.TryGetProperty( "StartFrame", out var sf ) && sf.ValueKind == JsonValueKind.Number ? sf.GetInt32()
+					: s.TryGetProperty( "Frame", out var fr ) && fr.ValueKind == JsonValueKind.Number ? fr.GetInt32() : 0;
+				string path = s.TryGetProperty( "SoundPath", out var sp ) ? sp.GetString() ?? ""
+					: s.TryGetProperty( "Path", out var pp ) ? pp.GetString() ?? "" : "";
+				float volume = s.TryGetProperty( "Volume", out var v ) && v.ValueKind == JsonValueKind.Number ? v.GetSingle() : 1f;
+				string bone = s.TryGetProperty( "BoneOrigin", out var bo ) ? bo.GetString() ?? ""
+					: s.TryGetProperty( "Bone", out var bo2 ) ? bo2.GetString() ?? "" : "";
+
+				_soundEvents.Add( new RigSoundEvent( name, start, path, volume, bone ) );
+			}
+		}
 	}
 
 	void RebuildDispatchItemsIfNeeded()
@@ -480,6 +748,11 @@ public sealed class TimelineEventDispatcher
 			_items.Add( new DispatchItem( TimelineEventKind.MorphEventStart, me.Morph, me.Start, startSeq, MorphEvent: me ) );
 			long endSeq = _sequenceCounter++;
 			_items.Add( new DispatchItem( TimelineEventKind.MorphEventEnd, me.Morph, me.End, endSeq, MorphEvent: me ) );
+		}
+
+		foreach ( var s in _soundEvents )
+		{
+			_items.Add( new DispatchItem( TimelineEventKind.Sound, s.Name, s.StartFrame, _sequenceCounter++, SoundEvent: s ) );
 		}
 
 		_itemsDirty = false;
@@ -654,6 +927,7 @@ public sealed class TimelineEventDispatcher
 				Mark = item.Mark,
 				Event = item.Event,
 				MorphEvent = item.MorphEvent,
+				SoundEvent = item.SoundEvent,
 				IsReplay = isReplay,
 				PlayheadTime = FrameRate > 0 ? item.Frame / FrameRate : 0f,
 				LoopIteration = loopIteration,
@@ -718,4 +992,7 @@ public sealed class TimelineEventDispatcher
 
 	public IReadOnlyList<RigMorphEvent> GetActiveMorphEvents( float frame ) =>
 		_morphEvents.Where( me => frame >= me.Start && frame <= me.End ).ToList();
+
+	public IReadOnlyList<RigSoundEvent> GetActiveSoundEvents( float frame ) =>
+		_soundEvents.Where( s => s.IsActive( frame ) ).ToList();
 }

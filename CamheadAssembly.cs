@@ -6,6 +6,7 @@ using Effigy;
 namespace Marionette.Desktop;
 
 /// <summary>
+/// NOTE (Lane C, v4 roadmap): the declarative replacement for this hardcoded assembly is Effigy AssemblyFeature (add Assembly parts=... frame=blender_cm remap=...). This helper is intentionally left behaviour-identical: the desktop kernel mirror does not carry AssemblyFeature until the Lane P sync, so rewiring this live path to call it now would break the desktop build. Rewire it after the sync, then delete this file.
 /// Camhead's .effigy is only the original mechanical core. The actual character's
 /// ModelDoc adds six separately authored FBX meshes. Load those source meshes in
 /// their bind pose, without changing the editable .effigy or duplicating its head.

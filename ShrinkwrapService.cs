@@ -187,44 +187,6 @@ public static class ShrinkwrapService
 		return true;
 	}
 
-	static Vec3 ClosestPointOnTriangle( Vec3 p, Vec3 a, Vec3 b, Vec3 c )
-	{
-		var ab = b - a; var ac = c - a; var ap = p - a;
-		float d1 = Vec3.Dot( ab, ap );
-		float d2 = Vec3.Dot( ac, ap );
-		if ( d1 <= 0 && d2 <= 0 ) return a;
-		var bp = p - b;
-		float d3 = Vec3.Dot( ab, bp );
-		float d4 = Vec3.Dot( ac, bp );
-		if ( d3 >= 0 && d4 <= d3 ) return b;
-		float vc = d1 * d4 - d3 * d2;
-		if ( vc <= 0 && d1 >= 0 && d3 <= 0 )
-		{
-			float v = d1 / ( d1 - d3 );
-			return a + ab * v;
-		}
-		var cp = p - c;
-		float d5 = Vec3.Dot( ab, cp );
-		float d6 = Vec3.Dot( ac, cp );
-		if ( d6 >= 0 && d5 <= d6 ) return c;
-		float vb = d5 * d2 - d1 * d6;
-		if ( vb <= 0 && d2 >= 0 && d6 <= 0 )
-		{
-			float w = d2 / ( d2 - d6 );
-			return a + ac * w;
-		}
-		float va = d3 * d6 - d5 * d4;
-		if ( va <= 0 && ( d4 - d3 ) >= 0 && ( d5 - d6 ) >= 0 )
-		{
-			float w = ( d4 - d3 ) / ( ( d4 - d3 ) + ( d5 - d6 ) );
-			return b + ( c - b ) * w;
-		}
-		float denom = 1f / ( va + vb + vc );
-		float v2 = vb * denom;
-		float w2 = vc * denom;
-		return a + ab * v2 + ac * w2;
-	}
-
 	public static Result Wrap( PolyMesh source, PolyMesh target, Options options=null )
 	{
 		if ( source is null ) throw new ArgumentNullException( nameof( source ) );

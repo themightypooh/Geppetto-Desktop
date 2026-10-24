@@ -6,6 +6,7 @@ using Effigy;
 namespace Marionette.Desktop;
 
 /// <summary>
+/// NOTE (Lane C, v4 roadmap): the declarative replacement for this hardcoded assembly is Effigy AssemblyFeature (add Assembly parts=...). This helper is intentionally left behaviour-identical: the desktop kernel mirror does not carry AssemblyFeature until the Lane P sync, so rewiring this live path to call it now would break the desktop build. Rewire it after the sync, then delete this file.
 /// Survey's third-person player: suit without its discarded placeholder head, plus the
 /// separately authored head and neck ring. Matches player_suit.vmdl, player_head.vmdl,
 /// and mirrors.scene's bone-merge assembly without loading any engine assets.
