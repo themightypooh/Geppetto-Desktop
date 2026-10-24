@@ -164,6 +164,89 @@ public static class AdvancedIkService
 		float cos = MathF.Cos( angle ), sin = MathF.Sin( angle );
 		return v * cos + Vec3.Cross( axis, v ) * sin + axis * Vec3.Dot( axis, v ) * (1f - cos);
 	}
+	// --- Lane K gait plans -----------------------------------------------------------------
+	//
+	// The desktop-side twin of BuildScriptAnim's `gait` verb: same phases, same planted
+	// fraction, same relative-motion maths (planted foot travels backwards past the body
+	// at root speed, swing foot arcs forward on +Z). The two implementations are
+	// deliberately kept in step by this comment and by the shared test expectations in
+	// AnimationPillarTests - if one changes, the other must, or a gait authored in the
+	// cabinet will not match one authored in a script.
+
+	/// <summary>Lane K: gait families the foot planner knows.</summary>
+	public enum GaitType
+	{
+		Walk,
+		Run,
+		Sneak,
+		QuadTrot,
+		Arachnid
+	}
+
+	/// <summary>Lane K: one foot's plan at one frame: where the IK goal goes, and whether
+	/// the foot is planted (standing still in the world) or swinging.</summary>
+	public sealed record FootPlan( int Frame, Vec3 Position, bool Planted );
+
+	/// <summary>
+	/// Lane K: phase offsets (in cycles) per foot index, and the planted fraction of
+	/// each cycle, for a gait. Quad trot pairs diagonal feet; every other family
+	/// alternates sides. The arrays cycle when a rig has more feet than the pattern.
+	/// </summary>
+	public static (float[] Phases, float PlantedFraction) GaitPhases( GaitType type, int footCount )
+	{
+		if ( footCount <= 0 )
+			throw new ArgumentOutOfRangeException( nameof( footCount ) );
+
+		return type switch
+		{
+			GaitType.Walk => (new[] { 0f, 0.5f }, 0.6f),
+			GaitType.Run => (new[] { 0f, 0.5f }, 0.4f),
+			GaitType.Sneak => (new[] { 0f, 0.5f }, 0.7f),
+			GaitType.QuadTrot => (new[] { 0f, 0.5f, 0.5f, 0f }, 0.5f),
+			GaitType.Arachnid => (new[] { 0f, 0.5f }, 0.6f),
+			_ => throw new ArgumentOutOfRangeException( nameof( type ) ),
+		};
+	}
+
+	/// <summary>
+	/// Lane K: one foot's IK-goal plan over a gait cycle. Forward is +X, up is +Z,
+	/// positions relative to the foot's bind position (the root's travel is separate -
+	/// see <see cref="GaitRootTravel"/>). During a planted span the foot moves from
+	/// +stride/2 to -stride/2 relative to the body; during swing it returns with a
+	/// sine arc of <paramref name="height"/>.
+	/// </summary>
+	public static List<FootPlan> FootPlan( GaitType type, int footIndex, int footCount, int frames, float stride, float height, Vec3 bindPosition )
+	{
+		if ( frames <= 0 )
+			throw new ArgumentOutOfRangeException( nameof( frames ) );
+
+		var (phases, planted) = GaitPhases( type, footCount );
+		var phase = phases[footIndex % phases.Length];
+		var plans = new List<FootPlan>( frames + 1 );
+
+		for ( var f = 0; f <= frames; f++ )
+		{
+			var cycle = (f / (float)frames + phase) % 1f;
+
+			if ( cycle < planted )
+			{
+				var u = cycle / planted;
+				plans.Add( new FootPlan( f,
+					new Vec3( bindPosition.x + stride * (0.5f - u), bindPosition.y, bindPosition.z ), true ) );
+			}
+			else
+			{
+				var u = (cycle - planted) / (1f - planted);
+				plans.Add( new FootPlan( f,
+					new Vec3( bindPosition.x + stride * (u - 0.5f), bindPosition.y, bindPosition.z + height * MathF.Sin( MathF.PI * u ) ), false ) );
+			}
+		}
+
+		return plans;
+	}
+
+	/// <summary>Lane K: the root's +X travel at a frame of a gait cycle of <paramref name="frames"/>
+	/// frames covering one <paramref name="stride"/>.</summary>
+	public static float GaitRootTravel( int frame, int frames, float stride ) =>
+		frames <= 0 ? 0f : stride * frame / frames;
 }
-
-

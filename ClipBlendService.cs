@@ -521,6 +521,110 @@ public static class ClipBlendService
 			baseLoop: fromLoop,
 			layerLoop: toLoop );
 	}
+	/// <summary>
+	/// Lane K: like <see cref="SampleClipBone"/>, but a track with channel curves is
+	/// read through <see cref="RigTrack.EvaluateWithChannels"/> so a layer's curves
+	/// and modifiers actually play in the blend instead of being silently dropped.
+	/// A track with neither keys nor curves falls back to the bind pose / default,
+	/// exactly like <see cref="SampleClipBone"/>.
+	/// </summary>
+	public static RigPose SampleClipBoneWithChannels( RigAnimFile clip, string boneName, float frame, Skeleton? skeleton = null, RigPose? defaultPose = null )
+	{
+		var track = clip.Find( boneName );
+		if ( track is not null && (track.Keys.Count > 0 || track.ChannelCurves.Count > 0) )
+			return track.EvaluateWithChannels( frame );
+
+		if ( skeleton != null )
+		{
+			int idx = skeleton.IndexOf( boneName );
+			if ( idx >= 0 )
+				return RigPose.FromXform( skeleton.Bones[idx].Local );
+		}
+
+		return defaultPose ?? RigPose.Identity;
+	}
+
+	/// <summary>
+	/// Lane K: <see cref="EvaluateBlend"/> with channel curves honoured on both clips.
+	/// Same bone set, mask, reference-pose and limit rules; only the sampling changes.
+	/// The layer's reference pose for additive deltas is its first key when it has
+	/// keys, else its channel-evaluated pose at frame 0, else the bind pose.
+	/// </summary>
+	public static Dictionary<string, RigPose> EvaluateBlendWithChannels(
+		RigAnimFile baseClip,
+		float baseTime,
+		RigAnimFile layerClip,
+		float layerTime,
+		float weight,
+		BlendMode mode = BlendMode.Override,
+		BoneMask? mask = null,
+		Skeleton? skeleton = null,
+		bool baseLoop = true,
+		bool layerLoop = true,
+		IReadOnlyDictionary<string, RigPose>? referencePoses = null )
+	{
+		ArgumentNullException.ThrowIfNull( baseClip );
+		ArgumentNullException.ThrowIfNull( layerClip );
+
+		float baseFrame = CalculateFrame( baseClip, baseTime, baseLoop );
+		float layerFrame = CalculateFrame( layerClip, layerTime, layerLoop );
+
+		IEnumerable<string> boneNames;
+		if ( skeleton != null )
+		{
+			boneNames = skeleton.Bones.Select( b => b.Name );
+		}
+		else
+		{
+			var names = new HashSet<string>( StringComparer.Ordinal );
+			foreach ( var t in baseClip.BoneTracks ) names.Add( t.Name );
+			foreach ( var t in layerClip.BoneTracks ) names.Add( t.Name );
+			if ( referencePoses != null )
+				foreach ( var k in referencePoses.Keys ) names.Add( k );
+			boneNames = names;
+		}
+
+		var result = new Dictionary<string, RigPose>( StringComparer.Ordinal );
+
+		foreach ( var bone in boneNames )
+		{
+			RigPose refPose;
+			if ( referencePoses != null && referencePoses.TryGetValue( bone, out var r ) )
+			{
+				refPose = r;
+			}
+			else if ( layerClip.Find( bone ) is { } layerTrack && (layerTrack.Keys.Count > 0 || layerTrack.ChannelCurves.Count > 0) )
+			{
+				refPose = layerTrack.Keys.Count > 0 ? layerTrack.Keys[0].Local : layerTrack.EvaluateWithChannels( 0 );
+			}
+			else if ( skeleton != null && skeleton.IndexOf( bone ) is >= 0 and var bIdx )
+			{
+				refPose = RigPose.FromXform( skeleton.Bones[bIdx].Local );
+			}
+			else
+			{
+				refPose = RigPose.Identity;
+			}
+
+			RigPose basePose = SampleClipBoneWithChannels( baseClip, bone, baseFrame, skeleton, refPose );
+
+			if ( mask != null && !mask.IsAllowed( bone ) )
+			{
+				result[bone] = basePose;
+				continue;
+			}
+
+			RigPose layerPose = SampleClipBoneWithChannels( layerClip, bone, layerFrame, skeleton, refPose );
+			RigPose blended = BlendPose( basePose, layerPose, refPose, weight, mode );
+
+			if ( baseClip.Limits is { Count: > 0 } )
+				blended = RigLimit.Clamp( baseClip.Limits, bone, blended );
+
+			result[bone] = blended;
+		}
+
+		return result;
+	}
 }
 
 /// <summary>

@@ -306,4 +306,175 @@ public static class ClipEditService
 
 		return cmd;
 	}
+	/// <summary>Lane K: key one scalar channel curve, as an undoable command. The
+	/// sampling stays in the kernel (<see cref="RigTrack.ChannelValue"/>); this only
+	/// writes the key and remembers the old curve for undo.</summary>
+	public static void SetChannelKey(
+		DocumentSession session,
+		string boneName,
+		RigChannel channel,
+		int frame,
+		float value,
+		MarionettePlayer? player = null ) =>
+		session.History.Execute( BuildSetChannelKey( session, boneName, channel, frame, value, player ) );
+
+	public static IEditCommand BuildSetChannelKey(
+		DocumentSession session,
+		string boneName,
+		RigChannel channel,
+		int frame,
+		float value,
+		MarionettePlayer? player = null )
+	{
+		ArgumentNullException.ThrowIfNull( session );
+		var clip = session.Clip ?? throw new InvalidOperationException( "DocumentSession has no animation clip." );
+		if ( string.IsNullOrWhiteSpace( boneName ) ) throw new ArgumentException( "Target name cannot be empty." );
+		if ( frame < 0 ) throw new ArgumentOutOfRangeException( nameof( frame ), "Key frame cannot be negative." );
+		if ( !float.IsFinite( value ) ) throw new ArgumentException( "Channel value must be finite." );
+
+		var track = clip.Tracks.FirstOrDefault( t => t.Kind == RigTrackKind.Bone && t.Name == boneName );
+		bool trackExisted = track is not null;
+		List<ScalarKey>? oldKeys = null;
+
+		if ( track is not null && track.ChannelCurves.TryGetValue( channel, out var existing ) && existing is not null )
+			oldKeys = existing.Select( k => new ScalarKey( k.Frame, k.Value ) ).ToList();
+
+		int initialFrameCount = clip.FrameCount;
+
+		return new DelegateEditCommand(
+			$"Set channel key {boneName}.{channel} at frame {frame}",
+			execute: () =>
+			{
+				ClipKeys.SetChannelKey( clip, boneName, channel, frame, value );
+				player?.InvalidateClipCache( preservePlayhead: true );
+			},
+			undo: () =>
+			{
+				var t = clip.Tracks.FirstOrDefault( tr => tr.Kind == RigTrackKind.Bone && tr.Name == boneName );
+
+				if ( !trackExisted )
+				{
+					if ( t is not null )
+						clip.Tracks.Remove( t );
+				}
+				else if ( t is not null )
+				{
+					if ( oldKeys is null )
+						t.ChannelCurves.Remove( channel );
+					else
+						t.ChannelCurves[channel] = oldKeys.Select( k => new ScalarKey( k.Frame, k.Value ) ).ToList();
+				}
+
+				clip.FrameCount = initialFrameCount;
+				player?.InvalidateClipCache( preservePlayhead: true );
+			}
+		);
+	}
+
+	/// <summary>Lane K: bake a bone's channel curves into ordinary keys, as an undoable
+	/// command. Undo restores the keys, curves, modifiers and frame count exactly.</summary>
+	public static void BakeChannels(
+		DocumentSession session,
+		string boneName,
+		MarionettePlayer? player = null ) =>
+		session.History.Execute( BuildBakeChannels( session, boneName, player ) );
+
+	public static IEditCommand BuildBakeChannels(
+		DocumentSession session,
+		string boneName,
+		MarionettePlayer? player = null )
+	{
+		ArgumentNullException.ThrowIfNull( session );
+		var clip = session.Clip ?? throw new InvalidOperationException( "DocumentSession has no animation clip." );
+
+		var track = clip.Tracks.FirstOrDefault( t => t.Kind == RigTrackKind.Bone && t.Name == boneName )
+			?? throw new InvalidOperationException( $"Track Bone/{boneName} not found." );
+
+		var oldKeys = track.Keys.Select( CloneKey ).ToList();
+		var oldCurves = track.ChannelCurves.ToDictionary(
+			kvp => kvp.Key,
+			kvp => kvp.Value.Select( k => new ScalarKey( k.Frame, k.Value ) ).ToList() );
+		var oldModifiers = track.Modifiers.Select( m => new FCurveModifier( m.Kind, m.Amplitude, m.Period, m.Phase, m.Steps ) ).ToList();
+		int initialFrameCount = clip.FrameCount;
+
+		return new DelegateEditCommand(
+			$"Bake channels {boneName}",
+			execute: () =>
+			{
+				ClipKeys.BakeChannels( clip, boneName );
+				player?.InvalidateClipCache( preservePlayhead: true );
+			},
+			undo: () =>
+			{
+				var t = clip.Tracks.FirstOrDefault( tr => tr.Kind == RigTrackKind.Bone && tr.Name == boneName );
+
+				if ( t is not null )
+				{
+					t.Keys.Clear();
+					t.Keys.AddRange( oldKeys.Select( CloneKey ) );
+					t.ChannelCurves.Clear();
+
+					foreach ( var kvp in oldCurves )
+						t.ChannelCurves[kvp.Key] = kvp.Value.Select( k => new ScalarKey( k.Frame, k.Value ) ).ToList();
+
+					t.Modifiers.Clear();
+					t.Modifiers.AddRange( oldModifiers.Select( m => new FCurveModifier( m.Kind, m.Amplitude, m.Period, m.Phase, m.Steps ) ) );
+				}
+
+				clip.FrameCount = initialFrameCount;
+				player?.InvalidateClipCache( preservePlayhead: true );
+			}
+		);
+	}
+
+	/// <summary>Lane K: add a channel-curve modifier to a bone track, as an undoable command.</summary>
+	public static void AddModifier(
+		DocumentSession session,
+		string boneName,
+		FCurveModifier modifier,
+		MarionettePlayer? player = null ) =>
+		session.History.Execute( BuildAddModifier( session, boneName, modifier, player ) );
+
+	public static IEditCommand BuildAddModifier(
+		DocumentSession session,
+		string boneName,
+		FCurveModifier modifier,
+		MarionettePlayer? player = null )
+	{
+		ArgumentNullException.ThrowIfNull( session );
+		ArgumentNullException.ThrowIfNull( modifier );
+		var clip = session.Clip ?? throw new InvalidOperationException( "DocumentSession has no animation clip." );
+
+		var track = clip.Tracks.FirstOrDefault( t => t.Kind == RigTrackKind.Bone && t.Name == boneName );
+		bool trackExisted = track is not null;
+		var oldModifiers = track?.Modifiers.Select( m => new FCurveModifier( m.Kind, m.Amplitude, m.Period, m.Phase, m.Steps ) ).ToList()
+			?? new List<FCurveModifier>();
+
+		return new DelegateEditCommand(
+			$"Add channel modifier {boneName}.{modifier.Kind}",
+			execute: () =>
+			{
+				var t = GetOrCreateTrack( clip, RigTrackKind.Bone, boneName, out _ );
+				t.Modifiers.Add( new FCurveModifier( modifier.Kind, modifier.Amplitude, modifier.Period, modifier.Phase, modifier.Steps ) );
+				player?.InvalidateClipCache( preservePlayhead: true );
+			},
+			undo: () =>
+			{
+				var t = clip.Tracks.FirstOrDefault( tr => tr.Kind == RigTrackKind.Bone && tr.Name == boneName );
+
+				if ( !trackExisted )
+				{
+					if ( t is not null )
+						clip.Tracks.Remove( t );
+				}
+				else if ( t is not null )
+				{
+					t.Modifiers.Clear();
+					t.Modifiers.AddRange( oldModifiers.Select( m => new FCurveModifier( m.Kind, m.Amplitude, m.Period, m.Phase, m.Steps ) ) );
+				}
+
+				player?.InvalidateClipCache( preservePlayhead: true );
+			}
+		);
+	}
 }
