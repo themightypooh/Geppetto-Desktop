@@ -1128,6 +1128,107 @@ Window {
         }
     }
 
+    // Lane D: a stage checkpoint bar at the top of a pane. When the run it heads is gated at
+    // a checkpoint (run.openState === "checkpoint", from live_runs.OPEN), it shows the
+    // checkpoint prompt, the focus bodies and vars as chips, quick look scrubbers whose values
+    // travel with the approve/redo direction, and APPROVE & CONTINUE / REQUEST REDO keys.
+    // The prompt never clips or spills: it wraps, at most 2 lines, elides right, and the full
+    // prompt is the hover tip. Approve/redo go through host.sendDirection (the cabinet slot
+    // that reaches a run): ScriptLive's checkpoint gate takes a direction whose text starts
+    // CHECKPOINT-APPROVE / CHECKPOINT-REDO. A future host.continueCheckpoint slot can call
+    // live_runs.continue_checkpoint directly; until then this is the wired path. REDO unblocks
+    // the gate too, with the redo request kept as a note for the modeller, so the run never
+    // deadlocks waiting for a stage it cannot redo on its own; the modeller's replacement
+    // lines then go in through the run's open loop.
+    component CheckpointBar: Rectangle {
+        id: cb
+        property var run: null
+        property bool sent: false
+        readonly property bool gated: !!cb.run && cb.run.openState === "checkpoint"
+        readonly property string prompt: cb.run ? (cb.run.operation || "Checkpoint") : ""
+        function listAfter(key) {
+            var parts = ((cb.run && cb.run.outcome) || "").split(" ");
+            for (var i = 0; i < parts.length; i++) if (parts[i].indexOf(key + "=") === 0) return parts[i].slice(key.length + 1).split(",");
+            return [];
+        }
+        readonly property var focusList: listAfter("focus")
+        readonly property var varList: listAfter("vars")
+        property real tweakBody: 1.0
+        property real toon: 0; property real stylized: 0; property real rough: 0.5; property real coat: 0; property real sss: 0
+        function tweaks() {
+            var t = [];
+            if (cb.focusList.length) t.push("focus tweak=" + cb.tweakBody.toFixed(2));
+            t.push("toon=" + cb.toon.toFixed(2) + " stylized=" + cb.stylized.toFixed(2) + " rough=" + cb.rough.toFixed(2) + " coat=" + cb.coat.toFixed(2) + " sss=" + cb.sss.toFixed(2));
+            return t.join(" ");
+        }
+        function act(redo) {
+            if (!cb.run || cb.sent) return;
+            cb.sent = true;
+            host.sendDirection(cb.run.dir, (redo ? "CHECKPOINT-REDO " : "CHECKPOINT-APPROVE ") + cb.prompt + " (" + cb.tweaks() + ")");
+        }
+        onGatedChanged: if (gated) cb.sent = false
+        visible: cb.gated
+        width: Math.min(760, (parent ? parent.width : 760) - 24)
+        height: cbCol.height + 12
+        color: "#16191c"; opacity: 0.95; border.color: "#f2a91c"
+        Column {
+            id: cbCol
+            x: 8; y: 6; width: parent.width - 16; spacing: 4
+            Text {
+                width: parent.width; wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
+                text: "CHECKPOINT: " + cb.prompt
+                color: root.amber; font.family: root.mono; font.bold: true; font.pixelSize: 12
+                MouseArea { anchors.fill: parent; hoverEnabled: true; onContainsMouseChanged: root.keyTip = containsMouse ? cb.prompt : "" }
+            }
+            Flow {
+                width: parent.width; spacing: 4
+                Repeater {
+                    model: cb.focusList
+                    Text { text: "focus: " + modelData; color: root.keyText; font.family: root.mono; font.bold: true; font.pixelSize: 11 }
+                }
+                Repeater {
+                    model: cb.varList
+                    Text { text: "var: " + modelData; color: root.keyText; font.family: root.mono; font.pixelSize: 11 }
+                }
+            }
+            Flow {
+                width: parent.width; spacing: 8
+                Repeater {
+                    model: [["focus tweak", 0, 2, 1, function (v) { cb.tweakBody = v }],
+                            ["toon", 0, 1, 0, function (v) { cb.toon = v }],
+                            ["stylized", 0, 1, 0, function (v) { cb.stylized = v }],
+                            ["rough", 0, 1, 0.5, function (v) { cb.rough = v }],
+                            ["coat", 0, 1, 0, function (v) { cb.coat = v }],
+                            ["sss", 0, 1, 0, function (v) { cb.sss = v }]]
+                    Row {
+                        spacing: 4
+                        Text { anchors.verticalCenter: parent.verticalCenter; width: 74; elide: Text.ElideRight; text: modelData[0]; color: root.keyText; font.family: root.mono; font.pixelSize: 11 }
+                        C.Slider {
+                            anchors.verticalCenter: parent.verticalCenter; width: 120
+                            from: modelData[1]; to: modelData[2]; stepSize: 0.01; value: modelData[3]
+                            onMoved: modelData[4](value)
+                        }
+                    }
+                }
+            }
+            Row {
+                spacing: 4
+                Chip {
+                    objectName: "checkpointApprove"
+                    label: cb.sent ? "SENT…" : "APPROVE & CONTINUE"; lit: !cb.sent
+                    tip: "approve this stage and carry on with the lines after it"
+                    onClicked: cb.act(false)
+                }
+                Chip {
+                    objectName: "checkpointRedo"
+                    label: cb.sent ? "SENT…" : "REQUEST REDO"
+                    tip: "flag this stage for a redo and carry on; the modeller's replacement lines go in next"
+                    onClicked: cb.act(true)
+                }
+            }
+        }
+    }
+
     // what a live script run is doing, written out on the build note (the paper the run bar's NOTE key
     // tosses out): LINE x of n, the part, what the line does, the line itself, a held run's error, and
     // every step so far, newest first (click one to replay from it; the raw line shows under the pointer)
@@ -1370,6 +1471,7 @@ Window {
         }
         ReplayStrip { src: sp.pn; x: 8; y: 28; width: sp.width - 16; visible: false }
         RunBar { id: spRunBar; n: sp.n; run: sp.replaying ? null : sp.r; x: 8; y: 28 }
+        CheckpointBar { run: sp.replaying ? null : sp.r; x: 8; y: 56 }
         // this pane's run controls, faint until the mouse comes near
         Flow {
             id: spKeys
@@ -3653,6 +3755,12 @@ Window {
             objectName: "p1RunBar"
             run: host.replay && host.replay.dir ? null : root.p1Run
             x: 12; y: 28
+        }
+        CheckpointBar {
+            id: p1CheckpointBar
+            objectName: "p1CheckpointBar"
+            run: host.replay && host.replay.dir ? null : root.p1Run
+            x: 12; y: 56
         }
         // ---- pick mode (keys 1-4 on the view) and what's picked, s&box style: tiny, top right, out of the way
         Column {

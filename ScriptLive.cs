@@ -72,7 +72,10 @@ public static class ScriptLive
     /// <paramref name="open"/>: when the script is done the run stays up with the model loaded, waiting for
     /// more lines in &lt;run&gt;/.live/inbox (see <see cref="Inbox"/>), so a change is a few lines on the same
     /// document, not a new run. A line that fails then holds the run there instead of ending it: the model
-    /// goes back to the last good revision, and the lines after it wait for a fix (or `skip`).</summary>
+    /// goes back to the last good revision, and the lines after it wait for a fix (or `skip`).
+    /// A <c>checkpoint "title" [focus=Body1,Body2] [vars=...]</c> line pauses the run at that stage
+    /// (see <see cref="Drain"/>): it commits the current studio, publishes a <c>checkpoint</c> state,
+    /// and blocks the lines after it until the cabinet or a tool continues it.</summary>
     public static Outcome Execute(PartStudio studio, string text, string baseDir, string root, double pace,
         CancellationTokenSource cancel, Action<string>? emit = null, bool open = false, double idleMinutes = 30)
     {
@@ -94,7 +97,7 @@ public static class ScriptLive
         {
             while (true)
             {
-                bool ok = Drain(ref studio, pending, result, baseDir, live, session, open, cancel.Token);
+                bool ok = Drain(ref studio, pending, result, baseDir, live, session, open, cancel.Token, root);
                 state = ok ? "completed" : "failed";
                 if (!open) break;
                 string phase = ok ? "open" : "held";
@@ -146,44 +149,229 @@ public static class ScriptLive
     }
 
     /// <summary>Runs what is pending, in order. False when a line fails: the rest of its piece stays pending
-    /// and, in an open run, the document goes back to the last revision so the half-made line is not in it.</summary>
+    /// and, in an open run, the document goes back to the last revision so the half-made line is not in it.
+    /// A checkpoint line (see <see cref="TryParseCheckpoint"/>) is not a build-script verb: Drain runs
+    /// the lines before it, commits the studio as that checkpoint, publishes a <c>checkpoint</c> state
+    /// the cabinet shows as a stage bar, and blocks the lines after it until it is continued (see
+    /// <see cref="WaitForCheckpoint"/>). The lines after a checkpoint keep their original line numbers,
+    /// so the chest's step list and script.txt still agree.</summary>
     /// <summary>A line that is a caption for the next one (echo) or nothing at all, never a step.</summary>
     static bool IsCaption(string verb) => string.IsNullOrEmpty(verb) || verb.Equals("echo", StringComparison.OrdinalIgnoreCase);
 
     static bool Drain(ref PartStudio studio, LinkedList<(string Text, int Base)> pending, BuildScript.Result result,
-        string baseDir, AiLiveRun live, AiLiveControl.Session session, bool open, CancellationToken ct)
+        string baseDir, AiLiveRun live, AiLiveControl.Session session, bool open, CancellationToken ct, string root)
     {
         while (pending.First is { } first)
         {
             var (text, at) = first.Value;
             var doc = studio;
-            BuildScript.Run(doc, text, baseDir,
-                (n, verb, line) =>
+            Action<int, string, string> before = (n, verb, line) =>
+            {
+                // Every line is a step the chest lists (po's rule: no step may go missing), so a
+                // render, save, export or measure is announced like an add. Only an echo is not a
+                // step of its own: it is the caption of the line after it. Pace and pause still
+                // gate only the lines that change the model; the rest run at once.
+                if (IsCaption(verb)) { ct.ThrowIfCancellationRequested(); return; }
+                session.BoundaryAsync(ct, mutation: BuildScript.Mutates(verb)).GetAwaiter().GetResult();
+                live.Status("building", $"line {at + n}: {Clip(line)}");   // the whole line: the chest's tool wheel reads the tool from it
+            };
+            Action<int, string, string> after = (n, verb, line) =>
+            {
+                if (IsCaption(verb)) return;
+                live.Commit(doc, $"line {at + n}: {Clip(line)}");
+                if (BuildScript.Mutates(verb)) session.MutationFinished();
+            };
+            string[] lines = text.Split('\n');
+            int cp = FindCheckpoint(lines);
+            if (cp < 0)
+            {
+                BuildScript.Run(doc, text, baseDir, before, after, result);
+                if (result.Ok) { pending.RemoveFirst(); continue; }
+                int failed = result.ErrorLine;
+                result.ErrorLine = at + failed;
+                string rest = string.Join("\n", text.Split('\n').Skip(failed));
+                if (string.IsNullOrWhiteSpace(rest.Replace("#", ""))) pending.RemoveFirst();
+                else first.Value = (rest, at + failed);
+                if (open && live.CurrentPath is { } last) studio = StudioCache.Load(last);
+                return false;
+            }
+            // A checkpoint sits in this piece: run only the lines before it, then gate on it.
+            string head = string.Join("\n", lines.Take(cp));
+            if (!string.IsNullOrWhiteSpace(head))
+            {
+                BuildScript.Run(doc, head, baseDir, before, after, result);
+                if (!result.Ok)
                 {
-                    // Every line is a step the chest lists (po's rule: no step may go missing), so a
-                    // render, save, export or measure is announced like an add. Only an echo is not a
-                    // step of its own: it is the caption of the line after it. Pace and pause still
-                    // gate only the lines that change the model; the rest run at once.
-                    if (IsCaption(verb)) { ct.ThrowIfCancellationRequested(); return; }
-                    session.BoundaryAsync(ct, mutation: BuildScript.Mutates(verb)).GetAwaiter().GetResult();
-                    live.Status("building", $"line {at + n}: {Clip(line)}");   // the whole line: the chest's tool wheel reads the tool from it
-                },
-                (n, verb, line) =>
-                {
-                    if (IsCaption(verb)) return;
-                    live.Commit(doc, $"line {at + n}: {Clip(line)}");
-                    if (BuildScript.Mutates(verb)) session.MutationFinished();
-                }, result);
-            if (result.Ok) { pending.RemoveFirst(); continue; }
-            int failed = result.ErrorLine;
-            result.ErrorLine = at + failed;
-            string rest = string.Join("\n", text.Split('\n').Skip(failed));
-            if (string.IsNullOrWhiteSpace(rest.Replace("#", ""))) pending.RemoveFirst();
-            else first.Value = (rest, at + failed);
-            if (open && live.CurrentPath is { } last) studio = StudioCache.Load(last);
-            return false;
+                    // The checkpoint was not reached: the rest (checkpoint included) stays pending
+                    // behind the failed line's fix, exactly like any other failed piece.
+                    int failed = result.ErrorLine;
+                    result.ErrorLine = at + failed;
+                    string rest = string.Join("\n", lines.Skip(failed));
+                    if (string.IsNullOrWhiteSpace(rest.Replace("#", ""))) pending.RemoveFirst();
+                    else first.Value = (rest, at + failed);
+                    if (open && live.CurrentPath is { } last) studio = StudioCache.Load(last);
+                    return false;
+                }
+            }
+            string tail = string.Join("\n", lines.Skip(cp + 1));
+            if (!TryParseCheckpoint(lines[cp], out string title, out List<string> focus, out List<string> vars, out string? cpError))
+            {
+                result.Ok = false; result.Error = cpError; result.ErrorLine = at + cp + 1;
+                if (string.IsNullOrWhiteSpace(tail.Replace("#", ""))) pending.RemoveFirst();
+                else first.Value = (tail, at + cp + 1);
+                if (open && live.CurrentPath is { } lastBad) studio = StudioCache.Load(lastBad);
+                return false;
+            }
+            // The checkpoint is a revision of its own, so the cabinet's replay can land on it and
+            // the focus bodies travel with it (AiLiveRun.Commit records them as affected ids).
+            live.Commit(doc, $"checkpoint \"{title}\"", checkpoint: title, affected: focus.ToArray());
+            // The outcome carries focus/vars for readers that only see the latest state (the
+            // cabinet's run list): "awaiting-user focus=Body,Head vars=length,depth".
+            string outcome = "awaiting-user"
+                + (focus.Count > 0 ? " focus=" + string.Join(",", focus) : "")
+                + (vars.Count > 0 ? " vars=" + string.Join(",", vars) : "");
+            if (outcome.Length > 300) outcome = outcome[..300];
+            live.Status("checkpoint", operation: title, outcome: outcome);
+            var gate = WaitForCheckpoint(root, live, session, title, ct);
+            if (gate is CheckpointGate.Closed or CheckpointGate.Skip) { pending.Clear(); return true; }
+            if (string.IsNullOrWhiteSpace(tail)) pending.RemoveFirst();
+            else first.Value = (tail, at + cp + 1);
         }
         return true;
+    }
+
+    /// <summary>What unblocked a checkpoint: carry on with the lines after it, or drop them.</summary>
+    enum CheckpointGate { Continue, Closed, Skip }
+
+    /// <summary>The 0-based index of the first checkpoint line in a piece, or -1. A checkpoint line
+    /// is a whole line (comments and blank lines are not checkpoints); its grammar is parsed by
+    /// <see cref="TryParseCheckpoint"/>.</summary>
+    static int FindCheckpoint(string[] lines)
+    {
+        for (int i = 0; i < lines.Length; i++)
+        {
+            string t = lines[i].Trim();
+            if (t.Length == 0 || t.StartsWith('#')) continue;
+            if (t.Equals("checkpoint", StringComparison.OrdinalIgnoreCase)
+                || t.StartsWith("checkpoint ", StringComparison.OrdinalIgnoreCase)
+                || t.StartsWith("checkpoint\t", StringComparison.OrdinalIgnoreCase)) return i;
+        }
+        return -1;
+    }
+
+    /// <summary><c>checkpoint "Stage 1: Silhouette" [focus=Body,Head] [vars=length,depth]</c>.
+    /// The title may also be unquoted words up to the first <c>key=value</c> token.</summary>
+    static bool TryParseCheckpoint(string line, out string title, out List<string> focus, out List<string> vars, out string? error)
+    {
+        title = ""; focus = new(); vars = new(); error = null;
+        string rest = line.Trim()["checkpoint".Length..].Trim();
+        if (rest.Length == 0) { error = "checkpoint needs a title: checkpoint \"Stage 1: ...\" [focus=Body] [vars=...]"; return false; }
+        if (rest[0] == '"')
+        {
+            int end = rest.IndexOf('"', 1);
+            if (end < 0) { error = "checkpoint title is missing its closing quote"; return false; }
+            title = rest[1..end];
+            rest = rest[(end + 1)..].Trim();
+        }
+        else
+        {
+            var parts = rest.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            var titleWords = new List<string>();
+            int j = 0;
+            for (; j < parts.Length; j++) { if (parts[j].Contains('=')) break; titleWords.Add(parts[j]); }
+            title = string.Join(" ", titleWords);
+            rest = string.Join(" ", parts.Skip(j));
+        }
+        if (string.IsNullOrWhiteSpace(title)) { error = "checkpoint needs a title: checkpoint \"Stage 1: ...\" [focus=Body] [vars=...]"; return false; }
+        foreach (string token in rest.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            int eq = token.IndexOf('=');
+            if (eq <= 0) continue;
+            string key = token[..eq].ToLowerInvariant();
+            string val = token[(eq + 1)..];
+            if (key == "focus") focus = val.Split(',').Select(s => s.Trim()).Where(s => s.Length > 0).ToList();
+            else if (key == "vars") vars = val.Split(',').Select(s => s.Trim()).Where(s => s.Length > 0).ToList();
+        }
+        return true;
+    }
+
+    /// <summary>Blocks at a checkpoint until something continues it. Signals, in order:
+    /// a <c>.continue</c> inbox file (the cabinet's continue_checkpoint, or a future
+    /// <c>geppetto-live continue</c>); a <c>.close</c>/<c>.skip</c> inbox file (drop the lines
+    /// after the checkpoint); a <c>.txt</c> inbox file left untouched for the open loop
+    /// (<c>geppetto-live more</c>: its lines run after the checkpoint's remaining lines);
+    /// an AiLiveControl <c>continue</c> command; or a cabinet direction whose text starts
+    /// <c>CHECKPOINT-APPROVE</c>/<c>CHECKPOINT-REDO</c> (host.sendDirection, the only cabinet
+    /// slot that reaches a run today). A continue note, and an approve/redo direction, are
+    /// kept as a note on the run so the modeller behind it reads them in geppetto-notes.
+    /// Cancellation (Ctrl-C) throws, as elsewhere in Drain.</summary>
+    static CheckpointGate WaitForCheckpoint(string root, AiLiveRun live, AiLiveControl.Session session, string title, CancellationToken ct)
+    {
+        string inbox = Path.Combine(root, ".live/inbox");
+        string commands = Path.Combine(root, ".live/commands");
+        Directory.CreateDirectory(inbox);
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (session.TakeCheckpointContinue()) return CheckpointGate.Continue;
+            if (Directory.Exists(inbox))
+            {
+                string? cont = Directory.EnumerateFiles(inbox, "*.continue")
+                    .OrderBy(p => Path.GetFileName(p), StringComparer.Ordinal).FirstOrDefault();
+                if (cont is not null)
+                {
+                    string note = "";
+                    try { note = File.ReadAllText(cont); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+                    try { File.Move(cont, cont + ".taken", overwrite: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+                    if (!string.IsNullOrWhiteSpace(note)) AppendCheckpointNote(root, live, title, note.Trim());
+                    return CheckpointGate.Continue;
+                }
+                if (Directory.EnumerateFiles(inbox, "*.close").Any()) return CheckpointGate.Closed;
+                if (Directory.EnumerateFiles(inbox, "*.skip").Any()) return CheckpointGate.Skip;
+                if (Directory.EnumerateFiles(inbox, "*.txt").Any()) return CheckpointGate.Continue;
+            }
+            if (Directory.Exists(commands))
+            {
+                foreach (string path in Directory.EnumerateFiles(commands, "*.json").OrderBy(p => p, StringComparer.Ordinal))
+                {
+                    JsonObject? cmd = null;
+                    try { cmd = JsonNode.Parse(File.ReadAllText(path)) as JsonObject; }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException) { continue; }
+                    if (cmd is null || cmd["command"]?.GetValue<string>() != "instruct") continue;
+                    if (cmd["runId"]?.GetValue<string>() != live.RunId) continue;
+                    string text = cmd["text"]?.GetValue<string>() ?? "";
+                    string t = text.Trim();
+                    if (t.StartsWith("CHECKPOINT-APPROVE", StringComparison.OrdinalIgnoreCase)
+                        || t.StartsWith("CHECKPOINT-REDO", StringComparison.OrdinalIgnoreCase))
+                    {
+                        try { File.Move(path, path + ".taken", overwrite: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+                        AppendCheckpointNote(root, live, title, text.Trim());
+                        return CheckpointGate.Continue;
+                    }
+                }
+            }
+            ct.WaitHandle.WaitOne(100);
+        }
+    }
+
+    /// <summary>One notes.jsonl entry in the shape live_runs.add_note writes, so geppetto-notes
+    /// prints it: time, run folder, revision, the checkpoint as its op, the text, unread.</summary>
+    static void AppendCheckpointNote(string root, AiLiveRun live, string title, string text)
+    {
+        try
+        {
+            var note = new JsonObject {
+                ["time"] = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture),
+                ["run"] = Path.GetFileName(root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)),
+                ["rev"] = live.Revision, ["op"] = $"checkpoint \"{title}\"", ["text"] = text,
+                ["script"] = "", ["prompt"] = "", ["read"] = false
+            };
+            using var stream = new FileStream(Path.Combine(root, "notes.jsonl"), FileMode.Append, FileAccess.Write, FileShare.Read);
+            byte[] bytes = System.Text.Encoding.UTF8.GetBytes(note.ToJsonString() + "\n");
+            stream.Write(bytes); stream.Flush(flushToDisk: true);
+        }
+        catch (IOException) { /* A lost gate note must not lose the continue itself. */ }
+        catch (UnauthorizedAccessException) { }
     }
 
     static string Normalise(string text)

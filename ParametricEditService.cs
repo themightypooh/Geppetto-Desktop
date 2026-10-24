@@ -2,8 +2,12 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
 using Effigy;
@@ -29,6 +33,20 @@ public interface IParameterDragSession : IDisposable
 	void Cancel();
 }
 
+/// <summary>An explicitly supplied value, or none at all. Lane D (Backlog BD4): the old
+/// <c>Commit(T? = default)</c> could not tell "no value given" from "the value is 0 / false",
+/// so dragging a float to 0.0 or a bool to false silently reverted to the initial value.
+/// <c>Commit()</c> (no value) now means "the last previewed value, else the initial one";
+/// <c>Commit(0f)</c> and <c>Commit(false)</c> mean exactly those values, via the implicit
+/// conversion to <see cref="Optional{T}"/>.</summary>
+public readonly struct Optional<T>
+{
+	public bool HasValue { get; }
+	public T? Value { get; }
+	public Optional( bool hasValue, T? value ) { HasValue = hasValue; Value = value; }
+	public static implicit operator Optional<T>( T value ) => new( true, value );
+}
+
 public sealed class ParameterDragSession<T> : IParameterDragSession
 {
 	readonly EditTransaction _tx;
@@ -36,25 +54,41 @@ public sealed class ParameterDragSession<T> : IParameterDragSession
 	readonly T _initialValue;
 	readonly Action _markDirtyAndRebuild;
 	readonly PartStudio _studio;
+	readonly string _featureId;
+	readonly string _featureName;
+	readonly string _paramName;
+	readonly ParametricEditService.LiveRunAttachment? _attachment;
 	bool _finished;
+	T _lastPreview = default!;
+	bool _hasPreview;
 
 	internal ParameterDragSession(
 		EditTransaction tx,
 		Action<T> setter,
 		T initialValue,
 		Action markDirtyAndRebuild,
-		PartStudio studio )
+		PartStudio studio,
+		string featureId = "",
+		string featureName = "",
+		string paramName = "",
+		ParametricEditService.LiveRunAttachment? attachment = null )
 	{
 		_tx = tx ?? throw new ArgumentNullException( nameof( tx ) );
 		_setter = setter ?? throw new ArgumentNullException( nameof( setter ) );
 		_initialValue = initialValue;
 		_markDirtyAndRebuild = markDirtyAndRebuild ?? throw new ArgumentNullException( nameof( markDirtyAndRebuild ) );
 		_studio = studio ?? throw new ArgumentNullException( nameof( studio ) );
+		_featureId = featureId;
+		_featureName = featureName;
+		_paramName = paramName;
+		_attachment = attachment;
 	}
 
 	public void UpdatePreview( T value )
 	{
 		if ( _finished ) throw new InvalidOperationException( "Parameter drag session is already finished." );
+		_lastPreview = value;
+		_hasPreview = true;
 		_tx.UpdatePreview( () =>
 		{
 			_setter( value );
@@ -68,29 +102,67 @@ public sealed class ParameterDragSession<T> : IParameterDragSession
 		UpdatePreview( (T)value );
 	}
 
-	public void Commit( T? finalValue = default )
+	/// <summary>Commits an explicit value (0 and false included), or, with no argument, the last
+	/// previewed value (a drag released without a final value keeps what was previewed), or the
+	/// initial value if nothing was ever previewed. A commit that ends where it started is a
+	/// no-op: the preview is restored and no history entry (and no live-run write-back) is made.</summary>
+	public void Commit( Optional<T> finalValue = default )
 	{
 		if ( _finished ) throw new InvalidOperationException( "Parameter drag session is already finished." );
 		_finished = true;
 
-		T valueToCommit = EqualityComparer<T>.Default.Equals( finalValue, default ) ? _initialValue : finalValue!;
+		T valueToCommit = finalValue.HasValue ? finalValue.Value! : (_hasPreview ? _lastPreview : _initialValue);
+		bool isNoOp = EqualityComparer<T>.Default.Equals( _initialValue, valueToCommit );
 
 		_tx.Commit( () =>
 		{
-			if ( !EqualityComparer<T>.Default.Equals( finalValue, default ) )
-			{
-				_setter( finalValue! );
-			}
+			_setter( valueToCommit );
 			_studio.PreviewQuality = false;
 			_markDirtyAndRebuild();
-		}, isNoOp: () => EqualityComparer<T>.Default.Equals( _initialValue, valueToCommit ) );
+		}, isNoOp: () => isNoOp );
+
+		if ( !isNoOp && _attachment is not null )
+			WriteBackToLiveRun( valueToCommit );
 	}
 
 	void IParameterDragSession.Commit( object? finalValue )
 	{
-		if ( finalValue is null ) Commit( default );
-		else Commit( (T)finalValue );
+		if ( finalValue is null ) Commit();
+		else Commit( new Optional<T>( true, (T)finalValue ) );
 	}
+
+	/// <summary>Lane D: the drag changed the model, and this session is attached to a live run,
+	/// so the run itself must learn of it before its next stage, or the agent would overwrite
+	/// the user's tweak. The run gets a new <c>NNNNNNNN-user.effigy</c> revision (AiLiveRun.Commit
+	/// with fileLabel "user") plus a structured <c>user-edit</c> entry in its directions journal.
+	/// A run that is ending (its commit throws cancellation) or an unwritable journal must not
+	/// take the user's local edit down with it: the edit already committed locally, so those
+	/// failures are swallowed and the drag still succeeds.</summary>
+	void WriteBackToLiveRun( T value )
+	{
+		try
+		{
+			_attachment!.Live.Commit( _studio,
+				$"user-edit:{_featureName}.{_paramName}={FormatValue( value )}",
+				affected: string.IsNullOrEmpty( _featureId ) ? null : new[] { _featureId },
+				fileLabel: "user" );
+			ParametricEditService.AppendUserEditDirection( _attachment, _featureName, _paramName,
+				FormatValue( value ), _attachment.Live.Revision );
+		}
+		catch ( Exception ex ) when ( ex is IOException or UnauthorizedAccessException or OperationCanceledException )
+		{
+		}
+	}
+
+	static string FormatValue( T value ) => value switch
+	{
+		float f => f.ToString( CultureInfo.InvariantCulture ),
+		double d => d.ToString( CultureInfo.InvariantCulture ),
+		bool b => b ? "true" : "false",
+		Vec3 v => $"{v.x.ToString( CultureInfo.InvariantCulture )},{v.y.ToString( CultureInfo.InvariantCulture )},{v.z.ToString( CultureInfo.InvariantCulture )}",
+		null => "",
+		_ => Convert.ToString( value, CultureInfo.InvariantCulture ) ?? ""
+	};
 
 	public void Cancel()
 	{
@@ -113,6 +185,59 @@ public sealed class ParameterDragSession<T> : IParameterDragSession
 /// </summary>
 public static class ParametricEditService
 {
+	/// <summary>Lane D: a live run a DocumentSession's drags write back to. The run lives in
+	/// another process in the cabinet, so a viewer-side attachment is made by the caller that
+	/// owns both the session and the run (tests and run-hosting code attach directly); the
+	/// attachment itself only carries the run root and its AiLiveRun.</summary>
+	public sealed class LiveRunAttachment
+	{
+		public string RunRoot { get; }
+		public AiLiveRun Live { get; }
+		public LiveRunAttachment( string runRoot, AiLiveRun live )
+		{
+			RunRoot = runRoot ?? throw new ArgumentNullException( nameof( runRoot ) );
+			Live = live ?? throw new ArgumentNullException( nameof( live ) );
+		}
+	}
+
+	static readonly ConditionalWeakTable<DocumentSession, LiveRunAttachment> LiveRuns = new();
+
+	/// <summary>Attach a session's drags to a live run: a committed drag then also commits a
+	/// user-edit revision to that run and appends a user-edit direction (see
+	/// <see cref="ParameterDragSession{T}"/>). Attaching twice replaces the first attachment.</summary>
+	public static void AttachLiveRun( DocumentSession session, string runRoot, AiLiveRun live )
+	{
+		ArgumentNullException.ThrowIfNull( session );
+		LiveRuns.Remove( session );
+		LiveRuns.Add( session, new LiveRunAttachment( runRoot, live ) );
+	}
+
+	public static void DetachLiveRun( DocumentSession session )
+	{
+		ArgumentNullException.ThrowIfNull( session );
+		LiveRuns.Remove( session );
+	}
+
+	internal static LiveRunAttachment? LiveRunFor( DocumentSession session )
+		=> LiveRuns.TryGetValue( session, out var attachment ) ? attachment : null;
+
+	/// <summary>One structured line in &lt;run&gt;/.live/directions.jsonl, the journal the run's
+	/// modeller reads for user edits: {"ev":"user-edit","feature":...,"param":...,"value":...,
+	/// "revision":N}. A directions entry is not a notes.jsonl note (those are po's words on a
+	/// step); it is the machine-readable delta a checkpoint resume builds on.</summary>
+	public static void AppendUserEditDirection( LiveRunAttachment attachment, string featureName, string paramName, string value, long revision )
+	{
+		ArgumentNullException.ThrowIfNull( attachment );
+		var line = new JsonObject {
+			["ev"] = "user-edit", ["feature"] = featureName, ["param"] = paramName,
+			["value"] = value, ["revision"] = revision,
+			["time"] = DateTimeOffset.UtcNow.ToString( "O", CultureInfo.InvariantCulture )
+		}.ToJsonString();
+		string folder = Path.Combine( attachment.RunRoot, ".live" );
+		Directory.CreateDirectory( folder );
+		File.AppendAllText( Path.Combine( folder, "directions.jsonl" ), line + "\n" );
+	}
+
 	static PartStudio RequireEffigyStudio( DocumentSession session )
 	{
 		ArgumentNullException.ThrowIfNull( session );
@@ -542,7 +667,8 @@ public static class ParametricEditService
 			studio.Rebuild();
 		};
 
-		return new ParameterDragSession<T>( tx, setter, initialValue, markDirtyAndRebuild, studio );
+		return new ParameterDragSession<T>( tx, setter, initialValue, markDirtyAndRebuild, studio,
+			feature.Id, feature.Name ?? feature.Id, binding.Name, LiveRunFor( session ) );
 	}
 
 	// --- Rebuild Operations -----------------------------------------------------------------

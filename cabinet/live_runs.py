@@ -76,7 +76,8 @@ def makedirs_private(path):
 
 PACES = (0, 1, 3, 5, 10)
 TERMINAL = ("completed", "below-target", "cancelled", "failed")
-OPEN = ("open", "held")     # a script run that finished its lines (or held at a bad one) and takes more (geppetto-live more)
+OPEN = ("open", "held", "checkpoint")     # a script run that finished its lines (or held at a bad one) and takes more (geppetto-live more);
+                                          # "checkpoint" is a run gated at a stage checkpoint (Lane D): it takes a continue, not more lines
 
 
 def close_open(root):
@@ -87,6 +88,51 @@ def close_open(root):
     tmp = os.path.join(directory, name + ".close.tmp")
     open(tmp, "w").close()
     os.replace(tmp, tmp[:-4])
+
+
+def continue_checkpoint(root, note=""):
+    """Lane D: continue a run gated at a stage checkpoint: a .continue inbox entry that
+    ScriptLive's checkpoint gate takes (it keeps the note, if any, as a note on the run for
+    the modeller). Returns the inbox entry name. A run that is not at a checkpoint ignores
+    a stray .continue file: nothing else in the inbox loop reads that extension."""
+    directory = os.path.join(root, ".live", "inbox")
+    makedirs_private(directory)
+    name = "%019d%s" % (time.time_ns() // 100 + 621355968000000000, uuid.uuid4().hex[:6])
+    tmp = os.path.join(directory, name + ".continue.tmp")
+    with open(tmp, "w") as stream:
+        stream.write(note or "")
+    os.replace(tmp, tmp[:-4])
+    return name
+
+
+def directions(root):
+    """Lane D: the structured user-edit journal (<run>/.live/directions.jsonl) a live run's
+    modeller reads: each entry is {"ev": "user-edit", "feature", "param", "value", "revision"}.
+    Tolerates a torn tail the way notes() tolerates bad lines: it is skipped, not fatal."""
+    out = []
+    try:
+        with open(os.path.join(root, ".live", "directions.jsonl")) as stream:
+            for line in stream:
+                try:
+                    entry = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(entry, dict) and entry.get("ev") == "user-edit":
+                    out.append(entry)
+    except OSError:
+        pass
+    return out
+
+
+def directions_text(root):
+    """User-edit deltas as the modeller reads them (geppetto-notes --directions): one line
+    per edit, newest last, so a checkpoint resume builds on the user's tweaks, in order."""
+    lines = []
+    for entry in directions(root):
+        lines.append("USER-EDIT rev %s: %s.%s = %s" % (
+            entry.get("revision", "?"), entry.get("feature", "?"),
+            entry.get("param", "?"), entry.get("value", "?")))
+    return "\n".join(lines) + ("\n" if lines else "")
 
 
 def control_state(state):
@@ -106,6 +152,7 @@ def activity(state):
     return {
         "starting": "starting", "researching": "researching", "waiting": "waiting for model",
         "open": "open: waiting for more lines", "held": "held at a bad line",
+        "checkpoint": "checkpoint: awaiting you",
         "building": operation.replace("_", " ") or "building", "revision": "model updated",
         "judging": "judging", "completed": "completed", "below-target": "stopped below target",
         "cancelled": "cancelled", "failed": "failed", "operation-failed": "operation rejected",
@@ -483,6 +530,9 @@ if __name__ == "__main__":
     args = sys.argv[1:]
     runs_root = os.path.expanduser("~/.local/share/geppetto/research")
     script = next((a for a in args if not a.startswith("--")), None)
+    if "--directions" in args:              # geppetto-notes --directions RUN: the user-edit deltas on one run
+        sys.stdout.write(directions_text(os.path.abspath(script)))
+        sys.exit(0)
     if "--wait" in args:                     # geppetto-live wait RUN [PID]
         root = os.path.abspath(script)
         pid = int(args[args.index("--wait") + 2]) if len(args) > args.index("--wait") + 2 else 0

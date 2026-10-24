@@ -22,7 +22,10 @@ namespace Marionette.Desktop;
 /// lines starting with '@' followed by JSON (anything else on stdout is log noise).
 ///
 ///   orbit DX DY | pan DX DY | zoom F | dolly N | size W H | frame | play 0|1 | time T | bones 0|1 | grid 0|1
-///   wire N | select BONE | pick X Y | clip PATH | loop 0|1 | ack | quit
+///   wire N | select BONE | pick X Y | clip PATH | clip off | rest | loop 0|1 | ack | quit
+///   clip PATH on an .effigy (or a live-run pane) builds a player on the pane's own rig
+///   when there is none yet, so a .riganim previews without an FBX pane; `rest` drops
+///   back to the bind pose. A clip set in a live pane survives live revisions until `rest`.
 ///   keys | kmove D T:F.. | kdel T:F.. | kease E T:F.. | kins F T.. | undo | redo | save
 ///   ortho 0|1 | refadd VIEW PATH | refset I key=value.. | refdel I | refsave | refs
 ///
@@ -64,6 +67,11 @@ public static class ServeMode
 		}
 		var mesh = options.WatchRun is null ? loader.Mesh : AiLivePreview.EmptyMesh();
 		var player = options.WatchRun is null ? loader.Player : null;
+		// Lane E: the clip currently playing in this pane, if any — including one
+		// set with `clip` after load, so a live revision can re-apply it instead of
+		// silently dropping back to the rest pose (player is reset per revision).
+		string activeClipPath = options.Clip;
+		bool activeClipPlaying = true;
 		AiLivePreview follow = options.WatchRun is null ? null : new AiLivePreview( options.WatchRun );
 		long displayedRevision = 0, eventSequence = 0;
 		string displayedRun = null;
@@ -349,7 +357,25 @@ public static class ServeMode
 								var upload = Stopwatch.StartNew();
 								if ( update.Mesh.TriangleCount > 0 ) update.Mesh.Upload( gl, mesh );   // in place over the last revision's buffers
 								if ( gl.GetError() is var uploadError && uploadError != GLEnum.NoError ) throw new InvalidOperationException( $"Preview upload: {uploadError}" );
-								var old = mesh; mesh = update.Mesh; player = null;
+								var old = mesh; mesh = update.Mesh;
+								// Lane E: a clip set in this pane survives the revision on
+								// the new mesh's rig; without this, every live step dropped
+								// a playing clip back to the rest pose.
+								var wasPlaying = player?.Playing ?? activeClipPlaying;
+								player = null;
+								if ( activeClipPath is not null && mesh.Rig is { Count: > 0 } )
+								{
+									try
+									{
+										player = new MarionettePlayer( mesh.Rig, activeClipPath );
+										player.Playing = wasPlaying;
+									}
+									catch ( Exception clipEx )
+									{
+										player = null;
+										Emit( new JsonObject { ["ev"] = "clip", ["path"] = activeClipPath, ["error"] = clipEx.Message } );
+									}
+								}
 								if ( face.Sync( mesh, update.Path ) && face.HasRig ) Emit( face.Snapshot() );
 								face.Apply( mesh );               // the next revision keeps the face
 								foreach ( var prop in renderer.Props ) { prop.Mesh.ReleaseGpu( gl ); prop.Dispose(); }
@@ -869,13 +895,57 @@ public static class ServeMode
 					break;
 				}
 				case "clip":
-					if ( player is null ) throw new InvalidOperationException( "This model has no skeleton to play a clip on." );
-					player.LoadClip( arg );
+				{
+					// Lane E: an .effigy pane (and a live-run pane) may have a rig but no
+					// player — the loader only builds one for an FBX-era clip, and live
+					// panes reset player per revision. Build one on the pane's own rig
+					// instead of refusing, so a .riganim previews where the model is.
+					var off = arg.Trim().ToLowerInvariant() is "" or "off" or "none" or "rest";
+					if ( off )
+					{
+						if ( mesh.Rig is not { Count: > 0 } ) throw new InvalidOperationException( "This model has no skeleton to rest on." );
+						activeClipPath = null;
+						player = new MarionettePlayer( mesh.Rig );
+						player.Playing = false;
+						player.Time = 0;
+						player.Step( 0 );
+						Reframe();
+						Emit( new JsonObject { ["ev"] = "clip", ["path"] = "", ["rest"] = true, ["frames"] = 0, ["tracks"] = 0 } );
+						OpenKeys( null );
+						break;
+					}
+					if ( mesh.Rig is not { Count: > 0 } && player is null )
+						throw new InvalidOperationException( "This model has no skeleton to play a clip on." );
+					player ??= new MarionettePlayer( mesh.Rig );
+					var clipFile = arg.Trim().Trim( '"' );
+					if ( !File.Exists( clipFile ) && !string.IsNullOrEmpty( options.Model ) )
+					{
+						var besideModel = Path.Combine( Path.GetDirectoryName( Path.GetFullPath( options.Model ) ) ?? ".", Path.GetFileName( clipFile ) );
+						if ( File.Exists( besideModel ) ) clipFile = besideModel;
+					}
+					player.LoadClip( clipFile );
+					activeClipPath = clipFile;
+					activeClipPlaying = true;
 					Reframe();
 					player.Playing = true;
-					Emit( ClipInfo( player, arg ) );
-					OpenKeys( arg );
+					Emit( ClipInfo( player, clipFile ) );
+					OpenKeys( clipFile );
 					break;
+				}
+				case "rest":
+				{
+					// Lane E: the bind pose, by name — the toggle the other way from `clip`.
+					if ( mesh.Rig is not { Count: > 0 } ) throw new InvalidOperationException( "This model has no skeleton to rest on." );
+					activeClipPath = null;
+					player = new MarionettePlayer( mesh.Rig );
+					player.Playing = false;
+					player.Time = 0;
+					player.Step( 0 );
+					Reframe();
+					Emit( new JsonObject { ["ev"] = "clip", ["path"] = "", ["rest"] = true, ["frames"] = 0, ["tracks"] = 0 } );
+					OpenKeys( null );
+					break;
+				}
 				// the dope sheet: keys are "track:frame" refs, track being the index in the keys event
 				case "keys": EmitKeys(); break;
 				// face [set NAME VALUE [BALANCE] | preset NAME | zero | random | scale S | save NAME | export PATH]

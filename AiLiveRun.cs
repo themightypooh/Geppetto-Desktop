@@ -56,13 +56,18 @@ public sealed class AiLiveRun
         }
     }
 
-    public void Commit(PartStudio studio, string operation, string? prepared = null, string? checkpoint = null, string[]? affected = null)
+    /// <param name="fileLabel">Lane D user edits: a fixed label (e.g. "user") instead of a random
+    /// suffix, so a user-edit revision reads <c>00000014-user.effigy</c>. The revision number
+    /// still makes it unique; the preview loader matches the <c>DDDDDDDD-*.effigy</c> prefix.</param>
+    public void Commit(PartStudio studio, string operation, string? prepared = null, string? checkpoint = null, string[]? affected = null, string? fileLabel = null)
     {
         lock (gate)
         {
             if (cancelling) throw new OperationCanceledException("Run cancellation accepted; late revision discarded.");
             long next = revision + 1;
-            string relative = $".live/revisions/{next:D8}-{Guid.NewGuid():N}.effigy";
+            string relative = fileLabel is null
+                ? $".live/revisions/{next:D8}-{Guid.NewGuid():N}.effigy"
+                : $".live/revisions/{next:D8}-{fileLabel}.effigy";
             string destination = owner.Owned(relative);
             string json = StudioDocument.Write(studio);
             AtomicWrite(destination, json, overwrite: false);
@@ -146,6 +151,7 @@ public sealed class AiLiveJournalReader : IDisposable
     bool oversized;
     JsonObject? latest;
     readonly List<JsonObject> fresh = new();
+    DateTime lastPathWriteUtc = DateTime.MinValue;   // Lane D (Backlog B29): the path file's mtime when last observed
     public AiLiveJournalReader(string root) => path = Path.Combine(root, ".live/events.jsonl");
     /// <summary>The newest complete record so far (what <see cref="Poll"/> last returned).</summary>
     public JsonObject? Latest => latest;
@@ -159,10 +165,51 @@ public sealed class AiLiveJournalReader : IDisposable
     }
     public JsonObject? Poll()
     {
+        // Lane D (Backlog B29): the journal file can be replaced under a long-lived reader
+        // (a new run reusing the root, a rotation). An open handle follows the old inode, so a
+        // same-inode append grows the open stream's length, but a replacement does not: a path
+        // length that differs from the open stream's length is a replacement, and a same-length
+        // file with a newer mtime and a different first record's runId is one too. Either way
+        // the reader reopens from the start and drops the old run's identity, or the new run's
+        // records would be filtered out as a "journal graft" forever.
+        if (reader is not null)
+        {
+            try
+            {
+                var info = new FileInfo(path);
+                if (info.Exists)
+                {
+                    long streamLen = -1;
+                    try { streamLen = reader.BaseStream.Length; } catch (Exception ex) when (ex is IOException or ObjectDisposedException) { }
+                    bool replaced = false;
+                    if (streamLen >= 0 && info.Length != streamLen) replaced = true;
+                    else if (streamLen >= 0 && reader.BaseStream.Position >= streamLen
+                        && lastPathWriteUtc != DateTime.MinValue && info.LastWriteTimeUtc != lastPathWriteUtc)
+                    {
+                        string? firstRun = null;
+                        try
+                        {
+                            using var probe = new StreamReader(new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite));
+                            if (probe.ReadLine() is string first && JsonNode.Parse(first) is JsonObject ev)
+                                firstRun = ev["runId"]?.GetValue<string>();
+                        }
+                        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { }
+                        if (firstRun is not null && latest is not null && firstRun != latest["runId"]?.GetValue<string>()) replaced = true;
+                    }
+                    lastPathWriteUtc = info.LastWriteTimeUtc;
+                    if (replaced)
+                    {
+                        reader.Dispose(); reader = null; latest = null; fresh.Clear(); partial.Clear(); oversized = false;
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* Keep the old reader. */ }
+        }
         if (reader is null)
         {
             if (!File.Exists(path)) return latest;
             reader = new StreamReader(new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite));
+            try { lastPathWriteUtc = new FileInfo(path).LastWriteTimeUtc; } catch (IOException) { } catch (UnauthorizedAccessException) { }
         }
         if (reader.BaseStream.Length < reader.BaseStream.Position)
         {

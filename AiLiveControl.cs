@@ -30,6 +30,7 @@ public static class AiLiveControl
         readonly Queue<Direction> directions = new();
         readonly Stopwatch clock = Stopwatch.StartNew();
         bool pauseRequested, paused, closed;
+        bool checkpointContinue;        // a `continue` command arrived while the run waits at a checkpoint (Lane D)
         int steps;                      // STEP while paused: changes allowed through before holding again
         double pace, lastMutation = double.NegativeInfinity;
         public Session(string root, AiLiveRun live, CancellationTokenSource run, bool allowDirections = true, double pace = 0)
@@ -39,6 +40,13 @@ public static class AiLiveControl
             if (pace > 0) Publish("pace-changed", null, "initial");
         }
         public bool HasDirections { get { lock (gate) return directions.Count > 0; } }
+
+        /// <summary>Takes a pending checkpoint-continue signal (a `continue` control command):
+        /// true once per command, so a run gated at a checkpoint resumes exactly once.</summary>
+        public bool TakeCheckpointContinue()
+        {
+            lock (gate) { bool v = checkpointContinue; checkpointContinue = false; return v; }
+        }
 
         void Publish(string state, string? id = null, string? outcome = null)
             => live.Control(state, pauseRequested, paused, pace, directions.Count, id, outcome);
@@ -127,6 +135,11 @@ public static class AiLiveControl
                                 switch (command["command"]?.GetValue<string>())
                                 {
                                     case "cancel": Publish("cancelling", id, "accepted"); run.Cancel(); return;
+                                    case "continue":
+                                        // Lane D: unblocks a run waiting at a checkpoint. Not a direction
+                                        // (it carries no modelling text), so it is accepted even when
+                                        // directions are locked, and ScriptLive polls TakeCheckpointContinue.
+                                        checkpointContinue = true; Publish("checkpoint-continue", id, "accepted"); break;
                                     case "pause": pauseRequested = true; Publish("pausing", id, "accepted"); break;
                                     case "resume": pauseRequested = paused = false; steps = 0; Publish("resumed", id, "accepted"); break;
                                     case "step":
