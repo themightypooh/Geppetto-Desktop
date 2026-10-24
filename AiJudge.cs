@@ -218,8 +218,8 @@ public static class AiJudge
             score = Math.Clamp(score, 0, 10);
             gates.Add(new(name, score, hardFail, detail));
             if (score < 10) failures.Add(name + ": " + detail);
-            if (hardFail) { hard = true; cap = Math.Min(cap, 8.9); }
-            else cap = Math.Min(cap, score);
+            if (hardFail) hard = true;
+            cap = Math.Min(cap, score);
         }
 
         // Manifold: the hidden-hole gate. Any non-manifold edge is a hard fail.

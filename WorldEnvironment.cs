@@ -272,7 +272,7 @@ public static class EnvironmentPresets
         throw new ArgumentException($"Unknown environment preset '{name}'. Presets: {string.Join(", ", Names)}.");
     }
 
-    public static bool TryGet(string name, out EnvironmentPreset preset)
+    public static bool TryGet(string name, out EnvironmentPreset? preset)
     {
         preset = null;
         switch (name?.Trim().ToLowerInvariant())

@@ -55,13 +55,10 @@ public static class DataTransferService
 		outMesh.Positions.AddRange( target.Positions );
 		foreach ( var f in target.Faces )
 			outMesh.Faces.Add( new Face( (int[])f.Indices.Clone(), (Vec2[])f.UVs.Clone(), f.Material ) );
-		if ( target.UV2 is not null ) outMesh.UV2.AddRange( target.UV2 );
-		if ( target.FaceUV2 is not null )
-		{
-			outMesh.FaceUV2 = new int[target.FaceUV2.Length][];
-			for ( int i = 0; i < target.FaceUV2.Length; i++ )
-				outMesh.FaceUV2[i] = target.FaceUV2[i] is null ? null : (int[])target.FaceUV2[i].Clone();
-		}
+		// No UV2 passthrough: the desktop kernel mirror has no UV2/FaceUV2 (that channel
+		// exists only in the geppetto tree so far), so copying it would break this build.
+		// UV2 transfer is a Lane P sync follow-up, not part of the UV channel here, which
+		// is the per-corner Face.UVs the transfer interpolates.
 
 		if ( wantSkin && source.Skin is not null )
 			outMesh.Skin = new SkinWeights( target.Positions.Count );
