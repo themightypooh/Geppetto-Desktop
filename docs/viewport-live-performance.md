@@ -21,3 +21,14 @@ writer and viewer restart together.
 
 Next wins if needed: per-body cache of extract data (most edits touch 1 of ~11 bodies), reuse GL
 buffers (BufferSubData) instead of new VAO/VBO per revision.
+
+## Round 2 (commit 3250393)
+- Real root causes: (1) workstation GC — the loader thread's allocations caused gen0 pauses of 30-70 ms
+  on the render thread; Server GC (4 heaps) fixed the hitches and halved load time. (2) The SDK stamped
+  the git sha into the kernel's InformationalVersion, so every commit changed the kernel MVID = the
+  StudioCache key -> ~16 s rebuild per revision whenever viewer and writer were built at different
+  commits. Now pinned in kernel/Effigy.Kernel.csproj; do not remove.
+- ViewportMesh.PieceCache: per-body extract cache keyed by geometry hash (unrigged, no shape keys).
+- Upload(gl, previous): reuse VAO/VBO/EBO + textures, grow only when needed, partial body writes.
+- AiLivePreview (working tree, with the every-revision queue): MaxBacklog = 3, older waiting steps skipped.
+- Barracuda: load ~1.5 s -> ~0.23 s; frame p95 ~60-75 ms -> ~21 ms; output pixel-identical.
