@@ -127,4 +127,17 @@ public sealed class VolumeGrid
 		}
 		return density;
 	}
+
+	/// <summary>A preset look as a renderable grid: the preset's fog volume at
+	/// this scene's scale, plus its ambient and key intensity. The centre follows
+	/// <see cref="GlobalFog"/>: the world volume's height falloff starts one
+	/// radius below it, so the scene centre sits inside the fog, not above it.</summary>
+	public static VolumeGrid FromPreset( string name, float sceneRadius, Vector3 centre )
+	{
+		var preset = EnvironmentPresets.Get( name );
+		float radius = MathF.Max( sceneRadius, 1e-3f );
+		var grid = new VolumeGrid { ReferenceRadius = radius, Ambient = preset.Ambient, KeyIntensity = preset.KeyIntensity };
+		grid.Volumes.Add( preset.FogVolume( radius, centre ) );
+		return grid;
+	}
 }

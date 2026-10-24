@@ -313,4 +313,12 @@ public sealed class IblBaker
         b[7] = 1.0925484306f * n.X * n.Z;
         b[8] = 0.5462742153f * (n.X * n.X - n.Y * n.Y);
     }
+
+    /// <summary>Lane N: bake a named environment preset exactly like any other
+    /// environment, so a viewport can switch looks without an HDRI on disk.
+    /// The preset's analytic sky is the image; fog itself lives in the volume
+    /// grid (<see cref="VolumeGrid.FromPreset"/>), not in this bake.</summary>
+    public static PreparedEnvironment PreparePreset(string name, int cubeSize = 32, int samples = 1024,
+        CancellationToken cancellationToken = default)
+        => Prepare(EnvironmentPresets.Get(name).BuildImage(), cubeSize, samples, cancellationToken);
 }

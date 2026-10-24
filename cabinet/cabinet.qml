@@ -1229,6 +1229,80 @@ Window {
         }
     }
 
+    // Lane O: freehand draw-over layer for pane 1. Armed with DRAW (or the ToolCard DRAW
+    // key), it captures a freehand stroke over the viewport and draws it back as a polyline.
+    // Points are kept as fractions of the layer (fx, fy), so they survive a pane resize, and
+    // strokeJson is the payload a host slot turns into world-space rays: the cabinet viewport
+    // is a streamed serve image, it has no 3D camera in QML, so the ray per point must come
+    // from the serve viewer's camera (ServeMode pick already does ScreenRay internally) —
+    // that 3-line host slot (rays + mesh -> live_runs.add_draw_over_note) is the one piece
+    // still missing, and it is NOT faked here: SEND only reports the captured stroke on the
+    // status line until that slot exists. While disarmed the MouseArea is disabled, so normal
+    // clicks, picks and orbits are untouched. The CheckpointBar above is not touched by this.
+    component DrawOverLayer: Item {
+        id: dl
+        property bool armed: false
+        property var points: []
+        property bool strokeReady: false
+        property string strokeJson: ""
+        signal sendStroke(string json)
+        Canvas {
+            id: dlCanvas
+            anchors.fill: parent
+            onPaint: {
+                var ctx = getContext("2d");
+                ctx.clearRect(0, 0, width, height);
+                if (dl.points.length < 2) return;
+                ctx.strokeStyle = "#f2a91c"; ctx.lineWidth = 2; ctx.lineJoin = "round"; ctx.lineCap = "round";
+                ctx.beginPath();
+                ctx.moveTo(dl.points[0].fx * width, dl.points[0].fy * height);
+                for (var i = 1; i < dl.points.length; i++) ctx.lineTo(dl.points[i].fx * width, dl.points[i].fy * height);
+                ctx.stroke();
+            }
+        }
+        MouseArea {
+            anchors.fill: parent
+            enabled: dl.armed
+            property bool drawing: false
+            onPressed: function (m) {
+                drawing = true; dl.points = [{ fx: m.x / width, fy: m.y / height }];
+                dl.strokeReady = false; dl.strokeJson = ""; dlCanvas.requestPaint();
+            }
+            onPositionChanged: function (m) {
+                if (!drawing) return;
+                var p = dl.points.slice();
+                p.push({ fx: m.x / width, fy: m.y / height });
+                dl.points = p; dlCanvas.requestPaint();
+            }
+            onReleased: function (m) {
+                drawing = false;
+                if (dl.points.length > 1) { dl.strokeReady = true; dl.strokeJson = JSON.stringify(dl.points); }
+                dlCanvas.requestPaint();
+            }
+        }
+        Row {
+            anchors.left: parent.left; anchors.bottom: parent.bottom; anchors.margins: 8
+            spacing: 4
+            Chip {
+                label: dl.armed ? "DRAW: ON" : "DRAW"; lit: dl.armed
+                tip: "draw-over: drag a freehand stroke over the model; SEND turns it into a note once the host ray slot lands"
+                onClicked: { dl.armed = !dl.armed; if (!dl.armed) { dl.points = []; dl.strokeReady = false; dlCanvas.requestPaint(); } }
+            }
+            Chip {
+                visible: dl.strokeReady
+                label: "SEND STROKE"; lit: true
+                tip: "captured stroke payload (fractions of the pane); the host slot that raycasts it is still to land"
+                onClicked: dl.sendStroke(dl.strokeJson)
+            }
+            Chip {
+                visible: dl.points.length > 0
+                label: "CLEAR"
+                tip: "drop this stroke"
+                onClicked: { dl.points = []; dl.strokeReady = false; dl.strokeJson = ""; dlCanvas.requestPaint(); }
+            }
+        }
+    }
+
     // what a live script run is doing, written out on the build note (the paper the run bar's NOTE key
     // tosses out): LINE x of n, the part, what the line does, the line itself, a held run's error, and
     // every step so far, newest first (click one to replay from it; the raw line shows under the pointer)
@@ -3762,6 +3836,15 @@ Window {
             run: host.replay && host.replay.dir ? null : root.p1Run
             x: 12; y: 56
         }
+        DrawOverLayer {
+            id: p1DrawOver
+            objectName: "p1DrawOver"
+            anchors.fill: parent
+            z: 6
+            onSendStroke: function (json) {
+                host.say("draw-over stroke captured (" + points.length + " points); host ray slot still to land — payload kept on p1DrawOver.strokeJson");
+            }
+        }
         // ---- pick mode (keys 1-4 on the view) and what's picked, s&box style: tiny, top right, out of the way
         Column {
             id: subLabel
@@ -3932,6 +4015,7 @@ Window {
             onKeep: host.benchKeep("")
             onWheel: { open = false; toolWheel.manual = true }
             onClosed: open = false
+            onDrawOver: p1DrawOver.armed = true
             onOpenChanged: host.toolPicking(open)   // a face tool lights the face under the cursor; closing puts the old mode back
         }
         // the CLAUDE card, bottom-left over the model: Claude's replies, the tools it runs, ALLOW/DENY, PAUSE/STOP

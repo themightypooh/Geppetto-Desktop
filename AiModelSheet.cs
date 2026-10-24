@@ -315,4 +315,31 @@ material: "sample" (preferred: Geppetto takes the median colour of those pixels)
         foreach (var src in (JsonArray)s["sources"]!) b.Append("- ").Append(Str(src)).Append('\n');
         return b.ToString();
     }
+
+    /// <summary>The judge's supporting sheet section (Lane O O2): render an AiGateResult as
+    /// the "Judge gates" markdown block, and attach the same numbers to a sheet JSON under
+    /// "judge", so a capped score always carries its reasons with the model sheet.</summary>
+    public static string JudgeMarkdown(AiGateResult gate)
+    {
+        var b = new StringBuilder();
+        b.Append("\n## Judge gates\n\n");
+        b.Append(gate.HardFail ? "HARD FAIL — this model cannot pass, whatever its vision score.\n\n"
+            : $"Gate cap {gate.Cap:0.##} / 10.\n\n");
+        b.Append("| gate | score | detail |\n|---|---|---|\n");
+        foreach (var g in gate.Gates)
+            b.Append($"| {Cell(g.Name)} | {g.Score:0.##} | {Cell(g.Detail)} |\n");
+        if (gate.Failures.Count > 0)
+        {
+            b.Append("\nFailing gates:\n\n");
+            foreach (var f in gate.Failures) b.Append("- ").Append(f).Append('\n');
+        }
+        return b.ToString();
+    }
+
+    public static JsonObject AttachJudge(JsonObject sheet, AiGateResult gate)
+    {
+        if (sheet is null) throw new ArgumentException("A sheet is required.");
+        sheet["judge"] = gate.Json();
+        return sheet;
+    }
 }

@@ -193,3 +193,152 @@ public sealed class WorldEnvironment
         throw new InvalidDataException("HDR header line too long.");
     }
 }
+
+/// <summary>One named look: an analytic sky image, a fog-volume spec, and the
+/// volume-grid ambient/key it pairs with. Values are linear RGB, Z-up. The sky
+/// is analytic (gradient + sun disc), not a captured HDRI: a preset must work
+/// with no asset on disk, and <see cref="IblBaker"/> can bake it like any other
+/// environment. Fog density is stored as <see cref="OpticalDepth"/> (extinction
+/// across one scene radius) so the look survives a unit change; the volume
+/// grid divides by the radius, exactly like <see cref="VolumeGrid.GlobalFog"/>.
+/// <see cref="KeyDirection"/> points TOWARD the key light (the sun's position).</summary>
+public sealed class EnvironmentPreset
+{
+    public string Name = "";
+    public Vector3 KeyDirection = new(0, 0, 1);
+    public Vector3 Zenith, Horizon, Ground;
+    public Vector3 SunColor = new(1, 1, 1);
+    public float OpticalDepth;
+    public Vector3 Scattering = new(1, 1, 1);
+    public float Absorption = 0.05f;
+    public float Anisotropy = 0.3f;
+    /// <summary>Height falloff per scene radius (0 = uniform with height).</summary>
+    public float HeightFalloffPerRadius;
+    public Vector3 Emission;
+    public Vector3 Ambient = new(0.02f, 0.022f, 0.028f);
+    public float KeyIntensity = 5f;
+
+    /// <summary>Analytic equirectangular image: vertical gradient plus a sun disc
+    /// and a wide glow around <see cref="KeyDirection"/>. Row zero is north, the
+    /// same convention <see cref="WorldEnvironment.Sample"/> reads.</summary>
+    public WorldEnvironment BuildImage(int width = 64, int height = 32)
+    {
+        if (width <= 0 || height <= 0) throw new ArgumentOutOfRangeException("Preset image size must be positive.");
+        var key = KeyDirection.LengthSquared() > 1e-12f ? Vector3.Normalize(KeyDirection) : new Vector3(0, 0, 1);
+        var pixels = new Vector3[width * height];
+        for (int y = 0; y < height; y++)
+        for (int x = 0; x < width; x++)
+        {
+            float u = (x + 0.5f) / width, v = (y + 0.5f) / height;
+            float lon = (u - 0.5f) * 2f * MathF.PI;
+            float z = MathF.Cos(v * MathF.PI), s = MathF.Sin(v * MathF.PI);
+            var dir = new Vector3(MathF.Cos(lon) * s, MathF.Sin(lon) * s, z);
+            var colour = z >= 0 ? Vector3.Lerp(Horizon, Zenith, z) : Vector3.Lerp(Horizon, Ground, -z);
+            float d = MathF.Max(0f, Vector3.Dot(dir, key));
+            colour += SunColor * (MathF.Pow(d, 350f) + 0.15f * MathF.Pow(d, 8f));
+            pixels[y * width + x] = new Vector3(MathF.Max(0f, colour.X), MathF.Max(0f, colour.Y), MathF.Max(0f, colour.Z));
+        }
+        return new WorldEnvironment(width, height, pixels);
+    }
+
+    /// <summary>Fresh fog volume for this preset (never shared: callers mutate volumes).</summary>
+    public FogVolume FogVolume(float sceneRadius, Vector3 centre)
+    {
+        float radius = MathF.Max(sceneRadius, 1e-3f);
+        return new FogVolume
+        {
+            Shape = VolumeShape.World,
+            Centre = centre - new Vector3(0, 0, radius),
+            Density = MathF.Max(0f, OpticalDepth) / radius,
+            Scattering = Scattering,
+            Absorption = Absorption,
+            Anisotropy = Anisotropy,
+            Emission = Emission,
+            HeightFalloff = HeightFalloffPerRadius / radius,
+        };
+    }
+}
+
+/// <summary>Lane N environment/volumetric presets. Names are the roadmap's;
+/// lookup is case-insensitive, unknown names fail loudly with the list.</summary>
+public static class EnvironmentPresets
+{
+    public static readonly string[] Names =
+        { "studio_neutral", "outdoor_sun", "underwater_caustic", "horror_sodium_fog", "cel_toon_stage", "dramatic_rim" };
+
+    public static EnvironmentPreset Get(string name)
+    {
+        if (TryGet(name, out var preset)) return preset;
+        throw new ArgumentException($"Unknown environment preset '{name}'. Presets: {string.Join(", ", Names)}.");
+    }
+
+    public static bool TryGet(string name, out EnvironmentPreset preset)
+    {
+        preset = null;
+        switch (name?.Trim().ToLowerInvariant())
+        {
+            case "studio_neutral":
+                preset = new EnvironmentPreset
+                {
+                    Name = "studio_neutral", KeyDirection = new Vector3(0.5f, 0.4f, 0.75f),
+                    Zenith = new Vector3(0.35f, 0.36f, 0.38f), Horizon = new Vector3(0.55f, 0.55f, 0.56f), Ground = new Vector3(0.18f, 0.18f, 0.19f),
+                    SunColor = new Vector3(2.5f, 2.5f, 2.5f), OpticalDepth = 0.06f,
+                    Scattering = new Vector3(1f, 1f, 1f), Absorption = 0.05f, Anisotropy = 0.3f, HeightFalloffPerRadius = 0.35f,
+                    Ambient = new Vector3(0.05f, 0.05f, 0.055f), KeyIntensity = 5f,
+                };
+                return true;
+            case "outdoor_sun":
+                preset = new EnvironmentPreset
+                {
+                    Name = "outdoor_sun", KeyDirection = new Vector3(0.4f, 0.2f, 0.85f),
+                    Zenith = new Vector3(0.25f, 0.5f, 1.1f), Horizon = new Vector3(0.7f, 0.85f, 1.0f), Ground = new Vector3(0.3f, 0.28f, 0.22f),
+                    SunColor = new Vector3(8f, 7f, 5f), OpticalDepth = 0.15f,
+                    Scattering = new Vector3(1f, 1f, 1f), Absorption = 0.05f, Anisotropy = 0.5f, HeightFalloffPerRadius = 0.35f,
+                    Ambient = new Vector3(0.06f, 0.07f, 0.09f), KeyIntensity = 8f,
+                };
+                return true;
+            case "underwater_caustic":
+                preset = new EnvironmentPreset
+                {
+                    Name = "underwater_caustic", KeyDirection = new Vector3(0.2f, 0.1f, 1f),
+                    Zenith = new Vector3(0.05f, 0.35f, 0.45f), Horizon = new Vector3(0.05f, 0.3f, 0.38f), Ground = new Vector3(0.02f, 0.12f, 0.14f),
+                    SunColor = new Vector3(0.6f, 1.8f, 2.0f), OpticalDepth = 0.9f,
+                    Scattering = new Vector3(0.15f, 0.7f, 0.85f), Absorption = 0.3f, Anisotropy = 0.6f, HeightFalloffPerRadius = 0.8f,
+                    Ambient = new Vector3(0.02f, 0.08f, 0.10f), KeyIntensity = 4f,
+                };
+                return true;
+            case "horror_sodium_fog":
+                preset = new EnvironmentPreset
+                {
+                    Name = "horror_sodium_fog", KeyDirection = new Vector3(0.6f, -0.3f, 0.5f),
+                    Zenith = new Vector3(0.08f, 0.05f, 0.03f), Horizon = new Vector3(0.35f, 0.18f, 0.04f), Ground = new Vector3(0.05f, 0.03f, 0.02f),
+                    SunColor = new Vector3(2.2f, 1.0f, 0.15f), OpticalDepth = 1.5f,
+                    Scattering = new Vector3(1.0f, 0.55f, 0.15f), Absorption = 0.1f, Anisotropy = 0.8f, HeightFalloffPerRadius = 0.15f,
+                    Emission = new Vector3(0.06f, 0.03f, 0.005f),
+                    Ambient = new Vector3(0.03f, 0.02f, 0.015f), KeyIntensity = 6f,
+                };
+                return true;
+            case "cel_toon_stage":
+                preset = new EnvironmentPreset
+                {
+                    Name = "cel_toon_stage", KeyDirection = new Vector3(0.3f, 0.3f, 0.9f),
+                    Zenith = new Vector3(0.45f, 0.6f, 0.9f), Horizon = new Vector3(0.75f, 0.8f, 0.9f), Ground = new Vector3(0.4f, 0.4f, 0.42f),
+                    SunColor = new Vector3(3f, 3f, 3f), OpticalDepth = 0.04f,
+                    Scattering = new Vector3(1f, 1f, 1f), Absorption = 0.05f, Anisotropy = 0f, HeightFalloffPerRadius = 0f,
+                    Ambient = new Vector3(0.12f, 0.12f, 0.13f), KeyIntensity = 5f,
+                };
+                return true;
+            case "dramatic_rim":
+                preset = new EnvironmentPreset
+                {
+                    Name = "dramatic_rim", KeyDirection = new Vector3(-0.6f, -0.4f, 0.5f),
+                    Zenith = new Vector3(0.03f, 0.03f, 0.05f), Horizon = new Vector3(0.10f, 0.08f, 0.12f), Ground = new Vector3(0.02f, 0.02f, 0.03f),
+                    SunColor = new Vector3(3.5f, 3.0f, 2.5f), OpticalDepth = 0.35f,
+                    Scattering = new Vector3(1f, 1f, 1f), Absorption = 0.05f, Anisotropy = 0.7f, HeightFalloffPerRadius = 0.2f,
+                    Ambient = new Vector3(0.015f, 0.015f, 0.02f), KeyIntensity = 7f,
+                };
+                return true;
+            default: return false;
+        }
+    }
+}

@@ -950,4 +950,145 @@ public sealed class ParticleSystem
 		for ( int i = 0; i < k; i++ ) destination[i] = _history[slot * k + ((newest - i) % k + k) % k];
 		return k;
 	}
+
+	/// <summary>Fire a timeline cue as particles. This is the entry point the
+	/// desktop viewport's timeline dispatcher calls when it crosses a
+	/// <c>RigMark</c> or a <c>RigEvent</c> start: pass the cue's name and the
+	/// world position it belongs to (a bone's world position for a bone cue).
+	/// Burst presets (splash, mist, sparks, frost) fire once, at the current
+	/// step — a step-0 burst on an already-running system would never be seen.
+	/// Rate presets (bubbles, dust) start looping; the caller stops them by
+	/// setting the returned emitter's <c>Enabled</c> to false at the event end.
+	/// Returns null when the cue names no preset, so an unrelated mark (a
+	/// camera cut, a prop attach) never becomes an explosion by accident.</summary>
+	public ParticleEmitter? TriggerCue( string cueName, Vector3 origin, Vector3? direction = null )
+	{
+		if ( ParticleEmitterPresets.ResolveName( cueName ) is not { } name ) return null;
+		var emitter = ParticleEmitterPresets.Create( name, origin, direction );
+		if ( emitter.Bursts.Count > 0 )
+			emitter.Bursts = new List<ParticleBurst> { new( (int)StepIndex, emitter.Bursts[0].Count ) };
+		return AddEmitter( emitter );
+	}
+}
+
+/// <summary>Lane N built-in particle emitter presets. Units are kernel inches
+/// and seconds, Z-up, like the rest of <see cref="ParticleSystem"/>; a preset
+/// is an emitter shape plus launch numbers, and <see cref="SettingsFor"/> is
+/// the gravity/wind/drag/turbulence that makes it read (bubbles rise, mist
+/// hangs). Settings are per effect system: a preset's gravity override must
+/// not be poured into a system that is also simulating something else.
+/// Cue names resolve by <see cref="ResolveName"/>: an exact preset name, an
+/// <c>fx:</c>/<c>vfx:</c>-prefixed one, or a name that carries the preset as
+/// a whole underscore-separated word (<c>footstep_water_splash</c>).</summary>
+public static class ParticleEmitterPresets
+{
+	public static readonly string[] Names =
+		{ "water_splash", "bubbles", "blood_mist", "sparks", "dust_motes", "breath_frost" };
+
+	public static string? ResolveName( string cueName )
+	{
+		if ( string.IsNullOrWhiteSpace( cueName ) ) return null;
+		var n = cueName.Trim().ToLowerInvariant();
+		foreach ( var p in new[] { "fx:", "fx_", "vfx:", "vfx_", "particle:", "particle_" } )
+			if ( n.StartsWith( p ) ) { n = n[p.Length..]; break; }
+		var flat = n.Replace( '-', '_' ).Replace( ':', '_' ).Replace( ' ', '_' ).Replace( '/', '_' );
+		foreach ( var name in Names )
+			if ( flat == name || flat.StartsWith( name + "_" ) || flat.EndsWith( "_" + name ) || flat.Contains( "_" + name + "_" ) )
+				return name;
+		return null;
+	}
+
+	/// <summary>Fresh emitter for a preset at <paramref name="origin"/>. A
+	/// non-zero <paramref name="direction"/> re-aims the launch (a character's
+	/// facing for breath, a surface normal for a splash); otherwise the
+	/// preset's own direction stands. Burst presets carry one burst at step 0
+	/// for a fresh system; <see cref="ParticleSystem.TriggerCue"/> retimes it.</summary>
+	public static ParticleEmitter Create( string name, Vector3 origin, Vector3? direction = null )
+	{
+		var key = ResolveName( name ) ?? throw new ArgumentException( $"Unknown particle preset '{name}'. Presets: {string.Join( ", ", Names )}." );
+		var em = new ParticleEmitter { Position = origin };
+		switch ( key )
+		{
+			case "water_splash":
+				em.Shape = ParticleEmitterShape.Point; em.Direction = new Vector3( 0, 0, 1 );
+				em.Speed = 260f; em.SpeedJitter = 0.4f; em.SpreadDegrees = 35f;
+				em.LifetimeMin = 0.4f; em.LifetimeMax = 0.9f; em.SizeMin = 1.5f; em.SizeMax = 3.5f;
+				em.AngularSpeedMax = 6f; em.Bursts.Add( new ParticleBurst( 0, 120 ) );
+				break;
+			case "bubbles":
+				em.Shape = ParticleEmitterShape.Sphere; em.SphereRadius = 6f; em.Direction = new Vector3( 0, 0, 1 );
+				em.Speed = 30f; em.SpeedJitter = 0.5f; em.SpreadDegrees = 20f;
+				em.LifetimeMin = 1.5f; em.LifetimeMax = 3.5f; em.SizeMin = 0.6f; em.SizeMax = 1.6f;
+				em.Rate = 40f;
+				break;
+			case "blood_mist":
+				em.Shape = ParticleEmitterShape.Point; em.Direction = new Vector3( 0, 0, 1 );
+				em.Speed = 60f; em.SpeedJitter = 0.6f; em.SpreadDegrees = 70f;
+				em.LifetimeMin = 0.8f; em.LifetimeMax = 1.8f; em.SizeMin = 2f; em.SizeMax = 5f;
+				em.Bursts.Add( new ParticleBurst( 0, 90 ) );
+				break;
+			case "sparks":
+				em.Shape = ParticleEmitterShape.Point; em.Direction = new Vector3( 0, 0, 1 );
+				em.Speed = 420f; em.SpeedJitter = 0.5f; em.SpreadDegrees = 50f;
+				em.LifetimeMin = 0.2f; em.LifetimeMax = 0.6f; em.SizeMin = 0.3f; em.SizeMax = 0.9f;
+				em.AngularSpeedMax = 20f; em.Bursts.Add( new ParticleBurst( 0, 70 ) );
+				break;
+			case "dust_motes":
+				em.Shape = ParticleEmitterShape.Box; em.BoxHalfExtents = new Vector3( 30f, 30f, 10f ); em.Direction = new Vector3( 0, 0, 1 );
+				em.Speed = 5f; em.SpeedJitter = 0.8f; em.SpreadDegrees = 180f;
+				em.LifetimeMin = 3f; em.LifetimeMax = 6f; em.SizeMin = 0.2f; em.SizeMax = 0.6f;
+				em.Rate = 12f;
+				break;
+			case "breath_frost":
+				em.Shape = ParticleEmitterShape.Point; em.Direction = new Vector3( 1, 0, 0 );
+				em.Speed = 70f; em.SpeedJitter = 0.3f; em.SpreadDegrees = 12f;
+				em.LifetimeMin = 0.5f; em.LifetimeMax = 1.1f; em.SizeMin = 1f; em.SizeMax = 2.5f;
+				em.Bursts.Add( new ParticleBurst( 0, 45 ) );
+				break;
+		}
+		if ( direction is { } d && d.LengthSquared() > 1e-12f ) em.Direction = d;
+		return em;
+	}
+
+	/// <summary>A copy of <paramref name="baseSettings"/> with this preset's
+	/// medium applied. The base is never mutated: two presets on one system
+	/// would otherwise fight over one gravity.</summary>
+	public static ParticleSystemSettings SettingsFor( string name, ParticleSystemSettings baseSettings )
+	{
+		ArgumentNullException.ThrowIfNull( baseSettings );
+		var key = ResolveName( name ) ?? throw new ArgumentException( $"Unknown particle preset '{name}'. Presets: {string.Join( ", ", Names )}." );
+		var s = Clone( baseSettings );
+		switch ( key )
+		{
+			case "water_splash": s.Drag = 0.1f; break;
+			case "bubbles":
+				s.Gravity = new Vector3( 0, 0, 60f ); s.Drag = 0.8f;
+				s.TurbulenceStrength = 8f; s.TurbulenceFrequency = 0.3f;
+				break;
+			case "blood_mist":
+				s.Gravity = new Vector3( 0, 0, -120f ); s.Drag = 2.5f;
+				s.TurbulenceStrength = 30f; s.TurbulenceFrequency = 0.2f;
+				break;
+			case "sparks": s.Drag = 0.05f; break;
+			case "dust_motes":
+				s.Gravity = new Vector3( 0, 0, -8f ); s.Drag = 0.5f;
+				s.TurbulenceStrength = 6f; s.TurbulenceFrequency = 0.15f; s.Wind = new Vector3( 4f, 2f, 0f );
+				break;
+			case "breath_frost":
+				s.Drag = 1.5f; s.TurbulenceStrength = 10f; s.TurbulenceFrequency = 0.4f;
+				break;
+		}
+		return s;
+	}
+
+	static ParticleSystemSettings Clone( ParticleSystemSettings s ) => new()
+	{
+		Capacity = s.Capacity, Seed = s.Seed, FixedDeltaTime = s.FixedDeltaTime, Substeps = s.Substeps,
+		Gravity = s.Gravity, Wind = s.Wind, Drag = s.Drag,
+		TurbulenceStrength = s.TurbulenceStrength, TurbulenceFrequency = s.TurbulenceFrequency, TurbulenceSpeed = s.TurbulenceSpeed,
+		VortexStrength = s.VortexStrength, VortexCenter = s.VortexCenter, VortexAxis = s.VortexAxis, VortexRadius = s.VortexRadius,
+		GroundEnabled = s.GroundEnabled, GroundNormal = s.GroundNormal, GroundOffset = s.GroundOffset,
+		CollisionMesh = s.CollisionMesh, CollisionRadius = s.CollisionRadius, Restitution = s.Restitution, Friction = s.Friction,
+		RenderType = s.RenderType, StrandPoints = s.StrandPoints,
+	};
 }

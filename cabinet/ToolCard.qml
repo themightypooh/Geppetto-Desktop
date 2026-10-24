@@ -19,6 +19,7 @@ Item {
     signal keep()                          // save your edit as a model in the MODELING folder
     signal wheel()
     signal closed()
+    signal drawOver()             // arm the pane-1 draw-over layer: drag a stroke over the model
 
     readonly property var form: bench.form || ({})
     readonly property var fields: form.fields || []
@@ -266,6 +267,7 @@ Item {
         CardKey { text: "UNDO"; enabled: !!card.bench.canUndo && !card.bench.busy; onClicked: card.undo() }
         CardKey { text: "KEEP"; enabled: !!card.bench.revision && !card.bench.busy; onClicked: card.keep() }
         CardKey { text: "WHEEL"; onClicked: card.wheel() }
+        CardKey { text: "DRAW"; onClicked: card.drawOver() }
         CardKey { text: "X"; onClicked: card.closed() }
     }
 

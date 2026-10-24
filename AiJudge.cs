@@ -283,11 +283,9 @@ public static class AiJudge
     {
         var result = Gate(gates);
         double total = Math.Min(vision.Total, result.Cap);
-        bool passed = vision.Passed && !result.HardFail && total >= 0 && vision.Total >= 0;
-        // Passed must also respect the vision floor logic already inside AiScore.Passed; a hard
-        // fail alone is enough to fail it, and a capped total below the vision total is the
-        // visible reason. Keep the vision Passed value unless a hard fail vetoes it.
-        passed = vision.Passed && !result.HardFail;
+        // A hard fail alone vetoes a pass; otherwise the vision Passed value stands, and a
+        // capped total below the vision total is the visible reason for a lower score.
+        bool passed = vision.Passed && !result.HardFail;
         var evidence = vision.Evidence is JsonObject vo ? (JsonObject)vo.DeepClone()
             : new JsonObject { ["vision"] = vision.Evidence?.DeepClone() };
         evidence["gates"] = result.Json();

@@ -746,4 +746,125 @@ public static class RetopoService
 		for ( int i = 0; i < keep; i++ ) outMesh.Faces.Add( new Face( (int[])scored[ i ].face.Indices.Clone(), (Vec2[])scored[ i ].face.UVs.Clone(), scored[ i ].face.Material ) );
 		return outMesh;
 	}
+	/// <summary>Script-facing LOD targets: "4000,1500,500" - the targets= list of the
+	/// roadmap's <c>retopo Body targets=4000,1500,500</c> operation. The verb binding itself
+	/// lives in ServeMode/BuildScript (other lanes); this is the operation it calls, so the
+	/// string never has to be parsed twice. Sorted descending, duplicates dropped.</summary>
+	public static int[] ParseLodTargets( string targets )
+	{
+		if ( string.IsNullOrWhiteSpace( targets ) )
+			throw new ArgumentException( "LOD targets must list at least one triangle count, e.g. 4000,1500,500.", nameof( targets ) );
+		var parsed = new List<int>();
+		foreach ( var piece in targets.Split( ',' ) )
+		{
+			if ( !int.TryParse( piece.Trim(), out int t ) || t <= 0 )
+				throw new ArgumentException( $"LOD target '{piece.Trim()}' is not a positive triangle count.", nameof( targets ) );
+			if ( !parsed.Contains( t ) ) parsed.Add( t );
+		}
+		parsed.Sort( ( a, b ) => b.CompareTo( a ) );
+		return parsed.ToArray();
+	}
+
+	/// <summary>The <c>retopo Body targets=...</c> operation: one <see cref="RetopoLodChain"/>
+	/// per target in the string, each with the seam/material/hard-edge-respecting defaults
+	/// (or <paramref name="baseOptions"/> when given).</summary>
+	public static List<Result> RetopoLodChain( PolyMesh source, string targets, Options baseOptions = null )
+		=> RetopoLodChain( source, ParseLodTargets( targets ), baseOptions );
+
+	/// <summary>What a LOD kept, structurally, from its source. These are counts, not a
+	/// vertex-correspondence proof: decimation has no correspondence map, so "preserved"
+	/// here means the LOD still carries the same material slots and no worse seam/hard-edge
+	/// structure than the source, not that any one seam vertex survived.</summary>
+	public sealed class LodPreservation
+	{
+		public int Target;
+		public Result Lod;
+		public bool MaterialsPreserved;
+		public int SourceSeamEdges, LodSeamEdges;
+		public int SourceHardEdges, LodHardEdges;
+		public string Summary() => $"target {Target}: faces {Lod.OutputQuads}q/{Lod.OutputTriangles}t, manifold {Lod.IsManifold}, "
+			+ $"materials preserved {MaterialsPreserved}, seam edges {SourceSeamEdges}->{LodSeamEdges}, hard edges {SourceHardEdges}->{LodHardEdges}";
+	}
+
+	public static LodPreservation CheckLodPreservation( PolyMesh source, int target, Result lod, Options options = null )
+	{
+		if ( source is null ) throw new ArgumentNullException( nameof( source ) );
+		if ( lod is null ) throw new ArgumentNullException( nameof( lod ) );
+		float hardDeg = options?.HardEdgeAngleDegrees ?? 30f;
+		var srcMats = new HashSet<int>();
+		foreach ( var f in source.Faces ) srcMats.Add( f.Material );
+		bool matsOk = true;
+		foreach ( var f in lod.Mesh.Faces ) if ( !srcMats.Contains( f.Material ) ) matsOk = false;
+		return new LodPreservation
+		{
+			Target = target,
+			Lod = lod,
+			MaterialsPreserved = matsOk,
+			SourceSeamEdges = CountSeamEdges( source ),
+			LodSeamEdges = CountSeamEdges( lod.Mesh ),
+			SourceHardEdges = CountHardEdges( source, hardDeg ),
+			LodHardEdges = CountHardEdges( lod.Mesh, hardDeg ),
+		};
+	}
+
+	static int CountSeamEdges( PolyMesh mesh )
+	{
+		var inc = new Dictionary<EdgeKey, List<(Face face, int ca, int cb)>>();
+		for ( int fi = 0; fi < mesh.Faces.Count; fi++ )
+		{
+			var f = mesh.Faces[fi];
+			for ( int e = 0; e < f.Count; e++ )
+			{
+				var key = new EdgeKey( f.Indices[e], f.Indices[( e + 1 ) % f.Count] );
+				if ( !inc.TryGetValue( key, out var list ) ) { list = new List<(Face, int, int)>(); inc[key] = list; }
+				list.Add( (f, e, ( e + 1 ) % f.Count) );
+			}
+		}
+		int seams = 0;
+		foreach ( var kv in inc )
+		{
+			if ( kv.Value.Count != 2 ) continue;
+			var (f0, a0, b0) = kv.Value[0];
+			var (f1, a1, b1) = kv.Value[1];
+			// Same geometric edge, opposite corner order in the two faces: compare each
+			// endpoint's UV across the faces (endpoint identity by vertex index).
+			bool mismatch = false;
+			foreach ( var (fa, ca, fb, cb) in new[] { (f0, a0, f1, a1), (f0, a0, f1, b1), (f0, b0, f1, a1), (f0, b0, f1, b1) } )
+			{
+				if ( fa.Indices[ca] != fb.Indices[cb] ) continue;
+				if ( ca < fa.UVs.Length && cb < fb.UVs.Length
+					&& ( fa.UVs[ca].x != fb.UVs[cb].x || fa.UVs[ca].y != fb.UVs[cb].y ) ) mismatch = true;
+			}
+			if ( mismatch ) seams++;
+		}
+		return seams;
+	}
+
+	static int CountHardEdges( PolyMesh mesh, float thresholdDegrees )
+	{
+		var inc = new Dictionary<EdgeKey, List<Face>>();
+		for ( int fi = 0; fi < mesh.Faces.Count; fi++ )
+		{
+			var f = mesh.Faces[fi];
+			if ( f.Count < 3 ) continue;
+			for ( int e = 0; e < f.Count; e++ )
+			{
+				var key = new EdgeKey( f.Indices[e], f.Indices[( e + 1 ) % f.Count] );
+				if ( !inc.TryGetValue( key, out var list ) ) { list = new List<Face>(); inc[key] = list; }
+				list.Add( f );
+			}
+		}
+		int hard = 0;
+		foreach ( var kv in inc )
+		{
+			if ( kv.Value.Count != 2 ) continue;
+			var n0 = FaceNormal( mesh.Positions, kv.Value[0] );
+			var n1 = FaceNormal( mesh.Positions, kv.Value[1] );
+			double cos = Vec3.Dot( n0, n1 ) / Math.Max( 1e-12, n0.Length * n1.Length );
+			cos = Math.Clamp( cos, -1.0, 1.0 );
+			if ( Math.Acos( cos ) * 180.0 / Math.PI > thresholdDegrees ) hard++;
+		}
+		return hard;
+	}
+
 }

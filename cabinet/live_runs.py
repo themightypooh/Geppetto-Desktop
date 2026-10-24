@@ -415,6 +415,59 @@ def add_note(root, rev, op, text):
     return note
 
 
+def stroke_hits(rays, mesh, axis=None):
+    """Raycast a draw-over stroke (Lane O O2): one drawing_tools.resolve_ray per ray, in
+    order; a miss stays None in place. `rays` are world-space rays
+    [{"origin": [x,y,z], "direction": [x,y,z]}] and `mesh` is the drawing_tools mesh dict
+    {"bodies": [{"name", "vertices": [[x,y,z]], "faces": [[i, ...]]}]}. The viewport owns
+    the camera, so pixel -> ray unprojection is NOT done here: the caller (a host slot, once
+    wired) asks the serve viewer for the ray per stroke point and hands the rays in."""
+    import drawing_tools
+    return drawing_tools.raycast_stroke(mesh, rays, axis=axis)
+
+
+def attach_stroke(note, hits):
+    """A copy of a note dict with a draw-over stroke attached: note["stroke"] is one entry
+    per stroke point, in order — the hit dict (body, station_s, world_pos, normal) or None
+    on a miss. A stroke with no hits at all leaves the note unchanged, so a miss-stroke is
+    not mistaken for a placed one."""
+    import drawing_tools
+    out = dict(note or {})
+    entries = []
+    for hit in (hits or []):
+        entries.append(None if hit is None else
+                       {"body": hit["body"], "station_s": hit["station_s"],
+                        "world_pos": hit["world_pos"], "normal": hit["normal"]})
+    if any(e is not None for e in entries):
+        out["stroke"] = entries
+    return out
+
+
+def add_draw_over_note(root, rev, op, text, rays, mesh, axis=None):
+    """Write a note on a run step and attach its draw-over stroke hits to it (Lane O O2):
+    add_note first, then the stroke, so the note is never lost if the raycast fails — a
+    raycast error raises after the plain note is kept. Returns the note with "stroke"."""
+    import drawing_tools
+    note = add_note(root, rev, op, text)
+    hits = drawing_tools.raycast_stroke(mesh, rays, axis=axis)
+    stamped = attach_stroke(note, hits)
+    if "stroke" not in stamped:
+        return note
+    path = os.path.join(root, "notes.jsonl")
+    rows = notes(root)
+    for row in reversed(rows):
+        if (row.get("time"), row.get("rev"), row.get("text")) == (note["time"], note["rev"], note["text"]):
+            row["stroke"] = stamped["stroke"]
+            break
+    else:
+        return note
+    temp = path + ".tmp"
+    with open(temp, "w") as stream:
+        stream.writelines(json.dumps(n) + "\n" for n in rows)
+    os.replace(temp, path)
+    return stamped
+
+
 def notes(root):
     out = []
     try:
@@ -530,6 +583,18 @@ if __name__ == "__main__":
     args = sys.argv[1:]
     runs_root = os.path.expanduser("~/.local/share/geppetto/research")
     script = next((a for a in args if not a.startswith("--")), None)
+    if "--draw-over" in args:              # geppetto-notes --draw-over RUN REV --rays rays.json --mesh mesh.json [--axis axis.json] [--text TEXT]
+        root = os.path.abspath(script)
+        rev = int(args[args.index(script) + 1])
+        def _load(flag):
+            return json.load(open(args[args.index(flag) + 1])) if flag in args else None
+        rays = _load("--rays") or []
+        mesh = _load("--mesh") or {}
+        axis = _load("--axis")
+        text = args[args.index("--text") + 1] if "--text" in args else "draw-over stroke"
+        note = add_draw_over_note(root, rev, "", text, rays, mesh, axis=axis)
+        sys.stdout.write(json.dumps(note) + "\n")
+        sys.exit(0)
     if "--directions" in args:              # geppetto-notes --directions RUN: the user-edit deltas on one run
         sys.stdout.write(directions_text(os.path.abspath(script)))
         sys.exit(0)
