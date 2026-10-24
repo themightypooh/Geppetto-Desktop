@@ -1,0 +1,589 @@
+using System;
+using System.Collections.Generic;
+using System.Numerics;
+using Silk.NET.OpenGL;
+
+namespace Marionette.Desktop;
+
+/// <summary>The same mesh/lighting pipeline for the interactive app and windowless EGL renders.</summary>
+public sealed class SceneRenderer : IDisposable
+{
+	readonly GL _gl;
+	readonly GlShader _shader;
+	readonly KeyShadowMap _shadow;
+	readonly int _mvp, _model, _eye, _key, _skinned, _bones, _exposure, _lightViewProjection, _shadowTexture;
+	readonly int _albedo, _roughness, _metallic, _emission;
+	readonly int _albedoMap;
+	readonly int _normalMap, _roughnessMap, _metallicMap, _emissionMap, _occlusionMap, _normalY;
+	readonly int _uvScale, _uvOffset, _uvRotation;
+	readonly int _alphaMode, _alphaCutoff, _baseAlpha, _doubleSided;
+	readonly int _normalStrength;
+	readonly int _ps1Occlusion, _ps1Wear, _ps1WearColor, _ps1Grime, _ps1GrimeFilm, _ps1Glow;
+	readonly int _envIntensity, _envColor;
+	readonly int _pointLightPos, _pointLightColor, _pointLightIntensity;
+	readonly int _ssaoMap, _screenSize, _ssaoRadius, _ssaoStrength;
+	readonly int _envMapUniform, _envMapIntensity;
+	readonly int _screenColor, _view, _projection, _invProjection, _ssrStrength;
+	readonly int _opaqueColor;
+	readonly LobeUniforms _lobes;
+	/// <summary>R6: copy of the lit opaque scene, sampled by transmissive (refracting) batches.</summary>
+	readonly RenderTarget _opaqueCopy;
+	public float EnvironmentIntensity { get; set; } = 1.0f;
+	public Vector3 EnvironmentColor { get; set; } = new Vector3( 1.0f, 1.0f, 1.0f );
+	public Vector3 PointLightPosition { get; set; } = new Vector3( 0, 0, 0 );
+	public Vector3 PointLightColor { get; set; } = new Vector3( 1, 1, 1 );
+	public float PointLightIntensity { get; set; } = 0.0f;
+	public float SsaoRadius { get; set; } = 8.0f;
+	public float SsaoStrength { get; set; } = 0.5f;
+
+	readonly RenderTarget _depthTarget;
+	// R5: hemisphere SSAO (unit 12).
+	readonly SsaoPass _ssao = new();
+	int _aoMapUniform;
+	public SsaoPass Ssao => _ssao;
+	uint _dummyDepthTex;
+	uint _envMap;
+	uint _brdfLut;
+	Vector3[] _irradiance;
+	int _environmentLevels;
+	readonly int[] _irradianceUniforms = new int[9];
+	readonly int _brdfUniform, _maxLodUniform;
+	readonly int _shadowRadiusUniform, _shadowNormalOffsetUniform, _shadowRotationUniform;
+	readonly int _shadowWorldTexelUniform, _shadowDepthRangeUniform, _shadowSlopeBiasUniform, _shadowConstantBiasUniform;
+	public float ShadowRadius { get; set; } = 2f;
+	/// <summary>Shadow catcher on the grid plane (key shadow + SSAO contact). Off unless a host enables it.</summary>
+	public bool GroundShadow { get; set; }
+	GroundShadowPass _ground;
+	public GroundShadowPass Ground => _ground ??= new GroundShadowPass( _gl );
+	public float ShadowNormalOffsetTexels { get; set; } = 1f;
+	public float ShadowSlopeBias { get => _shadow.SlopeBias; set => _shadow.SlopeBias = value; }
+	public float ShadowConstantBias { get => _shadow.ConstantBias; set => _shadow.ConstantBias = value; }
+	uint _litFramebuffer;
+	readonly Action _copyOpaqueCallback;
+	readonly object _environmentGate = new();
+	IblBaker.PreparedEnvironment _pendingEnvironment;
+	int _environmentRevision;
+	bool _disposed;
+	static readonly Lazy<System.Threading.Tasks.Task<IblBaker.PreparedEnvironment>> DefaultEnvironment = new(
+		() => System.Threading.Tasks.Task.Run(() => IblBaker.Prepare(IblBaker.ProceduralEnvironment())));
+	public float EnvironmentMapIntensity { get; set; } = 1.0f;
+	public float SsrStrength { get; set; } = 1.0f;
+	/// <summary>Focus distance in world units from the eye; 0 focuses on the orbit target.</summary>
+	public float DepthOfFieldFocusDistance { get; set; } = 0.0f;
+	/// <summary>R7: lens f-stop (Blender camera "F-Stop"); 0 disables depth of field. Lens focal
+	/// length, blades and rotation live on <see cref="PostChainTargets"/>.</summary>
+	public float DepthOfFieldFStop { get; set; } = 0.0f;
+	/// <summary>R7: shutter as a fraction of the frame interval (Blender default 0.5); 0 disables
+	/// motion blur. Off by default so single-frame captures stay deterministic.</summary>
+	public float MotionBlurShutter { get; set; } = 0.0f;
+	readonly MotionBlurPass _motionBlur;
+	public ViewSettings View { get; set; } = new();
+	public BloomPass PostChainTargets => _bloom;
+	readonly BloomPass _bloom;
+	readonly TaaPass _taa = new();
+	readonly MsaaPass _msaa;
+	/// <summary>R8: participating media; null/empty grids cost nothing.</summary>
+	public VolumeGrid Volumes { get; set; }
+	/// <summary>Reference props the clip places beside the character. They are drawn through
+	/// the same lit shader and material path as the character, never a second one.</summary>
+	public IReadOnlyList<PropScene> Props { get; set; } = Array.Empty<PropScene>();
+	/// <summary>R9: particles, strands, cloth and geometry-nodes output, lit by the same shader as the mesh.</summary>
+	public LiveGeometry Live { get; } = new();
+	int _liveSkinned;
+	LiveGeometry.Uniforms LiveUniforms => new( _albedo, _roughness, _metallic, _emission, _normalY, _uvScale, _uvOffset, _uvRotation,
+		_alphaMode, _alphaCutoff, _baseAlpha, _normalStrength, _ps1Occlusion, _ps1Wear, _ps1Grime, _ps1GrimeFilm, _ps1Glow, _doubleSided, _skinned, _model );
+	readonly VolumePass _volume;
+	Matrix4x4 _frameViewProjection;
+	ViewportMesh _temporalMesh;
+	AntiAliasingMode _antiAliasing;
+	/// <summary>None keeps deterministic single-frame captures unchanged. TAA shares
+	/// skinned motion vectors; morph and dynamic live geometry reject unreliable history.</summary>
+	public AntiAliasingMode AntiAliasing
+	{
+		get => _antiAliasing;
+		set
+		{
+			if (!Enum.IsDefined(value)) throw new ArgumentOutOfRangeException(nameof(value));
+			if (_antiAliasing != value) { _antiAliasing = value; ResetTemporalHistory(); }
+		}
+	}
+	/// <summary>R7: rejects every history (TAA, motion vectors, SSR colour) after a camera cut.</summary>
+	public void ResetTemporalHistory() { _taa.Reset(); _motionBlur.Reset(); _bloom.ResetHistory(); }
+	public Vector3 KeyDirection { get; set; } = KeyShadowMap.Direction;
+	public int WireframeMode { get; set; } = 0; // 0: shaded, 1: overlay, 2: wireframe only
+	/// <summary>Display-only world transform applied to where the scene lands on screen, not to
+	/// how it is shaded: lighting, shadows and the mesh itself stay as they are (the send-off
+	/// presses the model flat onto a card this way).</summary>
+	public Matrix4x4 DisplayTransform { get; set; } = Matrix4x4.Identity;
+
+	public SceneRenderer( GL gl )
+	{
+		_gl = gl;
+		_copyOpaqueCallback = CopyOpaque;
+		_shadow = new KeyShadowMap( gl );
+		_bloom = new BloomPass( gl );
+		_motionBlur = new MotionBlurPass( gl );
+		_msaa = new MsaaPass(gl);
+		_volume = new VolumePass( gl );
+		_stats = new RenderStats( gl );
+		_depthTarget = new RenderTarget( gl, null, depth: true );
+		_opaqueCopy = new RenderTarget( gl, InternalFormat.Rgba16f, depth: false );
+		_shader = new GlShader( gl, RendererShaders.VertexSrc, RendererShaders.FragmentSrc );
+		_mvp = _shader.Uniform( "uMvp" ); _model = _shader.Uniform( "uModel" );
+		_eye = _shader.Uniform( "uEye" ); _key = _shader.Uniform( "uKeyDirection" );
+		_lightViewProjection = _shader.Uniform( "uLightViewProjection" ); _shadowTexture = _shader.Uniform( "uShadowMap" );
+		_skinned = _shader.Uniform( "uSkinned" ); _bones = _shader.Uniform( "uBones[0]" );
+		_albedo = _shader.Uniform( "uAlbedo" ); _roughness = _shader.Uniform( "uRoughness" );
+		_albedoMap = _shader.Uniform( "uAlbedoMap" );
+		_normalMap = _shader.Uniform( "uNormalMap" ); _roughnessMap = _shader.Uniform( "uRoughnessMap" );
+		_metallicMap = _shader.Uniform( "uMetallicMap" ); _emissionMap = _shader.Uniform( "uEmissionMap" );
+		_normalY = _shader.Uniform( "uNormalY" );
+		_normalStrength = _shader.Uniform( "uNormalStrength" );
+		_occlusionMap = _shader.Uniform( "uOcclusionMap" );
+		_uvScale = _shader.Uniform( "uUvScale[0]" ); _uvOffset = _shader.Uniform( "uUvOffset[0]" );
+		_uvRotation = _shader.Uniform( "uUvRotation[0]" );
+		_alphaMode = _shader.Uniform( "uAlphaMode" ); _alphaCutoff = _shader.Uniform( "uAlphaCutoff" );
+		_baseAlpha = _shader.Uniform( "uBaseAlpha" ); _doubleSided = _shader.Uniform( "uDoubleSided" );
+		_ps1Occlusion = _shader.Uniform( "uPs1Occlusion" ); _ps1Wear = _shader.Uniform( "uPs1Wear" );
+		_ps1WearColor = _shader.Uniform( "uPs1WearColor" ); _ps1Grime = _shader.Uniform( "uPs1Grime" );
+		_ps1GrimeFilm = _shader.Uniform( "uPs1GrimeFilm" ); _ps1Glow = _shader.Uniform( "uPs1Glow" );
+		_metallic = _shader.Uniform( "uMetallic" ); _emission = _shader.Uniform( "uEmission" );
+		_exposure = _shader.Uniform( "uExposure" );
+		_envIntensity = _shader.Uniform( "uEnvIntensity" ); _envColor = _shader.Uniform( "uEnvColor" );
+		_pointLightPos = _shader.Uniform( "uPointLightPos" ); _pointLightColor = _shader.Uniform( "uPointLightColor" ); _pointLightIntensity = _shader.Uniform( "uPointLightIntensity" );
+		_ssaoMap = _shader.Uniform( "uDepthMap" ); _screenSize = _shader.Uniform( "uScreenSize" ); _ssaoRadius = _shader.Uniform( "uSsaoRadius" ); _ssaoStrength = _shader.Uniform( "uSsaoStrength" );
+		_envMapUniform = _shader.Uniform( "uEnvMap" ); _envMapIntensity = _shader.Uniform( "uEnvMapIntensity" );
+		_screenColor = _shader.Uniform( "uScreenColor" ); _view = _shader.Uniform( "uView" ); _projection = _shader.Uniform( "uProjection" ); _invProjection = _shader.Uniform( "uInvProjection" ); _ssrStrength = _shader.Uniform( "uSsrStrength" ); _aoMapUniform = _shader.Uniform( "uAoMap" );
+		_opaqueColor = _shader.Uniform( "uOpaqueColor" );
+		_lobes = new LobeUniforms( _shader );
+		_brdfUniform = _shader.Uniform("uBrdfLut");
+		_maxLodUniform = _shader.Uniform("uEnvironmentMaxLod");
+		_shadowRadiusUniform = _shader.Uniform("uShadowRadius");
+		_shadowNormalOffsetUniform = _shader.Uniform("uShadowNormalOffset");
+		_shadowRotationUniform = _shader.Uniform("uShadowRotation");
+		_shadowWorldTexelUniform = _shader.Uniform("uShadowWorldTexel");
+		_shadowDepthRangeUniform = _shader.Uniform("uShadowDepthRange");
+		_shadowSlopeBiasUniform = _shader.Uniform("uShadowSlopeBias");
+		_shadowConstantBiasUniform = _shader.Uniform("uShadowConstantBias");
+		for (int i = 0; i < 9; i++) _irradianceUniforms[i] = _shader.Uniform("uIrradiance[" + i + "]");
+		// Worker-baked Z-up linear HDR sky, with explicit roughness levels.
+		SetEnvironment(DefaultEnvironment.Value.GetAwaiter().GetResult());
+		// 1x1 stand-in sampled during the SSAO depth pre-pass: the pre-pass writes the depth target,
+		// so the shader must not sample it (texture feedback loop). Only the main pass
+		// samples the real depth texture.
+		_dummyDepthTex = _gl.GenTexture();
+		_gl.BindTexture( TextureTarget.Texture2D, _dummyDepthTex );
+		unsafe { _gl.TexImage2D( TextureTarget.Texture2D, 0, InternalFormat.DepthComponent24, 1, 1, 0, PixelFormat.DepthComponent, PixelType.Float, null ); }
+		_gl.TexParameter( TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)GLEnum.Nearest );
+		_gl.TexParameter( TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)GLEnum.Nearest );
+		_gl.TexParameter( TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)GLEnum.ClampToEdge );
+		_gl.TexParameter( TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)GLEnum.ClampToEdge );
+	}
+
+	/// <summary>Upload a worker-prepared HDR environment on the owning GL thread.
+	/// Prepare with IblBaker.Prepare(WorldEnvironment.LoadRadiance(path)) off-thread.</summary>
+	public unsafe void SetEnvironment(IblBaker.PreparedEnvironment environment)
+	{
+		ArgumentNullException.ThrowIfNull(environment);
+		environment.Validate();
+		lock (_environmentGate) if (_disposed) throw new ObjectDisposedException(nameof(SceneRenderer));
+		var irradiance = (Vector3[])environment.Irradiance.Clone();
+		uint cube = 0, lut = 0;
+		_gl.GetInteger(GetPName.ActiveTexture, out int activeTexture);
+		try
+		{
+		cube = _gl.GenTexture();
+		_gl.ActiveTexture(TextureUnit.Texture8);
+		_gl.BindTexture(TextureTarget.TextureCubeMap, cube);
+		for (int level = 0; level < environment.Specular.Length; level++)
+		{
+			var mip = environment.Specular[level];
+			for (int face = 0; face < 6; face++)
+				fixed (Vector3* pixels = mip.Faces[face])
+					_gl.TexImage2D((TextureTarget)((int)TextureTarget.TextureCubeMapPositiveX + face), level,
+						InternalFormat.Rgb16f, (uint)mip.Size, (uint)mip.Size, 0, PixelFormat.Rgb, PixelType.Float, pixels);
+		}
+		_gl.TexParameter(TextureTarget.TextureCubeMap, TextureParameterName.TextureMaxLevel, environment.Specular.Length - 1);
+		_gl.TexParameter(TextureTarget.TextureCubeMap, TextureParameterName.TextureMinFilter, (int)GLEnum.LinearMipmapLinear);
+		_gl.TexParameter(TextureTarget.TextureCubeMap, TextureParameterName.TextureMagFilter, (int)GLEnum.Linear);
+		_gl.TexParameter(TextureTarget.TextureCubeMap, TextureParameterName.TextureWrapS, (int)GLEnum.ClampToEdge);
+		_gl.TexParameter(TextureTarget.TextureCubeMap, TextureParameterName.TextureWrapT, (int)GLEnum.ClampToEdge);
+		_gl.TexParameter(TextureTarget.TextureCubeMap, TextureParameterName.TextureWrapR, (int)GLEnum.ClampToEdge);
+		_gl.Enable(EnableCap.TextureCubeMapSeamless);
+		lut = _gl.GenTexture();
+		_gl.ActiveTexture(TextureUnit.Texture10);
+		_gl.BindTexture(TextureTarget.Texture2D, lut);
+		fixed (Vector2* pixels = environment.Brdf)
+			_gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.RG16f, (uint)environment.LutSize,
+				(uint)environment.LutSize, 0, PixelFormat.RG, PixelType.Float, pixels);
+		_gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)GLEnum.Linear);
+		_gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)GLEnum.Linear);
+		_gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)GLEnum.ClampToEdge);
+		_gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)GLEnum.ClampToEdge);
+		if (_envMap != 0) _gl.DeleteTexture(_envMap);
+		if (_brdfLut != 0) _gl.DeleteTexture(_brdfLut);
+		_envMap = cube; _brdfLut = lut;
+		cube = 0; lut = 0;
+		_environmentLevels = environment.Specular.Length;
+		_irradiance = irradiance;
+		ResetTemporalHistory();
+		}
+		finally
+		{
+			if (cube != 0) _gl.DeleteTexture(cube);
+			if (lut != 0) _gl.DeleteTexture(lut);
+			_gl.ActiveTexture((TextureUnit)activeTexture);
+		}
+	}
+
+	/// <summary>Decode and bake without GL access. The newest completed request is
+	/// promoted by Draw on its GL thread; stale requests cannot replace a newer sky.</summary>
+	public async System.Threading.Tasks.Task LoadEnvironmentAsync(string path,
+		System.Threading.CancellationToken cancellationToken = default)
+	{
+		int revision;
+		lock (_environmentGate)
+		{
+			if (_disposed) throw new ObjectDisposedException(nameof(SceneRenderer));
+			revision = ++_environmentRevision;
+			_pendingEnvironment = null;
+		}
+		var prepared = await System.Threading.Tasks.Task.Run(() =>
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var source = WorldEnvironment.LoadRadiance(path);
+			var result = IblBaker.Prepare(source, cancellationToken: cancellationToken);
+			cancellationToken.ThrowIfCancellationRequested();
+			return result;
+		}, cancellationToken).ConfigureAwait(false);
+		lock (_environmentGate)
+			if (!_disposed && revision == _environmentRevision && !cancellationToken.IsCancellationRequested)
+				_pendingEnvironment = prepared;
+	}
+
+	/// <summary>Per-frame inputs shared by every pass.</summary>
+	readonly record struct Frame( ViewportMesh Mesh, MarionettePlayer Player, OrbitCamera Camera, int Width, int Height, float Exposure, uint Target );
+
+	readonly List<RenderPassKind> _lastFrame = new( 8 );
+	// R10: per-pass CPU/GPU time and allocation.
+	readonly RenderStats _stats;
+	public RenderStats Stats => _stats;
+	/// <summary>The passes the last <see cref="Draw"/> executed, in order.</summary>
+	public IReadOnlyList<RenderPassKind> LastFramePasses => _lastFrame;
+
+	public void Draw( ViewportMesh mesh, MarionettePlayer player, OrbitCamera camera, int width, int height, float exposure, uint target = 0 )
+	{
+		IblBaker.PreparedEnvironment pending;
+		lock (_environmentGate) { pending = _pendingEnvironment; _pendingEnvironment = null; }
+		if (pending is not null) SetEnvironment(pending);
+		_taa.Enabled = AntiAliasing == AntiAliasingMode.Temporal;
+		if (AntiAliasing != AntiAliasingMode.Msaa4 && _msaa.Framebuffer != 0) _msaa.Dispose();
+		if (!ReferenceEquals(_temporalMesh, mesh)) { ResetTemporalHistory(); _temporalMesh = mesh; }
+		// R7: cut / resize / reload detection, before SSR samples last frame's colour.
+		if ( _motionBlur.Track( camera, mesh, player, width, height ) ) { _taa.Reset(); _bloom.ResetHistory(); Live.ResetHistory = true; }
+		long frameAlloc = GC.GetAllocatedBytesForCurrentThread();
+		_stats.BeginFrame();
+		var frame = new Frame( mesh, player, camera, width, height, exposure, target );
+		_lastFrame.Clear();
+		var order = RenderPassOrder.Default;
+		for ( int p = 0; p < order.Count; p++ )
+		{
+			var pass = order[p];
+			_stats.Begin( pass );
+			switch ( pass )
+			{
+				case RenderPassKind.Shadow: ShadowPass( frame ); break;
+				case RenderPassKind.DepthPrePass: DepthPrePass( frame ); break;
+				case RenderPassKind.Lit: LitPass( frame ); ApplyVolumes( frame ); break;
+				case RenderPassKind.PostChain: PostChain( frame ); break;
+				default: throw new InvalidOperationException( "Unhandled render pass " + pass );
+			}
+			_stats.End( pass );
+			_lastFrame.Add( pass );
+		}
+		_stats.EndFrame( GC.GetAllocatedBytesForCurrentThread() - frameAlloc );
+	}
+
+	readonly Dictionary<string, float> _mergedWeights = new( StringComparer.Ordinal );
+
+	/// <summary>A clip's morph weights with the mesh's own (the Face Poser's) on top, so a face set on
+	/// the sliders still shows while a clip plays.</summary>
+	IReadOnlyDictionary<string, float> MergedWeights( IReadOnlyDictionary<string, float> clip, Dictionary<string, float> mesh )
+	{
+		if ( mesh.Count == 0 ) return clip;
+		_mergedWeights.Clear();
+		if ( clip is not null ) foreach ( var kv in clip ) _mergedWeights[kv.Key] = kv.Value;
+		foreach ( var kv in mesh ) _mergedWeights[kv.Key] = kv.Value;
+		return _mergedWeights;
+	}
+
+	void ShadowPass( in Frame f )
+	{
+		f.Mesh.ApplyMorphWeights( _gl, f.Player is null ? f.Mesh.MorphWeights : MergedWeights( f.Player.MorphWeights, f.Mesh.MorphWeights ) );
+		_shadow.LightDirection = KeyDirection;
+		// R9: live geometry is built once per frame here, before the first pass that draws it.
+		if ( !Live.IsEmpty )
+		{
+			var view = f.Camera.ViewMatrix();
+			var inv = Matrix4x4.Invert( view, out var camWorld ) ? camWorld : Matrix4x4.Identity;
+			Live.Build( _gl, new LiveView( f.Camera.Eye, new Vector3( inv.M11, inv.M12, inv.M13 ), new Vector3( inv.M21, inv.M22, inv.M23 ), -new Vector3( inv.M31, inv.M32, inv.M33 ) ) );
+		}
+		_shadow.Draw( f.Mesh, f.Player, Live.IsEmpty ? null : Live );
+	}
+
+	void DrawScene( ViewportMesh mesh, Action beforeTranslucent = null ) =>
+		mesh.DrawBatched( _gl, _shader, _albedo, _roughness, _metallic, _emission, _normalY, _uvScale, _uvOffset, _uvRotation, _alphaMode, _alphaCutoff, _baseAlpha, _normalStrength, _ps1Occlusion, _ps1Wear, _ps1WearColor, _ps1Grime, _ps1GrimeFilm, _ps1Glow, _doubleSided, _lobes, beforeTranslucent );
+
+	/// <summary>Between the opaque and translucent groups of the lit pass: snapshot the HDR scene
+	/// so refraction reads finished opaque colour without a feedback loop.</summary>
+	void CopyOpaque()
+	{
+		_gl.BindFramebuffer( FramebufferTarget.ReadFramebuffer, _litFramebuffer );
+		_gl.BindFramebuffer( FramebufferTarget.DrawFramebuffer, _opaqueCopy.Framebuffer );
+		_gl.BlitFramebuffer( 0, 0, _opaqueCopy.Width, _opaqueCopy.Height, 0, 0, _opaqueCopy.Width, _opaqueCopy.Height, ClearBufferMask.ColorBufferBit, BlitFramebufferFilter.Nearest );
+		_gl.BindFramebuffer( FramebufferTarget.Framebuffer, _litFramebuffer );
+	}
+
+	/// <summary>Sizes the frame targets, sets the lit shader's frame uniforms and sampler units
+	/// (the pre-pass uses the same shader), then writes scene depth for SSAO/SSR.</summary>
+	void DepthPrePass( in Frame f )
+	{
+		int width = f.Width, height = f.Height;
+		// Size the bloom targets before any sampler bindings: creation binds its textures
+		// onto whichever unit is active, so it must not run between the bindings below.
+		_bloom.Ensure( width, height );
+		_gl.BindFramebuffer( FramebufferTarget.Framebuffer, f.Target );
+		_gl.Viewport( 0, 0, (uint)width, (uint)height );
+		_gl.Enable( EnableCap.DepthTest );
+		_gl.ClearColor( 0.14f, 0.145f, 0.16f, 1 );
+		_gl.Clear( ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit );
+		var view = f.Camera.ViewMatrix();
+		var proj = f.Camera.ProjectionMatrix( width / (float)Math.Max( 1, height ) );
+		var jitter = _taa.Jitter(width, height);
+		// Row-vector projection: clip x/y gain jitter*clip.w (perspective M34=-1).
+		proj.M31 += jitter.X * proj.M34;
+		proj.M32 += jitter.Y * proj.M34;
+		if ( proj.M34 == 0 ) { proj.M41 += jitter.X; proj.M42 += jitter.Y; }   // orthographic: w is 1
+		var viewProj = view * proj;
+		_frameViewProjection = viewProj;
+		Matrix4x4.Invert( proj, out var invProj );
+		var eye = f.Camera.Eye;
+		var key = KeyDirection.LengthSquared() > 1e-4f ? Vector3.Normalize( KeyDirection ) : KeyShadowMap.Direction;
+		_shader.Use();
+		_shader.SetMatrix( _mvp, DisplayTransform * viewProj ); _shader.SetMatrix( _model, Matrix4x4.Identity );
+		_shader.SetMatrix( _view, view ); _shader.SetMatrix( _projection, proj ); _shader.SetMatrix( _invProjection, invProj );
+		_shader.SetVec3( _eye, eye.X, eye.Y, eye.Z );
+		_shader.SetVec3( _key, key.X, key.Y, key.Z );
+		_shader.SetMatrix( _lightViewProjection, _shadow.ViewProjection );
+		_shader.SetFloat(_shadowRadiusUniform, MathF.Max(0, ShadowRadius));
+		_shader.SetFloat(_shadowNormalOffsetUniform, MathF.Max(0, ShadowNormalOffsetTexels) * _shadow.WorldTexelSize);
+		_shader.SetFloat(_shadowWorldTexelUniform, _shadow.WorldTexelSize);
+		_shader.SetFloat(_shadowDepthRangeUniform, _shadow.DepthRange);
+		_shader.SetFloat(_shadowSlopeBiasUniform, _shadow.SlopeBias);
+		_shader.SetFloat(_shadowConstantBiasUniform, _shadow.ConstantBias);
+		// Static captures use a fixed kernel; TAA accumulates rotated shadow samples.
+		_shader.SetFloat(_shadowRotationUniform, _taa.Enabled && !Live.HasDynamic && f.Mesh.MorphWeights.Count == 0
+			&& (f.Player is null || f.Player.MorphWeights.Count == 0)
+			? (_taa.FrameIndex % 8) * 2.39996323f : 0);
+		_gl.ActiveTexture( TextureUnit.Texture0 ); _gl.BindTexture( TextureTarget.Texture2D, _shadow.Texture );
+		_shader.SetInt( _shadowTexture, 0 );
+		_shader.SetInt( _albedoMap, 1 );
+		_shader.SetInt( _normalMap, 2 ); _shader.SetInt( _roughnessMap, 3 );
+		_shader.SetInt( _metallicMap, 4 ); _shader.SetInt( _emissionMap, 5 );
+		_shader.SetInt( _occlusionMap, 6 );
+		_shader.SetFloat( _exposure, f.Exposure );
+		_shader.SetFloat( _envIntensity, EnvironmentIntensity );
+		_shader.SetVec3( _envColor, EnvironmentColor.X, EnvironmentColor.Y, EnvironmentColor.Z );
+		_shader.SetVec3( _pointLightPos, PointLightPosition.X, PointLightPosition.Y, PointLightPosition.Z );
+		_shader.SetVec3( _pointLightColor, PointLightColor.X, PointLightColor.Y, PointLightColor.Z );
+		_shader.SetFloat( _pointLightIntensity, PointLightIntensity );
+		_shader.SetFloat( _normalStrength, 1.0f );
+		bool skinned = f.Mesh.HasSkin && f.Player is not null;
+		_liveSkinned = skinned ? 1 : 0;
+		_shader.SetInt( _skinned, skinned ? 1 : 0 );
+		if ( skinned ) _shader.SetMatrixArray( _bones, f.Player.GpuBones );
+
+		// Create on unit 7: creation binds onto the active unit and must not clobber
+		// unit 0's shadow texture; unit 7 is rebound explicitly below anyway.
+		_gl.ActiveTexture( TextureUnit.Texture7 );
+		_depthTarget.Ensure( width, height );
+		_opaqueCopy.Ensure( width, height );
+		// Bind every auxiliary sampler before either pass: the lit shader is also used
+		// for the depth pre-pass, and unset samplers default to unit 0 where they would
+		// collide with the shadow texture. During the pre-pass unit 7 must hold the
+		// dummy texture (it renders into the depth target) and unit 9 a texture that is
+		// not the main pass's color target (feedback loops in both passes otherwise).
+		_gl.ActiveTexture( TextureUnit.Texture7 );
+		_gl.BindTexture( TextureTarget.Texture2D, _dummyDepthTex );
+		_shader.SetInt( _ssaoMap, 7 );
+		_shader.SetVec2( _screenSize, width, height );
+		_shader.SetFloat( _ssaoRadius, SsaoRadius );
+		_shader.SetFloat( _ssaoStrength, SsaoStrength );
+		_gl.ActiveTexture( TextureUnit.Texture8 );
+		_gl.BindTexture( TextureTarget.TextureCubeMap, _envMap );
+		_shader.SetInt( _envMapUniform, 8 );
+		_shader.SetFloat( _envMapIntensity, EnvironmentMapIntensity );
+		_shader.SetFloat(_maxLodUniform, _environmentLevels - 1);
+		for (int i = 0; i < 9; i++)
+			_shader.SetVec3(_irradianceUniforms[i], _irradiance[i].X, _irradiance[i].Y, _irradiance[i].Z);
+		_gl.ActiveTexture(TextureUnit.Texture10);
+		_gl.BindTexture(TextureTarget.Texture2D, _brdfLut);
+		_shader.SetInt(_brdfUniform, 10);
+		// screen color for SSR: previous frame's bloom output, never the live target
+		_gl.ActiveTexture( TextureUnit.Texture9 );
+		_gl.BindTexture( TextureTarget.Texture2D, _bloom.ScreenColorTex );
+		_shader.SetInt( _screenColor, 9 );
+		// R6: unit 11 (unit 10 is R2's BRDF LUT).
+		_gl.ActiveTexture( TextureUnit.Texture11 );
+		_gl.BindTexture( TextureTarget.Texture2D, _opaqueCopy.ColorTexture );
+		_shader.SetInt( _opaqueColor, 11 );
+		_shader.SetFloat( _ssrStrength, _bloom.HistoryValid ? SsrStrength : 0f );
+		// R5: unit 12 holds white during the pre-pass, then the blurred AO.
+		_gl.ActiveTexture( TextureUnit.Texture12 );
+		_ssao.Ensure( _gl, width, height );
+		_gl.ActiveTexture( TextureUnit.Texture12 );
+		_gl.BindTexture( TextureTarget.Texture2D, _ssao.White );
+		_shader.SetInt( _aoMapUniform, 12 );
+		_gl.BindFramebuffer( FramebufferTarget.Framebuffer, _depthTarget.Framebuffer );
+		_gl.Viewport( 0, 0, (uint)width, (uint)height );
+		_gl.Clear( ClearBufferMask.DepthBufferBit );
+		_gl.ColorMask( false, false, false, false );
+		DrawScene( f.Mesh );
+		DrawProps( f, depthOnly: true );
+		// R9: live geometry (built in ShadowPass) writes depth for SSAO/SSR.
+		if ( !Live.IsEmpty )
+		{
+			Live.Draw( _gl, _shader, LiveUniforms, _lobes, translucent: false, _liveSkinned );
+		}
+		if ( GroundShadow ) { Ground.DrawDepth( viewProj, f.Camera ); _shader.Use(); }
+		_gl.ColorMask( true, true, true, true );
+		_ssao.Enabled = SsaoStrength > 0f;
+		if ( _ssao.Enabled )
+		{
+			_ssao.Intensity = SsaoStrength * 2f;
+			_ssao.Render( _depthTarget.DepthTexture, proj, f.Camera.Distance );
+			_shader.Use();
+			_gl.ActiveTexture( TextureUnit.Texture0 ); _gl.BindTexture( TextureTarget.Texture2D, _shadow.Texture );
+			_gl.ActiveTexture( TextureUnit.Texture12 ); _gl.BindTexture( TextureTarget.Texture2D, _ssao.Texture );
+		}
+	}
+
+	/// <summary>Shades the scene into the linear HDR colour target.</summary>
+	void LitPass( in Frame f )
+	{
+		bool multisampled = AntiAliasing == AntiAliasingMode.Msaa4;
+		if (multisampled) { _msaa.Ensure(f.Width, f.Height); _gl.Enable(EnableCap.Multisample); }
+		// bind the real depth for SSAO/SSR in the main pass
+		_gl.ActiveTexture( TextureUnit.Texture7 );
+		_gl.BindTexture( TextureTarget.Texture2D, _depthTarget.DepthTexture );
+		_litFramebuffer = multisampled ? _msaa.Framebuffer : _bloom.ColorFbo;
+		_gl.BindFramebuffer( FramebufferTarget.Framebuffer, _litFramebuffer );
+		_gl.Viewport( 0, 0, (uint)f.Width, (uint)f.Height );
+		_gl.Enable( EnableCap.DepthTest );
+		_gl.ClearColor( 0.14f, 0.145f, 0.16f, 1 );
+		_gl.Clear( ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit );
+		if ( WireframeMode == 2 )
+		{
+			_gl.PolygonMode( GLEnum.FrontAndBack, PolygonMode.Line );
+			DrawScene( f.Mesh );
+			_gl.PolygonMode( GLEnum.FrontAndBack, PolygonMode.Fill );
+			if (multisampled) _msaa.Resolve(_bloom.ColorFbo);
+			return;
+		}
+		DrawScene( f.Mesh, _copyOpaqueCallback );
+		DrawProps( f, depthOnly: false );
+		if ( !Live.IsEmpty )
+		{
+			Live.Draw( _gl, _shader, LiveUniforms, _lobes, translucent: false, _liveSkinned );
+			Live.Draw( _gl, _shader, LiveUniforms, _lobes, translucent: true, _liveSkinned );
+		}
+		if ( GroundShadow )
+		{
+			Ground.Shade( _frameViewProjection, f.Camera, _shadow.ViewProjection, _shadow.DepthRange, _shadow.WorldTexelSize, MathF.Max( 0, ShadowRadius ), 0, 12, f.Width, f.Height );
+			_shader.Use();
+		}
+		if ( WireframeMode == 1 )
+		{
+			_gl.Enable( EnableCap.PolygonOffsetLine );
+			_gl.PolygonOffset( -1.5f, -2.0f );
+			_gl.PolygonMode( GLEnum.FrontAndBack, PolygonMode.Line );
+			DrawScene( f.Mesh );
+			_gl.PolygonMode( GLEnum.FrontAndBack, PolygonMode.Fill );
+			_gl.Disable( EnableCap.PolygonOffsetLine );
+		}
+		if (multisampled) _msaa.Resolve(_bloom.ColorFbo);
+	}
+
+	/// <summary>Draws the clip's reference props through the same lit shader, the same
+	/// material path and the same uniforms as the character. A prop is a static model with
+	/// its own ModelDoc; the clip places it, and the clip's own unit applies to its
+	/// position, so the placement goes through the same measurement the bones do.</summary>
+	void DrawProps( in Frame f, bool depthOnly )
+	{
+		if ( Props.Count == 0 ) return;
+		var clip = f.Player?.Clip;
+		if ( clip is null ) return;
+		// Reference props own a model transform; character bone weights must not
+		// deform their independent mesh, even when the character itself is skinned.
+		_shader.SetInt( _skinned, 0 );
+		float positionScale = f.Player!.ClipPositionScale;
+		float frame = clip.FrameRate > 0 ? f.Player.Time * clip.FrameRate : 0f;
+		foreach ( var prop in Props )
+		{
+			if ( !prop.Visible ) continue;
+			var mesh = prop.Mesh;
+			if ( mesh.TriangleCount == 0 ) continue;
+			// Upload is a no-op once the mesh is on the GPU, so this stays cheap.
+			mesh.Upload( _gl );
+			_shader.SetMatrix( _model, prop.WorldMatrix( clip, frame, positionScale, f.Player.RigFromClipModel ) );
+			mesh.DrawBatched( _gl, _shader, _albedo, _roughness, _metallic, _emission, _normalY, _uvScale, _uvOffset, _uvRotation, _alphaMode, _alphaCutoff, _baseAlpha, _normalStrength, _ps1Occlusion, _ps1Wear, _ps1WearColor, _ps1Grime, _ps1GrimeFilm, _ps1Glow, _doubleSided, _lobes );
+		}
+		_shader.SetMatrix( _model, Matrix4x4.Identity );
+		_shader.SetInt( _skinned, _liveSkinned );
+	}
+
+	/// <summary>Bloom, depth of field, view transform and the single display encode into the
+	/// caller's target, then scene depth is copied back for overlays.</summary>
+	void PostChain( in Frame f )	{
+		int width = f.Width, height = f.Height;
+		uint target = f.Target;
+		if (_taa.Enabled)
+			_motionBlur.RenderVelocity(f.Mesh, width, height, Live.IsEmpty ? null : Live, _frameViewProjection);
+		_taa.Resolve(_gl, _bloom.ColorTex, _depthTarget.DepthTexture, _bloom.ColorFbo,
+			width, height, _frameViewProjection, f.Mesh.MorphWeights.Count > 0 || Live.HasDynamic
+				|| (f.Player is not null && f.Player.MorphWeights.Count > 0),
+			_taa.Enabled ? _motionBlur.VelocityTexture : 0, _taa.Enabled ? _motionBlur.VelocityDepthTexture : 0);
+		if ( MotionBlurShutter > 0 )
+			_motionBlur.Apply( f.Mesh, MotionBlurShutter, _bloom.ColorFbo, _bloom.ColorTex, width, height, f.Camera.Near, f.Camera.Far, Live.IsEmpty ? null : Live );
+		_bloom.Process();
+		_bloom.StoreHistory();
+		float focus = DepthOfFieldFocusDistance > 0 ? DepthOfFieldFocusDistance : f.Camera.Distance;
+		_bloom.FovDegrees = f.Camera.FovDegrees;
+		_bloom.Composite( target, View, _depthTarget.DepthTexture, focus, DepthOfFieldFStop, f.Camera.Near, f.Camera.Far );
+		// The mesh was rendered into the bloom color FBO, so the caller's target only
+		// holds the composite quad's flat 0.5 depth stamp. Anything drawn into the target
+		// afterwards (SkeletonOverlay grid/bones) depth-tests against real scene depth,
+		// so copy it back. A depth blit into a multisampled target (the window's MSAA
+		// default framebuffer) is not a legal blit; those callers keep the cleared depth.
+		_gl.GetInteger( GetPName.Samples, out int targetSamples );
+		if ( targetSamples == 0 )
+		{
+			_gl.BindFramebuffer( FramebufferTarget.ReadFramebuffer, _bloom.ColorFbo );
+			_gl.BindFramebuffer( FramebufferTarget.DrawFramebuffer, target );
+			_gl.BlitFramebuffer( 0, 0, width, height, 0, 0, width, height,
+				ClearBufferMask.DepthBufferBit, BlitFramebufferFilter.Nearest );
+			_gl.BindFramebuffer( FramebufferTarget.Framebuffer, target );
+		}
+	}
+
+	/// <summary>R8: composite volumes into the HDR target in linear light, before TAA/bloom/DoF.
+	/// Uses the pre-pass depth and the key shadow map; returns before any GL call when empty.</summary>
+	void ApplyVolumes( in Frame f )
+	{
+		if ( Volumes is null || Volumes.IsEmpty ) return;
+		_volume.Apply( Volumes, _bloom.ColorFbo, _depthTarget.DepthTexture, _shadow.Texture, _shadow.ViewProjection,
+			_frameViewProjection, f.Camera.Eye, KeyDirection, new Vector3( 1.0f, 0.95f, 0.88f ) * 3.0f, f.Exposure, f.Width, f.Height );
+	}
+
+	public void Dispose() { lock (_environmentGate) { if (_disposed) return; _disposed = true; ++_environmentRevision; _pendingEnvironment = null; } _taa.Dispose(); _motionBlur.Dispose(); _msaa.Dispose(); _volume.Dispose(); _ssao.Dispose(); _ground?.Dispose(); _stats.Dispose(); Live.Dispose(); _depthTarget.Dispose(); _opaqueCopy.Dispose(); if (_brdfLut != 0) _gl.DeleteTexture(_brdfLut); if ( _envMap != 0 ) _gl.DeleteTexture( _envMap ); if ( _dummyDepthTex != 0 ) _gl.DeleteTexture( _dummyDepthTex ); _bloom?.Dispose(); _shadow.Dispose(); _shader.Dispose(); }
+}
