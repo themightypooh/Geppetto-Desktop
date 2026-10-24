@@ -47,6 +47,52 @@ internal static class AiTests
             Directory.CreateSymbolicLink(Path.Combine(root, "link"), "/tmp/opencode");
             Throws(() => tools.Owned("link/escape"));
         });
+        // F3: Stroke's Alpha PNG is a kernel-read filesystem path. AI assignment is confined to
+        // the run's refs/ at assignment time, and every failure mode returns ONE generic message
+        // (distinct messages / echoed paths would be a file-existence + PNG-validity oracle).
+        string AlphaAssign(AiSuiteTools t, string alpha)
+        {
+            try { t.ExecuteAsync("add_feature", new JsonObject { ["type"] = "Stroke", ["fields"] = new JsonObject { ["Alpha"] = alpha } }, default).GetAwaiter().GetResult(); }
+            catch (ArgumentException ex) { return ex.Message; }
+            catch (InvalidOperationException) { return ""; } // validation passed; the path-less stroke fails its rebuild instead
+            return "";
+        }
+        Check("stroke alpha rejects a system file with one generic message", () => {
+            var tools = new AiSuiteTools(Path.Combine(settings.WorkDirectory, "ai-alpha-system"));
+            string msg = AlphaAssign(tools, "/etc/passwd");
+            That(msg == AiSuiteTools.AlphaPngError, "generic rejection, got: " + msg);
+            That(!msg.Contains("/etc/passwd"), "resolved path is never echoed");
+        });
+        Check("stroke alpha rejects a nonexistent outside path with the identical message", () => {
+            var tools = new AiSuiteTools(Path.Combine(settings.WorkDirectory, "ai-alpha-missing"));
+            string msg = AlphaAssign(tools, Path.Combine(settings.WorkDirectory, "no-such-place", "missing.png"));
+            That(msg == AiSuiteTools.AlphaPngError, "identical generic rejection (oracle closed), got: " + msg);
+        });
+        Check("stroke alpha accepts a png inside the run refs and an empty clear", () => {
+            string root = Path.Combine(settings.WorkDirectory, "ai-alpha-valid");
+            var tools = new AiSuiteTools(root);
+            string refs = Path.Combine(root, "refs"); Directory.CreateDirectory(refs);
+            var rgb = new byte[4 * 4 * 3]; for (int i = 0; i < rgb.Length; i++) rgb[i] = 200;
+            Effigy.PngWriter.WriteFile(Path.Combine(refs, "valid.png"), rgb, 4, 4);
+            That(AlphaAssign(tools, "refs/valid.png") == "", "refs/ png passes assignment validation");
+            That(AlphaAssign(tools, "") == "", "empty value clears and is allowed");
+        });
+        Check("stroke alpha rejects traversal out of refs", () => {
+            var tools = new AiSuiteTools(Path.Combine(settings.WorkDirectory, "ai-alpha-traversal"));
+            string msg = AlphaAssign(tools, "refs/../../escape.png");
+            That(msg == AiSuiteTools.AlphaPngError, "generic rejection, got: " + msg);
+        });
+        Check("stroke alpha rejects a symlink inside refs pointing outside", () => {
+            string root = Path.Combine(settings.WorkDirectory, "ai-alpha-symlink");
+            var tools = new AiSuiteTools(root);
+            string refs = Path.Combine(root, "refs"); Directory.CreateDirectory(refs);
+            var rgb = new byte[4 * 4 * 3]; for (int i = 0; i < rgb.Length; i++) rgb[i] = 200;
+            string outside = Path.Combine(settings.WorkDirectory, "outside-alpha.png");
+            Effigy.PngWriter.WriteFile(outside, rgb, 4, 4);
+            File.CreateSymbolicLink(Path.Combine(refs, "linked.png"), outside);
+            string msg = AlphaAssign(tools, "refs/linked.png");
+            That(msg == AiSuiteTools.AlphaPngError, "generic rejection, got: " + msg);
+        });
         Check("native feature tool creates editable checkpoint", () => {
             var tools = new AiSuiteTools(Path.Combine(settings.WorkDirectory, "ai-native"));
             var feature = tools.ExecuteAsync("add_feature", JsonNode.Parse("{\"type\":\"Primitive\",\"fields\":{\"SizeX\":12,\"SizeY\":8,\"SizeZ\":4}}")!, default).GetAwaiter().GetResult();
@@ -112,6 +158,14 @@ internal static class AiTests
             That(o.Research && o.Command == "research", "check 7");
             That(AiSuiteTools.ResearchDefinitions.All(t => AiSuiteTools.IsResearchTool(t!["name"]!.GetValue<string>())), "check 8");
             That(!AiSuiteTools.BuilderDefinitions.Any(t => AiSuiteTools.IsResearchTool(t!["name"]!.GetValue<string>())), "check 9");
+        });
+        Check("prompt file supplies the prompt and conflicts with --prompt", () => {
+            string file = Path.Combine(settings.WorkDirectory, "prompt-" + Guid.NewGuid().ToString("N") + ".txt");
+            File.WriteAllText(file, "rondel dagger");
+            var o = AiOptions.Parse(new[]{"research", "--model", "x", "--out", "new", "--prompt-file", file});
+            That(o.Prompt == "rondel dagger", "prompt file text becomes the prompt");
+            Throws(() => AiOptions.Parse(new[]{"research", "--model", "x", "--out", "new", "--prompt", "dagger", "--prompt-file", file}));
+            Throws(() => AiOptions.Parse(new[]{"research", "--model", "x", "--out", "new", "--prompt-file", file + ".missing"}));
         });
         Check("configuration rejects unknown flags and unsafe providers", () => {
             Throws(() => AiOptions.Parse(new[]{"create", "--no-such-option"}));

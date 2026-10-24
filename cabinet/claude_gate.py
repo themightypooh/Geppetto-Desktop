@@ -27,9 +27,16 @@ WAIT_LIMIT = 55 * 60          # the hook's timeout in settings.json is an hour
 
 
 def _write(path, data):
+    # Private by default (audit G6): gate/run files name sessions and run pids, so the
+    # folder is 0700 and the file lands 0600 (the temp is created 0600, os.replace keeps it).
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    try:
+        os.chmod(os.path.dirname(path), 0o700)
+    except OSError:
+        pass
     temp = "%s.%d.tmp" % (path, os.getpid())
-    with open(temp, "w") as stream:
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as stream:
         json.dump(data, stream)
     os.replace(temp, path)
 

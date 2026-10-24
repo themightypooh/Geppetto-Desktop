@@ -1,0 +1,2 @@
+# part	model	pivot x	y	z	size x	y	z
+bookends	./bookends.vmdl	-1.961	4.743	-0.034	6.881	33.563	9.635

@@ -438,7 +438,7 @@ public static class Program
 				mouse.Scroll += ( _, wheel ) =>
 				{
 					if ( camera.Flying ) camera.AdjustFlySpeed( wheel.Y );
-					else camera.Zoom( wheel.Y > 0 ? 0.9f : 1.1f );
+					else camera.Dolly( wheel.Y > 0 ? 1 : -1 );
 				};
 			}
 

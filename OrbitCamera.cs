@@ -103,6 +103,27 @@ public sealed class OrbitCamera
 		Distance = Math.Clamp( Distance * factor, MinDistance, MaxDistance );
 	}
 
+	/// <summary>
+	/// Wheel-fly: travel along the view direction instead of shrinking Distance.
+	/// One notch moves 0.1 * Distance — the same first-notch feel as Zoom(0.9) —
+	/// but it never clamps: repeated notches keep travelling, which is the point
+	/// (Zoom stops at MinDistance/MaxDistance). Distance stays put, so the orbit
+	/// radius stays, and the eye travels with the target. While flying, the fly
+	/// position travels instead (the orbit target is rebuilt on EndFly).
+	/// Backing away grows Far with the travel, the way Frame() floors Far at
+	/// Distance*20, so the model never clips out behind the far plane.
+	/// The per-command notch clamp is sanity only, not a position clamp.
+	/// </summary>
+	public void Dolly( float steps )
+	{
+		steps = Math.Clamp( steps, -10f, 10f );
+		float step = steps * Distance * 0.1f;
+		if ( Flying ) FlyPosition += Forward * step;
+		else Target += Forward * step;
+		if ( step < 0 ) Far += -step;
+		Far = Math.Max( Far, Distance * 20f );
+	}
+
 	public void Frame( Vector3 centre, float radius )
 	{
 		Target = centre;

@@ -102,7 +102,33 @@ public sealed class AiSuiteTools
         }
         return new JsonObject { ["id"] = feature.Id, ["name"] = feature.Name, ["type"] = feature.GetType().Name.Replace("Feature", ""), ["fields"] = fields };
     }
-    static void Assign(Feature feature, JsonObject values)
+    /// <summary>The one message every Stroke Alpha rejection uses (F3): distinct messages
+    /// for missing / non-PNG / outside-the-run would be a file-existence oracle, and the
+    /// resolved path is never echoed.</summary>
+    public const string AlphaPngError = "Alpha PNG must name a PNG inside this run's refs/ folder.";
+    void ValidateStrokeAlpha(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return; // empty clears the brush alpha
+        string full;
+        try { full = Owned(text.Trim()); }
+        catch (ArgumentException) { throw new ArgumentException(AlphaPngError); }
+        string refs = Path.GetFullPath(Path.Combine(Root, "refs"));
+        if (!full.StartsWith(refs + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+            || !string.Equals(Path.GetExtension(full), ".png", StringComparison.OrdinalIgnoreCase)
+            || !File.Exists(full))
+            throw new ArgumentException(AlphaPngError);
+    }
+    /// <summary>Belt-and-braces for F3: a studio document that reaches the worker without
+    /// passing through Assign must not carry a Stroke Alpha pointing outside this run either.</summary>
+    public void RejectUnownedStrokeAlpha()
+    {
+        foreach (var feature in Studio.Features)
+        {
+            if (feature.GetType().Name != "StrokeFeature") continue;
+            if (feature.GetType().GetField("Alpha")?.GetValue(feature) is StringParam p) ValidateStrokeAlpha(p.Value ?? "");
+        }
+    }
+    void Assign(Feature feature, JsonObject values)
     {
         foreach (var (name, value) in values)
         {
@@ -114,7 +140,11 @@ public sealed class AiSuiteTools
                     int n = value!.GetValue<int>(); if (n < p.Min || n > p.Max || n > 100000) throw new ArgumentException("Integer outside native/AI bounds."); p.Value = n; break;
                 case BoolParam p: p.Value = value!.GetValue<bool>(); break;
                 case StringParam p:
-                    string text = value!.GetValue<string>(); if (text.Length > 32000) throw new ArgumentException("Parameter too long."); p.Value = text; break;
+                    string text = value!.GetValue<string>(); if (text.Length > 32000) throw new ArgumentException("Parameter too long.");
+                    // F3: Stroke's Alpha PNG is a filesystem path the kernel reads at rebuild;
+                    // confine AI assignment to this run's refs/ before any rebuild can see it.
+                    if (feature.GetType().Name == "StrokeFeature" && name == "Alpha") ValidateStrokeAlpha(text);
+                    p.Value = text; break;
                 case ChoiceParam p:
                     int i = Array.FindIndex(p.Options, x => x.Equals(value!.GetValue<string>(), StringComparison.OrdinalIgnoreCase));
                     if (i < 0) throw new ArgumentException("Choice not in catalog."); p.Index = i; break;

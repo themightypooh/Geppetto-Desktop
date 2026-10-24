@@ -1,5 +1,6 @@
 #nullable enable
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Numerics;
@@ -41,10 +42,18 @@ public sealed class AiLivePreview : IDisposable
         lock (gate) { var result = pending; pending = null; return result; }
     }
     public JsonObject? State { get { lock (gate) return (JsonObject?)state?.DeepClone(); } }
+    /// <summary>How long each revision stays on screen before the next queued one replaces it, so a
+    /// run that commits faster than the pace (or a viewer that loads slower than it) still shows every
+    /// step in turn instead of jumping to the newest. The latest revision stays as long as it is latest.</summary>
+    public const int MinDwellMs = 250;
+    /// <summary>Steps allowed to wait for the viewport before the oldest are skipped to catch up.</summary>
+    public const int MaxBacklog = 3;
     async Task LoadLoop()
     {
-        long attempted = 0;
+        long attempted = 0;                 // the newest revision queued or loaded
         string? run = null;
+        var queue = new Queue<(string Path, long Revision, string CommittedAt)>();
+        var shown = System.Diagnostics.Stopwatch.StartNew();
         using var journal = new AiLiveJournalReader(root);
         try
         {
@@ -52,33 +61,62 @@ public sealed class AiLivePreview : IDisposable
             {
                 try
                 {
-                    var latest = journal.Poll();
+                    var fresh = journal.PollNew();
+                    var latest = journal.Latest;
                     if (latest is not null)
                     {
                         lock (gate) { if (!disposed) state = latest; }
                         string id = latest["runId"]!.GetValue<string>();
+                        string documentId = latest["documentId"]!.GetValue<string>();
                         // A root belongs to one run. Never accept a journal graft from another run.
+                        bool joined = run is null;
                         run ??= id;
                         long revision = latest["snapshot"]?["revision"]?.GetValue<long>() ?? 0;
-                        long want; lock (gate) { want = seek; if (want == 0 && seekLoaded != 0) { attempted = 0; seekLoaded = 0; } }
+                        long want; bool back;
+                        lock (gate) { want = seek; back = want == 0 && seekLoaded != 0; if (back) seekLoaded = 0; }
                         if (want > 0)
                         {
-                            bool fresh; lock (gate) fresh = seekLoaded != want;
-                            if (id == run && fresh)
+                            bool fresh2; lock (gate) fresh2 = seekLoaded != want;
+                            if (id == run && fresh2)
                             {
                                 lock (gate) seekLoaded = want;     // one try per seek, even if it fails
                                 string prefix = want.ToString("D8") + "-";
                                 string? file = Directory.EnumerateFiles(Path.Combine(root, ".live/revisions"), prefix + "*.effigy").FirstOrDefault();
                                 if (file is null) throw new IOException($"Revision {want} is not kept.");
-                                Publish(".live/revisions/" + Path.GetFileName(file), id, latest["documentId"]!.GetValue<string>(), want,
-                                    File.GetLastWriteTimeUtc(file).ToString("O"));
+                                queue.Clear();
+                                Publish(".live/revisions/" + Path.GetFileName(file), id, documentId, want, File.GetLastWriteTimeUtc(file).ToString("O"));
                             }
                         }
-                        else if (id == run && revision > attempted)
+                        else if (id == run)
                         {
-                            attempted = revision;
-                            Publish(latest["snapshot"]!["path"]!.GetValue<string>(), id, latest["documentId"]!.GetValue<string>(), revision,
-                                latest["snapshot"]!["committedAt"]!.GetValue<string>());
+                            if (joined || back)
+                            {
+                                // joining a run (or back from scrubbing it): straight to where it is now, not through its history
+                                queue.Clear(); attempted = 0;
+                                if (revision > 0 && latest["snapshot"]?["path"] is { } p0)
+                                { queue.Enqueue((p0.GetValue<string>(), revision, latest["snapshot"]!["committedAt"]!.GetValue<string>())); attempted = revision; }
+                            }
+                            else
+                            {
+                                // every revision the run committed since the last look, in order: none is skipped
+                                foreach (var ev in fresh)
+                                {
+                                    if (ev["state"]?.GetValue<string>() != "revision" || ev["runId"]!.GetValue<string>() != run) continue;
+                                    long r = ev["snapshot"]?["revision"]?.GetValue<long>() ?? 0;
+                                    if (r <= attempted || ev["snapshot"]?["path"] is not { } p) continue;
+                                    queue.Enqueue((p.GetValue<string>(), r, ev["snapshot"]!["committedAt"]!.GetValue<string>())); attempted = r;
+                                }
+                            }
+                            bool free; lock (gate) free = pending is null;
+                            // never fall behind: when more than MaxBacklog steps are waiting, the oldest are passed
+                            // over so the pane stays within a second or so of the run (each still shown in the chest)
+                            while (queue.Count > MaxBacklog) queue.Dequeue();
+                            if (queue.Count > 0 && free && shown.ElapsedMilliseconds >= MinDwellMs)
+                            {
+                                var next = queue.Dequeue();
+                                try { Publish(next.Path, id, documentId, next.Revision, next.CommittedAt); }
+                                finally { shown.Restart(); }    // a revision that fails to load still took its turn; the next one follows
+                            }
                         }
                     }
                 }
@@ -93,7 +131,7 @@ public sealed class AiLivePreview : IDisposable
                         }
                     }
                 }
-                await Task.Delay(Pinned ? 20 : 100, stop.Token);   // scrubbing wants a quick turnaround
+                await Task.Delay(Pinned ? 20 : queue.Count > 0 ? 25 : 100, stop.Token);   // scrubbing and a backlog want a quick turnaround
             }
         }
         catch (OperationCanceledException) when (stop.IsCancellationRequested) { }

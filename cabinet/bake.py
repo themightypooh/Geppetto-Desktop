@@ -243,7 +243,69 @@ P = 12          # how far the bar pull sticks out past the front edge (art px)
 SH = 3          # drop-shadow offset (art px)
 
 
-def bake_drawer(name, W, H, front, vp, k=0.86, seed=1):
+LINING = "wood"   # default drawer interior: "wood" (oak), "walnut" (Pinoch cabinet wood) or "rubber"
+PINOCH_WOOD = hexes("#160b06", "#28140b", "#3b1f11", "#512b16", "#6a391c", "#844823",
+                    "#9d5a2c", "#b56f38", "#cb8848", "#dfa560", "#efc282", "#f8dca8")
+LININGS = ("wood", "walnut", "rubber")
+
+
+def _wood_interior(rgb, H, W, xx, yy, xc, yc, u, v, s, k, vx, vy, x0, y0, x1, y1,
+                   floor, wall, inside, wl, wr, wt, wb, slide_h, seed, ramp=None):
+    ramp = WOOD if ramp is None else ramp
+    n = len(ramp) - 1
+    sc = n / 5.0
+    rng = np.random.default_rng(seed + 9)
+    fx0, fy0 = vx + (x0 - vx) * k, vy + (y0 - vy) * k
+    fx1, fy1 = vx + (x1 - vx) * k, vy + (y1 - vy) * k
+    # -- floor: planks running along the slide axis, so the boards point at the pull
+    along = xx if slide_h else yy
+    across = (yy - fy0) if slide_h else (xx - fx0)
+    PW = 13
+    plank = np.floor(across / PW).astype(int)
+    inplank = np.mod(across, PW)
+    tone = (rng.random(64) - 0.5) * 1.3
+    f = 2.2 + tone[np.clip(plank, 0, 63)]
+    # grain: thin streaks along each board, wobbling slowly so they read as growth lines
+    wob = np.sin(along * 0.045 + plank * 1.7) * 1.6 + np.sin(along * 0.013 + plank) * 2.5
+    g = np.sin((inplank + wob) * 1.9 + plank * 2.3)
+    f += np.where(g > 0.78, 1.2, np.where(g < -0.84, -1.0, 0.0))
+    f += noise(H, W, 6, seed + 3) * 0.12
+    # the seam between boards: a dark gap with a lit edge on the next board
+    f = np.where(inplank < 1, f - 2.2, f)
+    f = np.where((inplank >= 1) & (inplank < 2), f + 0.5, f)
+    # butt joints where boards end, staggered per plank
+    off = (rng.random(64) * 120).astype(int)
+    joint = np.mod(along + off[np.clip(plank, 0, 63)], 150) < 1
+    f = np.where(joint, f - 1.8, f)
+    fu = np.clip((xc - fx0) / max(fx1 - fx0, 1), 0, 1)
+    fv = np.clip((yc - fy0) / max(fy1 - fy0, 1), 0, 1)
+    f += 0.5 * np.exp(-((fu - 0.3) ** 2 + (fv - 0.25) ** 2) / 0.25) - 0.2
+    def ao(d, r):
+        return np.clip(1 - d / r, 0, 1) ** 1.6
+    f -= ao(xc - fx0, 11) * 2.2 + ao(yc - fy0, 11) * 2.0 + ao(fx1 - xc, 7) * 1.0 + ao(fy1 - yc, 7) * 0.9
+    rgb[floor] = dither(np.clip(f * sc, 0, n), ramp)[floor]
+    # -- walls: solid wood sides, grain running along each side, lit from the top-left
+    depth = np.clip((s - k) / (1 - k), 0, 1)
+    wsh = np.zeros((H, W), np.float32)
+    for m, base, horiz_grain in ((wr, 3.9, False), (wb, 3.5, True), (wt, 1.7, True), (wl, 1.4, False)):
+        a = xx if horiz_grain else yy
+        d = depth * 9.0
+        gg = np.sin((d + np.sin(a * 0.05 + seed) * 1.4) * 2.1)
+        val = base - (1 - depth) ** 2 * 1.2 + np.where(gg > 0.85, 0.6, np.where(gg < -0.9, -0.5, 0.0))
+        val = val + noise(H, W, 4, seed + 4) * 0.12
+        wsh[m] = val[m]
+    wsh[wall & (depth < 0.16)] -= 1.1                      # contact shadow where the side meets the floor
+    wsh[wall & (depth > 0.86)] += 1.0                      # the sanded top edge of the side board catches light
+    gap = np.abs(u - v) * np.minimum(x1 - x0, y1 - y0)
+    wsh[wall & (gap < 0.9)] -= 1.5                         # the corner joint
+    wsh[wall & (gap >= 0.9) & (gap < 1.9)] += 0.5
+    rgb[wall] = dither(np.clip(wsh * sc, 0, n), ramp)[wall]
+    rgb[inside & (s > k) & (s < k + 0.02)] = ramp[0]
+
+
+
+def bake_drawer(name, W, H, front, vp, k=0.86, seed=1, lining=None):
+    lining = LINING if lining is None else lining
     lip = {"l": 4, "r": 4, "t": 4, "b": 4}
     lip[front] = 11
     x0, y0, x1, y1 = lip["l"], lip["t"], W - lip["r"], H - lip["b"]
@@ -265,45 +327,53 @@ def bake_drawer(name, W, H, front, vp, k=0.86, seed=1):
     slide_h = front in ("l", "r")
     rgb = np.zeros((H, W, 3), np.uint8)
 
-    # -- floor: black ribbed rubber liner, ribs running across the slide axis
     fx0, fy0 = vx + (x0 - vx) * k, vy + (y0 - vy) * k
     fx1, fy1 = vx + (x1 - vx) * k, vy + (y1 - vy) * k
-    across = (xx - fx0) if slide_h else (yy - fy0)
-    rib = np.mod(across, 4)
-    f = 3.1 + noise(H, W, 30, seed) * 0.08
-    # each rib: a lit crown, a flank, a flat and a dark groove
-    f = f + np.choose(rib.astype(int), [1.9, 0.8, 0.0, -1.3])
-    # a soft pool of light from the top-left, falling off toward the far corner
-    fu = np.clip((xc - fx0) / max(fx1 - fx0, 1), 0, 1)
-    fv = np.clip((yc - fy0) / max(fy1 - fy0, 1), 0, 1)
-    f += 0.45 * np.exp(-((fu - 0.3) ** 2 + (fv - 0.25) ** 2) / 0.25) - 0.2
-    # ambient occlusion where the liner meets each wall: deepest under the lit (top/left) walls
-    def ao(d, r):
-        return np.clip(1 - d / r, 0, 1) ** 1.6
-    f -= ao(xc - fx0, 11) * 2.6 + ao(yc - fy0, 11) * 2.4 + ao(fx1 - xc, 7) * 1.2 + ao(fy1 - yc, 7) * 1.1
-    rgb[floor] = dither(f, RUBBER)[floor]
-
-    # -- walls: brushed zinc-plated steel, lit from the top-left, grain running along each wall
-    depth = np.clip((s - k) / (1 - k), 0, 1)             # 0 where the wall meets the floor, 1 at the lip
-    rng = np.random.default_rng(seed + 5)
-    grain_rows = (rng.random((H, 1)) - 0.5) * 0.7          # streaks along x (top and bottom walls)
-    grain_cols = (rng.random((1, W)) - 0.5) * 0.7          # streaks along y (left and right walls)
-    wsh = np.zeros((H, W), np.float32)
-    for m, base, grain in ((wr, 5.4, grain_cols), (wb, 4.8, grain_rows), (wt, 2.3, grain_rows), (wl, 1.9, grain_cols)):
-        val = base - (1 - depth) ** 2 * 1.7 + np.broadcast_to(grain, (H, W)) + noise(H, W, 2, seed + 4) * 0.15
-        wsh[m] = val[m]
-    wsh[wall & (depth < 0.16)] -= 1.3                      # contact shadow down where the wall meets the liner
-    wsh[wall & (depth > 0.88)] += 1.4                      # the box's rolled top edge catches the light
-    # slide rails pressed into the two walls that run along the slide axis: a lit ridge over a dark groove
-    rail_walls = (wt | wb) if slide_h else (wl | wr)
-    wsh[rail_walls & (np.abs(depth - 0.52) < 0.035)] += 2.2
-    wsh[rail_walls & (np.abs(depth - 0.44) < 0.035)] -= 1.8
-    # the corner seams: a dark fold with a thin highlight beside it
-    gap = np.abs(u - v) * np.minimum(x1 - x0, y1 - y0)
-    wsh[wall & (gap < 0.9)] -= 1.6
-    wsh[wall & (gap >= 0.9) & (gap < 1.9)] += 0.8
-    rgb[wall] = dither(wsh, ZINC)[wall]
-    rgb[inside & (s > k) & (s < k + 0.02)] = ZINC[0]
+    if lining in ("wood", "walnut"):
+        _wood_interior(rgb, H, W, xx, yy, xc, yc, u, v, s, k, vx, vy, x0, y0, x1, y1,
+                       floor, wall, inside, wl, wr, wt, wb, slide_h, seed,
+                       PINOCH_WOOD if lining == "walnut" else WOOD)
+        rng = np.random.default_rng(seed + 5)
+    else:
+        # -- floor: black ribbed rubber liner, ribs running across the slide axis
+        fx0, fy0 = vx + (x0 - vx) * k, vy + (y0 - vy) * k
+        fx1, fy1 = vx + (x1 - vx) * k, vy + (y1 - vy) * k
+        across = (xx - fx0) if slide_h else (yy - fy0)
+        rib = np.mod(across, 4)
+        f = 3.1 + noise(H, W, 30, seed) * 0.08
+        # each rib: a lit crown, a flank, a flat and a dark groove
+        f = f + np.choose(rib.astype(int), [1.9, 0.8, 0.0, -1.3])
+        # a soft pool of light from the top-left, falling off toward the far corner
+        fu = np.clip((xc - fx0) / max(fx1 - fx0, 1), 0, 1)
+        fv = np.clip((yc - fy0) / max(fy1 - fy0, 1), 0, 1)
+        f += 0.45 * np.exp(-((fu - 0.3) ** 2 + (fv - 0.25) ** 2) / 0.25) - 0.2
+        # ambient occlusion where the liner meets each wall: deepest under the lit (top/left) walls
+        def ao(d, r):
+            return np.clip(1 - d / r, 0, 1) ** 1.6
+        f -= ao(xc - fx0, 11) * 2.6 + ao(yc - fy0, 11) * 2.4 + ao(fx1 - xc, 7) * 1.2 + ao(fy1 - yc, 7) * 1.1
+        rgb[floor] = dither(f, RUBBER)[floor]
+    
+        # -- walls: brushed zinc-plated steel, lit from the top-left, grain running along each wall
+        depth = np.clip((s - k) / (1 - k), 0, 1)             # 0 where the wall meets the floor, 1 at the lip
+        rng = np.random.default_rng(seed + 5)
+        grain_rows = (rng.random((H, 1)) - 0.5) * 0.7          # streaks along x (top and bottom walls)
+        grain_cols = (rng.random((1, W)) - 0.5) * 0.7          # streaks along y (left and right walls)
+        wsh = np.zeros((H, W), np.float32)
+        for m, base, grain in ((wr, 5.4, grain_cols), (wb, 4.8, grain_rows), (wt, 2.3, grain_rows), (wl, 1.9, grain_cols)):
+            val = base - (1 - depth) ** 2 * 1.7 + np.broadcast_to(grain, (H, W)) + noise(H, W, 2, seed + 4) * 0.15
+            wsh[m] = val[m]
+        wsh[wall & (depth < 0.16)] -= 1.3                      # contact shadow down where the wall meets the liner
+        wsh[wall & (depth > 0.88)] += 1.4                      # the box's rolled top edge catches the light
+        # slide rails pressed into the two walls that run along the slide axis: a lit ridge over a dark groove
+        rail_walls = (wt | wb) if slide_h else (wl | wr)
+        wsh[rail_walls & (np.abs(depth - 0.52) < 0.035)] += 2.2
+        wsh[rail_walls & (np.abs(depth - 0.44) < 0.035)] -= 1.8
+        # the corner seams: a dark fold with a thin highlight beside it
+        gap = np.abs(u - v) * np.minimum(x1 - x0, y1 - y0)
+        wsh[wall & (gap < 0.9)] -= 1.6
+        wsh[wall & (gap >= 0.9) & (gap < 1.9)] += 0.8
+        rgb[wall] = dither(wsh, ZINC)[wall]
+        rgb[inside & (s > k) & (s < k + 0.02)] = ZINC[0]
 
     # -- the enamel lip around the top, and the drawer front
     rim = ~inside
@@ -1405,39 +1475,163 @@ def _rolo_face(cls):
     return int(rows.min()), int(rows.max()) + 1, x0, x1
 
 
-def bake_rolodex(name="rolodex", W=104):
-    """The rotary card file (model/rolodex) seen from above, W art px wide, its spindle running
-    up the drawer so the cards flip sideways. The cradle is <name>_base.png; each turn of the
-    card wheel is <name>_NN.png, same canvas, so the two stack. The front card (the one lying
-    flat, on the right) is where a label goes."""
-    base = model_frames("rolodex", "base")
-    spins = model_frames("rolodex", "spin")
-    if not base or not spins:
-        return None
-    ids = [id_classes(base[0])] + [id_classes(f) for f in spins]
-    y0, y1, x0, x1 = _rolo_crop(ids)
-    H = max(1, int(round((y1 - y0) * W / (x1 - x0))))
-    rng = light_range(ids)
+def bake_rolodex(name="rolodex", W=110, H=132):
+    """The files as an expanding accordion file, fanned open in the drawer: nineteen cream
+    dividers with blue tabs, hinged from a spine you can see at the bottom middle, the fan
+    blown up until its tips bleed off the top and its sides off the edges, the file's own
+    dark covers filling the bottom corners -- no wood anywhere, and no backdrop either:
+    every pixel is some part of the file. A flip (3 frames, 12 to a full turn) takes the
+    front divider over to the back of the fan while the right-hand side closes one slot
+    toward the middle, so the fan leafs forever. Fully opaque in every frame."""
+    import math
 
-    def paint(k, v):
-        cls, lit = shrink_ids(k[y0:y1, x0:x1], v[y0:y1, x0:x1], W, H)
-        return cls, lit, outlined(paint_ids(cls, lit, ROLO_PARTS, rng), cls > 0)
+    from PIL import ImageDraw
 
-    _, _, base_img = paint(*ids[0])
-    save(name + "_base.png", base_img)
-    face = None
-    for i, kv in enumerate(ids[1:]):
-        cls, _, img = paint(*kv)
-        save("%s_%02d.png" % (name, i), img)
-        if i == 0:
-            face = _rolo_face(cls)
-    meta = {"w": (W + 4) * S, "h": (H + 4) * S, "bodyW": W * S, "bodyH": H * S,
-            "frames": len(spins), "cards": 12}
-    if face:
-        fy0, fy1, fx0, fx1 = face
-        meta.update(labelX=(fx0 + 1) * S, labelY=(fy0 + 1) * S,
-                    labelW=(fx1 - fx0) * S, labelH=(fy1 - fy0) * S)
-    return meta
+    frames_n, cards = 36, 12
+    px, py = W / 2.0, H - 14.0             # the spine hinge, inside the frame
+    div_w, div_l = 26.0, 172.0            # divider width and hinge-to-tip length
+    step = 8.5                            # degrees between dividers: 19 of them span 153
+    tab_r, tab_l = 7.0, 16.0
+    ink_c = tuple(int(c) for c in INK[1])
+    edge_c = (14, 10, 6)
+
+    def tone(k, drop=0):                  # face tone by slot: the front face pops, the
+        idx = [6, 5, 4, 4, 3, 3, 2, 2, 2, 2][min(9, abs(k))]   # rest fall off into shade
+        return tuple(int(c) for c in PARCH[max(1, idx - drop)])
+
+    def divider_poly(a_deg, tab_rad):
+        a = math.radians(a_deg)
+        ca, sa = math.cos(a), math.sin(a)
+
+        def pt(x, y):                     # local: x across, y up from the hinge
+            return (px + x * ca - y * sa, py - x * sa - y * ca)
+
+        body = [pt(-div_w / 2, -6), pt(div_w / 2, -6), pt(div_w / 2, div_l), pt(-div_w / 2, div_l)]
+        # the tab rides the trailing edge, like the real file: a bump out of the side,
+        # stepped up and down the fan by slot so the arc is ringed with tabs
+        tab = [pt(div_w / 2, tab_rad - tab_l / 2), pt(div_w / 2 + tab_r, tab_rad - tab_l / 2),
+               pt(div_w / 2 + tab_r, tab_rad + tab_l / 2), pt(div_w / 2, tab_rad + tab_l / 2)]
+        return body, tab, pt
+
+    def draw_frame(img, flip_ph):
+        """flip_ph: None at rest, else 0..1 through the flip of the front divider."""
+        d = ImageDraw.Draw(img, "RGBA")
+        ease = flip_ph * flip_ph * (3 - 2 * flip_ph) if flip_ph is not None else 0.0
+        # the covers the fan sits between, splayed to the bottom corners
+        d.polygon([(px, py), (0, H), (0, H - 46), (px - 40, py + 2)],
+                  fill=tuple(int(c) for c in PLASTIC[2]) + (255,), outline=edge_c + (255,))
+        d.polygon([(px, py), (W, H), (W, H - 46), (px + 40, py + 2)],
+                  fill=tuple(int(c) for c in PLASTIC[2]) + (255,), outline=edge_c + (255,))
+        # (angle, is_flipper) for the 19 slots, left to right; slot 9 stands at the front
+        slots = []
+        for p in range(19):
+            a = (p - 9) * step
+            if flip_ph is not None:
+                if p == 9:
+                    a = 9 * step * ease
+                elif p > 9:
+                    a -= step * ease
+            slots.append((a, p == 9 and flip_ph is not None))
+        order = sorted(range(19), key=lambda i: -abs(slots[i][0]))
+        if flip_ph is not None:
+            fi = next(i for i, s in enumerate(slots) if s[1])
+            order.remove(fi)
+            if flip_ph < 0.5:
+                order.append(fi)          # still on top, being leafed over
+            else:
+                order.insert(0, fi)       # tucking in behind the fan
+        for i in order:
+            a, is_flip = slots[i]
+            tab_rad = 55.0 + (i % 5) * 20.0     # tabs step up the fan by slot
+            body, tab, pt = divider_poly(a, tab_rad)
+            sh = [(x + 2, y + 3) for x, y in body]
+            d.polygon(sh, fill=(20, 14, 8, 70))
+            kk = int(round(a / step))
+            d.polygon(body, fill=tone(kk) + (255,), outline=edge_c + (255,))
+            band = [pt(div_w / 2 - 3, -6), pt(div_w / 2, -6), pt(div_w / 2, div_l), pt(div_w / 2 - 3, div_l)]
+            d.polygon(band, fill=tone(kk, 1) + (255,))
+            d.line([pt(div_w / 2, -6), pt(div_w / 2, div_l)], fill=edge_c + (255,), width=1)
+            d.polygon(tab, fill=tuple(int(c) for c in TAB[4]) + (255,), outline=edge_c + (255,))
+            if a == 0.0 or is_flip:
+                # the front face carries the writing: three ink lines near the top
+                for j, (off, ln) in enumerate([(-9, 17), (-6, 12), (-11, 14)]):
+                    r0 = 100.0 + j * 8.0
+                    d.line([pt(off, r0), pt(off + ln, r0)], fill=ink_c + (255,), width=2)
+        # the spine rivet the whole fan turns on
+        d.ellipse([px - 5, py - 5, px + 5, py + 5],
+                  fill=tuple(int(c) for c in PLASTIC[0]) + (255,), outline=edge_c + (255,))
+        d.ellipse([px - 2, py - 2, px + 2, py + 2], fill=tuple(int(c) for c in BRASS[3]) + (255,))
+
+    for t in range(frames_n):
+        ph = (t % 3) / 3.0
+        img = Image.new("RGBA", (W, H), (0, 0, 0, 255))
+        arr = np.asarray(img).copy()
+        # the pleated gusset: folds converging on the hinge, for any sliver left over
+        yy, xx = np.mgrid[0:H, 0:W]
+        ang = np.degrees(np.arctan2(xx - px, py - yy))
+        fold = ((ang + 66) // 6).astype(int) % 2
+        gus = np.where(fold[..., None] == 0, np.array(PLASTIC[2], np.uint8), np.array(PLASTIC[1], np.uint8))
+        deep = np.clip(1.0 - (yy / H) * 0.25, 0.7, 1.0)[..., None]
+        arr[..., :3] = (gus.astype(np.float32) * deep).astype(np.uint8)
+        img = Image.fromarray(arr, "RGBA")
+        draw_frame(img, None if t % 3 == 0 else ph)
+        save("%s_%02d.png" % (name, t), np.asarray(img))
+    return {"w": W * S, "h": H * S, "bodyW": W * S, "bodyH": H * S,
+            "frames": frames_n, "cards": cards}
+
+
+def bake_minidrawer_front(name="minidrawer_front.png", W=120, H=28):
+    """The front of a mini drawer that lives inside a big one (the MODELS drawer in the tools
+    tray): an oak board the width of the MODELING folder, a stamped aluminium plate across the
+    top for its name, and a chrome bar pull low in the middle — the handle you grab. Drawn flat
+    like the wavegoo cabinet fronts, so the plate's lettering (QML, on top) stays crisp while the
+    box behind it carries the depth. A dithered shadow strip rides under it."""
+    yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+    # oak board: planks running across, grain streaking along them
+    plank = np.floor(yy / 9).astype(int)
+    rng = np.random.default_rng(71)
+    tone = (rng.random(8) - 0.5) * 1.1
+    sh = 4.6 + tone[np.clip(plank, 0, 7)]
+    sh += np.where(np.sin(xx * 0.11 + plank * 2.1) > 0.86, 0.8, 0.0)
+    sh += noise(H, W, 5, 72) * 0.15
+    sh = np.where(np.mod(yy, 9) < 1, sh - 2.0, sh)                    # plank seams
+    sh += (1 - yy / H) * 0.7                                          # lit from above
+    m = np.ones((H, W), bool)
+    sh[(xx == 0) | (yy == 0)] += 1.6
+    sh[(xx == W - 1) | (yy == H - 1)] -= 2.2
+    rgb = dither(np.clip(sh, 0, len(WOOD) - 1), WOOD)
+    body = solid(rgb, m)
+    # corner screws
+    for sx, sy in ((3, 3), (W - 6, 3), (3, H - 6), (W - 6, H - 6)):
+        scr, scm = screw(2, cross=False)
+        sub = body[sy:sy + 5, sx:sx + 5]
+        sub[scm[:sub.shape[0], :sub.shape[1]]] = np.dstack([scr, np.full(scr.shape[:2], 255, np.uint8)])[:sub.shape[0], :sub.shape[1]][scm[:sub.shape[0], :sub.shape[1]]]
+    # the aluminium plate, stamped across the top middle: QML letters it
+    pw, ph, px0, py0 = 64, 12, (W - 64) // 2, 3
+    psh = 5.6 + noise(ph, pw, 3, 73) * 0.2
+    psh[0, :] += 1.6; psh[-1, :] -= 1.8; psh[:, 0] += 1.2; psh[:, -1] -= 1.4
+    body[py0:py0 + ph, px0:px0 + pw, :3] = dither(np.clip(psh, 0, len(ALU) - 1), ALU)
+    for sx in (px0 + 2, px0 + pw - 4):
+        scr, scm = screw(1, cross=False)
+        sub = body[py0 + 4:py0 + 7, sx:sx + 3]
+        sub[scm[:sub.shape[0], :sub.shape[1]]] = np.dstack([scr, np.full(scr.shape[:2], 255, np.uint8)])[:sub.shape[0], :sub.shape[1]][scm[:sub.shape[0], :sub.shape[1]]]
+    # the chrome bar pull, low and central: two feet and a bar with a specular streak
+    bx0, bx1, byy = W // 2 - 30, W // 2 + 30, H - 9
+    for fx in (bx0, bx1 - 3):
+        body[byy - 2:byy + 5, fx:fx + 3, :3] = dither(np.array([[3.2, 5.4, 3.2]] * 7, np.float32), CHROME)
+    bar = np.zeros((4, bx1 - bx0), np.float32)
+    bar[0, :] = 2.6; bar[1, :] = 8.8; bar[2, :] = 6.4; bar[3, :] = 1.4
+    body[byy:byy + 4, bx0:bx1, :3] = dither(bar, CHROME)
+    body[byy + 1, bx0 + 3:bx1 - 3, :3] = CHROME[9]                     # the long streak
+    # dithered shadow under the board, on a canvas 3px taller
+    pad_m = np.zeros((H + 3, W), bool); pad_m[:H] = m
+    body_pad = np.zeros((H + 3, W, 4), np.uint8); body_pad[:H] = body
+    out = np.zeros((H + 3, W, 4), np.uint8)
+    out = over(out, checker_shadow(pad_m, 0, 3))
+    out = over(out, body_pad)
+    save(name, out)
+    return {"w": W * S, "h": (H + 3) * S, "plateX": px0 * S, "plateY": py0 * S,
+            "plateW": pw * S, "plateH": ph * S}
 
 
 def main():
@@ -1469,6 +1663,8 @@ def main():
     geom["scroll3d"] = bake_scroll3d("scroll3d")
     geom["chisel3d"] = bake_turning("chisel3d", "chisel", 60, CHISEL_PARTS, 2)
     geom["modelfolder"] = bake_modelfolder("modelfolder")
+    geom["minidrawerBox"] = bake_drawer("minidrawer_box.png", 120, 118, "b", (0.5, 0.38), k=0.80, seed=43)
+    geom["minidrawerFront"] = bake_minidrawer_front()
     geom["books"] = bake_books()
     geom["eraser"] = bake_eraser()
     geom["scrollRod"] = bake_scroll_rod("scroll_rod.png")
@@ -1490,7 +1686,7 @@ def main():
 
 
 ENAMEL_FILES = ["frame.png", "bar.png", "drawer_research.png", "drawer_tools.png", "drawer_timeline.png",
-                "modelfolder_back.png", "modelfolder_cover.png"]
+                "modelfolder_back.png", "modelfolder_cover.png", "minidrawer_box.png"]
 
 
 def bake_scheme(name):
@@ -1510,6 +1706,7 @@ def bake_scheme(name):
         bake_drawer("drawer_timeline.png", 500, 112, "b", (0.5, 0.05), k=0.88, seed=37)
         bake_bar(VIEW_W + 2 * T + 10, 30)
         bake_modelfolder("modelfolder")
+        bake_drawer("minidrawer_box.png", 120, 118, "b", (0.5, 0.38), k=0.80, seed=43)
     finally:
         RED, OUT = stock_red, stock_out
     return ink

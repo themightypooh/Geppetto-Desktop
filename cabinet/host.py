@@ -42,17 +42,42 @@ import model_sheet
 import panes as paneslib
 import pane_owner
 import part_focus
+import ai_notice as noticelib
 import sticker as stickerlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROJECT = os.path.dirname(HERE)
 BIN = os.path.join(PROJECT, "bin", "Release", "net8.0")
 EXE = os.path.join(BIN, "marionette-desktop")
+if not os.path.exists(EXE) and os.path.exists(os.path.join(PROJECT, "marionette-desktop")):
+    # a packaged bundle (packaging/package-linux.sh): the viewer sits beside the cabinet
+    # folder instead of in a build tree — drive that one
+    BIN = PROJECT
+    EXE = os.path.join(PROJECT, "marionette-desktop")
 SOCK = "geppetto-cabinet"
 DRAWER_ALIASES = {"outliner": "tools"}      # the right drawer is the tools drawer now
 PROJECTS = os.path.expanduser("~/games/projects")
 RUNS = os.path.expanduser("~/.local/share/geppetto/research")
+CHAT_IMAGES = os.path.expanduser("~/.cache/geppetto/chat-images")   # pictures attached to drawer chat (audit G5)
+
+
+def makedirs_private(path):
+    """os.makedirs + 0700 on the leaf (audit G6): Geppetto's state trees hold the user's
+    prompts, briefs and pictures - private by default, not the umask's 0755."""
+    os.makedirs(path, exist_ok=True)
+    try:
+        os.chmod(path, 0o700)
+    except OSError:
+        pass
+    return path
+
+
+def open_private(path, mode="w"):
+    """open() with the file created 0600 (audit G6), for Geppetto's own state files."""
+    flags = os.O_WRONLY | os.O_CREAT | (os.O_APPEND if "a" in mode else os.O_TRUNC)
+    return os.fdopen(os.open(path, flags, 0o600), mode)
 VIEW_PREFS = os.path.expanduser("~/.config/geppetto/chest-view.json")   # viewport layout (1/2/4 panes), linked cameras
+NOTICE_STATE = os.path.expanduser("~/.config/geppetto/ai-consent.json")  # BYO-AI notices: per-provider acks (ai_notice.py)
 MODELING = os.path.expanduser("~/.local/share/geppetto/modeling")   # models you KEEP off the bench: <name>/<name>.effigy + sticker.png
 DEFAULT_MODEL = os.path.join(PROJECTS, "deep_sentance/tools/out/suit/live/pants.effigy")
 OLLAMA = "http://localhost:11434/v1/"
@@ -177,15 +202,20 @@ def kept_model(d):
 
 
 def folder_entry(sticker):
-    """one slip in the MODELING folder: its picture, its name, and what opening it puts on screen"""
+    """one slip in the MODELING folder: its picture, its name, what opening it puts on screen,
+    and when it was filed (the listing shows the date and sorts kept models before runs)"""
     d = os.path.dirname(sticker)
+    try:
+        when = int(os.path.getmtime(sticker))
+    except OSError:
+        when = 0
     if os.path.dirname(d) == MODELING:
         try:
             name = json.load(open(os.path.join(d, "kept.json"))).get("name", "")
         except (OSError, ValueError, AttributeError):
             name = ""
-        return {"sticker": "file://" + sticker, "name": name or os.path.basename(d), "kind": "model", "path": kept_model(d)}
-    return {"sticker": "file://" + sticker, "name": run_name(d), "kind": "run", "path": d}
+        return {"sticker": "file://" + sticker, "name": name or os.path.basename(d), "kind": "model", "path": kept_model(d), "mtime": when}
+    return {"sticker": "file://" + sticker, "name": run_name(d), "kind": "run", "path": d, "mtime": when}
 
 
 def run_name(d):
@@ -245,8 +275,8 @@ PANES_SAVED = os.path.expanduser("~/.cache/geppetto/chest-panes.json")   # panes
 def remember_open(model, clip=""):
     """the model (and clip) on screen, so a restarted chest reopens them"""
     try:
-        os.makedirs(os.path.dirname(LAST_OPEN), exist_ok=True)
-        with open(LAST_OPEN, "w") as f:
+        makedirs_private(os.path.dirname(LAST_OPEN))
+        with open_private(LAST_OPEN) as f:
             json.dump({"model": model, "clip": clip}, f)
     except OSError:
         pass
@@ -316,6 +346,7 @@ class Host(QObject):
     stickerMade = Signal(str, float, float, float, float)
     filedChanged = Signal()
     replayChanged = Signal()
+    noticeChanged = Signal()           # the BYO-AI notice card (ai_notice.py): cost + first-send disclosure gate
     shownOpChanged = Signal()
     benchChanged = Signal()
     refsChanged = Signal()             # the reference pictures standing behind the model
@@ -344,6 +375,7 @@ class Host(QObject):
         self._chat_session = str(uuid.uuid4())   # Claude's CLI session for this conversation; CLEAR starts a new one
         self._chat = []                   # [{"role": "you"|"model", "text": ..., "images": [...]?}, ...]
         self._chat_pending = []           # picture paths waiting to go with the next send
+        self._sweep_chat_images()         # audit G5: a new session sweeps the last one's attached pictures
         self._chat_models = []
         self._chat_model = self._chat_models[0]["id"] if self._chat_models else ""
         self._chat_busy = False
@@ -450,6 +482,14 @@ class Host(QObject):
             self._scheme = str(prefs.get("scheme", "red"))
         except (OSError, ValueError, AttributeError):
             pass
+        # the BYO-AI notices (ai_notice.py): per-provider consent, file-tolerant; the card
+        # starts hidden and only the send paths below raise it, before anything is sent.
+        self._notice_path = NOTICE_STATE
+        self._notice_state = noticelib.load_state(self._notice_path)
+        self._notice_cfg = None
+        self._notice_missing = []
+        self._notice_show = False
+        self._pending_notice = None      # ("research", prompt, model_id) or ("chat", text)
 
     # ---- properties ------------------------------------------------------------------------
     def _get_info(self): return self._info
@@ -489,6 +529,12 @@ class Host(QObject):
     chatBusy = Property(bool, lambda self: self._chat_busy, notify=chatChanged)
     catalogueBusy = Property(bool, lambda self: self._catalogue_busy, notify=chatChanged)
     replay = Property("QVariantMap", lambda self: self._replay, notify=replayChanged)
+    def _get_notice(self):
+        m = noticelib.notice_map(self._notice_state, self._notice_cfg, show=self._notice_show)
+        pending = self._pending_notice[0] if self._pending_notice else ""
+        m["startLabel"] = "START" if pending == "chat" else "START THE BUILD"
+        return m
+    notice = Property("QVariantMap", _get_notice, notify=noticeChanged)
     # the op that made the revision on screen ("line 14: add Blob ..."): the tool wheel's tool, in step with
     # the viewport, whether it follows a run, a replay or your bench
     shownOp = Property(str, lambda self: live_runs.revision_op(self.watching, self.displayed_revision)
@@ -1107,7 +1153,7 @@ class Host(QObject):
         if source:
             # a copy beside the bench, so loading it can't write anything into the run it came from
             base = d + ".base.effigy"
-            os.makedirs(RUNS, exist_ok=True)
+            makedirs_private(RUNS)
             shutil.copyfile(source, base)
             args += ["--doc", base]
         p = QProcess(self)
@@ -1251,7 +1297,7 @@ class Host(QObject):
             d, k = os.path.join(MODELING, stem), 2
             while os.path.exists(d):
                 d, k = os.path.join(MODELING, "%s-%d" % (stem, k)), k + 1
-        os.makedirs(d, exist_ok=True)
+        makedirs_private(d)
         try:
             meta = json.load(open(os.path.join(d, "kept.json")))
         except (OSError, ValueError):
@@ -1371,6 +1417,53 @@ class Host(QObject):
         self.replayTimer.start()
         self.scanRuns()
         self.set_status("replaying %s: %d steps" % (os.path.basename(directory), len(steps)))
+
+    # ---- the BYO-AI notices: cost pre-flight + first-send disclosure (ai_notice.py) -------
+    def _notice_cfg_for(self, model, surface, research=False):
+        return noticelib.config_from_model(
+            model, research=research,
+            brave=bool(self.env.value("BRAVE_SEARCH_API_KEY") or os.environ.get("BRAVE_SEARCH_API_KEY")),
+            vision=bool(model.get("vision")))
+
+    def _notice_gate(self, model, surface, research=False):
+        """True when this send must stop at the notice card. Raises the card and
+        returns True; the caller stashes its pending send and returns unsent."""
+        cfg = self._notice_cfg_for(model, surface, research=research)
+        if surface == "chat":
+            cfg["surface"] = "chat"
+        need = noticelib.needs_notice(self._notice_state, cfg)
+        self._notice_cfg = cfg
+        self._notice_missing = need["missing"]
+        if not need["show"]:
+            self.noticeChanged.emit()
+            return False
+        self._notice_show = True
+        self.noticeChanged.emit()
+        return True
+
+    @Slot(bool)
+    def noticeStart(self, every_time):
+        """[ Start the build ] on the notice card: record the ack (never sends by
+        itself), hide the card, then resume the send that was waiting on it."""
+        pending, self._pending_notice = self._pending_notice, None
+        if self._notice_cfg is not None:
+            noticelib.ack_notice(self._notice_state, self._notice_cfg,
+                                 self._notice_missing, every_time=bool(every_time))
+            noticelib.save_state(self._notice_path, self._notice_state)
+        self._notice_show = False
+        self.noticeChanged.emit()
+        if pending and pending[0] == "research":
+            self.beginResearch(pending[1], pending[2])
+        elif pending and pending[0] == "chat":
+            self.sendChat(pending[1])
+
+    @Slot()
+    def noticeCancel(self):
+        """[ Not yet ]: nothing was sent, nothing is acked; the prompt stays filled."""
+        self._pending_notice = None
+        self._notice_show = False
+        self.noticeChanged.emit()
+        self.set_status("not started — nothing was sent")
 
     @Slot(str, int)
     def replayAt(self, directory, rev):
@@ -1646,8 +1739,8 @@ class Host(QObject):
             return
         self._saved_panes = now
         try:
-            os.makedirs(os.path.dirname(PANES_SAVED), exist_ok=True)
-            with open(PANES_SAVED + ".tmp", "w") as f:
+            makedirs_private(os.path.dirname(PANES_SAVED))
+            with open_private(PANES_SAVED + ".tmp") as f:
                 json.dump(now, f)
             os.replace(PANES_SAVED + ".tmp", PANES_SAVED)
         except OSError:
@@ -2005,8 +2098,8 @@ class Host(QObject):
 
     def _save_view_prefs(self):
         try:
-            os.makedirs(os.path.dirname(VIEW_PREFS), exist_ok=True)
-            with open(VIEW_PREFS + ".tmp", "w") as f:
+            makedirs_private(os.path.dirname(VIEW_PREFS))
+            with open_private(VIEW_PREFS + ".tmp") as f:
                 json.dump({"layout": self._layout, "link": self._link, "auto": self._auto, "solo": self._solo,
                            "scheme": self._scheme}, f)
             os.replace(VIEW_PREFS + ".tmp", VIEW_PREFS)
@@ -2041,9 +2134,9 @@ class Host(QObject):
     def _save_model_preferences(self):
         self._model_preferences = {"chat": self._chat_model, "research": self.ai_model, "claude": self._claude_model}
         try:
-            os.makedirs(os.path.dirname(self._preferences_path), exist_ok=True)
+            makedirs_private(os.path.dirname(self._preferences_path))
             temporary = self._preferences_path + ".tmp"
-            with open(temporary, "w") as f:
+            with open_private(temporary) as f:
                 json.dump(self._model_preferences, f)
             os.replace(temporary, self._preferences_path)
         except OSError:
@@ -2081,25 +2174,33 @@ class Host(QObject):
         except RuntimeError as e:
             self.set_status(str(e))
             return ""
-        os.makedirs(RUNS, exist_ok=True)
+        if self._notice_gate(model, "research", research=True):
+            self._pending_notice = ("research", prompt, model_id)
+            self.set_status("first, in plain words: the money, and what leaves this machine")
+            return ""
+        makedirs_private(RUNS)
         slug = re.sub(r"[^a-z0-9]+", "-", prompt.lower()).strip("-")[:32] or "run"
         name = time.strftime("%Y%m%d-%H%M%S-") + str(time.time_ns() % 1000000) + "-" + slug
         d = os.path.join(RUNS, name)
-        with open(os.path.join(RUNS, name + ".json"), "w") as f:
+        with open_private(os.path.join(RUNS, name + ".json")) as f:
             json.dump({"prompt": prompt, "model": model["label"], "started": time.time()}, f)
-        env = {k: self.env.value(k) for k in self.env.keys()}
-        if model.get("key_env"):
-            env[model["key_env"]] = chatlib.key(model)
+        # Minimal env, not the whole process environment (audit G2): baseline + research's
+        # own search keys + only the selected model's key. See chatlib.research_env.
+        env = chatlib.research_env({k: self.env.value(k) for k in chatlib.RESEARCH_ENV_BASE}, model)
         # its own session, so restarting the chest does not kill a research run; its pid goes in the
         # run's .json, which run_is_live checks, and STOP/PAUSE go through the run's control files as before
         try:
-            with open(os.path.join(RUNS, name + ".log"), "ab") as log:
+            with open_private(os.path.join(RUNS, name + ".log"), "ab") as log:
+                # NOTE (audit G1, remaining): the prompt still travels in argv because the
+                # terminal CLI's only prompt contract is --prompt (AiCli.cs) — no --prompt-file
+                # or stdin option exists to switch to. The key never travels this way
+                # (--key-env name only, value in env above). Closing this needs a C# CLI change.
                 p = subprocess.Popen([EXE, "--ai", "research"] + connection + ["--out", d, "--prompt", prompt],
                                      stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, env=env, start_new_session=True)
         except OSError:
             self.set_status("research process failed to start; check the desktop executable")
             return ""
-        with open(os.path.join(RUNS, name + ".json"), "w") as f:
+        with open_private(os.path.join(RUNS, name + ".json")) as f:
             json.dump({"prompt": prompt, "model": model["label"], "started": time.time(), "pid": p.pid}, f)
         self.set_status("research started: " + model["label"])
         self.scanRuns()
@@ -2132,7 +2233,7 @@ class Host(QObject):
         else:
             j.pop("spine", None)
         try:
-            with open(meta + ".tmp", "w") as f:
+            with open_private(meta + ".tmp") as f:
                 json.dump(j, f, indent=2)
             os.replace(meta + ".tmp", meta)
         except OSError as e:
@@ -2168,7 +2269,7 @@ class Host(QObject):
         if self.watching == d:
             self.stopWatching()
         bin_dir = os.path.join(RUNS, ".cleared")
-        os.makedirs(bin_dir, exist_ok=True)
+        makedirs_private(bin_dir)
         try:
             for src in (d, d + ".json", d + ".log"):
                 if os.path.exists(src):
@@ -2249,6 +2350,17 @@ class Host(QObject):
     def _claude_model_record(self):
         return chatlib.find(self._claude_model, self._chat_models)
 
+    def _apply_claude_persona(self, record):
+        """The picked Claude model's persona (its chat.py system/system_file), or '' for a plain model.
+        Without this the card talks to ClaudeLink, which never sees chat.py's system prompts."""
+        persona = ""
+        if record is not None and record.get("kind") == "claude-cli":
+            try:
+                persona = chatlib._extra_system(record)
+            except Exception:
+                persona = ""
+        self.claude.set_persona(persona)
+
     @Slot(str)
     def setClaudeModel(self, model_id):
         model = chatlib.find(model_id, self._chat_models)
@@ -2256,6 +2368,7 @@ class Host(QObject):
             return
         self._claude_model = model_id
         self.claude.set_model(model["model"] if model["kind"] == "claude-cli" else "")
+        self._apply_claude_persona(model)
         self._save_model_preferences()
         self.claudeChanged.emit()
 
@@ -2392,6 +2505,7 @@ class Host(QObject):
         self._claude_model = wanted
         picked = chatlib.find(wanted, available)
         self.claude.set_model(picked["model"] if picked and picked["kind"] == "claude-cli" else "")
+        self._apply_claude_persona(picked)
         self.claudeChanged.emit()
         research = [m for m in available if m.get("research", True)]
         if not any(m["id"] == self.ai_model for m in research):
@@ -2416,9 +2530,35 @@ class Host(QObject):
         self._chat_busy = False
         self.chatChanged.emit()
 
+    # ---- attached chat pictures (audit G5): stored copies live only as long as the chat ----
+    def _forget_chat_images(self, paths):
+        """Delete stored chat-image copies; only files inside CHAT_IMAGES are ever touched."""
+        folder = os.path.abspath(CHAT_IMAGES)
+        for path in paths or []:
+            try:
+                if os.path.dirname(os.path.abspath(path)) == folder:
+                    os.unlink(path)
+            except OSError:
+                pass
+
+    def _sweep_chat_images(self):
+        """Startup sweep: every stored copy predates this session, so none of them are kept."""
+        try:
+            names = os.listdir(CHAT_IMAGES)
+        except OSError:
+            return
+        self._forget_chat_images([os.path.join(CHAT_IMAGES, n) for n in names])
+
+    def _trim_chat(self):
+        """self._chat = self._chat[-40:], plus G5: a dropped message's pictures go with it."""
+        dropped, self._chat = self._chat[:-40], self._chat[-40:]
+        self._forget_chat_images([p for m in dropped for p in m.get("images", [])])
+
     @Slot()
     def clearChat(self):
         self.stopChat()
+        self._forget_chat_images(list(self._chat_pending) +
+                                 [p for m in self._chat for p in m.get("images", [])])
         self._chat = []
         self._chat_pending = []
         self._chat_session = str(uuid.uuid4())
@@ -2441,12 +2581,13 @@ class Host(QObject):
         if max(image.width(), image.height()) > edge:
             image = image.scaled(edge, edge, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         image = image.convertToFormat(QImage.Format_RGB32)
-        folder = os.path.expanduser("~/.cache/geppetto/chat-images")
+        folder = CHAT_IMAGES
         try:
-            os.makedirs(folder, exist_ok=True)
+            makedirs_private(folder)
             path = os.path.join(folder, uuid.uuid4().hex + ".jpg")
             if not image.save(path, "JPEG", 82):
                 raise OSError("could not write the picture")
+            os.chmod(path, 0o600)          # audit G5/G6: QImage.save lands umask-default; the copy is private
         except OSError as e:
             self.set_status("picture: " + str(e))
             return ""
@@ -2480,7 +2621,7 @@ class Host(QObject):
     @Slot(int)
     def removeChatImage(self, index):
         if 0 <= index < len(self._chat_pending):
-            self._chat_pending.pop(index)
+            self._forget_chat_images([self._chat_pending.pop(index)])
             self.chatChanged.emit()
 
     @Slot(str)
@@ -2493,6 +2634,10 @@ class Host(QObject):
         if model is None:
             self.set_status("no chat model is selected")
             return
+        if self._notice_gate(model, "chat"):
+            self._pending_notice = ("chat", text)
+            self.set_status("first, in plain words: the money, and what leaves this machine")
+            return
         if not text:
             text = "What is in this picture?"
         message = {"role": "you", "text": text}
@@ -2502,7 +2647,7 @@ class Host(QObject):
         self._chat_pending = []
         history = [dict(m) for m in self._chat if m["role"] in ("you", "model") and (m.get("text") or m.get("images"))]
         self._chat.append({"role": "model", "text": "", "label": model["label"]})
-        self._chat = self._chat[-40:]
+        self._trim_chat()
         self._chat_busy = True
         self._chat_request += 1
         self._chat_cancel = threading.Event()
@@ -2547,7 +2692,7 @@ class Host(QObject):
                 self._chat.pop()
         if error:
             self._chat.append({"role": "error", "text": error})
-        self._chat = self._chat[-40:]
+        self._trim_chat()
         self.chatChanged.emit()
 
     # ---- the drawing tool (Linework) -------------------------------------------------------

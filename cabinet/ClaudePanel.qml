@@ -51,6 +51,7 @@ Item {
         field.text = "";
     }
     function focusInput() { field.forceActiveFocus() }
+    function prefill(t) { field.text = t; focusInput() }   // the guide's example ideas land here, ready to send — never auto-sent
     signal pictureClicked(string path)
 
     Rectangle { anchors.fill: parent; color: card.steelLo; opacity: 0.9; border.color: card.edge; border.width: 1; radius: 4 }

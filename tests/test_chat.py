@@ -141,7 +141,8 @@ class CatalogueTests(unittest.TestCase):
                             'assert \'XAI_API_KEY\' not in os.environ\n'
                             'assert sys.argv[sys.argv.index(\'--session-id\') + 1] == \'g1\'\n'
                             'assert sys.argv[sys.argv.index(\'--permission-mode\') + 1] == \'auto\'\n'
-                            'said = sys.argv[sys.argv.index(\'--single\') + 1]\n'
+                            'assert \'--single\' not in sys.argv and \'teal\' not in str(sys.argv)\n'
+                            'said = open(sys.argv[sys.argv.index(\'--prompt-file\') + 1]).read()\n'
                             'print(json.dumps(dict(type=\'system\', session_id=\'g1\')))\n'
                             'for t in (\'saw \', str(\'teal\' in said)):\n'
                             '    print(json.dumps(dict(type=\'stream_event\', event=dict(delta=dict(type=\'text_delta\', text=t)))))\n'
@@ -157,6 +158,81 @@ class CatalogueTests(unittest.TestCase):
                 history = [dict(role='you', text='I like teal'), dict(role='model', text='ok'), dict(role='you', text='colour?')]
                 self.assertEqual(''.join(chat.stream(chat.find('grok/grok-4.7', models), history, session='g1')), 'saw True')
                 self.assertIn('g1', chat._grok_sessions)
+
+
+class EndpointSafetyTests(unittest.TestCase):
+    """Audit C1: a record's key may only travel to the host that key belongs to."""
+
+    def test_official_host_is_accepted(self):
+        chat.validate_endpoint(fixture(kind='anthropic', endpoint='https://api.anthropic.com/v1/',
+                                       key_env='ANTHROPIC_API_KEY'))
+        chat.validate_endpoint(fixture(kind='google', endpoint='https://generativelanguage.googleapis.com/v1beta/',
+                                       key_env='GEMINI_API_KEY'))
+        chat.validate_endpoint(fixture(kind='openai', endpoint='https://api.openai.com/v1/',
+                                       key_env='OPENAI_API_KEY'))
+
+    def test_explicit_key_custom_host_is_accepted(self):
+        # A new service, its own id, naming its own key variable: the explicit-key custom case.
+        chat.validate_endpoint(fixture(id='myservice/model', kind='openai',
+                                       endpoint='https://llm.example.com/v1/', key_env='MYSERVICE_API_KEY'))
+        chat.validate_endpoint(fixture(id='proxy/claude', kind='anthropic',
+                                       endpoint='https://proxy.example.com/v1/', key_env='MY_PROXY_KEY'))
+
+    def test_redirected_known_provider_is_rejected(self):
+        preset = next(m for m in chat.DEFAULT_MODELS if m['id'] == 'deepseek/deepseek-v4-pro')
+        with self.assertRaisesRegex(RuntimeError, 'known provider'):
+            chat.validate_endpoint(dict(preset, endpoint='https://evil.example/v1/'))
+        # the default provider key must not go to a non-official host either
+        with self.assertRaisesRegex(RuntimeError, 'only sent to'):
+            chat.validate_endpoint(fixture(kind='anthropic', endpoint='https://evil.example/v1/',
+                                           key_env='ANTHROPIC_API_KEY'))
+        with self.assertRaisesRegex(RuntimeError, 'only sent to'):
+            chat.validate_endpoint(fixture(kind='google', endpoint='https://evil.example/v1beta/',
+                                           key_env='GEMINI_API_KEY'))
+
+    def test_http_nonloopback_is_rejected(self):
+        with self.assertRaisesRegex(RuntimeError, 'plain http'):
+            chat.validate_endpoint(fixture(endpoint='http://example.com/v1/'))
+        with self.assertRaisesRegex(RuntimeError, 'plain http'):
+            chat.validate_endpoint(fixture(kind='anthropic', endpoint='http://api.anthropic.com/v1/',
+                                           key_env='ANTHROPIC_API_KEY'))
+        chat.validate_endpoint(fixture(endpoint='http://127.0.0.1:11434/'))   # local stays allowed
+        chat.validate_endpoint(fixture(endpoint='http://localhost:5001/v1/'))
+
+    def test_request_refuses_a_redirected_provider_before_any_send(self):
+        preset = next(m for m in chat.DEFAULT_MODELS if m['id'] == 'deepseek/deepseek-v4-pro')
+        with patch.dict(os.environ, {'TEACHER_API_KEY': 'secret'}):
+            with self.assertRaisesRegex(RuntimeError, 'known provider'):
+                chat.complete(dict(preset, endpoint='https://evil.example/v1/'),
+                              [dict(role='you', text='hi')])
+
+    def test_cli_records_and_keyless_records_are_not_blocked(self):
+        chat.validate_endpoint(dict(id='claude/opus', kind='claude-cli', endpoint='cli', model='opus'))
+        chat.validate_endpoint(fixture(endpoint='https://public.example.com/v1/'))   # no key to leak
+
+
+class ChildEnvTests(unittest.TestCase):
+    """Audit C2/G2: children get a baseline plus only what they themselves need."""
+
+    def test_child_env_is_an_allowlist(self):
+        with patch.dict(os.environ, {'PATH': '/bin', 'HOME': '/home/x', 'OPENAI_API_KEY': 'no',
+                                     'ANTHROPIC_API_KEY': 'no', 'TEACHER_API_KEY': 'no'}):
+            env = chat.child_env()
+        self.assertEqual(env.get('PATH'), '/bin')
+        self.assertNotIn('OPENAI_API_KEY', env)
+        self.assertNotIn('ANTHROPIC_API_KEY', env)
+        self.assertNotIn('TEACHER_API_KEY', env)
+
+    def test_research_env_carries_only_the_selected_key(self):
+        base = {'PATH': '/bin', 'HOME': '/home/x', 'DOTNET_ROOT': '/dotnet', 'OPENAI_API_KEY': 'stray'}
+        with patch.dict(os.environ, {'TEST_KEY': 'picked', 'OTHER_KEY': 'no',
+                                     'BRAVE_SEARCH_API_KEY': 'search'}):
+            env = chat.research_env(base, fixture(key_env='TEST_KEY'))
+        self.assertEqual(env['TEST_KEY'], 'picked')
+        self.assertEqual(env['BRAVE_SEARCH_API_KEY'], 'search')   # research's own search key
+        self.assertNotIn('OTHER_KEY', env)
+        self.assertNotIn('OPENAI_API_KEY', env)                   # a stray in the base is dropped
+        self.assertEqual(env['DOTNET_ROOT'], '/dotnet')
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -337,19 +413,44 @@ class HostTests(unittest.TestCase):
         self.assertEqual(self.host.chatMessages[-1]['text'], 'first second')
 
     def test_research_process_gets_selected_connection_and_private_environment(self):
+        # Rewritten 2026-10-23 (audit G2 coverage): the previous version of this test
+        # asserted the OLD QProcess spawn (setArguments / setProcessEnvironment /
+        # p.start) and failed identically on the unpatched tree - beginResearch no
+        # longer uses QProcess at all. It spawns the research child with
+        # subprocess.Popen in its own session (so restarting the chest does not kill
+        # a run), passing the connection as an argv list and the environment as a
+        # plain dict built by chatlib.research_env (round-1 G2 fix). The assertions
+        # below pin THAT contract: selected provider/model in argv, the key's VALUE
+        # only in the env dict (never in argv), no other provider's key in the env,
+        # and the run's .json/.log files created private (audit G6).
         from unittest.mock import MagicMock
         self.host._chat_models = [fixture(id='cloud', kind='anthropic', key_env='TEST_KEY')]
         self.host.ai_model = 'cloud'
-        with tempfile.TemporaryDirectory() as d, patch.object(self.module, 'RUNS', d), patch.object(self.module, 'QProcess') as process, patch.dict(os.environ, {'TEST_KEY': 'private'}):
-            process.MergedChannels = 0
-            p = process.return_value
-            self.host.startResearch('make a block')
-            args = p.setArguments.call_args.args[0]
-            self.assertEqual(args[args.index('--provider') + 1], 'anthropic')
-            self.assertEqual(args[args.index('--model') + 1], 'test-model')
-            self.assertNotIn('private', args)
-            self.assertEqual(p.setProcessEnvironment.call_args.args[0].value('TEST_KEY'), 'private')
-            p.start.assert_called_once()
+        with tempfile.TemporaryDirectory() as d, patch.object(self.module, 'RUNS', d), \
+                patch('subprocess.Popen') as popen, \
+                patch.dict(os.environ, {'TEST_KEY': 'private', 'OTHER_API_KEY': 'other-secret'}):
+            popen.return_value.pid = 4242
+            self.assertTrue(self.host.startResearch('make a block'))
+            popen.assert_called_once()
+            args, kwargs = popen.call_args
+            argv = args[0]
+            self.assertEqual(argv[1:3], ['--ai', 'research'])
+            self.assertEqual(argv[argv.index('--provider') + 1], 'anthropic')
+            self.assertEqual(argv[argv.index('--model') + 1], 'test-model')
+            self.assertIn('--key-env', argv)
+            self.assertNotIn('private', argv)
+            env = kwargs['env']
+            self.assertEqual(env['TEST_KEY'], 'private')
+            self.assertNotIn('OTHER_API_KEY', env)
+            self.assertNotIn('other-secret', env.values())
+            self.assertTrue(kwargs['start_new_session'])
+            metas = [n for n in os.listdir(d) if n.endswith('.json')]
+            self.assertEqual(len(metas), 1)
+            meta = json.load(open(os.path.join(d, metas[0])))
+            self.assertEqual(meta['pid'], 4242)
+            self.assertEqual(meta['prompt'], 'make a block')
+            for name in metas + [n for n in os.listdir(d) if n.endswith('.log')]:
+                self.assertEqual(os.stat(os.path.join(d, name)).st_mode & 0o777, 0o600, name)
         self.host.jobs.clear()
 
 

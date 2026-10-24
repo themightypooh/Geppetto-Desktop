@@ -199,8 +199,21 @@ void main() {
 			catch ( InvalidDataException ) { /* paletted or interlaced: let magick flatten it */ }
 		}
 		// A JPEG/WebP/paletted PNG photo: magick writes a plain 8-bit RGBA PNG the kernel reader takes.
-		var start = new ProcessStartInfo( "magick", new[] { path, "-auto-orient", "-depth", "8", "PNG32:-" } )
+		// F2: name the format from the extension so magick decodes with that coder instead of
+		// sniffing possibly-untrusted bytes; unknown extensions keep the old sniffing path.
+		string input = Path.GetExtension( path ).ToLowerInvariant() switch
+		{
+			".jpg" or ".jpeg" => "JPEG:" + path,
+			".webp" => "WEBP:" + path,
+			".gif" => "GIF:" + path,
+			".tif" or ".tiff" => "TIFF:" + path,
+			".png" => "PNG:" + path,
+			_ => path
+		};
+		var start = new ProcessStartInfo( "magick", new[] { input, "-auto-orient", "-depth", "8", "PNG32:-" } )
 			{ RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+		// magick parses file bytes here too; it gets no provider keys (F1).
+		AiChildEnvironment.ScrubSecrets( start );
 		Process? process;
 		try { process = Process.Start( start ); }
 		catch ( System.ComponentModel.Win32Exception ) { throw new InvalidDataException( "only PNG reads without ImageMagick (magick) installed; save it as PNG" ); }

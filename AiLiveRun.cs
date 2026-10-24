@@ -1,5 +1,6 @@
 #nullable enable
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -144,7 +145,18 @@ public sealed class AiLiveJournalReader : IDisposable
     readonly StringBuilder partial = new();
     bool oversized;
     JsonObject? latest;
+    readonly List<JsonObject> fresh = new();
     public AiLiveJournalReader(string root) => path = Path.Combine(root, ".live/events.jsonl");
+    /// <summary>The newest complete record so far (what <see cref="Poll"/> last returned).</summary>
+    public JsonObject? Latest => latest;
+    /// <summary>Every complete record accepted since the last call, oldest first: a follower that must show
+    /// each revision in turn reads these, where <see cref="Poll"/> only tells it the newest.</summary>
+    public List<JsonObject> PollNew()
+    {
+        Poll();
+        var result = new List<JsonObject>(fresh); fresh.Clear();
+        return result;
+    }
     public JsonObject? Poll()
     {
         if (reader is null)
@@ -173,7 +185,7 @@ public sealed class AiLiveJournalReader : IDisposable
                         && ev["ev"]?.GetValue<string>() == "ai-live" && !string.IsNullOrWhiteSpace(ev["runId"]?.GetValue<string>())
                         && !string.IsNullOrWhiteSpace(ev["documentId"]?.GetValue<string>()) && ev["sequence"]?.GetValue<long>() is > 0
                         && (latest is null || ev["runId"]!.GetValue<string>() == latest["runId"]!.GetValue<string>()
-                            && ev["sequence"]!.GetValue<long>() > latest["sequence"]!.GetValue<long>())) latest = ev;
+                            && ev["sequence"]!.GetValue<long>() > latest["sequence"]!.GetValue<long>())) { latest = ev; fresh.Add(ev); }
                 }
                 catch (Exception ex) when (ex is JsonException or InvalidOperationException or FormatException) { }
             }

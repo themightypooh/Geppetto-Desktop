@@ -281,6 +281,26 @@ internal static class AiLiveTests
             viewer.Send("ack");
         });
 
+        registry.Add("ai-live", "hardware EGL viewer shows every revision in order, none skipped (po: a pane follows each step)", () =>
+        {
+            var tools = new AiSuiteTools(Path.Combine(settings.WorkDirectory, "live-every-step"));
+            tools.Live = new AiLiveRun(tools); tools.Live.Commit(tools.Studio, "initial");
+            tools.ExecuteAsync("add_feature", JsonNode.Parse("""{"type":"Primitive","fields":{}}""")!, default).GetAwaiter().GetResult();
+            string id = tools.Studio.Features[0].Id;
+            using var viewer = new Viewer(tools.Root);
+            viewer.Wait(x => x["ev"]!.GetValue<string>() == "ready");
+            viewer.Wait(x => x["ev"]!.GetValue<string>() == "ai-preview" && x["revision"]!.GetValue<long>() == 2);
+            // ten commits in a burst, far faster than the viewer loads: each one must still get its turn on screen
+            for (int i = 0; i < 10; i++)
+                tools.ExecuteAsync("edit_feature", new JsonObject { ["id"] = id, ["fields"] = new JsonObject { ["SizeX"] = i + 2d } }, default).GetAwaiter().GetResult();
+            var seen = new List<long>();
+            while (seen.Count < 10)
+            {
+                var ev = viewer.Wait(x => x["ev"]!.GetValue<string>() == "ai-preview");
+                seen.Add(ev["revision"]!.GetValue<long>());
+            }
+            Check(string.Join(",", seen) == "3,4,5,6,7,8,9,10,11,12", "viewer skipped or reordered revisions: " + string.Join(",", seen));
+        });
         registry.Add("ai-live", "hardware EGL cache-eligible 49k-triangle commit latency", () =>
         {
             var tools = new AiSuiteTools(Path.Combine(settings.WorkDirectory, "live-latency"));

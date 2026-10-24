@@ -14,7 +14,7 @@ namespace Marionette.Desktop;
 
 public sealed class AiOptions
 {
-    public string Command = "chat", Provider = "openai", Model = "", Endpoint = "", KeyEnv = "", Prompt = "", Output = "", RubricPath = "";
+    public string Command = "chat", Provider = "openai", Model = "", Endpoint = "", KeyEnv = "", Prompt = "", PromptFile = "", Output = "", RubricPath = "";
     public string AuthHeader = "", RequestOptions = "";
     public string JudgeProvider = "", JudgeModel = "", JudgeEndpoint = "", JudgeKeyEnv = "";
     public bool Research, Judge, Vision, JudgeVision, Help;
@@ -41,6 +41,7 @@ public sealed class AiOptions
                 case "--auth-header": o.AuthHeader = Value(); break;
                 case "--request-options": o.RequestOptions = Value(); break;
                 case "--prompt": o.Prompt = Value(); break;
+                case "--prompt-file": o.PromptFile = Value(); break;
                 case "--out": o.Output = Value(); break;
                 case "--research": o.Research = true; break;
                 case "--judge": o.Judge = true; break;
@@ -61,6 +62,15 @@ public sealed class AiOptions
                 case "--help": o.Help = true; break;
                 default: throw new ArgumentException("Unknown AI option: " + flag);
             }
+        }
+        if (o.PromptFile.Length > 0)
+        {
+            // --prompt-file keeps the prompt out of the process list (argv is readable by
+            // every same-user process); the two prompt forms are mutually exclusive.
+            if (o.Prompt.Length > 0) throw new ArgumentException("--prompt and --prompt-file cannot be used together; pass the prompt one way or the other.");
+            if (!File.Exists(o.PromptFile)) throw new ArgumentException("--prompt-file file not found: " + o.PromptFile);
+            try { o.Prompt = File.ReadAllText(o.PromptFile); }
+            catch (IOException ex) { throw new ArgumentException("--prompt-file could not be read: " + ex.Message); }
         }
         if (o.Command is not ("chat" or "create" or "research")) throw new ArgumentException("AI command must be chat, create or research.");
         if (!o.Help && (string.IsNullOrWhiteSpace(o.Model) || string.IsNullOrWhiteSpace(o.Output))) throw new ArgumentException("AI requires --model and --out (a NEW run directory).");
@@ -111,6 +121,9 @@ Geppetto AI (terminal only; never opens a window)
       [--plateau 3] [--delta 0.2] [--calls 60] [--minutes 15]
 
 Native defaults: OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY.
+Prompt: --prompt TEXT, or --prompt-file FILE to read the prompt from a file instead
+  (the two cannot be combined). Prefer --prompt-file for prompts that should not be
+  visible in the process list.
 Other companies/local: openai protocol + their compatible base URL + --key-env.
 Ollama: --provider openai --endpoint http://localhost:11434/v1/ --model YOUR_MODEL
 Provider options: --auth-header api-key|x-api-key and --request-options JSON (thinking, reasoning_effort, sampling/output limits).

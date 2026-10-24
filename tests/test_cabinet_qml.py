@@ -292,32 +292,6 @@ class CabinetQmlTests(unittest.TestCase):
         self.assertIsNotNone(self.root.findChild(QObject, "modelingBin"))
         self.assertEqual(self.qml_errors(), [])
 
-    def test_the_rolodex_spins_on_its_spindle_and_a_card_can_be_picked(self):
-        """drag angle picks a frame; a click on a letter card selects it and does not open a tool"""
-        import math
-        from PySide6.QtCore import QMetaObject
-        rx = self.root.findChild(QObject, "rolodex")
-        self.assertIsNotNone(rx)
-        frames = rx.property("frames")
-        cards = rx.property("cards")
-        self.assertGreater(frames, 1)
-        self.assertGreater(cards, 1)
-        self.assertEqual(frames % cards, 0)
-        rx.setProperty("ang", 0)
-        self.app.processEvents()
-        self.assertEqual(rx.property("frame"), 0)
-        self.assertEqual(rx.property("card"), 0)
-        step = 2 * math.pi / cards
-        # card 7 is a letter, two render frames past each stop when frames is twice cards
-        rx.setProperty("ang", 7 * step)
-        self.app.processEvents()
-        self.assertEqual(rx.property("card"), 7)
-        self.assertEqual(rx.property("frame"), 7 * (frames // cards))
-        QMetaObject.invokeMethod(rx, "pick")
-        self.app.processEvents()
-        self.assertEqual(rx.property("picked"), 7)
-        self.assertEqual(self.qml_errors(), [])
-
     def test_the_pencil_brings_up_the_sketch_carousel(self):
         """a click on the pencil fans the starting tools along the bottom of the viewport;
         clicking the front card opens that tool's card, like picking it off the wheel"""
@@ -800,6 +774,153 @@ class CabinetQmlTests(unittest.TestCase):
         self.assertGreater(files.property("contentY"), 0, "wheeled down through the files")
         folder.setProperty("open", False)
         self.assertEqual(self.qml_errors(), [])
+
+    def test_the_models_mini_drawer_pulls_out_with_the_folder_riding_in_it(self):
+        mini = self.root.findChild(QObject, "miniModels")
+        self.assertIsNotNone(mini, "the MODELS mini drawer is in the tools drawer")
+        self.assertIsNotNone(self.root.findChild(QObject, "miniGrab"), "its front is a handle you can grab")
+        folder = self.root.findChild(QObject, "folderView")
+        bin_ = self.root.findChild(QQuickItem, "modelingBin")
+        QMetaObject.invokeMethod(mini, "setOpen", Q_ARG("QVariant", False))   # an earlier test may have left it out
+        self.settle(0.9)
+        self.assertEqual(mini.property("slide"), 0, "it starts shut")
+        shut_y = bin_.property("y")
+        QMetaObject.invokeMethod(mini, "setOpen", Q_ARG("QVariant", True))
+        self.settle(0.9)
+        self.assertEqual(mini.property("slide"), mini.property("travel"), "pulled all the way out, stepped like the big drawers")
+        self.assertTrue(folder.property("open"), "the folder opens as its drawer comes out")
+        # floor coords, not scene: the floor itself scrolls to follow the front, which is the point
+        self.assertAlmostEqual(bin_.property("y") - shut_y, mini.property("travel"), delta=3,
+                               msg="the folder — and everything in it — rode out with the drawer")
+        QMetaObject.invokeMethod(mini, "setOpen", Q_ARG("QVariant", False))
+        self.settle(0.9)
+        self.assertEqual(mini.property("slide"), 0, "and it shoves home again")
+        self.assertFalse(folder.property("open"))
+        self.assertEqual(self.qml_errors(), [])
+
+    # ---- the tutorial card and pipeline tape were removed (2026-10-24, at po's word) -----
+    def test_there_is_no_guide_card_pipeline_tape_or_guide_key(self):
+        """po did not approve the tutorial UI and ordered it out: no first-run card,
+        no pipeline tape along the frame's bottom edge, no GUIDE key anywhere."""
+        self.assertIsNone(self.root.findChild(QObject, "guideCard"),
+                          "the tutorial card is gone")
+        self.assertIsNone(self.root.findChild(QObject, "pipelineTape"),
+                          "the pipeline tape is gone")
+        self.assertIsNone(self.root.findChild(QObject, "pipelineGuide"),
+                          "and no GUIDE key left behind")
+        self.assertFalse(hasattr(self.host, "guide"),
+                         "the host no longer carries a guide property")
+        self.assertEqual(self.qml_errors(), [])
+
+    def test_the_mouse_and_wheel_only_move_the_pane_they_are_in(self):
+        """quad view, cameras LINKED: drag-orbit and wheel-zoom in one pane must reach that
+        pane's viewer only — the mouse is in one pane, so it moves one pane, link or no link"""
+        from PySide6.QtCore import QProcess, Q_RETURN_ARG
+        from PySide6.QtGui import QMouseEvent
+
+        class FakeProc:
+            def __init__(self):
+                self.lines = []
+
+            def state(self):
+                return QProcess.Running
+
+            def write(self, data):
+                self.lines.append(bytes(data).decode())
+                return len(data)
+
+        saved = (self.host._layout, self.host._link, self.host.proc,
+                 [p.proc for p in self.host.panes])
+        self.host.runTimer.stop()                # the run scan would talk to the viewers itself
+        fakes = {1: FakeProc()}
+        try:
+            self.host._layout, self.host._link = 4, True
+            self.host.proc = fakes[1]
+            for p in self.host.panes:
+                fakes[p.number] = FakeProc()
+                p.proc = fakes[p.number]
+            self.host.panesChanged.emit()
+            self.settle(0.8)                     # panes 2-4 build; their size lines land here
+
+            def lines():
+                return {n: list(f.lines) for n, f in fakes.items()}
+
+            def clear():
+                for f in fakes.values():
+                    f.lines.clear()
+
+            def wheel_on(at):
+                QGuiApplication.sendEvent(self.root, QWheelEvent(
+                    at, self.root.mapToGlobal(at.toPoint()), QPoint(), QPoint(0, 120),
+                    Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False))
+                self.settle(0.3)
+
+            def drag_on(at):
+                gp = self.root.mapToGlobal(at.toPoint())
+                QGuiApplication.sendEvent(self.root, QMouseEvent(
+                    QMouseEvent.Type.MouseButtonPress, at, gp, Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
+                for step in (1, 2, 3):
+                    to = at + QPointF(10 * step, 4 * step)
+                    QGuiApplication.sendEvent(self.root, QMouseEvent(
+                        QMouseEvent.Type.MouseMove, to, self.root.mapToGlobal(to.toPoint()),
+                        Qt.NoButton, Qt.LeftButton, Qt.NoModifier))
+                QGuiApplication.sendEvent(self.root, QMouseEvent(
+                    QMouseEvent.Type.MouseButtonRelease, at + QPointF(30, 12),
+                    self.root.mapToGlobal((at + QPointF(30, 12)).toPoint()),
+                    Qt.LeftButton, Qt.NoButton, Qt.NoModifier))
+                self.settle(0.3)
+
+            view_mouse = self.root.findChild(QObject, "viewMouse")
+            self.assertIsNotNone(view_mouse)
+
+            def pane_center(n):
+                # the SidePane items are QML-side only (findChild cannot see them), so
+                # aim by geometry: pane 1's mouse area sits at its cell's origin
+                r = QMetaObject.invokeMethod(self.root, "paneRect", Q_RETURN_ARG("QVariant"),
+                                             Q_ARG("QVariant", n))
+                origin = view_mouse.mapToScene(QPointF(0, 0))
+                return origin + QPointF(r.property("x").toNumber() + r.property("w").toNumber() / 2,
+                                        r.property("y").toNumber() + r.property("h").toNumber() / 2)
+
+            pane1_at = view_mouse.mapToScene(QPointF(view_mouse.width() / 2, view_mouse.height() / 2))
+            pane2_at = pane_center(2)
+            self.assertGreater(pane2_at.x(), pane1_at.x(), "pane 2 is right of pane 1 in the quad view")
+
+            clear()
+            wheel_on(pane2_at)
+            got = lines()
+            self.assertEqual(got[2], ["zoom 0.9\n"], "the wheel zooms the pane it is over")
+            for n in (1, 3, 4):
+                self.assertEqual(got[n], [], "pane %d must not zoom: the wheel was in pane 2" % n)
+
+            clear()
+            drag_on(pane2_at)
+            got = lines()
+            self.assertTrue(any(l.startswith("orbit ") for l in got[2]), got)
+            for n in (1, 3, 4):
+                self.assertEqual(got[n], [], "pane %d must not orbit: the drag was in pane 2" % n)
+
+            clear()
+            wheel_on(pane1_at)
+            got = lines()
+            self.assertEqual(got[1], ["zoom 0.9\n"], "the wheel zooms pane 1 from pane 1")
+            for n in (2, 3, 4):
+                self.assertEqual(got[n], [], "pane %d must not zoom: the wheel was in pane 1" % n)
+
+            clear()
+            drag_on(pane1_at)
+            got = lines()
+            self.assertTrue(any(l.startswith("orbit ") for l in got[1]), got)
+            for n in (2, 3, 4):
+                self.assertEqual(got[n], [], "pane %d must not orbit: the drag was in pane 1" % n)
+        finally:
+            self.host._layout, self.host._link, self.host.proc = saved[0], saved[1], saved[2]
+            for p, proc in zip(self.host.panes, saved[3]):
+                p.proc = proc
+            self.host.panesChanged.emit()
+            self.host.runTimer.start()
+        self.assertEqual(self.qml_errors(), [])
+
 
 if __name__ == "__main__":
     unittest.main()

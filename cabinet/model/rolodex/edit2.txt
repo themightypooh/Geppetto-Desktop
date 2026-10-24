@@ -1,0 +1,6 @@
+echo Front card: card body back to paper (its tab stays blue), so the cabinet can find the face to click and label
+set Front shapes="box 0.000,1.093,3.902 4.0,0.10,2.3 r=0.04 rot=-40,0,0 mat=0; -box -0.650,0.546,3.251 0.4,0.3,0.6 rot=-40,0,0; -box 0.650,0.546,3.251 0.4,0.3,0.6 rot=-40,0,0; box -1.300,1.877,4.837 0.7,0.06,0.42 r=0.04 rot=-40,0,0 mat=2; paint box -0.300,1.382,4.247 1.7,0.16,0.08 rot=-40,0,0 mat=3; paint box 0.200,1.125,3.941 1.2,0.16,0.07 rot=-40,0,0 mat=3; paint box -0.100,0.900,3.672 1.4,0.16,0.07 rot=-40,0,0 mat=3"
+echo Save: keep this as the rolodex model
+save rolodex.effigy
+echo Export: the .obj the sprite frames are rendered from
+export . name=rolodex skin=0

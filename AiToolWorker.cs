@@ -11,6 +11,27 @@ using Effigy;
 
 namespace Marionette.Desktop;
 
+/// <summary>Secret hygiene for child processes (F1): a spawned child that parses model
+/// documents or untrusted image bytes never needs a provider key, so no key reaches
+/// its environment — and therefore never its address space (/proc/self/environ) if a
+/// native parser is exploited. Everything else (PATH, HOME, locale, runtime vars) is
+/// inherited unchanged; DISPLAY handling stays with each caller, as before.</summary>
+public static class AiChildEnvironment
+{
+    static readonly string[] KnownKeys =
+        { "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "BRAVE_SEARCH_API_KEY" };
+
+    /// <summary>Remove provider keys from a not-yet-started process: the named keys above
+    /// plus any variable ending in _API_KEY (other providers configured via key_env).</summary>
+    public static void ScrubSecrets(ProcessStartInfo start)
+    {
+        foreach (string name in start.Environment.Keys.ToArray())
+            if (KnownKeys.Contains(name, StringComparer.OrdinalIgnoreCase)
+                || name.EndsWith("_API_KEY", StringComparison.OrdinalIgnoreCase))
+                start.Environment.Remove(name);
+    }
+}
+
 /// <summary>Native rebuild/render isolation: cancellation kills the child, not player work.</summary>
 public static class AiToolWorker
 {
@@ -37,6 +58,8 @@ public static class AiToolWorker
         start.ArgumentList.Add("--ai-worker"); start.ArgumentList.Add(directory);
         // Native worker is always windowless, including when launched from a desktop terminal.
         start.Environment.Remove("DISPLAY"); start.Environment.Remove("WAYLAND_DISPLAY");
+        // The worker parses model-generated documents and needs no provider key (F1).
+        AiChildEnvironment.ScrubSecrets(start);
         using var process = Process.Start(start) ?? throw new IOException("Cannot start native AI worker.");
         var output = process.StandardOutput.ReadToEndAsync(); var error = process.StandardError.ReadToEndAsync();
         try { await process.WaitForExitAsync(ct); }
@@ -72,6 +95,7 @@ public static class AiToolWorker
             string name = request["name"]!.GetValue<string>();
             if (name is not ("add_feature" or "edit_feature" or "remove_feature" or "render")) throw new ArgumentException("Unsupported native worker operation.");
             tools.Studio = StudioDocument.Read(request["studio"]!.GetValue<string>());
+            tools.RejectUnownedStrokeAlpha(); // F3 belt-and-braces: before the first rebuild can read the path
             var report = tools.Studio.Rebuild();
             if (report.HasErrors) throw new ArgumentException("Invalid native worker input.");
             foreach (var id in (JsonArray)request["frozen"]!) tools.Freeze(id!.GetValue<string>());

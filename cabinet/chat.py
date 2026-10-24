@@ -12,6 +12,7 @@ import os
 import shutil
 import socket
 import subprocess
+import tempfile
 import threading
 import urllib.error
 import urllib.parse
@@ -46,6 +47,105 @@ CLAUDE_MODELS = [
     dict(id='claude/sonnet', label='Claude Sonnet · Max plan', kind='claude-cli', model='sonnet', endpoint='cli', research=False),
     dict(id='claude/haiku', label='Claude Haiku · Max plan', kind='claude-cli', model='haiku', endpoint='cli', research=False),
 ]
+
+ZOOPA_FILE = os.path.expanduser('~/.config/geppetto/zoopa.md')
+ZOOPA_MODELS = [
+    dict(id='zoopa/opus', label='Zoopa · Opus (Max)', kind='claude-cli', model='opus', endpoint='cli', research=False,
+         system_file=ZOOPA_FILE),
+]
+
+# --- Endpoint safety (audit C1): the terminal AI mode's rules (AiCli.Connection), ported. ---
+# A provider's key may only travel to the host that key belongs to. Before this, _request()
+# attached a record's key to whatever endpoint the record named — and chat-models.json records
+# override built-ins by id, so a pasted/shared record could redirect a known provider to an
+# arbitrary host and receive its key, over plain http if it said so.
+OFFICIAL_HOSTS = {'anthropic': 'api.anthropic.com', 'google': 'generativelanguage.googleapis.com',
+                  'openai': 'api.openai.com'}
+# The env names a provider's *default* key lives under in the terminal mode. For the anthropic
+# and google wire kinds there is exactly one official host each, so the default key going to any
+# other host is a redirect by definition. (The openai *kind* is a protocol spoken by many
+# providers, each its own record with its own key_env — those are pinned by PRESET_HOSTS below
+# for built-ins, and a new record naming its own key_env is the explicit-key custom case.)
+DEFAULT_KEY_ENVS = {'anthropic': 'ANTHROPIC_API_KEY', 'google': 'GEMINI_API_KEY'}
+PRESET_HOSTS = {m['id']: urllib.parse.urlparse(m['endpoint']).hostname for m in DEFAULT_MODELS}
+
+
+def _is_loopback(host):
+    return host == 'localhost' or host == '::1' or (host or '').startswith('127.')
+
+
+def validate_endpoint(model):
+    """Raise RuntimeError, in plain words, if this record's endpoint must not receive its key.
+
+    Rules: non-loopback endpoints must be https; a built-in provider record (known id) may
+    only ever talk to its own host; the anthropic/google default key may only go to that
+    provider's official host — a custom host for those kinds must name its *own* key_env in
+    the record (the explicit-key custom case). Records with no key_env send no key, so only
+    the scheme rule applies to them. CLI records ('cli') make no HTTP request here at all.
+    """
+    if model.get('kind') in ('claude-cli', 'grok-cli') or model.get('endpoint') == 'cli':
+        return
+    endpoint = model.get('endpoint') or ''
+    parsed = urllib.parse.urlparse(endpoint if '://' in endpoint else 'https://' + endpoint)
+    host = (parsed.hostname or '').lower()
+    if not host:
+        raise RuntimeError('This model has no usable endpoint; check its record before sending.')
+    if parsed.scheme == 'http':
+        if not _is_loopback(host):
+            raise RuntimeError('Refusing to send to %s over plain http: a key or your words would '
+                               'travel unencrypted. Use its https endpoint, or a local model.' % host)
+    elif parsed.scheme != 'https':
+        raise RuntimeError('Refusing to send to %s: only https (or a local http server) is allowed.' % endpoint)
+    if not model.get('key_env'):
+        return
+    preset_host = PRESET_HOSTS.get(model.get('id'))
+    if preset_host:
+        if host != preset_host:
+            raise RuntimeError('Refusing: %s is a known provider whose key belongs to %s, not %s. '
+                               'A record must not redirect a known provider to another host; if you '
+                               'meant a different service, add it as a new model with its own id and '
+                               'its own key.' % (model.get('id'), preset_host, host))
+        return
+    official = OFFICIAL_HOSTS.get(model.get('kind'))
+    if official and host != official and model['key_env'] == DEFAULT_KEY_ENVS.get(model.get('kind')):
+        raise RuntimeError('Refusing: the default %s key is only sent to %s, never to %s. For a '
+                           'custom host, name that service\'s own key variable (key_env) in its '
+                           'model record.' % (model['key_env'], official, host))
+
+
+# --- Child environments (audit C2/G2/G-env): allowlist, never the whole process env. ---
+# The cabinet process environment carries every provider's key. Children used to inherit all
+# of it; now each spawn gets a minimal baseline plus only what that child itself needs.
+BASE_ENV_NAMES = ('PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'TERM', 'LANG', 'LC_ALL', 'LC_CTYPE',
+                  'TZ', 'TMPDIR', 'DISPLAY', 'WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR',
+                  'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME',
+                  'DBUS_SESSION_BUS_ADDRESS', 'CLAUDE_CONFIG_DIR')
+
+
+def child_env():
+    """A spawned CLI's environment: the baseline only — no provider keys at all. CLI models
+    (Claude/Grok) authenticate with their own login files under $HOME, not with API keys."""
+    return {k: os.environ[k] for k in BASE_ENV_NAMES if k in os.environ}
+
+
+# What the native research child needs on top of the runtime baseline host.py assembles
+# (PATH/DOTNET_ROOT/LD_LIBRARY_PATH come from the host's prepared environment).
+RESEARCH_ENV_BASE = BASE_ENV_NAMES + ('DOTNET_ROOT', 'LD_LIBRARY_PATH')
+# Research's own optional search keys: AiResearch.cs reads exactly these three, for the
+# research function itself. They are not other providers' chat/build keys.
+RESEARCH_SEARCH_KEYS = ('BRAVE_SEARCH_API_KEY', 'SMITHSONIAN_API_KEY', 'DATA_GOV_API_KEY')
+
+
+def research_env(base, model):
+    """The research child's environment (audit G2): the baseline in `base`, research's own
+    search keys, and ONLY the selected model's key — never every key in the process env."""
+    env = {k: base[k] for k in RESEARCH_ENV_BASE if base.get(k)}
+    for name in RESEARCH_SEARCH_KEYS:
+        if os.environ.get(name):
+            env[name] = os.environ[name]
+    if model.get('key_env') and key(model):
+        env[model['key_env']] = key(model)
+    return env
 
 
 def key(model):
@@ -102,6 +202,8 @@ def models(discover=True):
             pass
     if os.access(CLAUDE, os.X_OK):
         out += [dict(m) for m in CLAUDE_MODELS]
+        if os.path.exists(ZOOPA_FILE):
+            out += [dict(m) for m in ZOOPA_MODELS]
     if os.access(GROK, os.X_OK):
         out += [dict(m) for m in GROK_MODELS]
     for m in DEFAULT_MODELS:
@@ -131,6 +233,7 @@ def find(model_id, catalogue=None):
 def research_arguments(model):
     if not model.get('research', True):
         raise RuntimeError('This model is for chat; research needs tool calling.')
+    validate_endpoint(model)
     if model.get('key_env') and not key(model):
         raise RuntimeError('Missing ' + model['key_env'])
     endpoint = model['endpoint'].rstrip('/') + ('/v1/' if model['kind'] == 'ollama' else '/')
@@ -309,6 +412,7 @@ def _reply(kind, data):
 
 
 def _request(model, history, streaming, notes='', api=''):
+    validate_endpoint(model)
     secret = key(model)
     if model.get('key_env') and not secret:
         raise RuntimeError('Missing ' + model['key_env'] + '; configure this provider before sending.')
@@ -348,6 +452,23 @@ GROK_CHAT = CLAUDE_CHAT
 _grok_sessions = set()
 
 
+
+def _extra_system(model):
+    """A model's own extra system prompt: inline text, or a file it points at (read fresh each call)."""
+    extra = str(model.get('system') or '')
+    path = str(model.get('system_file') or '')
+    if path:
+        try:
+            extra = (extra + '\n\n' + Path(path).expanduser().read_text()).strip()
+        except OSError:
+            pass
+    return extra.strip()
+
+
+def _chat_system(model):
+    extra = _extra_system(model)
+    return CLAUDE_CHAT + ('\n\n' + extra if extra else '')
+
 def _claude_cli(model, history, cancel, timeout, session=''):
     """Claude via `claude -p` on its own login (the Max plan), with modelling tools, one CLI session per chat."""
     history = [h for h in history if h['role'] in ('you', 'model')][-16:]
@@ -360,15 +481,15 @@ def _claude_cli(model, history, cancel, timeout, session=''):
         prompt = ('The conversation so far:\n\n' +
                   '\n\n'.join(('User: ' if h['role'] == 'you' else 'Assistant: ') + _said(h) for h in history[:-1]) +
                   '\n\nReply to the user\'s latest message:\n\n' + _said(history[-1]))
-    env = {k: v for k, v in os.environ.items() if k not in ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN')}
+    env = child_env()     # allowlist (audit C2): no ANTHROPIC_API_KEY etc. — the CLI's own login is used
     args = [CLAUDE, '-p', '--model', model['model'], '--output-format', 'stream-json', '--include-partial-messages',
-            '--verbose', '--setting-sources', 'user', '--append-system-prompt', CLAUDE_CHAT,
+            '--verbose', '--setting-sources', 'user', '--append-system-prompt', _chat_system(model),
             '--allowedTools', *CLAUDE_TOOLS]
     if session:
         args += ['--resume', session] if resume else ['--session-id', session]
     else:
         args.append('--no-session-persistence')
-    os.makedirs(CLAUDE_HOME, exist_ok=True)
+    os.makedirs(CLAUDE_HOME, mode=0o700, exist_ok=True)   # audit G6: chat home holds CLI sessions
     p = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
                          cwd=CLAUDE_HOME, text=True)
     timer = threading.Timer(max(timeout, 3600), p.kill)     # a build can take a while
@@ -417,13 +538,19 @@ def _grok_cli(model, history, cancel, timeout, session=''):
         prompt = ('The conversation so far:\n\n' +
                   '\n\n'.join(('User: ' if h['role'] == 'you' else 'Assistant: ') + _said(h) for h in history[:-1]) +
                   '\n\nReply to the user\'s latest message:\n\n' + _said(history[-1]))
-    env = {k: v for k, v in os.environ.items() if k not in ('GROK_SESSION_ID', 'GROK_AGENT', 'XAI_API_KEY')}
-    args = [GROK, '--single', prompt, '--model', model['model'], '--output-format', 'streaming-messages-json',
+    env = child_env()     # allowlist (audit C2): no GROK_SESSION_ID/XAI_API_KEY etc. — its own login is used
+    os.makedirs(CLAUDE_HOME, mode=0o700, exist_ok=True)   # audit G6: chat home holds CLI sessions
+    # The prompt goes in a 0600 file, not argv (audit G1): argv is world-visible in `ps` /
+    # /proc/<pid>/cmdline to every same-user process. grok's --prompt-file is its single-turn
+    # file contract, the equivalent of Claude's stdin feed above.
+    fd, prompt_path = tempfile.mkstemp(prefix='geppetto-grok-prompt-', dir=CLAUDE_HOME)
+    with os.fdopen(fd, 'w') as f:
+        f.write(prompt)
+    args = [GROK, '--prompt-file', prompt_path, '--model', model['model'], '--output-format', 'streaming-messages-json',
             '--include-partial-messages', '--no-alt-screen', '--no-subagents', '--permission-mode', 'auto',
-            '--rules', GROK_CHAT, '--cwd', CLAUDE_HOME]
+            '--rules', _chat_system(model), '--cwd', CLAUDE_HOME]
     if session:
         args += ['--resume', session] if resume else ['--session-id', session]
-    os.makedirs(CLAUDE_HOME, exist_ok=True)
     p = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
                          cwd=CLAUDE_HOME, text=True)
     timer = threading.Timer(max(timeout, 3600), p.kill)
@@ -456,6 +583,10 @@ def _grok_cli(model, history, cancel, timeout, session=''):
         timer.cancel()
         if p.poll() is None:
             p.kill()
+        try:
+            os.unlink(prompt_path)
+        except OSError:
+            pass
 
 
 def stream(model, history, cancel=None, timeout=120, notes='', api='', session=''):

@@ -21,7 +21,7 @@ namespace Marionette.Desktop;
 /// memory file, top-down RGBA. Commands come in on stdin, one per line; events go out on stdout as
 /// lines starting with '@' followed by JSON (anything else on stdout is log noise).
 ///
-///   orbit DX DY | pan DX DY | zoom F | size W H | frame | play 0|1 | time T | bones 0|1 | grid 0|1
+///   orbit DX DY | pan DX DY | zoom F | dolly N | size W H | frame | play 0|1 | time T | bones 0|1 | grid 0|1
 ///   wire N | select BONE | pick X Y | clip PATH | loop 0|1 | ack | quit
 ///   keys | kmove D T:F.. | kdel T:F.. | kease E T:F.. | kins F T.. | undo | redo | save
 ///   ortho 0|1 | refadd VIEW PATH | refset I key=value.. | refdel I | refsave | refs
@@ -641,6 +641,10 @@ public static class ServeMode
 					camera.Target += (-side * F( 0 ) + Vector3.UnitZ * F( 1 )) * (camera.Distance * 0.0015f);
 					break;
 				case "zoom": camera.Zoom( F( 0 ) ); break;
+				case "dolly":                           // dolly N: wheel-fly, N notches forward (+) / back (-)
+					camera.Dolly( F( 0 ) );
+					camera.Orthographic = false;          // like orbit: a travelled view is a perspective view
+					break;
 				case "fly":                                // fly 1|0: RMB down / up
 					if ( arg == "1" )
 					{

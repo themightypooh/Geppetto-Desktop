@@ -1,0 +1,4 @@
+echo Foot: a wider rounded tray past the cards and the knobs, so from above it shows around the wheel and below it in the drawer
+set Base shapes="box 0,0.09,0.36 7.4,6.4,0.72 r=0.3 mat=1; box -2.22,0.05,1.85 0.5,0.66,3.15 r=0.12 mat=1; box 2.22,0.05,1.85 0.5,0.66,3.15 r=0.12 mat=1; cylinder -1.96,0.05,3.3 -2.5,0.05,3.3 0.22 r=0.04 mat=1; cylinder 1.96,0.05,3.3 2.5,0.05,3.3 0.22 r=0.04 mat=1"
+save /home/poo/Desktop/geppetto-desktop/cabinet/model/rolodex/rolodex.effigy
+export /home/poo/Desktop/geppetto-desktop/cabinet/model/rolodex/out name=rolodex

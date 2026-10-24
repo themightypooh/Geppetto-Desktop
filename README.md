@@ -50,6 +50,24 @@ and tool at once and names the script line. Between revisions it holds still, ap
 the countdown ring, and it goes when the model leaves. WHEEL in the tools drawer opens it
 by hand. See [handoffs/33-tool-wheel.md](handoffs/33-tool-wheel.md).
 
+## New here? Start with the guide
+
+Geppetto is an AI model maker you can **see every step of the way**: describe what you
+want, watch it being built step by step in plain words, step in at any step (pause,
+single-step, redirect), and keep a model that stays yours and editable. The five stages
+— DESCRIBE → PLAN → BUILD → STEP IN → KEEP — are written down once in
+`cabinet/guide.py`, and the cabinet shows them three ways:
+
+- **First run:** the cabinet opens on a four-page guide card (pitch, pipeline, a guided
+  tour that replays a finished build for free, and the few controls that matter). It
+  never auto-opens again; `python3 cabinet/host.py guide` or the GUIDE key reopens it.
+  Seen/finished state lives in `~/.config/geppetto/guide.json`.
+- **Always:** a pipeline tape along the viewport's bottom edge lights the stage the
+  work is on and says the current step in plain words.
+- **In the package:** `packaging/FIRST-RUN.md` ships in the bundle next to a
+  `./geppetto` launcher — since the cabinet was bundled, the packaged product is the
+  model maker itself, not just the standalone viewer.
+
 ## Running the current prototype
 
 Run `dotnet run -c Release` to view Survey's player (suit plus its separate authored head/neck). Pass `--model path/to/file.effigy` or `--model path/to/file.fbx` for other sources. The source assets are never edited. Materials resolve the **declared standard texture channels** of the source — base colour, normal, roughness, metallic, emission, occlusion — with sRGB upload for colour and linear upload for data. They are **not** the game's `ps1_lit` shader; see the unsupported-features list below.

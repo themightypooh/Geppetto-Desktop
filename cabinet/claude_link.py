@@ -27,6 +27,26 @@ PROMPT = ("You are talking to po through the CLAUDE card in the Geppetto chest, 
           "geppetto-live so it shows in the chest. If a hook says po pressed STOP, stop at once.")
 KEEP = 200
 
+# --- Locked-down spawn environment (audit C2) — implemented, OFF by default. ---
+# Today _start() hands the child the whole process environment minus CLAUDE_CODE_* names —
+# i.e. every provider key the cabinet process holds. The lockdown replaces that with the
+# allowlist below (baseline only, no provider keys; the Claude CLI authenticates from its
+# own files under $HOME / $CLAUDE_CONFIG_DIR). It is NOT the default: the live Zoopa card
+# session runs on this path, and changing what that session's tools inherit is Joshua's
+# call, not a silent ship. Full spec: CLAUDE_LINK_LOCKDOWN.spec.md in this folder.
+# Enable per-process with GEPPETTO_CLAUDE_LINK_LOCKDOWN=1, or per-link with lockdown=True.
+LOCKDOWN_FLAG = "GEPPETTO_CLAUDE_LINK_LOCKDOWN"
+LOCKDOWN_ENV_ALLOW = ("PATH", "HOME", "USER", "LOGNAME", "SHELL", "TERM", "LANG", "LC_ALL",
+                      "LC_CTYPE", "TZ", "TMPDIR", "DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR",
+                      "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME",
+                      "DBUS_SESSION_BUS_ADDRESS", "CLAUDE_CONFIG_DIR", "SSH_AUTH_SOCK")
+
+
+def locked_down_env(source=None):
+    """The environment a locked-down ClaudeLink child gets: LOCKDOWN_ENV_ALLOW, nothing else."""
+    source = os.environ if source is None else source
+    return {k: source[k] for k in LOCKDOWN_ENV_ALLOW if k in source}
+
 
 def tool_line(name, data):
     """One short line for a tool call: what it does, not its whole input."""
@@ -75,13 +95,17 @@ def _partial(raw):
 
 
 class ClaudeLink:
-    def __init__(self, on_change=lambda: None, spawn=subprocess.Popen, state_path=STATE, cwd=PROJECT):
+    def __init__(self, on_change=lambda: None, spawn=subprocess.Popen, state_path=STATE, cwd=PROJECT,
+                 lockdown=None):
         self.on_change = on_change
         self.spawn = spawn
         self.state_path = state_path
         self.cwd = cwd
+        # Audit C2 lockdown (see top of file): None = follow the GEPPETTO_CLAUDE_LINK_LOCKDOWN flag.
+        self.lockdown = (os.environ.get(LOCKDOWN_FLAG) == "1") if lockdown is None else bool(lockdown)
         self.messages = []          # {"role": "you"|"claude"|"tool"|"note"|"ask", "text": ..., ...}
         self.model = ""             # the Claude model (opus, sonnet, haiku); "" = the CLI's default
+        self.persona = ""           # extra system prompt for this card (e.g. Zoopa, from the picked model's persona file)
         self.status = "idle"        # idle | starting | working | paused | stopped | offline
         self.ask = None             # the permission question waiting on you: {"id", "tool", "text"}
         self.session = self._load().get("session", "")
@@ -102,9 +126,11 @@ class ClaudeLink:
             return {}
 
     def _save(self):
-        os.makedirs(os.path.dirname(os.path.abspath(self.state_path)), exist_ok=True)
+        # Private (audit G6): the state file names the card's Claude session.
+        os.makedirs(os.path.dirname(os.path.abspath(self.state_path)), mode=0o700, exist_ok=True)
         temp = self.state_path + ".tmp"
-        with open(temp, "w") as stream:
+        fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as stream:
             json.dump({"session": self.session}, stream)
         os.replace(temp, self.state_path)
 
@@ -139,15 +165,19 @@ class ClaudeLink:
 
     # ---- the process ----------------------------------------------------------------------------
     def _start(self):
+        prompt = PROMPT + ("\n\n" + self.persona if self.persona else "")
         args = [CLAUDE, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
                 "--include-partial-messages",
                 "--permission-mode", "auto", "--permission-prompt-tool", "stdio",
-                "--append-system-prompt", PROMPT, "-n", "Geppetto chest"]
+                "--append-system-prompt", prompt, "-n", "Zoopa in the Geppetto chest" if self.persona else "Geppetto chest"]
         args += ["--resume", self.session] if self.session else []
         args += ["--model", self.model] if self.model else []
-        env = dict(os.environ)
-        for name in [k for k in env if k.startswith(("CLAUDE_CODE_", "CLAUDECODE"))]:
-            env.pop(name)       # a chest started from inside a Claude session must not look like its child
+        if self.lockdown:
+            env = locked_down_env()
+        else:
+            env = dict(os.environ)
+            for name in [k for k in env if k.startswith(("CLAUDE_CODE_", "CLAUDECODE"))]:
+                env.pop(name)       # a chest started from inside a Claude session must not look like its child
         self._set("starting")
         self.proc = self.spawn(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                text=True, bufsize=1, cwd=self.cwd, env=env)
@@ -361,6 +391,17 @@ class ClaudeLink:
                 except (OSError, ValueError):
                     pass
         self._set("working" if paused and self.proc is not None else ("idle" if paused else "paused"))
+
+    def set_persona(self, persona):
+        """Switch persona: like set_model, the running process goes and the next message restarts
+        (resuming the same session) with the new persona in its system prompt."""
+        persona = (persona or "").strip()
+        if persona == self.persona:
+            return
+        self.persona = persona
+        if self.proc is not None:
+            self.close()
+            self._set("idle")
 
     def set_model(self, model):
         """Switch Claude models: the running process goes, the conversation stays (the next message

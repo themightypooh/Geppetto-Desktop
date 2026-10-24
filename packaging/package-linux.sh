@@ -230,6 +230,14 @@ cat << 'EOF' > "${STAGE_DIR}/README.md"
 Geppetto Desktop is a standalone 3D animation, parametric modeling, and assembly editor.
 This distribution bundle contains a self-contained runtime requiring no external .NET SDK.
 
+**New here? Read FIRST-RUN.md first** — Geppetto is an AI model maker you can see every
+step of the way, and that doc walks the pipeline and your first build. Short version:
+
+```sh
+pip install -r cabinet-requirements.txt   # once, for the cabinet UI
+./geppetto                                # the full experience: cabinet + viewer
+```
+
 ## System Requirements
 - Linux x64 (glibc 2.28 or later)
 - Hardware OpenGL 4.6 Core Profile
@@ -296,6 +304,45 @@ cat << 'EOF' > "${STAGE_DIR}/CAPABILITIES.md"
 - Project System: Portable DesktopProject manifests (.geppetto-project.json)
 - Runtime Independence: 100% self-contained; zero dependency on .NET SDK or host development tools
 EOF
+
+echo "4b. Bundling the cabinet: the AI model maker UI that drives the viewer..."
+# Until now this package shipped only the native viewer — the actual product (describe it,
+# watch it build, step in) is the cabinet: Python/Qt host, QML, baked art and guide.py.
+# Stage it beside the viewer; host.py finds the bundled binary next to the cabinet folder.
+mkdir -p "${STAGE_DIR}/cabinet"
+# Only the runtime: code, QML and baked art. cabinet/model/ is ~9 GB of art *sources*
+# (icon/concept projects) that no cabinet code loads, and *.bak-* are editor backups.
+tar -cf - -C "${PROJECT_DIR}/cabinet" \
+    --exclude='__pycache__' --exclude='*.pyc' --exclude='*.bak' --exclude='*.bak-*' \
+    --exclude='./model' \
+    . | tar -xf - -C "${STAGE_DIR}/cabinet"
+[[ -f "${PROJECT_DIR}/geppetto.svg" ]] && cp "${PROJECT_DIR}/geppetto.svg" "${STAGE_DIR}/geppetto.svg" || true
+cp "${SCRIPT_DIR}/FIRST-RUN.md" "${STAGE_DIR}/FIRST-RUN.md"
+cat << 'EOF' > "${STAGE_DIR}/cabinet-requirements.txt"
+# The cabinet (Geppetto's AI modelling frontend) is Python + Qt Quick.
+# The native viewer in this bundle is self-contained; the cabinet needs:
+PySide6>=6.5
+EOF
+cat << 'EOF' > "${STAGE_DIR}/geppetto"
+#!/usr/bin/env bash
+set -euo pipefail
+# Geppetto: the full experience — the cabinet (the AI model maker you can watch and
+# step into) driving the bundled native viewer. Falls back to the viewer alone when
+# the cabinet's Python/Qt is not installed yet (see FIRST-RUN.md).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export LD_LIBRARY_PATH="${SCRIPT_DIR}:${SCRIPT_DIR}/runtimes/linux-x64/native:${LD_LIBRARY_PATH:-}"
+if [[ "${1:-}" == "--viewer" ]]; then
+    shift
+    exec "${SCRIPT_DIR}/marionette-desktop" "$@"
+fi
+if python3 -c "import PySide6" >/dev/null 2>&1; then
+    exec python3 "${SCRIPT_DIR}/cabinet/host.py" "$@"
+fi
+echo "Geppetto's cabinet needs Python 3 + PySide6:  pip install -r cabinet-requirements.txt" >&2
+echo "Opening the standalone viewer instead; FIRST-RUN.md explains the rest." >&2
+exec "${SCRIPT_DIR}/marionette-desktop" "$@"
+EOF
+chmod +x "${STAGE_DIR}/geppetto"
 
 echo "5. Generating build-info.json manifest..."
 SDK_VERSION="$(dotnet --version 2>/dev/null || echo "unknown")"

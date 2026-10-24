@@ -1,63 +1,29 @@
-effigy 2
+effigy 1
 rollback 2147483647
 materiallook 0 color=#efe6d2 rough=0.72 metal=0
-materiallook 1 color=#241610 rough=0.4 metal=0
-materiallook 2 color=#6f9eae rough=0.5 metal=0
+materiallook 1 color=#1a1614 rough=0.45 metal=0
+materiallook 2 color=#3a78c4 rough=0.5 metal=0
 materiallook 3 color=#2a2420 rough=0.65 metal=0
-materiallook 4 color=#14110f rough=0.34 metal=0
+materiallook 4 color=#15120f rough=0.36 metal=0
 refimage front 5.2 8.4 1.6 0 0.85 1 /home/poo/Desktop/geppetto-desktop/cabinet/model/rolodex/refs/02.jpg
-rig
-	bone Stand
-		parent -1
-		x 0 -1 0
-		y 1 0 0
-		z 0 0 1
-		origin -2.6 0.05 0.34
-		length 5.2
-	endbone
-	bone PostL
-		parent 0
-		x 0 1 0
-		y 0 0 1
-		z 1 0 0
-		origin 0 0.37999988 0.109999985
-		length 3.1
-	endbone
-	bone PostR
-		parent 0
-		x 0 1 0
-		y 0 0 1
-		z 1 0 0
-		origin 0 4.8199997 0.109999985
-		length 3.1
-	endbone
-	bone Wheel
-		parent -1
-		x 0 -1 0
-		y 1 0 0
-		z 0 0 1
-		origin -3.2 0.05 3.3
-		length 6.4
-	endbone
-endrig
 feature BlobFeature
-	id 2ff917db
-	name Base
+	id 522ce048
+	name Stand
 	suppressed 0
 	visible 1
 	param Blend 0.06
-	param CutBlend 0.012
+	param CutBlend 0.05
 	param Material 0
 	param Noise 0
 	param NoiseSize 6
 	param Seed 1
-	param Shapes box 0,0.55,0.38 4.6,1.15,0.55 r=0.2 mat=1; box -2.15,0.2,1.95 0.58,0.7,3.3 r=0.16 mat=1; box 2.15,0.2,1.95 0.58,0.7,3.3 r=0.16 mat=1; box 0,1.05,0.85 4.3,0.48,0.85 r=0.16 mat=1
+	param Shapes tube -2.45,-2.5,0.25|-2.45,0,0.25|-2.45,0,2.60 0.16 mat=1;tube -2.45,2.5,0.25|-2.45,0,0.25 0.16 mat=1;cylinder -2.57,0,2.60 -2.33,0,2.60 0.42 r=0.05 mat=1;tube 2.45,-2.5,0.25|2.45,0,0.25|2.45,0,2.60 0.16 mat=1;tube 2.45,2.5,0.25|2.45,0,0.25 0.16 mat=1;cylinder 2.33,0,2.60 2.57,0,2.60 0.42 r=0.05 mat=1;cylinder -2.45,-2.5,0.25 2.45,-2.5,0.25 0.16 mat=1;cylinder -2.45,2.5,0.25 2.45,2.5,0.25 0.16 mat=1
 	param Smooth 2
 	param Voxel 0.03
 end
 feature BlobFeature
-	id 00be4b45
-	name Knobs
+	id 11b0c73d
+	name Hub
 	suppressed 0
 	visible 1
 	param Blend 0.015
@@ -66,193 +32,13 @@ feature BlobFeature
 	param Noise 0
 	param NoiseSize 6
 	param Seed 1
-	param Shapes cylinder -2.15,0.05,3.3 2.15,0.05,3.3 0.075 mat=4; torus -0.62,0.05,3.3 0.15 0.05 rot=0,90,0 mat=4; torus 0.62,0.05,3.3 0.15 0.05 rot=0,90,0 mat=4; cylinder -2.5,0.05,3.3 -3.18,0.05,3.3 0.48 r=0.06 mat=4; cylinder 2.5,0.05,3.3 3.18,0.05,3.3 0.48 r=0.06 mat=4; torus -2.7,0.05,3.3 0.46 0.038 rot=0,90,0 mat=1; torus -2.96,0.05,3.3 0.46 0.038 rot=0,90,0 mat=1; torus 2.7,0.05,3.3 0.46 0.038 rot=0,90,0 mat=1; torus 2.96,0.05,3.3 0.46 0.038 rot=0,90,0 mat=1
+	param Shapes cylinder -2.4,0,2.60 2.4,0,2.60 0.10 mat=4; torus -0.65,0,2.60 0.24 0.05 rot=0,90,0 mat=4; torus 0.65,0,2.60 0.24 0.05 rot=0,90,0 mat=4; cylinder -2.55,0,2.60 -3.25,0,2.60 0.55 r=0.06 mat=4; torus -2.75,0,2.60 0.56 0.035 rot=0,90,0 mat=1; torus -2.95,0,2.60 0.56 0.035 rot=0,90,0 mat=1; torus -3.12,0,2.60 0.56 0.035 rot=0,90,0 mat=1; cylinder 2.55,0,2.60 3.25,0,2.60 0.55 r=0.06 mat=4; torus 2.75,0,2.60 0.56 0.035 rot=0,90,0 mat=1; torus 2.95,0,2.60 0.56 0.035 rot=0,90,0 mat=1; torus 3.12,0,2.60 0.56 0.035 rot=0,90,0 mat=1
 	param Smooth 2
 	param Voxel 0.02
 end
 feature BlobFeature
-	id 9cc73d9f
-	name Card00
-	suppressed 0
-	visible 1
-	param Blend 0.008
-	param CutBlend 0.008
-	param Material 0
-	param Noise 0
-	param NoiseSize 6
-	param Seed 1
-	param Shapes box 0,-1.225,3.642 3.3,0.09,2.2 r=0.02 rot=75,0,0 mat=0; -box -0.62,-0.433,3.429 0.36,0.4,0.62 rot=75,0,0; -box 0.62,-0.433,3.429 0.36,0.4,0.62 rot=75,0,0; box -1.15,-2.345,3.942 0.7,0.045,0.38 r=0.04 rot=75,0,0 mat=2; paint box -0.15,-1.467,3.706 1.45,0.12,0.07 rot=75,0,0 mat=3; paint box 0.4,-1.08,3.603 1.05,0.12,0.06 rot=75,0,0 mat=3
-	param Smooth 2
-	param Voxel 0.025
-end
-feature BlobFeature
-	id e03615cc
-	name Card01
-	suppressed 0
-	visible 1
-	param Blend 0.008
-	param CutBlend 0.008
-	param Material 0
-	param Noise 0
-	param NoiseSize 6
-	param Seed 1
-	param Shapes box 0,-1.136,3.879 3.3,0.09,2.2 r=0.02 rot=64,0,0 mat=0; -box -0.62,-0.399,3.519 0.36,0.4,0.62 rot=64,0,0; -box 0.62,-0.399,3.519 0.36,0.4,0.62 rot=64,0,0; paint box -0.15,-1.361,3.988 1.45,0.12,0.07 rot=64,0,0 mat=3; paint box 0.4,-1.002,3.813 1.05,0.12,0.06 rot=64,0,0 mat=3
-	param Smooth 2
-	param Voxel 0.025
-end
-feature BlobFeature
-	id 7a9d6a35
-	name Card02
-	suppressed 0
-	visible 1
-	param Blend 0.008
-	param CutBlend 0.008
-	param Material 0
-	param Noise 0
-	param NoiseSize 6
-	param Seed 1
-	param Shapes box 0,-1.004,4.094 3.3,0.09,2.2 r=0.02 rot=53,0,0 mat=0; -box -0.62,-0.349,3.601 0.36,0.4,0.62 rot=53,0,0; -box 0.62,-0.349,3.601 0.36,0.4,0.62 rot=53,0,0; paint box -0.15,-1.204,4.245 1.45,0.12,0.07 rot=53,0,0 mat=3; paint box 0.4,-0.884,4.004 1.05,0.12,0.06 rot=53,0,0 mat=3
-	param Smooth 2
-	param Voxel 0.025
-end
-feature BlobFeature
-	id 9ff6e4b0
-	name Card03
-	suppressed 0
-	visible 1
-	param Blend 0.008
-	param CutBlend 0.008
-	param Material 0
-	param Noise 0
-	param NoiseSize 6
-	param Seed 1
-	param Shapes box 0,-0.833,4.281 3.3,0.09,2.2 r=0.02 rot=42,0,0 mat=0; -box -0.62,-0.285,3.672 0.36,0.4,0.62 rot=42,0,0; -box 0.62,-0.285,3.672 0.36,0.4,0.62 rot=42,0,0; box -0.45,-1.609,5.143 0.7,0.045,0.38 r=0.04 rot=42,0,0 mat=2; paint box -0.15,-1.001,4.467 1.45,0.12,0.07 rot=42,0,0 mat=3; paint box 0.4,-0.733,4.169 1.05,0.12,0.06 rot=42,0,0 mat=3
-	param Smooth 2
-	param Voxel 0.025
-end
-feature BlobFeature
-	id b5c0c204
-	name Card04
-	suppressed 0
-	visible 1
-	param Blend 0.008
-	param CutBlend 0.008
-	param Material 0
-	param Noise 0
-	param NoiseSize 6
-	param Seed 1
-	param Shapes box 0,-0.63,4.431 3.3,0.09,2.2 r=0.02 rot=31,0,0 mat=0; -box -0.62,-0.208,3.729 0.36,0.4,0.62 rot=31,0,0; -box 0.62,-0.208,3.729 0.36,0.4,0.62 rot=31,0,0; paint box -0.15,-0.759,4.646 1.45,0.12,0.07 rot=31,0,0 mat=3; paint box 0.4,-0.553,4.303 1.05,0.12,0.06 rot=31,0,0 mat=3
-	param Smooth 2
-	param Voxel 0.025
-end
-feature BlobFeature
-	id 904d455b
-	name Card05
-	suppressed 0
-	visible 1
-	param Blend 0.008
-	param CutBlend 0.008
-	param Material 0
-	param Noise 0
-	param NoiseSize 6
-	param Seed 1
-	param Shapes box 0,-0.401,4.54 3.3,0.09,2.2 r=0.02 rot=20,0,0 mat=0; -box -0.62,-0.121,3.77 0.36,0.4,0.62 rot=20,0,0; -box 0.62,-0.121,3.77 0.36,0.4,0.62 rot=20,0,0; paint box -0.15,-0.487,4.775 1.45,0.12,0.07 rot=20,0,0 mat=3; paint box 0.4,-0.35,4.399 1.05,0.12,0.06 rot=20,0,0 mat=3
-	param Smooth 2
-	param Voxel 0.025
-end
-feature BlobFeature
-	id d3a9c345
-	name Card06
-	suppressed 0
-	visible 1
-	param Blend 0.008
-	param CutBlend 0.008
-	param Material 0
-	param Noise 0
-	param NoiseSize 6
-	param Seed 1
-	param Shapes box 0,-0.156,4.604 3.3,0.09,2.2 r=0.02 rot=9,0,0 mat=0; -box -0.62,-0.028,3.794 0.36,0.4,0.62 rot=9,0,0; -box 0.62,-0.028,3.794 0.36,0.4,0.62 rot=9,0,0; box 0.25,-0.338,5.749 0.7,0.045,0.38 r=0.04 rot=9,0,0 mat=2; paint box -0.15,-0.196,4.851 1.45,0.12,0.07 rot=9,0,0 mat=3; paint box 0.4,-0.133,4.456 1.05,0.12,0.06 rot=9,0,0 mat=3
-	param Smooth 2
-	param Voxel 0.025
-end
-feature BlobFeature
-	id 3c056956
-	name Card07
-	suppressed 0
-	visible 1
-	param Blend 0.008
-	param CutBlend 0.008
-	param Material 0
-	param Noise 0
-	param NoiseSize 6
-	param Seed 1
-	param Shapes box 0,0.096,4.619 3.3,0.09,2.2 r=0.02 rot=-2,0,0 mat=0; -box -0.62,0.067,3.8 0.36,0.4,0.62 rot=-2,0,0; -box 0.62,0.067,3.8 0.36,0.4,0.62 rot=-2,0,0; paint box -0.15,0.105,4.869 1.45,0.12,0.07 rot=-2,0,0 mat=3; paint box 0.4,0.091,4.469 1.05,0.12,0.06 rot=-2,0,0 mat=3
-	param Smooth 2
-	param Voxel 0.025
-end
-feature BlobFeature
-	id ac417ceb
-	name Card08
-	suppressed 0
-	visible 1
-	param Blend 0.008
-	param CutBlend 0.008
-	param Material 0
-	param Noise 0
-	param NoiseSize 6
-	param Seed 1
-	param Shapes box 0,0.347,4.586 3.3,0.09,2.2 r=0.02 rot=-13,0,0 mat=0; -box -0.62,0.162,3.787 0.36,0.4,0.62 rot=-13,0,0; -box 0.62,0.162,3.787 0.36,0.4,0.62 rot=-13,0,0; paint box -0.15,0.403,4.83 1.45,0.12,0.07 rot=-13,0,0 mat=3; paint box 0.4,0.313,4.44 1.05,0.12,0.06 rot=-13,0,0 mat=3
-	param Smooth 2
-	param Voxel 0.025
-end
-feature BlobFeature
-	id 14d4fe68
-	name Card09
-	suppressed 0
-	visible 1
-	param Blend 0.008
-	param CutBlend 0.008
-	param Material 0
-	param Noise 0
-	param NoiseSize 6
-	param Seed 1
-	param Shapes box 0,0.587,4.506 3.3,0.09,2.2 r=0.02 rot=-24,0,0 mat=0; -box -0.62,0.253,3.757 0.36,0.4,0.62 rot=-24,0,0; -box 0.62,0.253,3.757 0.36,0.4,0.62 rot=-24,0,0; box 0.95,1.059,5.566 0.7,0.045,0.38 r=0.04 rot=-24,0,0 mat=2; paint box -0.15,0.689,4.734 1.45,0.12,0.07 rot=-24,0,0 mat=3; paint box 0.4,0.526,4.369 1.05,0.12,0.06 rot=-24,0,0 mat=3
-	param Smooth 2
-	param Voxel 0.025
-end
-feature BlobFeature
-	id ddde83f2
-	name Card10
-	suppressed 0
-	visible 1
-	param Blend 0.008
-	param CutBlend 0.008
-	param Material 0
-	param Noise 0
-	param NoiseSize 6
-	param Seed 1
-	param Shapes box 0,0.807,4.381 3.3,0.09,2.2 r=0.02 rot=-35,0,0 mat=0; -box -0.62,0.337,3.71 0.36,0.4,0.62 rot=-35,0,0; -box 0.62,0.337,3.71 0.36,0.4,0.62 rot=-35,0,0; paint box -0.15,0.951,4.586 1.45,0.12,0.07 rot=-35,0,0 mat=3; paint box 0.4,0.721,4.258 1.05,0.12,0.06 rot=-35,0,0 mat=3
-	param Smooth 2
-	param Voxel 0.025
-end
-feature BlobFeature
-	id a23f729e
-	name Card11
-	suppressed 0
-	visible 1
-	param Blend 0.008
-	param CutBlend 0.008
-	param Material 0
-	param Noise 0
-	param NoiseSize 6
-	param Seed 1
-	param Shapes box 0,1,4.217 3.3,0.09,2.2 r=0.02 rot=-46,0,0 mat=0; -box -0.62,0.41,3.647 0.36,0.4,0.62 rot=-46,0,0; -box 0.62,0.41,3.647 0.36,0.4,0.62 rot=-46,0,0; paint box -0.15,1.179,4.391 1.45,0.12,0.07 rot=-46,0,0 mat=3; paint box 0.4,0.892,4.113 1.05,0.12,0.06 rot=-46,0,0 mat=3
-	param Smooth 2
-	param Voxel 0.025
-end
-feature BlobFeature
-	id f226bfdc
-	name Hub
+	id 36266f80
+	name Pack
 	suppressed 0
 	visible 1
 	param Blend 0.01
@@ -261,25 +47,28 @@ feature BlobFeature
 	param Noise 0
 	param NoiseSize 6
 	param Seed 1
-	param Shapes cylinder -1.9,0.05,3.3 1.9,0.05,3.3 0.36 r=0.04 mat=4
+	param Shapes box 0.000,-1.553,3.291 4.0,0.10,2.3 r=0.04 rot=66,0,0 mat=0; box 0.000,-1.607,3.153 4.0,0.10,2.3 r=0.04 rot=71,0,0 mat=0; box 0.000,-1.650,3.011 4.0,0.10,2.3 r=0.04 rot=76,0,0 mat=0; box 0.000,-1.679,2.866 4.0,0.10,2.3 r=0.04 rot=81,0,0 mat=0; box 0.000,-1.696,2.719 4.0,0.10,2.3 r=0.04 rot=86,0,0 mat=0; box 0.000,-1.700,2.570 4.0,0.10,2.3 r=0.04 rot=91,0,0 mat=0; box 0.000,-1.691,2.422 4.0,0.10,2.3 r=0.04 rot=96,0,0 mat=0; box 0.000,-1.669,2.276 4.0,0.10,2.3 r=0.04 rot=101,0,0 mat=0; box 0.000,-1.634,2.131 4.0,0.10,2.3 r=0.04 rot=106,0,0 mat=0; box 0.000,-1.587,1.991 4.0,0.10,2.3 r=0.04 rot=111,0,0 mat=0; box 0.000,-1.528,1.855 4.0,0.10,2.3 r=0.04 rot=116,0,0 mat=0; box 0.000,-1.457,1.724 4.0,0.10,2.3 r=0.04 rot=121,0,0 mat=0; box 0.000,-1.375,1.601 4.0,0.10,2.3 r=0.04 rot=126,0,0 mat=0; box 0.000,-1.283,1.485 4.0,0.10,2.3 r=0.04 rot=131,0,0 mat=0; box 0.000,-1.181,1.377 4.0,0.10,2.3 r=0.04 rot=136,0,0 mat=0; box 0.000,-1.070,1.279 4.0,0.10,2.3 r=0.04 rot=141,0,0 mat=0; box 0.000,-0.951,1.191 4.0,0.10,2.3 r=0.04 rot=146,0,0 mat=0; box 0.000,-0.824,1.113 4.0,0.10,2.3 r=0.04 rot=151,0,0 mat=0; box 0.000,-0.691,1.047 4.0,0.10,2.3 r=0.04 rot=156,0,0 mat=0; box 0.000,-0.553,0.993 4.0,0.10,2.3 r=0.04 rot=161,0,0 mat=0; box 0.000,-0.411,0.950 4.0,0.10,2.3 r=0.04 rot=166,0,0 mat=0; box 0.000,-0.266,0.921 4.0,0.10,2.3 r=0.04 rot=171,0,0 mat=0; box 0.000,-0.119,0.904 4.0,0.10,2.3 r=0.04 rot=176,0,0 mat=0; box 0.000,0.030,0.900 4.0,0.10,2.3 r=0.04 rot=181,0,0 mat=0; box 0.000,0.178,0.909 4.0,0.10,2.3 r=0.04 rot=186,0,0 mat=0; box 0.000,0.324,0.931 4.0,0.10,2.3 r=0.04 rot=191,0,0 mat=0; box 0.000,0.469,0.966 4.0,0.10,2.3 r=0.04 rot=196,0,0 mat=0; box 0.000,0.609,1.013 4.0,0.10,2.3 r=0.04 rot=201,0,0 mat=0; box 0.000,0.745,1.072 4.0,0.10,2.3 r=0.04 rot=206,0,0 mat=0; box 0.000,0.876,1.143 4.0,0.10,2.3 r=0.04 rot=211,0,0 mat=0; box 0.000,0.999,1.225 4.0,0.10,2.3 r=0.04 rot=216,0,0 mat=0; box 0.000,1.115,1.317 4.0,0.10,2.3 r=0.04 rot=221,0,0 mat=0; box 0.000,1.223,1.419 4.0,0.10,2.3 r=0.04 rot=226,0,0 mat=0; box 0.000,1.321,1.530 4.0,0.10,2.3 r=0.04 rot=231,0,0 mat=0; box 0.000,1.409,1.649 4.0,0.10,2.3 r=0.04 rot=236,0,0 mat=0; box 0.000,1.487,1.776 4.0,0.10,2.3 r=0.04 rot=241,0,0 mat=0; box 0.000,1.553,1.909 4.0,0.10,2.3 r=0.04 rot=246,0,0 mat=0; box 0.000,1.607,2.047 4.0,0.10,2.3 r=0.04 rot=251,0,0 mat=0; box 0.000,1.650,2.189 4.0,0.10,2.3 r=0.04 rot=256,0,0 mat=0; box 0.000,1.679,2.334 4.0,0.10,2.3 r=0.04 rot=261,0,0 mat=0; box 0.000,1.696,2.481 4.0,0.10,2.3 r=0.04 rot=266,0,0 mat=0; box 0.000,1.700,2.630 4.0,0.10,2.3 r=0.04 rot=271,0,0 mat=0; box 0.000,1.691,2.778 4.0,0.10,2.3 r=0.04 rot=276,0,0 mat=0; box 0.000,1.669,2.924 4.0,0.10,2.3 r=0.04 rot=281,0,0 mat=0; box 0.000,1.634,3.069 4.0,0.10,2.3 r=0.04 rot=286,0,0 mat=0; box 0.000,1.587,3.209 4.0,0.10,2.3 r=0.04 rot=291,0,0 mat=0; box 0.000,1.528,3.345 4.0,0.10,2.3 r=0.04 rot=296,0,0 mat=0; box 0.000,1.457,3.476 4.0,0.10,2.3 r=0.04 rot=301,0,0 mat=0; box 0.000,1.375,3.599 4.0,0.10,2.3 r=0.04 rot=306,0,0 mat=0; box 0.000,1.283,3.715 4.0,0.10,2.3 r=0.04 rot=311,0,0 mat=0; box 0.000,1.181,3.823 4.0,0.10,2.3 r=0.04 rot=316,0,0 mat=0; box 0.000,1.070,3.921 4.0,0.10,2.3 r=0.04 rot=321,0,0 mat=0; box 0.000,0.951,4.009 4.0,0.10,2.3 r=0.04 rot=326,0,0 mat=0
+	param Smooth 2
+	param Voxel 0.03
+end
+feature BlobFeature
+	id 5ca6d817
+	name Tabs
+	suppressed 0
+	visible 1
+	param Blend 0.005
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box -1.300,-2.876,3.107 0.7,0.06,0.42 r=0.04 rot=80,0,0 mat=2; box -0.650,-2.821,1.844 0.7,0.06,0.42 r=0.04 rot=105,0,0 mat=2; box 0.000,-2.237,0.723 0.7,0.06,0.42 r=0.04 rot=130,0,0 mat=2; box 0.650,-1.234,-0.046 0.7,0.06,0.42 r=0.04 rot=155,0,0 mat=2; box 1.300,-0.000,-0.320 0.7,0.06,0.42 r=0.04 rot=180,0,0 mat=2; box -1.300,1.234,-0.046 0.7,0.06,0.42 r=0.04 rot=205,0,0 mat=2; box -0.650,2.237,0.723 0.7,0.06,0.42 r=0.04 rot=230,0,0 mat=2; box 0.000,2.821,1.844 0.7,0.06,0.42 r=0.04 rot=255,0,0 mat=2; box 0.650,2.876,3.107 0.7,0.06,0.42 r=0.04 rot=280,0,0 mat=2; box 1.300,2.392,4.275 0.7,0.06,0.42 r=0.04 rot=305,0,0 mat=2
 	param Smooth 2
 	param Voxel 0.02
 end
-feature BindFeature
-	id 2f6c0588
-	name all weights
-	suppressed 0
-	visible 1
-	bodies Bodies
-	param Falloff 2
-	param MaxInfluences 4
-	param Method 2
-	param Smoothing 3
-	param Twist 1
-end
 feature BlobFeature
-	id b3ed8bf5
-	name Card12
+	id 758b463c
+	name Fan
 	suppressed 0
 	visible 1
 	param Blend 0.008
@@ -288,13 +77,13 @@ feature BlobFeature
 	param Noise 0
 	param NoiseSize 6
 	param Seed 1
-	param Shapes box 0,-1.250,3.529 3.3,0.09,2.2 r=0.02 rot=80,0,0 mat=0; -box -0.62,-0.442,3.387 0.36,0.4,0.62 rot=80,0,0; -box 0.62,-0.442,3.387 0.36,0.4,0.62 rot=80,0,0; paint box -0.15,-1.496,3.573 1.45,0.12,0.07 rot=80,0,0 mat=3; paint box 0.4,-1.102,3.503 1.05,0.12,0.06 rot=80,0,0 mat=3
+	param Shapes box 0.000,-0.000,4.300 4.0,0.10,2.3 r=0.04 rot=0,0,0 mat=0; -box -0.650,-0.000,3.450 0.4,0.3,0.6 rot=0,0,0; -box 0.650,-0.000,3.450 0.4,0.3,0.6 rot=0,0,0; box 0.000,-0.411,4.250 4.0,0.10,2.3 r=0.04 rot=14,0,0 mat=0; -box -0.650,-0.206,3.425 0.4,0.3,0.6 rot=14,0,0; -box 0.650,-0.206,3.425 0.4,0.3,0.6 rot=14,0,0; box 0.000,-0.745,4.128 4.0,0.10,2.3 r=0.04 rot=26,0,0 mat=0; -box -0.650,-0.373,3.364 0.4,0.3,0.6 rot=26,0,0; -box 0.650,-0.373,3.364 0.4,0.3,0.6 rot=26,0,0; box 0.000,-0.999,3.975 4.0,0.10,2.3 r=0.04 rot=36,0,0 mat=0; -box -0.650,-0.500,3.288 0.4,0.3,0.6 rot=36,0,0; -box 0.650,-0.500,3.288 0.4,0.3,0.6 rot=36,0,0; box 0.000,-1.202,3.802 4.0,0.10,2.3 r=0.04 rot=45,0,0 mat=0; -box -0.650,-0.601,3.201 0.4,0.3,0.6 rot=45,0,0; -box 0.650,-0.601,3.201 0.4,0.3,0.6 rot=45,0,0; box 0.000,-1.358,3.623 4.0,0.10,2.3 r=0.04 rot=53,0,0 mat=0; -box -0.650,-0.679,3.112 0.4,0.3,0.6 rot=53,0,0; -box 0.650,-0.679,3.112 0.4,0.3,0.6 rot=53,0,0; box 0.000,-1.472,3.450 4.0,0.10,2.3 r=0.04 rot=60,0,0 mat=0; -box -0.650,-0.736,3.025 0.4,0.3,0.6 rot=60,0,0; -box 0.650,-0.736,3.025 0.4,0.3,0.6 rot=60,0,0
 	param Smooth 2
 	param Voxel 0.025
 end
 feature BlobFeature
-	id 2d256675
-	name Card13
+	id 28efa5d4
+	name Front
 	suppressed 0
 	visible 1
 	param Blend 0.008
@@ -303,337 +92,7 @@ feature BlobFeature
 	param Noise 0
 	param NoiseSize 6
 	param Seed 1
-	param Shapes box 0,-1.190,3.751 3.3,0.09,2.2 r=0.02 rot=70,0,0 mat=0; -box -0.62,-0.420,3.471 0.36,0.4,0.62 rot=70,0,0; -box 0.62,-0.420,3.471 0.36,0.4,0.62 rot=70,0,0; paint box -0.15,-1.425,3.837 1.45,0.12,0.07 rot=70,0,0 mat=3; paint box 0.4,-1.049,3.700 1.05,0.12,0.06 rot=70,0,0 mat=3
+	param Shapes box 0.000,1.093,3.902 4.0,0.10,2.3 r=0.04 rot=-40,0,0 mat=0; -box -0.650,0.546,3.251 0.4,0.3,0.6 rot=-40,0,0; -box 0.650,0.546,3.251 0.4,0.3,0.6 rot=-40,0,0; box -1.300,1.877,4.837 0.7,0.06,0.42 r=0.04 rot=-40,0,0 mat=2; paint box -0.300,1.382,4.247 1.7,0.16,0.08 rot=-40,0,0 mat=3; paint box 0.200,1.125,3.941 1.2,0.16,0.07 rot=-40,0,0 mat=3; paint box -0.100,0.900,3.672 1.4,0.16,0.07 rot=-40,0,0 mat=3
 	param Smooth 2
-	param Voxel 0.025
-end
-feature BlobFeature
-	id 548ef175
-	name Card14
-	suppressed 0
-	visible 1
-	param Blend 0.008
-	param CutBlend 0.008
-	param Material 0
-	param Noise 0
-	param NoiseSize 6
-	param Seed 1
-	param Shapes box 0,-0.961,4.148 3.3,0.09,2.2 r=0.02 rot=50,0,0 mat=0; -box -0.62,-0.333,3.621 0.36,0.4,0.62 rot=50,0,0; -box 0.62,-0.333,3.621 0.36,0.4,0.62 rot=50,0,0; paint box -0.15,-1.153,4.309 1.45,0.12,0.07 rot=50,0,0 mat=3; paint box 0.4,-0.846,4.052 1.05,0.12,0.06 rot=50,0,0 mat=3
-	param Smooth 2
-	param Voxel 0.025
-end
-feature BlobFeature
-	id e5d06d4f
-	name Card15
-	suppressed 0
-	visible 1
-	param Blend 0.008
-	param CutBlend 0.008
-	param Material 0
-	param Noise 0
-	param NoiseSize 6
-	param Seed 1
-	param Shapes box 0,-0.798,4.311 3.3,0.09,2.2 r=0.02 rot=40,0,0 mat=0; -box -0.62,-0.271,3.683 0.36,0.4,0.62 rot=40,0,0; -box 0.62,-0.271,3.683 0.36,0.4,0.62 rot=40,0,0; paint box -0.15,-0.959,4.503 1.45,0.12,0.07 rot=40,0,0 mat=3; paint box 0.4,-0.702,4.196 1.05,0.12,0.06 rot=40,0,0 mat=3
-	param Smooth 2
-	param Voxel 0.025
-end
-feature BlobFeature
-	id ade0e653
-	name Card16
-	suppressed 0
-	visible 1
-	param Blend 0.008
-	param CutBlend 0.008
-	param Material 0
-	param Noise 0
-	param NoiseSize 6
-	param Seed 1
-	param Shapes box 0,-0.401,4.540 3.3,0.09,2.2 r=0.02 rot=20,0,0 mat=0; -box -0.62,-0.121,3.770 0.36,0.4,0.62 rot=20,0,0; -box 0.62,-0.121,3.770 0.36,0.4,0.62 rot=20,0,0; paint box -0.15,-0.487,4.775 1.45,0.12,0.07 rot=20,0,0 mat=3; paint box 0.4,-0.350,4.399 1.05,0.12,0.06 rot=20,0,0 mat=3
-	param Smooth 2
-	param Voxel 0.025
-end
-feature BlobFeature
-	id d27d58f1
-	name Card17
-	suppressed 0
-	visible 1
-	param Blend 0.008
-	param CutBlend 0.008
-	param Material 0
-	param Noise 0
-	param NoiseSize 6
-	param Seed 1
-	param Shapes box 0,-0.179,4.600 3.3,0.09,2.2 r=0.02 rot=10,0,0 mat=0; -box -0.62,-0.037,3.792 0.36,0.4,0.62 rot=10,0,0; -box 0.62,-0.037,3.792 0.36,0.4,0.62 rot=10,0,0; paint box -0.15,-0.223,4.846 1.45,0.12,0.07 rot=10,0,0 mat=3; paint box 0.4,-0.153,4.452 1.05,0.12,0.06 rot=10,0,0 mat=3
-	param Smooth 2
-	param Voxel 0.025
-end
-feature BlobFeature
-	id 0f7c46f9
-	name Card18
-	suppressed 0
-	visible 1
-	param Blend 0.008
-	param CutBlend 0.008
-	param Material 0
-	param Noise 0
-	param NoiseSize 6
-	param Seed 1
-	param Shapes box 0,0.279,4.600 3.3,0.09,2.2 r=0.02 rot=-10,0,0 mat=0; -box -0.62,0.137,3.792 0.36,0.4,0.62 rot=-10,0,0; -box 0.62,0.137,3.792 0.36,0.4,0.62 rot=-10,0,0; paint box -0.15,0.323,4.846 1.45,0.12,0.07 rot=-10,0,0 mat=3; paint box 0.4,0.253,4.452 1.05,0.12,0.06 rot=-10,0,0 mat=3
-	param Smooth 2
-	param Voxel 0.025
-end
-feature BlobFeature
-	id 94066a53
-	name Card19
-	suppressed 0
-	visible 1
-	param Blend 0.008
-	param CutBlend 0.008
-	param Material 0
-	param Noise 0
-	param NoiseSize 6
-	param Seed 1
-	param Shapes box 0,0.501,4.540 3.3,0.09,2.2 r=0.02 rot=-20,0,0 mat=0; -box -0.62,0.221,3.770 0.36,0.4,0.62 rot=-20,0,0; -box 0.62,0.221,3.770 0.36,0.4,0.62 rot=-20,0,0; paint box -0.15,0.587,4.775 1.45,0.12,0.07 rot=-20,0,0 mat=3; paint box 0.4,0.450,4.399 1.05,0.12,0.06 rot=-20,0,0 mat=3
-	param Smooth 2
-	param Voxel 0.025
-end
-feature BlobFeature
-	id c0346df8
-	name Card20
-	suppressed 0
-	visible 1
-	param Blend 0.008
-	param CutBlend 0.008
-	param Material 0
-	param Noise 0
-	param NoiseSize 6
-	param Seed 1
-	param Shapes box 0,0.898,4.311 3.3,0.09,2.2 r=0.02 rot=-40,0,0 mat=0; -box -0.62,0.371,3.683 0.36,0.4,0.62 rot=-40,0,0; -box 0.62,0.371,3.683 0.36,0.4,0.62 rot=-40,0,0; paint box -0.15,1.059,4.503 1.45,0.12,0.07 rot=-40,0,0 mat=3; paint box 0.4,0.802,4.196 1.05,0.12,0.06 rot=-40,0,0 mat=3
-	param Smooth 2
-	param Voxel 0.025
-end
-feature BlobFeature
-	id 6b29e0dc
-	name Card21
-	suppressed 0
-	visible 1
-	param Blend 0.008
-	param CutBlend 0.008
-	param Material 0
-	param Noise 0
-	param NoiseSize 6
-	param Seed 1
-	param Shapes box 0,1.061,4.148 3.3,0.09,2.2 r=0.02 rot=-50,0,0 mat=0; -box -0.62,0.433,3.621 0.36,0.4,0.62 rot=-50,0,0; -box 0.62,0.433,3.621 0.36,0.4,0.62 rot=-50,0,0; paint box -0.15,1.253,4.309 1.45,0.12,0.07 rot=-50,0,0 mat=3; paint box 0.4,0.946,4.052 1.05,0.12,0.06 rot=-50,0,0 mat=3
-	param Smooth 2
-	param Voxel 0.025
-end
-feature BlobFeature
-	id 93426200
-	name Card22
-	suppressed 0
-	visible 1
-	param Blend 0.008
-	param CutBlend 0.008
-	param Material 0
-	param Noise 0
-	param NoiseSize 6
-	param Seed 1
-	param Shapes box 0,1.290,3.751 3.3,0.09,2.2 r=0.02 rot=-70,0,0 mat=0; -box -0.62,0.520,3.471 0.36,0.4,0.62 rot=-70,0,0; -box 0.62,0.520,3.471 0.36,0.4,0.62 rot=-70,0,0; paint box -0.15,1.525,3.837 1.45,0.12,0.07 rot=-70,0,0 mat=3; paint box 0.4,1.149,3.700 1.05,0.12,0.06 rot=-70,0,0 mat=3
-	param Smooth 2
-	param Voxel 0.025
-end
-feature BlobFeature
-	id a65081e3
-	name Card23
-	suppressed 0
-	visible 1
-	param Blend 0.008
-	param CutBlend 0.008
-	param Material 0
-	param Noise 0
-	param NoiseSize 6
-	param Seed 1
-	param Shapes box 0,1.350,3.529 3.3,0.09,2.2 r=0.02 rot=-80,0,0 mat=0; -box -0.62,0.542,3.387 0.36,0.4,0.62 rot=-80,0,0; -box 0.62,0.542,3.387 0.36,0.4,0.62 rot=-80,0,0; paint box -0.15,1.596,3.573 1.45,0.12,0.07 rot=-80,0,0 mat=3; paint box 0.4,1.202,3.503 1.05,0.12,0.06 rot=-80,0,0 mat=3
-	param Smooth 2
-	param Voxel 0.025
-end
-feature BlobFeature
-	id ddd6ec14
-	name Card24
-	suppressed 0
-	visible 1
-	param Blend 0.008
-	param CutBlend 0.008
-	param Material 0
-	param Noise 0
-	param NoiseSize 6
-	param Seed 1
-	param Shapes box 0,1.350,3.071 3.3,0.09,2.2 r=0.02 rot=-100,0,0 mat=0; -box -0.62,0.542,3.213 0.36,0.4,0.62 rot=-100,0,0; -box 0.62,0.542,3.213 0.36,0.4,0.62 rot=-100,0,0; paint box -0.15,1.596,3.027 1.45,0.12,0.07 rot=-100,0,0 mat=3; paint box 0.4,1.202,3.097 1.05,0.12,0.06 rot=-100,0,0 mat=3
-	param Smooth 2
-	param Voxel 0.025
-end
-feature BlobFeature
-	id a3b8eb97
-	name Card25
-	suppressed 0
-	visible 1
-	param Blend 0.008
-	param CutBlend 0.008
-	param Material 0
-	param Noise 0
-	param NoiseSize 6
-	param Seed 1
-	param Shapes box 0,1.290,2.849 3.3,0.09,2.2 r=0.02 rot=-110,0,0 mat=0; -box -0.62,0.520,3.129 0.36,0.4,0.62 rot=-110,0,0; -box 0.62,0.520,3.129 0.36,0.4,0.62 rot=-110,0,0; paint box -0.15,1.525,2.763 1.45,0.12,0.07 rot=-110,0,0 mat=3; paint box 0.4,1.149,2.900 1.05,0.12,0.06 rot=-110,0,0 mat=3
-	param Smooth 2
-	param Voxel 0.025
-end
-feature BlobFeature
-	id 78e0ada9
-	name Card26
-	suppressed 0
-	visible 1
-	param Blend 0.008
-	param CutBlend 0.008
-	param Material 0
-	param Noise 0
-	param NoiseSize 6
-	param Seed 1
-	param Shapes box 0,1.061,2.452 3.3,0.09,2.2 r=0.02 rot=-130,0,0 mat=0; -box -0.62,0.433,2.979 0.36,0.4,0.62 rot=-130,0,0; -box 0.62,0.433,2.979 0.36,0.4,0.62 rot=-130,0,0; paint box -0.15,1.253,2.291 1.45,0.12,0.07 rot=-130,0,0 mat=3; paint box 0.4,0.946,2.548 1.05,0.12,0.06 rot=-130,0,0 mat=3
-	param Smooth 2
-	param Voxel 0.025
-end
-feature BlobFeature
-	id 67b3dbf1
-	name Card27
-	suppressed 0
-	visible 1
-	param Blend 0.008
-	param CutBlend 0.008
-	param Material 0
-	param Noise 0
-	param NoiseSize 6
-	param Seed 1
-	param Shapes box 0,0.898,2.289 3.3,0.09,2.2 r=0.02 rot=-140,0,0 mat=0; -box -0.62,0.371,2.917 0.36,0.4,0.62 rot=-140,0,0; -box 0.62,0.371,2.917 0.36,0.4,0.62 rot=-140,0,0; paint box -0.15,1.059,2.097 1.45,0.12,0.07 rot=-140,0,0 mat=3; paint box 0.4,0.802,2.404 1.05,0.12,0.06 rot=-140,0,0 mat=3
-	param Smooth 2
-	param Voxel 0.025
-end
-feature BlobFeature
-	id f813b8bb
-	name Card28
-	suppressed 0
-	visible 1
-	param Blend 0.008
-	param CutBlend 0.008
-	param Material 0
-	param Noise 0
-	param NoiseSize 6
-	param Seed 1
-	param Shapes box 0,0.501,2.060 3.3,0.09,2.2 r=0.02 rot=-160,0,0 mat=0; -box -0.62,0.221,2.830 0.36,0.4,0.62 rot=-160,0,0; -box 0.62,0.221,2.830 0.36,0.4,0.62 rot=-160,0,0; paint box -0.15,0.587,1.825 1.45,0.12,0.07 rot=-160,0,0 mat=3; paint box 0.4,0.450,2.201 1.05,0.12,0.06 rot=-160,0,0 mat=3
-	param Smooth 2
-	param Voxel 0.025
-end
-feature BlobFeature
-	id 64313e65
-	name Card29
-	suppressed 0
-	visible 1
-	param Blend 0.008
-	param CutBlend 0.008
-	param Material 0
-	param Noise 0
-	param NoiseSize 6
-	param Seed 1
-	param Shapes box 0,0.279,2.000 3.3,0.09,2.2 r=0.02 rot=-170,0,0 mat=0; -box -0.62,0.137,2.808 0.36,0.4,0.62 rot=-170,0,0; -box 0.62,0.137,2.808 0.36,0.4,0.62 rot=-170,0,0; paint box -0.15,0.323,1.754 1.45,0.12,0.07 rot=-170,0,0 mat=3; paint box 0.4,0.253,2.148 1.05,0.12,0.06 rot=-170,0,0 mat=3
-	param Smooth 2
-	param Voxel 0.025
-end
-feature BlobFeature
-	id 118f4a2e
-	name Card30
-	suppressed 0
-	visible 1
-	param Blend 0.008
-	param CutBlend 0.008
-	param Material 0
-	param Noise 0
-	param NoiseSize 6
-	param Seed 1
-	param Shapes box 0,-0.179,2.000 3.3,0.09,2.2 r=0.02 rot=-190,0,0 mat=0; -box -0.62,-0.037,2.808 0.36,0.4,0.62 rot=-190,0,0; -box 0.62,-0.037,2.808 0.36,0.4,0.62 rot=-190,0,0; paint box -0.15,-0.223,1.754 1.45,0.12,0.07 rot=-190,0,0 mat=3; paint box 0.4,-0.153,2.148 1.05,0.12,0.06 rot=-190,0,0 mat=3
-	param Smooth 2
-	param Voxel 0.025
-end
-feature BlobFeature
-	id 60a1968a
-	name Card31
-	suppressed 0
-	visible 1
-	param Blend 0.008
-	param CutBlend 0.008
-	param Material 0
-	param Noise 0
-	param NoiseSize 6
-	param Seed 1
-	param Shapes box 0,-0.401,2.060 3.3,0.09,2.2 r=0.02 rot=-200,0,0 mat=0; -box -0.62,-0.121,2.830 0.36,0.4,0.62 rot=-200,0,0; -box 0.62,-0.121,2.830 0.36,0.4,0.62 rot=-200,0,0; paint box -0.15,-0.487,1.825 1.45,0.12,0.07 rot=-200,0,0 mat=3; paint box 0.4,-0.350,2.201 1.05,0.12,0.06 rot=-200,0,0 mat=3
-	param Smooth 2
-	param Voxel 0.025
-end
-feature BlobFeature
-	id 0ad8eb75
-	name Card32
-	suppressed 0
-	visible 1
-	param Blend 0.008
-	param CutBlend 0.008
-	param Material 0
-	param Noise 0
-	param NoiseSize 6
-	param Seed 1
-	param Shapes box 0,-0.798,2.289 3.3,0.09,2.2 r=0.02 rot=-220,0,0 mat=0; -box -0.62,-0.271,2.917 0.36,0.4,0.62 rot=-220,0,0; -box 0.62,-0.271,2.917 0.36,0.4,0.62 rot=-220,0,0; paint box -0.15,-0.959,2.097 1.45,0.12,0.07 rot=-220,0,0 mat=3; paint box 0.4,-0.702,2.404 1.05,0.12,0.06 rot=-220,0,0 mat=3
-	param Smooth 2
-	param Voxel 0.025
-end
-feature BlobFeature
-	id 05a79a4e
-	name Card33
-	suppressed 0
-	visible 1
-	param Blend 0.008
-	param CutBlend 0.008
-	param Material 0
-	param Noise 0
-	param NoiseSize 6
-	param Seed 1
-	param Shapes box 0,-0.961,2.452 3.3,0.09,2.2 r=0.02 rot=-230,0,0 mat=0; -box -0.62,-0.333,2.979 0.36,0.4,0.62 rot=-230,0,0; -box 0.62,-0.333,2.979 0.36,0.4,0.62 rot=-230,0,0; paint box -0.15,-1.153,2.291 1.45,0.12,0.07 rot=-230,0,0 mat=3; paint box 0.4,-0.846,2.548 1.05,0.12,0.06 rot=-230,0,0 mat=3
-	param Smooth 2
-	param Voxel 0.025
-end
-feature BlobFeature
-	id 9c3a8ea7
-	name Card34
-	suppressed 0
-	visible 1
-	param Blend 0.008
-	param CutBlend 0.008
-	param Material 0
-	param Noise 0
-	param NoiseSize 6
-	param Seed 1
-	param Shapes box 0,-1.190,2.849 3.3,0.09,2.2 r=0.02 rot=-250,0,0 mat=0; -box -0.62,-0.420,3.129 0.36,0.4,0.62 rot=-250,0,0; -box 0.62,-0.420,3.129 0.36,0.4,0.62 rot=-250,0,0; paint box -0.15,-1.425,2.763 1.45,0.12,0.07 rot=-250,0,0 mat=3; paint box 0.4,-1.049,2.900 1.05,0.12,0.06 rot=-250,0,0 mat=3
-	param Smooth 2
-	param Voxel 0.025
-end
-feature BlobFeature
-	id 12a091fd
-	name Card35
-	suppressed 0
-	visible 1
-	param Blend 0.008
-	param CutBlend 0.008
-	param Material 0
-	param Noise 0
-	param NoiseSize 6
-	param Seed 1
-	param Shapes box 0,-1.250,3.071 3.3,0.09,2.2 r=0.02 rot=-260,0,0 mat=0; -box -0.62,-0.442,3.213 0.36,0.4,0.62 rot=-260,0,0; -box 0.62,-0.442,3.213 0.36,0.4,0.62 rot=-260,0,0; paint box -0.15,-1.496,3.027 1.45,0.12,0.07 rot=-260,0,0 mat=3; paint box 0.4,-1.102,3.097 1.05,0.12,0.06 rot=-260,0,0 mat=3
-	param Smooth 2
-	param Voxel 0.025
+	param Voxel 0.02
 end

@@ -62,6 +62,18 @@ def preview_path(root, state):
     return path if os.path.isfile(path) else ""
 
 
+
+def makedirs_private(path):
+    """os.makedirs + 0700 on the leaf (audit G6): a run's .live folders hold its notes,
+    directions and control files - the user's words, not world-readable scratch."""
+    os.makedirs(path, exist_ok=True)
+    try:
+        os.chmod(path, 0o700)
+    except OSError:
+        pass
+    return path
+
+
 PACES = (0, 1, 3, 5, 10)
 TERMINAL = ("completed", "below-target", "cancelled", "failed")
 OPEN = ("open", "held")     # a script run that finished its lines (or held at a bad one) and takes more (geppetto-live more)
@@ -70,7 +82,7 @@ OPEN = ("open", "held")     # a script run that finished its lines (or held at a
 def close_open(root):
     """Ask an open script run to close: an inbox entry it takes between lines (ScriptLive.Inbox)."""
     directory = os.path.join(root, ".live", "inbox")
-    os.makedirs(directory, exist_ok=True)
+    makedirs_private(directory)
     name = "%019d%s" % (time.time_ns() // 100 + 621355968000000000, uuid.uuid4().hex[:6])
     tmp = os.path.join(directory, name + ".close.tmp")
     open(tmp, "w").close()
@@ -128,7 +140,7 @@ def send_command(root, command, **fields):
             raise ValueError("direction must be 1 to 2000 characters")
         fields["text"] = text.strip()
     directory = os.path.join(root, ".live", "commands")
-    os.makedirs(directory, exist_ok=True)
+    makedirs_private(directory)
     ident = "%020d-%s" % (time.time_ns(), uuid.uuid4().hex)
     path = os.path.join(directory, ident + ".json")
     temp = path + ".tmp"
@@ -285,9 +297,10 @@ def line_part(line):
 _watch = {}
 
 
-def watch(root, state, recent=6):
+def watch(root, state):
     """What a live script run is doing, for the pane's watch panel: the line it is on of how many, that whole line,
-    the part it changes, the error a held/failed run stopped at, and its last few steps. Read again only when the run grows."""
+    the part it changes, the error a held/failed run stopped at, and EVERY step so far (po: the STEPS list must show
+    every single step of every model; the old last-6 tail hid the rest). Read again only when the run grows."""
     stamp = []
     for f in (os.path.join(root, ".live", "events.jsonl"), os.path.join(root, "script.txt")):
         try:
@@ -326,7 +339,7 @@ def watch(root, state, recent=6):
         if 0 < bad <= len(lines):
             at, code = bad, lines[bad - 1]
     tail = []
-    for st in shown[-recent:]:
+    for st in shown:
         line = script_line(root, st["op"])
         tail.append(dict(st, code=line or st["op"].split(": ", 1)[-1], part=line_part(line),
                          say=plain_words.say(line or st["op"].split(": ", 1)[-1], lines, _line_no(st["op"]))))
@@ -407,7 +420,7 @@ def rewind_open(root, rev, op=""):
     if rev < 1 or not revision_path(root, rev):
         raise ValueError("no step %d kept in this run" % rev)
     directory = os.path.join(root, ".live", "inbox")
-    os.makedirs(directory, exist_ok=True)
+    makedirs_private(directory)
     name = "%019d%s" % (time.time_ns() // 100 + 621355968000000000, uuid.uuid4().hex[:6])
     tmp = os.path.join(directory, name + ".rewind.tmp")
     with open(tmp, "w") as stream:

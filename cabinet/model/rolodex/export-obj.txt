@@ -1,1 +1,2 @@
+echo Export: the corrected model as an .obj, so the ID-colour frames use the black stand (slot 1) and blue front card
 export . name=rolodex skin=0

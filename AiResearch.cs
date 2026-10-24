@@ -512,6 +512,22 @@ public sealed class AiResearch
     // ---- photos ---------------------------------------------------------------------------------
     public static readonly string[] Views = { "front", "side", "top", "back", "three-quarter", "close-up", "unsorted" };
 
+    /// <summary>Magic-byte check for the F2 allowlist: the bytes must actually be the format
+    /// the server declared, so ImageMagick's explicit-format decode starts from truth.</summary>
+    static bool MatchesImageFormat(string format, byte[] b) => format switch
+    {
+        "JPEG" => b.Length >= 3 && b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF,
+        "PNG" => b.Length >= 8 && b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47
+            && b[4] == 0x0D && b[5] == 0x0A && b[6] == 0x1A && b[7] == 0x0A,
+        "WEBP" => b.Length >= 12 && b[0] == (byte)'R' && b[1] == (byte)'I' && b[2] == (byte)'F' && b[3] == (byte)'F'
+            && b[8] == (byte)'W' && b[9] == (byte)'E' && b[10] == (byte)'B' && b[11] == (byte)'P',
+        "GIF" => b.Length >= 6 && b[0] == (byte)'G' && b[1] == (byte)'I' && b[2] == (byte)'F' && b[3] == (byte)'8'
+            && (b[4] == (byte)'7' || b[4] == (byte)'9') && b[5] == (byte)'a',
+        "TIFF" => b.Length >= 4 && ((b[0] == 0x49 && b[1] == 0x49 && b[2] == 0x2A && b[3] == 0x00)
+            || (b[0] == 0x4D && b[1] == 0x4D && b[2] == 0x00 && b[3] == 0x2A)),
+        _ => false
+    };
+
     /// <summary>Download a photo into refs/ (the original plus a PNG, since refimage reads PNG), measure it,
     /// and return what the pixels say.</summary>
     public async Task<string> SaveImageAsync(string url, string view, JsonNode? args, CancellationToken ct)
@@ -544,6 +560,18 @@ public sealed class AiResearch
             while ((read = await stream.ReadAsync(chunk, ct)) > 0) { buffer.Write(chunk, 0, read); if (buffer.Length > 40 * 1024 * 1024) throw new InvalidOperationException("Photo over 40 MB."); }
             bytes = buffer.ToArray();
         }
+        // F2: the declared Content-Type is the server's claim, not evidence. Only an
+        // allowlisted format whose magic bytes match that claim is ever handed to
+        // ImageMagick, and magick is then told the format explicitly (below) instead
+        // of sniffing the content — a polyglot served as image/jpeg gets rejected
+        // here, not routed to whatever coder its bytes happen to trigger.
+        string magickFormat = mime switch
+        {
+            "image/jpeg" => "JPEG", "image/png" => "PNG", "image/webp" => "WEBP",
+            "image/gif" => "GIF", "image/tiff" => "TIFF", _ => ""
+        };
+        if (magickFormat.Length == 0) throw new InvalidOperationException("Not a supported photo format (" + mime + "); use JPEG, PNG, WebP, GIF or TIFF.");
+        if (!MatchesImageFormat(magickFormat, bytes)) throw new InvalidOperationException("That file's bytes are not the " + mime + " photo its server claimed; refusing it.");
         var meta = imageMeta.GetValueOrDefault(url) ?? imageMeta.GetValueOrDefault(uri.ToString());
         string title = Str(meta?["title"]) is { Length: > 0 } t ? t : Str(args?["title"]) is { Length: > 0 } at ? at : Path.GetFileNameWithoutExtension(uri.AbsolutePath);
         string slug = Regex.Replace(title.ToLowerInvariant(), "[^a-z0-9]+", "-").Trim('-');
@@ -553,8 +581,10 @@ public sealed class AiResearch
         string original = Path.Combine(refsDir, stem + ".orig" + ext), png = Path.Combine(refsDir, stem + ".png");
         await System.IO.File.WriteAllBytesAsync(original, bytes, ct);
         // refimage reads PNG: flatten to an 8-bit RGB PNG at <= 2000 px (plenty for a viewport backdrop)
-        var start = new ProcessStartInfo("magick", new[] { original + "[0]", "-auto-orient", "-resize", "2000x2000>", "-background", "white", "-flatten", "-strip", "-depth", "8", "PNG24:" + png })
+        var start = new ProcessStartInfo("magick", new[] { magickFormat + ":" + original + "[0]", "-auto-orient", "-resize", "2000x2000>", "-background", "white", "-flatten", "-strip", "-depth", "8", "PNG24:" + png })
             { RedirectStandardError = true, UseShellExecute = false };
+        // magick parses untrusted remote bytes; it gets no provider keys (F1).
+        AiChildEnvironment.ScrubSecrets(start);
         using (var process = Process.Start(start) ?? throw new InvalidOperationException("ImageMagick (magick) is needed to convert photos to PNG."))
         {
             var err = process.StandardError.ReadToEndAsync(ct);

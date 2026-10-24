@@ -4,6 +4,11 @@ The gate hook (claude_gate.py) calls note() on every PreToolUse: a Read of an im
 SendUserFile with images, appends {"at", "path", "tool"} to claude-feed/<session>.jsonl. The chest
 polls with Feed.poll() and only keeps sessions that matter there: the CLAUDE card's own session and
 sessions that started a geppetto-live run (claude-runs/).
+
+Audit G7: the hook is installed for *every* Claude session on the machine, so note() applies that
+same filter at WRITE time - a session that is neither the card session (its id is in
+claude-chat.json, written by claude_link.py) nor a claude-runs session records nothing at all.
+Feed files are pruned after 30 days and created private (audit G6): the folder is 0700, files 0600.
 """
 import glob
 import json
@@ -13,6 +18,8 @@ import time
 BASE = os.path.expanduser("~/.cache/geppetto")
 FEED = os.path.join(BASE, "claude-feed")
 RUNS = os.path.join(BASE, "claude-runs")
+CARD_STATE = os.path.join(BASE, "claude-chat.json")   # claude_link.py's session id file
+PRUNE_DAYS = 30
 IMAGES = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")
 
 
@@ -34,15 +41,49 @@ def images_in(payload):
     return out
 
 
-def note(payload, feed=FEED, clock=time.time):
+def card_session(state=CARD_STATE):
+    """The CLAUDE card's current session id ('' when there is none)."""
+    try:
+        with open(state) as stream:
+            s = json.load(stream).get("session")
+    except (OSError, ValueError, AttributeError):
+        return ""
+    return _safe(s) if s else ""
+
+
+def prune(feed=FEED, clock=time.time, days=PRUNE_DAYS):
+    """Drop feed files untouched for `days` days; the feed is a pop-up cache, not an archive."""
+    try:
+        names = os.listdir(feed)
+    except OSError:
+        return
+    for name in names:
+        if name.endswith(".jsonl"):
+            try:
+                path = os.path.join(feed, name)
+                if clock() - os.path.getmtime(path) > days * 86400:
+                    os.unlink(path)
+            except OSError:
+                pass
+
+
+def note(payload, feed=FEED, runs=RUNS, state=CARD_STATE, clock=time.time):
     session = _safe(payload.get("session_id", ""))
     paths = images_in(payload) if session and payload.get("hook_event_name") == "PreToolUse" else []
     if not paths:
         return
+    if session != card_session(state) and session not in run_sessions(runs):
+        return            # G7: not a Geppetto session - record nothing
     os.makedirs(feed, exist_ok=True)
-    with open(os.path.join(feed, session + ".jsonl"), "a") as stream:
+    try:
+        os.chmod(feed, 0o700)
+    except OSError:
+        pass
+    fd = os.open(os.path.join(feed, session + ".jsonl"), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    with os.fdopen(fd, "a") as stream:
         for p in paths:
             stream.write(json.dumps({"at": clock(), "path": p, "tool": payload.get("tool_name", "")}) + "\n")
+    prune(feed, clock)
 
 
 def run_sessions(runs=RUNS):
@@ -62,6 +103,7 @@ class Feed:
     """Reads new feed lines since the last poll; poll() returns the new pictures, oldest first."""
 
     def __init__(self, feed=FEED, runs=RUNS, clock=time.time, keep=12):
+        prune(feed, clock)
         self.feed, self.runs, self.keep = feed, runs, keep
         self.started = clock()             # pictures from before the chest opened don't pop
         self.offsets = {}

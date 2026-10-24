@@ -274,21 +274,37 @@ var G = {
   "halfLen": 2.0
  },
  "rolodex": {
-  "w": 216,
-  "h": 335,
-  "bodyW": 216,
-  "bodyH": 335,
-  "frames": 24,
-  "cards": 12,
-  "labelX": 0,
-  "labelY": 0,
-  "labelW": 0,
-  "labelH": 0
+  "w": 220,
+  "h": 264,
+  "bodyW": 220,
+  "bodyH": 264,
+  "frames": 36,
+  "cards": 12
  },
  "keyS": {
   "w": 44,
   "h": 36
  },
  "pull": 24,
- "shadow": 6
+ "shadow": 6,
+ "minidrawerBox": {
+  "w": 246,
+  "h": 310,
+  "bodyX": 0,
+  "bodyY": 0,
+  "bodyW": 240,
+  "bodyH": 280,
+  "floorX": 32,
+  "floorY": 26,
+  "floorW": 176,
+  "floorH": 198
+ },
+ "minidrawerFront": {
+  "w": 240,
+  "h": 62,
+  "plateX": 56,
+  "plateY": 6,
+  "plateW": 128,
+  "plateH": 24
+ }
 };

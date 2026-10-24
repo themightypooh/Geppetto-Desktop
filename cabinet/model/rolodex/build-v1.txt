@@ -1,0 +1,31 @@
+# Open rotary Rolodex. Inches, Z up, front faces -Y. The spindle runs along X
+# through (0, 0.05, 3.30). Twelve separate cards stand around it, 30 degrees apart:
+# card 0 lies flat toward the front (the one you read), and the wheel turns about
+# that spindle so the next card comes down onto the front. From the contact-file photo.
+refimage front /home/poo/Desktop/geppetto-desktop/cabinet/model/rolodex/refs/02.jpg height=5.2 offset=8.4,1.6 depth=0 opacity=0.85
+material 0 color=#efe6d2 rough=0.72
+material 1 color=#241610 rough=0.4
+material 2 color=#6f9eae rough=0.5
+material 3 color=#2a2420 rough=0.65
+material 4 color=#14110f rough=0.34
+echo Foot: a wider rounded tray past the cards and the knobs, so from above it shows around the wheel and below it in the drawer
+add Blob name=Base voxel=0.03 blend=0.04 shapes="box 0,0.09,0.36 7.4,6.4,0.72 r=0.3 mat=1; box -2.22,0.05,1.85 0.5,0.66,3.15 r=0.12 mat=1; box 2.22,0.05,1.85 0.5,0.66,3.15 r=0.12 mat=1; cylinder -1.96,0.05,3.3 -2.5,0.05,3.3 0.22 r=0.04 mat=1; cylinder 1.96,0.05,3.3 2.5,0.05,3.3 0.22 r=0.04 mat=1"
+echo the spindle, the two clip rings and the knurled knobs
+add Blob name=Knobs voxel=0.02 blend=0.015 shapes="cylinder -2.15,0.05,3.3 2.15,0.05,3.3 0.075 mat=4; torus -0.62,0.05,3.3 0.15 0.05 rot=0,90,0 mat=4; torus 0.62,0.05,3.3 0.15 0.05 rot=0,90,0 mat=4; cylinder -2.5,0.05,3.3 -3.18,0.05,3.3 0.48 r=0.06 mat=4; cylinder 2.5,0.05,3.3 3.18,0.05,3.3 0.48 r=0.06 mat=4; torus -2.7,0.05,3.3 0.46 0.038 rot=0,90,0 mat=1; torus -2.96,0.05,3.3 0.46 0.038 rot=0,90,0 mat=1; torus 2.7,0.05,3.3 0.46 0.038 rot=0,90,0 mat=1; torus 2.96,0.05,3.3 0.46 0.038 rot=0,90,0 mat=1"
+echo twelve cards around the spindle, each one its own part so it can be picked
+add Blob name=Card00 voxel=0.025 blend=0.008 cutblend=0.008 shapes="box 0,-1.27,3.3 3.3,0.09,2.2 r=0.02 rot=90,0,0 mat=0; -box -0.62,-0.45,3.3 0.36,0.4,0.62 rot=90,0,0; -box 0.62,-0.45,3.3 0.36,0.4,0.62 rot=90,0,0; box -1.15,-2.43,3.3 0.7,0.045,0.38 r=0.04 rot=90,0,0 mat=2; paint box -0.15,-1.52,3.3 1.45,0.12,0.07 rot=90,0,0 mat=3; paint box 0.4,-1.12,3.3 1.05,0.12,0.06 rot=90,0,0 mat=3"
+add Blob name=Card01 voxel=0.025 blend=0.008 cutblend=0.008 shapes="box 0,-1.093,3.96 3.3,0.09,2.2 r=0.02 rot=60,0,0 mat=0; -box -0.62,-0.383,3.55 0.36,0.4,0.62 rot=60,0,0; -box 0.62,-0.383,3.55 0.36,0.4,0.62 rot=60,0,0; paint box -0.15,-1.31,4.085 1.45,0.12,0.07 rot=60,0,0 mat=3; paint box 0.4,-0.963,3.885 1.05,0.12,0.06 rot=60,0,0 mat=3"
+add Blob name=Card02 voxel=0.025 blend=0.008 cutblend=0.008 shapes="box 0,-0.61,4.443 3.3,0.09,2.2 r=0.02 rot=30,0,0 mat=0; -box -0.62,-0.2,3.733 0.36,0.4,0.62 rot=30,0,0; -box 0.62,-0.2,3.733 0.36,0.4,0.62 rot=30,0,0; paint box -0.15,-0.735,4.66 1.45,0.12,0.07 rot=30,0,0 mat=3; paint box 0.4,-0.535,4.313 1.05,0.12,0.06 rot=30,0,0 mat=3"
+add Blob name=Card03 voxel=0.025 blend=0.008 cutblend=0.008 shapes="box 0,0.05,4.62 3.3,0.09,2.2 r=0.02 rot=0,0,0 mat=0; -box -0.62,0.05,3.8 0.36,0.4,0.62 rot=0,0,0; -box 0.62,0.05,3.8 0.36,0.4,0.62 rot=0,0,0; box -0.45,0.05,5.78 0.7,0.045,0.38 r=0.04 rot=0,0,0 mat=2; paint box -0.15,0.05,4.87 1.45,0.12,0.07 rot=0,0,0 mat=3; paint box 0.4,0.05,4.47 1.05,0.12,0.06 rot=0,0,0 mat=3"
+add Blob name=Card04 voxel=0.025 blend=0.008 cutblend=0.008 shapes="box 0,0.71,4.443 3.3,0.09,2.2 r=0.02 rot=-30,0,0 mat=0; -box -0.62,0.3,3.733 0.36,0.4,0.62 rot=-30,0,0; -box 0.62,0.3,3.733 0.36,0.4,0.62 rot=-30,0,0; paint box -0.15,0.835,4.66 1.45,0.12,0.07 rot=-30,0,0 mat=3; paint box 0.4,0.635,4.313 1.05,0.12,0.06 rot=-30,0,0 mat=3"
+add Blob name=Card05 voxel=0.025 blend=0.008 cutblend=0.008 shapes="box 0,1.193,3.96 3.3,0.09,2.2 r=0.02 rot=-60,0,0 mat=0; -box -0.62,0.483,3.55 0.36,0.4,0.62 rot=-60,0,0; -box 0.62,0.483,3.55 0.36,0.4,0.62 rot=-60,0,0; paint box -0.15,1.41,4.085 1.45,0.12,0.07 rot=-60,0,0 mat=3; paint box 0.4,1.063,3.885 1.05,0.12,0.06 rot=-60,0,0 mat=3"
+add Blob name=Card06 voxel=0.025 blend=0.008 cutblend=0.008 shapes="box 0,1.37,3.3 3.3,0.09,2.2 r=0.02 rot=-90,0,0 mat=0; -box -0.62,0.55,3.3 0.36,0.4,0.62 rot=-90,0,0; -box 0.62,0.55,3.3 0.36,0.4,0.62 rot=-90,0,0; box 0.25,2.53,3.3 0.7,0.045,0.38 r=0.04 rot=-90,0,0 mat=2; paint box -0.15,1.62,3.3 1.45,0.12,0.07 rot=-90,0,0 mat=3; paint box 0.4,1.22,3.3 1.05,0.12,0.06 rot=-90,0,0 mat=3"
+add Blob name=Card07 voxel=0.025 blend=0.008 cutblend=0.008 shapes="box 0,1.193,2.64 3.3,0.09,2.2 r=0.02 rot=-120,0,0 mat=0; -box -0.62,0.483,3.05 0.36,0.4,0.62 rot=-120,0,0; -box 0.62,0.483,3.05 0.36,0.4,0.62 rot=-120,0,0; paint box -0.15,1.41,2.515 1.45,0.12,0.07 rot=-120,0,0 mat=3; paint box 0.4,1.063,2.715 1.05,0.12,0.06 rot=-120,0,0 mat=3"
+add Blob name=Card08 voxel=0.025 blend=0.008 cutblend=0.008 shapes="box 0,0.71,2.157 3.3,0.09,2.2 r=0.02 rot=-150,0,0 mat=0; -box -0.62,0.3,2.867 0.36,0.4,0.62 rot=-150,0,0; -box 0.62,0.3,2.867 0.36,0.4,0.62 rot=-150,0,0; paint box -0.15,0.835,1.94 1.45,0.12,0.07 rot=-150,0,0 mat=3; paint box 0.4,0.635,2.287 1.05,0.12,0.06 rot=-150,0,0 mat=3"
+add Blob name=Card09 voxel=0.025 blend=0.008 cutblend=0.008 shapes="box 0,0.05,1.98 3.3,0.09,2.2 r=0.02 rot=-180,0,0 mat=0; -box -0.62,0.05,2.8 0.36,0.4,0.62 rot=-180,0,0; -box 0.62,0.05,2.8 0.36,0.4,0.62 rot=-180,0,0; box 0.95,0.05,0.82 0.7,0.045,0.38 r=0.04 rot=-180,0,0 mat=2; paint box -0.15,0.05,1.73 1.45,0.12,0.07 rot=-180,0,0 mat=3; paint box 0.4,0.05,2.13 1.05,0.12,0.06 rot=-180,0,0 mat=3"
+add Blob name=Card10 voxel=0.025 blend=0.008 cutblend=0.008 shapes="box 0,-0.61,2.157 3.3,0.09,2.2 r=0.02 rot=-210,0,0 mat=0; -box -0.62,-0.2,2.867 0.36,0.4,0.62 rot=-210,0,0; -box 0.62,-0.2,2.867 0.36,0.4,0.62 rot=-210,0,0; paint box -0.15,-0.735,1.94 1.45,0.12,0.07 rot=-210,0,0 mat=3; paint box 0.4,-0.535,2.287 1.05,0.12,0.06 rot=-210,0,0 mat=3"
+add Blob name=Card11 voxel=0.025 blend=0.008 cutblend=0.008 shapes="box 0,-1.093,2.64 3.3,0.09,2.2 r=0.02 rot=-240,0,0 mat=0; -box -0.62,-0.383,3.05 0.36,0.4,0.62 rot=-240,0,0; -box 0.62,-0.383,3.05 0.36,0.4,0.62 rot=-240,0,0; paint box -0.15,-1.31,2.515 1.45,0.12,0.07 rot=-240,0,0 mat=3; paint box 0.4,-0.963,2.715 1.05,0.12,0.06 rot=-240,0,0 mat=3"
+describe
+turnaround /home/poo/Desktop/geppetto-desktop/cabinet/model/rolodex/out shade=material size=512 views=top,front,side name=rolodex
+save /home/poo/Desktop/geppetto-desktop/cabinet/model/rolodex/rolodex.effigy
+export /home/poo/Desktop/geppetto-desktop/cabinet/model/rolodex/out name=rolodex

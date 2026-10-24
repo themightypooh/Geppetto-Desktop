@@ -268,6 +268,10 @@ class FeedTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.feed, self.runs = os.path.join(self.tmp.name, "feed"), os.path.join(self.tmp.name, "runs")
+        self.state = os.path.join(self.tmp.name, "claude-chat.json")
+        # The card's session id lands in claude-chat.json at session init (claude_link._save),
+        # before any of its tool calls reach the gate hook - register it the same way here.
+        Path(self.state).write_text(json.dumps({"session": "card"}))
         self.png = os.path.join(self.tmp.name, "ref.png")
         Path(self.png).write_bytes(b"x")
 
@@ -276,19 +280,20 @@ class FeedTests(unittest.TestCase):
 
     def note(self, session, tool, data):
         claude_feed.note({"session_id": session, "hook_event_name": "PreToolUse", "tool_name": tool,
-                          "tool_input": data, "cwd": self.tmp.name}, feed=self.feed)
+                          "tool_input": data, "cwd": self.tmp.name},
+                         feed=self.feed, runs=self.runs, state=self.state)
 
     def test_only_images_from_sessions_that_matter_pop(self):
         feed = claude_feed.Feed(self.feed, self.runs, clock=lambda: 0)
         self.note("card", "Read", {"file_path": "ref.png"})                 # relative to the session's cwd
         self.note("card", "Read", {"file_path": os.path.join(self.tmp.name, "build.txt")})
         self.note("other", "Read", {"file_path": self.png})                 # a session with no runs: ignored
-        self.note("modeller", "SendUserFile", {"files": [self.png, "missing.jpg"]})
         saved, claude_gate.RUNS = claude_gate.RUNS, self.runs
         try:
-            claude_gate.record_run(123, "modeller")
-        finally:
+            claude_gate.record_run(123, "modeller")                         # a run registers when it starts,
+        finally:                                                            # before the session's pictures
             claude_gate.RUNS = saved
+        self.note("modeller", "SendUserFile", {"files": [self.png, "missing.jpg"]})
         new = feed.poll("card")
         self.assertEqual([(p["session"], p["path"]) for p in new], [("card", self.png), ("modeller", self.png)])
         self.assertEqual(feed.poll("card"), [])                            # read once
@@ -388,8 +393,11 @@ class CardTests(unittest.TestCase):
         self.root.setProperty("claudeOpen", True)
         png = os.path.join(self.tmp.name, "ref.png")
         shutil.copy(os.environ.get("GEPPETTO_PICTURE", str(CABINET / "model" / "appicon" / "ref_flip.png")), png)
+        state = os.path.join(self.tmp.name, "claude-chat.json")             # the link saved its session
+        Path(state).write_text(json.dumps({"session": "card"}))             # id there at init, as in real use
         claude_feed.note({"session_id": "card", "hook_event_name": "PreToolUse", "tool_name": "Read",
-                          "tool_input": {"file_path": png}}, feed=feed_dir)
+                          "tool_input": {"file_path": png}}, feed=feed_dir,
+                         runs=os.path.join(self.tmp.name, "runs"), state=state)
         self.host._poll_pictures()
         self.settle(0.6)
         pop = self.find("claudePicture")

@@ -5,11 +5,23 @@ gets framed; a plain `add X name=N` makes N; `set N ...` edits N. The camera mov
 MOVE_EVERY seconds and holds there for the next revision. Steps without a part (materials, refimages)
 leave the camera where it is.
 """
+import json
+import os
 import re
 import shlex
 import time
 
 MOVE_EVERY = 2.5
+VIEW_PREFS = os.path.expanduser("~/.config/geppetto/chest-view.json")
+
+
+def zoom_to_part_enabled():
+    """Auto-zoom onto the edited part is OFF by default (po, 2026-10-23: "it needs rethinking").
+    Turn it back on with "zoom_to_part": true in ~/.config/geppetto/chest-view.json (read at launch)."""
+    try:
+        return bool(json.load(open(VIEW_PREFS)).get("zoom_to_part", False))
+    except Exception:
+        return False
 _LINE = re.compile(r"^line \d+:\s*")
 
 
@@ -76,7 +88,7 @@ def follow(owner, run, revision, replaying):
     """One pane's hook on each shown revision: the PartFocus kept on `owner` (a pane or the host) gets its op."""
     focus = getattr(owner, "_part_focus", None)
     if focus is None:
-        focus = owner._part_focus = PartFocus(owner.cmd)
+        focus = owner._part_focus = PartFocus(owner.cmd, enabled=zoom_to_part_enabled())   # glow always; camera only if on
     if run and not replaying:
         from live_runs import revision_op
         focus.step(revision_op(run, revision))

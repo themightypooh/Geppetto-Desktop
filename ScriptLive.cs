@@ -147,6 +147,9 @@ public static class ScriptLive
 
     /// <summary>Runs what is pending, in order. False when a line fails: the rest of its piece stays pending
     /// and, in an open run, the document goes back to the last revision so the half-made line is not in it.</summary>
+    /// <summary>A line that is a caption for the next one (echo) or nothing at all, never a step.</summary>
+    static bool IsCaption(string verb) => string.IsNullOrEmpty(verb) || verb.Equals("echo", StringComparison.OrdinalIgnoreCase);
+
     static bool Drain(ref PartStudio studio, LinkedList<(string Text, int Base)> pending, BuildScript.Result result,
         string baseDir, AiLiveRun live, AiLiveControl.Session session, bool open, CancellationToken ct)
     {
@@ -157,17 +160,19 @@ public static class ScriptLive
             BuildScript.Run(doc, text, baseDir,
                 (n, verb, line) =>
                 {
-                    // Pace and pause only gate the lines that change the model; a render or a
-                    // measure between them runs at once.
-                    if (!BuildScript.Mutates(verb)) { ct.ThrowIfCancellationRequested(); return; }
-                    session.BoundaryAsync(ct, mutation: true).GetAwaiter().GetResult();
+                    // Every line is a step the chest lists (po's rule: no step may go missing), so a
+                    // render, save, export or measure is announced like an add. Only an echo is not a
+                    // step of its own: it is the caption of the line after it. Pace and pause still
+                    // gate only the lines that change the model; the rest run at once.
+                    if (IsCaption(verb)) { ct.ThrowIfCancellationRequested(); return; }
+                    session.BoundaryAsync(ct, mutation: BuildScript.Mutates(verb)).GetAwaiter().GetResult();
                     live.Status("building", $"line {at + n}: {Clip(line)}");   // the whole line: the chest's tool wheel reads the tool from it
                 },
                 (n, verb, line) =>
                 {
-                    if (!BuildScript.Mutates(verb)) return;
+                    if (IsCaption(verb)) return;
                     live.Commit(doc, $"line {at + n}: {Clip(line)}");
-                    session.MutationFinished();
+                    if (BuildScript.Mutates(verb)) session.MutationFinished();
                 }, result);
             if (result.Ok) { pending.RemoveFirst(); continue; }
             int failed = result.ErrorLine;
