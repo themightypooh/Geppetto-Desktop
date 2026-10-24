@@ -9,7 +9,16 @@
     <AssemblyName>marionette-desktop</AssemblyName>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Live panes load a 100k+ object document every revision on a worker thread; with workstation GC
+         each gen0 collection paused the render thread 30-70 ms. Server GC (4 heaps, so a cabinet full of
+         pane processes does not reserve a heap per core each) cut that to a frame and halved load time. -->
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
   </PropertyGroup>
+
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.GC.HeapCount" Value="4" />
+  </ItemGroup>
 
   <!--
     The kernel is compiled from source in kernel/Effigy.Kernel.csproj (zero NuGet / engine dependencies)

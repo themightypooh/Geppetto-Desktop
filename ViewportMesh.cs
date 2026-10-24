@@ -175,6 +175,8 @@ public sealed class ViewportMesh : IDisposable
 	public MeshResourceBudget Budget { get; } = new();
 
 	uint _vao, _vbo, _ebo;
+	nuint _vboBytes, _eboBytes;           // allocated sizes, so a reused buffer grows only when needed
+	readonly Dictionary<string, uint> _inheritedTextures = new( StringComparer.Ordinal );
 	bool _uploaded;
 	long _gpuTextureBytes;
 	uint _whiteTexture, _flatNormalTexture, _unitDataTexture;
@@ -225,6 +227,10 @@ public sealed class ViewportMesh : IDisposable
 	public static ViewportMesh FromStudio( PartStudio studio, double loadSeconds, string documentPath )
 	{
 		var sw = Stopwatch.StartNew();
+		if ( LivePieces is { } pieces
+			&& !System.IO.Path.GetFileName( documentPath ).Equals( "camhead.effigy", StringComparison.OrdinalIgnoreCase )
+			&& FromStudioPieces( studio, loadSeconds, pieces ) is { } incremental )
+			return incremental;
 		PolyMesh mesh;
 		if ( System.IO.Path.GetFileName( documentPath ).Equals( "camhead.effigy", StringComparison.OrdinalIgnoreCase ) )
 		{
@@ -274,6 +280,172 @@ public sealed class ViewportMesh : IDisposable
 		var (bodyPicks, picker) = picksTask.GetAwaiter().GetResult();
 		result.BodyPicks = bodyPicks.ToArray();
 		result.Picker = picker;
+		result.ExtractSeconds = sw.Elapsed.TotalSeconds;
+		return result;
+	}
+
+	/// <summary>Live panes: the extracted pieces of each body from earlier revisions, keyed by a hash of
+	/// the body's geometry, so a revision rebuilds only the bodies it changed. One per follower.</summary>
+	public sealed class PieceCache
+	{
+		internal sealed class Piece { public ViewportMesh Part; public Vector3 PickMin, PickMax; public int Used; }
+		internal readonly Dictionary<(ulong, int, int), Piece> Map = new();
+		internal int Generation;
+		/// <summary>Bodies reused / rebuilt by the last build.</summary>
+		public int Hits { get; internal set; }
+		public int Misses { get; internal set; }
+	}
+
+	/// <summary>Set by a live follower around its build (same thread) to take the incremental path.</summary>
+	[ThreadStatic] public static PieceCache LivePieces;
+
+	/// <summary>Per-body layout of <see cref="Vertices"/> (piece key and float offset), so an upload over the
+	/// previous revision's buffers writes only the bodies that changed.</summary>
+	(ulong, int, int)[] _layoutKeys;
+	int[] _layoutOffsets, _layoutLengths;
+
+	static unsafe ulong GeometryHash( PolyMesh m )
+	{
+		// FNV-1a over 8-byte words of the positions, then each face's indices, UVs and material.
+		ulong h = 1469598103934665603UL;
+		static ulong Mix( ulong h, ReadOnlySpan<byte> bytes )
+		{
+			var words = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, ulong>( bytes );
+			foreach ( var w in words ) h = (h ^ w) * 1099511628211UL;
+			for ( int i = words.Length * 8; i < bytes.Length; i++ ) h = (h ^ bytes[i]) * 1099511628211UL;
+			return h;
+		}
+		h = Mix( h, System.Runtime.InteropServices.MemoryMarshal.AsBytes( System.Runtime.InteropServices.CollectionsMarshal.AsSpan( m.Positions ) ) );
+		foreach ( var f in m.Faces )
+		{
+			h = (h ^ (ulong)(uint)f.Material ^ ((ulong)(uint)f.Count << 32)) * 1099511628211UL;
+			h = Mix( h, System.Runtime.InteropServices.MemoryMarshal.AsBytes( f.Indices.AsSpan() ) );
+			if ( f.UVs is { } uv ) h = Mix( h, System.Runtime.InteropServices.MemoryMarshal.AsBytes( uv.AsSpan() ) );
+			else h = (h ^ 0x9E3779B97F4A7C15UL) * 1099511628211UL;
+		}
+		return h;
+	}
+
+	/// <summary>The same mesh <see cref="FromStudio"/> builds for an unrigged, shape-key-free document, made
+	/// from cached per-body pieces: only bodies whose geometry changed are re-extracted (in parallel), the
+	/// rest are copied in. Vertices are laid out body by body; batches stay one per material slot.
+	/// Null (take the full path) for anything rigged or with shape keys.</summary>
+	static ViewportMesh FromStudioPieces( PartStudio studio, double loadSeconds, PieceCache cache )
+	{
+		var sw = Stopwatch.StartNew();
+		if ( studio.Rig is { Count: > 0 } ) return null;
+		var render = new List<Body>();
+		foreach ( var b in studio.Bodies )
+		{
+			if ( b.IsReference || !b.Visible || b.Mesh is null ) continue;
+			if ( b.Mesh.Skin is not null || System.Linq.Enumerable.Any( b.Mesh.ValidMorphs ) ) return null;
+			if ( b.Mesh.FaceCount > 0 && b.Mesh.VertexCount > 0 ) render.Add( b );
+		}
+		if ( render.Count == 0 ) return null;
+		// the merged authored mesh, for the live modifier stack (SourceMesh), beside everything else
+		var sourceTask = System.Threading.Tasks.Task.Run( () => studio.ToMeshWithBodies( b => b.Visible ).Mesh );
+
+		int gen = ++cache.Generation, hits = 0, misses = 0;
+		var keys = new (ulong, int, int)[render.Count];
+		var parts = new PieceCache.Piece[render.Count];
+		System.Threading.Tasks.Parallel.For( 0, render.Count, i =>
+		{
+			var m = render[i].Mesh;
+			keys[i] = (GeometryHash( m ), m.VertexCount, m.FaceCount);
+		} );
+		var build = new List<int>();
+		for ( int i = 0; i < render.Count; i++ )
+		{
+			if ( cache.Map.TryGetValue( keys[i], out var hit ) ) { parts[i] = hit; hits++; }
+			else build.Add( i );
+		}
+		System.Threading.Tasks.Parallel.ForEach( build, i =>
+		{
+			var m = render[i].Mesh;
+			var piece = new PieceCache.Piece { Part = Extract( m, _ => "", null, false, null, 1, 0, retained: false ) };
+			var pmin = new Vector3( float.MaxValue ); var pmax = new Vector3( float.MinValue );
+			foreach ( var p in m.Positions ) { var v = new Vector3( p.x, p.y, p.z ); pmin = Vector3.Min( pmin, v ); pmax = Vector3.Max( pmax, v ); }
+			piece.PickMin = pmin; piece.PickMax = pmax;
+			parts[i] = piece;
+		} );
+		misses = build.Count;
+		for ( int i = 0; i < render.Count; i++ ) { parts[i].Used = gen; cache.Map[keys[i]] = parts[i]; }
+		// keep pieces seen in the last few revisions (a scrub back and forth, an undo) and drop the rest
+		foreach ( var stale in System.Linq.Enumerable.ToList( System.Linq.Enumerable.Where( cache.Map, kv => gen - kv.Value.Used > 3 ) ) )
+			cache.Map.Remove( stale.Key );
+		cache.Hits = hits; cache.Misses = misses;
+
+		// merge: vertices body by body, indices grouped by material slot in first-seen order
+		var offsets = new int[render.Count]; var lengths = new int[render.Count];
+		int floats = 0, indexTotal = 0, tris = 0;
+		for ( int i = 0; i < render.Count; i++ )
+		{
+			offsets[i] = floats; lengths[i] = parts[i].Part.Vertices.Length;
+			floats += lengths[i]; indexTotal += parts[i].Part.Indices.Length; tris += parts[i].Part.TriangleCount;
+		}
+		var vertices = new float[floats];
+		var indices = new uint[indexTotal];
+		System.Threading.Tasks.Parallel.For( 0, render.Count, i =>
+			Array.Copy( parts[i].Part.Vertices, 0, vertices, offsets[i], lengths[i] ) );
+		var slots = new List<int>();
+		foreach ( var piece in parts )
+			foreach ( var batch in piece.Part.Batches )
+				if ( !slots.Contains( batch.MaterialSlot ) ) slots.Add( batch.MaterialSlot );
+		var batches = new List<DrawBatch>( slots.Count );
+		int at = 0;
+		var bmin = new Vector3( float.MaxValue ); var bmax = new Vector3( float.MinValue );
+		foreach ( var slot in slots )
+		{
+			int start = at;
+			for ( int i = 0; i < parts.Length; i++ )
+			{
+				var part = parts[i].Part;
+				uint baseVertex = (uint)(offsets[i] / FloatsPerVertex);
+				foreach ( var batch in part.Batches )
+				{
+					if ( batch.MaterialSlot != slot ) continue;
+					int first = batch.IndexOffset / sizeof( uint );
+					for ( int k = 0; k < batch.IndexCount; k++ ) indices[at++] = part.Indices[first + k] + baseVertex;
+				}
+			}
+			string name = studio.NameForSlot( slot );
+			batches.Add( new DrawBatch( name, MaterialPalette.ForName( name ), start * sizeof( uint ), at - start, slot ) );
+		}
+		foreach ( var piece in parts ) { bmin = Vector3.Min( bmin, piece.Part.BoundsMin ); bmax = Vector3.Max( bmax, piece.Part.BoundsMax ); }
+
+		var bodyPicks = new List<BodyPickEntry>( studio.Bodies.Count );
+		var picker = new MeshPicker();
+		foreach ( var body in studio.Bodies )
+		{
+			if ( !body.Visible || body.Mesh is null || body.Mesh.VertexCount == 0 ) continue;
+			int i = render.IndexOf( body );
+			Vector3 pmin, pmax;
+			if ( i >= 0 ) { pmin = parts[i].PickMin; pmax = parts[i].PickMax; }
+			else
+			{
+				pmin = new Vector3( float.MaxValue ); pmax = new Vector3( float.MinValue );
+				foreach ( var p in body.Mesh.Positions ) { var v = new Vector3( p.x, p.y, p.z ); pmin = Vector3.Min( pmin, v ); pmax = Vector3.Max( pmax, v ); }
+			}
+			studio.BodyBoneMap.TryGetValue( body.Id, out var boneName );
+			picker.Add( body.Mesh );            // Add copies what it needs; no skin to bind on this path
+			bodyPicks.Add( new BodyPickEntry( body.Id, body.Name ?? body.Id, boneName ?? "", pmin, pmax ) );
+		}
+
+		var extent = bmax - bmin;
+		float radius = extent.Length() * 0.5f;
+		if ( radius < 1e-3f ) radius = 1f;
+		var result = new ViewportMesh
+		{
+			Vertices = vertices, BaseVertices = vertices,   // no shape keys: nothing ever deforms a copy
+			Indices = indices, Batches = batches.ToArray(), BodyPicks = bodyPicks.ToArray(),
+			Rig = studio.Rig, HasSkin = false, BoundsMin = bmin, BoundsMax = bmax, Centre = (bmin + bmax) * 0.5f,
+			Radius = radius, TriangleCount = tris, BodyCount = studio.Bodies.Count, LoadSeconds = loadSeconds,
+		};
+		result.Picker = picker;
+		result._layoutKeys = keys; result._layoutOffsets = offsets; result._layoutLengths = lengths;
+		result.SourceMesh = sourceTask.GetAwaiter().GetResult();
+		result._slotNames = slot => studio.NameForSlot( slot );
+		result.Budget.RecordLoad( loadSeconds );
 		result.ExtractSeconds = sw.Elapsed.TotalSeconds;
 		return result;
 	}
@@ -370,7 +542,7 @@ public sealed class ViewportMesh : IDisposable
 	}
 
 
-	static ViewportMesh Extract( PolyMesh mesh, Func<int,string> nameForSlot, Skeleton rig, bool hasSkin, BodyPickEntry[] bodyPicks, int bodyCount, double loadSeconds )
+	static ViewportMesh Extract( PolyMesh mesh, Func<int,string> nameForSlot, Skeleton rig, bool hasSkin, BodyPickEntry[] bodyPicks, int bodyCount, double loadSeconds , bool retained = true )
 	{
 		var sw = Stopwatch.StartNew();
 		if ( hasSkin && rig.Count > MarionettePlayer.MaxGpuBones )
@@ -479,7 +651,7 @@ public sealed class ViewportMesh : IDisposable
 		var result = new ViewportMesh
 		{
 			Vertices = extractedVertices,
-			BaseVertices = (float[])extractedVertices.Clone(),
+			BaseVertices = retained ? (float[])extractedVertices.Clone() : null,   // a cached piece is only copied from
 			Indices = indexList.ToArray(),
 			Batches = batches.ToArray(),
 			BodyPicks = bodyPicks ?? Array.Empty<BodyPickEntry>(),
@@ -501,31 +673,69 @@ public sealed class ViewportMesh : IDisposable
 		return result;
 	}
 
-	public unsafe void Upload( GL gl )
+	public void Upload( GL gl ) => Upload( gl, null );
+
+	/// <summary>Upload, taking over <paramref name="previous"/>'s vertex array, buffers and matching textures
+	/// when it has them (a live pane's last revision): buffers are written in place and grow only when this
+	/// mesh is bigger, and when both meshes have the same per-body layout only the bodies that changed are
+	/// written. <paramref name="previous"/> keeps its CPU data but no GPU objects; ReleaseGpu it as usual.</summary>
+	public unsafe void Upload( GL gl, ViewportMesh previous )
 	{
 		if ( _uploaded ) return;
 		var uploadClock = Stopwatch.StartNew();
 
-		_vao = gl.GenVertexArray();
-		_vbo = gl.GenBuffer();
-		_ebo = gl.GenBuffer();
+		bool reuse = previous is not null && !ReferenceEquals( previous, this ) && previous._uploaded && previous._vao != 0;
+		if ( reuse )
+		{
+			_vao = previous._vao; _vbo = previous._vbo; _ebo = previous._ebo;
+			_vboBytes = previous._vboBytes; _eboBytes = previous._eboBytes;
+			previous._vao = previous._vbo = previous._ebo = 0; previous._vboBytes = previous._eboBytes = 0;
+			foreach ( var kv in previous._ownedTextures ) _inheritedTextures[kv.Key] = kv.Value;
+			previous._ownedTextures.Clear();
+		}
+		else
+		{
+			_vao = gl.GenVertexArray();
+			_vbo = gl.GenBuffer();
+			_ebo = gl.GenBuffer();
+		}
 
 		gl.BindVertexArray( _vao );
 
 		gl.BindBuffer( BufferTargetARB.ArrayBuffer, _vbo );
+		nuint vertexBytes = (nuint)(Vertices.Length * sizeof( float ));
 		fixed ( float* raw = Vertices )
 		{
-			gl.BufferData( BufferTargetARB.ArrayBuffer,
-				(nuint)(Vertices.Length * sizeof( float )), raw,
-				BufferUsageARB.StaticDraw );
+			bool sameLayout = reuse && vertexBytes <= _vboBytes && previous._layoutKeys is { } pk && _layoutKeys is { } nk
+				&& pk.Length == nk.Length && System.Linq.Enumerable.SequenceEqual( previous._layoutOffsets, _layoutOffsets )
+				&& System.Linq.Enumerable.SequenceEqual( previous._layoutLengths, _layoutLengths );
+			if ( vertexBytes > _vboBytes )
+			{
+				// grow with headroom so a model that keeps growing does not reallocate every revision
+				_vboBytes = reuse ? vertexBytes + vertexBytes / 4 : vertexBytes;
+				gl.BufferData( BufferTargetARB.ArrayBuffer, _vboBytes, null, BufferUsageARB.DynamicDraw );
+				gl.BufferSubData( BufferTargetARB.ArrayBuffer, 0, vertexBytes, raw );
+			}
+			else if ( sameLayout )
+			{
+				for ( int i = 0; i < _layoutKeys.Length; i++ )
+					if ( _layoutKeys[i] != previous._layoutKeys[i] )
+						gl.BufferSubData( BufferTargetARB.ArrayBuffer, (nint)(_layoutOffsets[i] * sizeof( float )),
+							(nuint)(_layoutLengths[i] * sizeof( float )), raw + _layoutOffsets[i] );
+			}
+			else gl.BufferSubData( BufferTargetARB.ArrayBuffer, 0, vertexBytes, raw );
 		}
 
 		gl.BindBuffer( BufferTargetARB.ElementArrayBuffer, _ebo );
+		nuint indexBytes = (nuint)(Indices.Length * sizeof( uint ));
 		fixed ( uint* raw = Indices )
 		{
-			gl.BufferData( BufferTargetARB.ElementArrayBuffer,
-				(nuint)(Indices.Length * sizeof( uint )), raw,
-				BufferUsageARB.StaticDraw );
+			if ( indexBytes > _eboBytes )
+			{
+				_eboBytes = reuse ? indexBytes + indexBytes / 4 : indexBytes;
+				gl.BufferData( BufferTargetARB.ElementArrayBuffer, _eboBytes, null, reuse ? BufferUsageARB.DynamicDraw : BufferUsageARB.StaticDraw );
+			}
+			gl.BufferSubData( BufferTargetARB.ElementArrayBuffer, 0, indexBytes, raw );
 		}
 
 		const uint stride = FloatsPerVertex * sizeof( float );
@@ -564,6 +774,8 @@ public sealed class ViewportMesh : IDisposable
 
 		gl.BindVertexArray( 0 );
 		_uploaded = true;
+		foreach ( var leftover in _inheritedTextures.Values ) gl.DeleteTexture( leftover );   // maps the new revision dropped
+		_inheritedTextures.Clear();
 
 		// M4 budget: driver-side storage for the owned maps plus the three shared fallbacks
 		// (white, flat normal, unit data — one texel each).
@@ -584,7 +796,7 @@ public sealed class ViewportMesh : IDisposable
 			Convert.ToHexString( SHA256.HashData( image.Rgba ) );
 		if ( !_ownedTextures.TryGetValue( key, out uint texture ) )
 		{
-			_ownedTextures[key] = texture = CreateTexture( gl, image, binding, srgb );
+			_ownedTextures[key] = texture = _inheritedTextures.Remove( key, out uint kept ) ? kept : CreateTexture( gl, image, binding, srgb );
 			_gpuTextureBytes += (long)image.Width * image.Height * 4; // RGBA8 or sRGB8: 4 bytes/texel
 		}
 		return texture;
@@ -841,6 +1053,7 @@ public sealed class ViewportMesh : IDisposable
 		_batchOcclusionTextures = null;
 		_batchUv = null;
 		_morphApplied = false;
+		_vao = _vbo = _ebo = 0; _vboBytes = _eboBytes = 0;
 		_uploaded = false;
 	}
 }

@@ -18,6 +18,7 @@ public sealed class AiLivePreview : IDisposable
     readonly object gate = new();
     readonly CancellationTokenSource stop = new();
     readonly string root;
+    readonly ViewportMesh.PieceCache pieces = new();   // used only by the loader thread
     Update? pending;
     JsonObject? state;
     long seek, seekLoaded;      // replay: 0 follows the latest revision, N pins revision N
@@ -106,8 +107,16 @@ public sealed class AiLivePreview : IDisposable
             throw new IOException("Invalid preview revision path.");
         var clock = System.Diagnostics.Stopwatch.StartNew();
         var studio = StudioCache.Load(path, out string note);
-        var mesh = !studio.Bodies.Any(b => b.Visible && b.Mesh is { FaceCount: > 0 })
-            ? EmptyMesh() : DocumentSession.CreateEffigy(path, studio).BuildSnapshot().Mesh;
+        // per-body pieces from earlier revisions: only the bodies this revision changed are re-extracted
+        ViewportMesh.LivePieces = pieces;
+        ViewportMesh mesh;
+        try
+        {
+            mesh = !studio.Bodies.Any(b => b.Visible && b.Mesh is { FaceCount: > 0 })
+                ? EmptyMesh() : DocumentSession.CreateEffigy(path, studio).BuildSnapshot().Mesh;
+        }
+        finally { ViewportMesh.LivePieces = null; }
+        note += $"; {pieces.Hits} body(ies) reused, {pieces.Misses} rebuilt";
         var refs = studio.ReferenceImages.Select(r => r.Clone()).ToArray();
         var update = new Update(mesh, path, id, documentId, revision, clock.Elapsed.TotalMilliseconds, note, committedAt, refs);
         lock (gate)

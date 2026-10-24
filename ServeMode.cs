@@ -347,7 +347,7 @@ public static class ServeMode
 							try
 							{
 								var upload = Stopwatch.StartNew();
-								if ( update.Mesh.TriangleCount > 0 ) update.Mesh.Upload( gl );
+								if ( update.Mesh.TriangleCount > 0 ) update.Mesh.Upload( gl, mesh );   // in place over the last revision's buffers
 								if ( gl.GetError() is var uploadError && uploadError != GLEnum.NoError ) throw new InvalidOperationException( $"Preview upload: {uploadError}" );
 								var old = mesh; mesh = update.Mesh; player = null;
 								if ( face.Sync( mesh, update.Path ) && face.HasRig ) Emit( face.Snapshot() );

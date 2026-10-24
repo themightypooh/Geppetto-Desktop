@@ -11,6 +11,12 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <Deterministic>true</Deterministic>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <!-- The SDK stamps the git commit into InformationalVersion, which changed this assembly's
+         ModuleVersionId (the StudioCache key) on EVERY commit, even with no kernel edit: a viewer and a
+         writer built at different commits then missed every cache entry (~16 s rebuild per live revision).
+         Pinned to the value the kernel was built with on 2026-10-24 so existing caches stay warm. -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <InformationalVersion>1.0.0+4af78c252dd5b9b0b362f7292f7798c9be304f20</InformationalVersion>
   </PropertyGroup>
 
   <!--
