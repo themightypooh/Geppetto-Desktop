@@ -215,7 +215,7 @@ public static class AdvancedIkService
 	/// +stride/2 to -stride/2 relative to the body; during swing it returns with a
 	/// sine arc of <paramref name="height"/>.
 	/// </summary>
-	public static List<FootPlan> FootPlan( GaitType type, int footIndex, int footCount, int frames, float stride, float height, Vec3 bindPosition )
+	public static List<FootPlan> PlanGait( GaitType type, int footIndex, int footCount, int frames, float stride, float height, Vec3 bindPosition )
 	{
 		if ( frames <= 0 )
 			throw new ArgumentOutOfRangeException( nameof( frames ) );

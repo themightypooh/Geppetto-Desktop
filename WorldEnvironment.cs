@@ -268,7 +268,7 @@ public static class EnvironmentPresets
 
     public static EnvironmentPreset Get(string name)
     {
-        if (TryGet(name, out var preset)) return preset;
+        if (TryGet(name, out var preset) && preset is not null) return preset;
         throw new ArgumentException($"Unknown environment preset '{name}'. Presets: {string.Join(", ", Names)}.");
     }
 

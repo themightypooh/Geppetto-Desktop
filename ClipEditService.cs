@@ -306,6 +306,11 @@ public static class ClipEditService
 
 		return cmd;
 	}
+// Lane K additions are guarded: they need Lane K kernel types (RigChannel,
+// FCurveModifier, ScalarKey, RigTrack.ChannelCurves/EvaluateWithChannels) that
+// the desktop kernel mirror (kernel/Effigy) does not have until Lane P syncs
+// RigAnimFile.cs/ClipKeys.cs into it. Lane P: delete the #if/#endif pair at sync.
+#if LANE_K_KERNEL
 	/// <summary>Lane K: key one scalar channel curve, as an undoable command. The
 	/// sampling stays in the kernel (<see cref="RigTrack.ChannelValue"/>); this only
 	/// writes the key and remembers the old curve for undo.</summary>
@@ -477,4 +482,5 @@ public static class ClipEditService
 			}
 		);
 	}
+#endif // LANE_K_KERNEL
 }
