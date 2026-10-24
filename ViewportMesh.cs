@@ -241,32 +241,38 @@ public sealed class ViewportMesh : IDisposable
 		if ( mesh is null || mesh.FaceCount == 0 || mesh.VertexCount == 0 )
 			throw new InvalidOperationException( "document produced no visible mesh" );
 
-		// Build per-body AABB pick table for 3D viewport inspection.
-		var bodyPicks = new List<BodyPickEntry>( studio.Bodies.Count );
-		var picker = new MeshPicker();
-		foreach ( var body in studio.Bodies )
+		// Build per-body AABB pick table for 3D viewport inspection, off to the side of the merged extract.
+		var picksTask = System.Threading.Tasks.Task.Run( () =>
 		{
-			if ( !body.Visible || body.Mesh is null || body.Mesh.VertexCount == 0 ) continue;
-			var pmin = new Vector3( float.MaxValue );
-			var pmax = new Vector3( float.MinValue );
-			foreach ( var p in body.Mesh.Positions )
+			var bodyPicks = new List<BodyPickEntry>( studio.Bodies.Count );
+			var picker = new MeshPicker();
+			foreach ( var body in studio.Bodies )
 			{
-				var pv = new Vector3( p.x, p.y, p.z );
-				pmin = Vector3.Min( pmin, pv );
-				pmax = Vector3.Max( pmax, pv );
+				if ( !body.Visible || body.Mesh is null || body.Mesh.VertexCount == 0 ) continue;
+				var pmin = new Vector3( float.MaxValue );
+				var pmax = new Vector3( float.MinValue );
+				foreach ( var p in body.Mesh.Positions )
+				{
+					var pv = new Vector3( p.x, p.y, p.z );
+					pmin = Vector3.Min( pmin, pv );
+					pmax = Vector3.Max( pmax, pv );
+				}
+				studio.BodyBoneMap.TryGetValue( body.Id, out var boneName );
+				var pickMesh = body.Mesh.Clone();
+				if ( studio.Rig is { Count: > 0 } )
+					pickMesh.Skin = SkinBinder.BindBodies( pickMesh,
+						new[] { new BodyRange( body.Id, body.Name, 0, pickMesh.VertexCount, pickMesh.IsRigged ) },
+						studio.BodyBoneMap, studio.Rig );
+				picker.Add( pickMesh );
+				bodyPicks.Add( new BodyPickEntry( body.Id, body.Name ?? body.Id, boneName ?? "", pmin, pmax ) );
 			}
-			studio.BodyBoneMap.TryGetValue( body.Id, out var boneName );
-			var pickMesh = body.Mesh.Clone();
-			if ( studio.Rig is { Count: > 0 } )
-				pickMesh.Skin = SkinBinder.BindBodies( pickMesh,
-					new[] { new BodyRange( body.Id, body.Name, 0, pickMesh.VertexCount, pickMesh.IsRigged ) },
-					studio.BodyBoneMap, studio.Rig );
-			picker.Add( pickMesh );
-			bodyPicks.Add( new BodyPickEntry( body.Id, body.Name ?? body.Id, boneName ?? "", pmin, pmax ) );
-		}
 
+			return (bodyPicks, picker);
+		} );
 		var hasSkin = mesh.Skin is not null && mesh.Skin.Count == mesh.VertexCount && studio.Rig is { Count: > 0 };
-		var result = Extract( mesh, slot => studio.NameForSlot( slot ), studio.Rig, hasSkin, bodyPicks.ToArray(), studio.Bodies.Count, loadSeconds );
+		var result = Extract( mesh, slot => studio.NameForSlot( slot ), studio.Rig, hasSkin, null, studio.Bodies.Count, loadSeconds );
+		var (bodyPicks, picker) = picksTask.GetAwaiter().GetResult();
+		result.BodyPicks = bodyPicks.ToArray();
 		result.Picker = picker;
 		result.ExtractSeconds = sw.Elapsed.TotalSeconds;
 		return result;
@@ -371,7 +377,14 @@ public sealed class ViewportMesh : IDisposable
 			throw new NotSupportedException( $"This viewport supports at most {MarionettePlayer.MaxGpuBones} bones; this rig has {rig.Count}." );
 		var (cornerNormals, normals) = MeshNormals.ComputeCornerNormals(
 			mesh, MeshNormals.DefaultSmoothingAngleDegrees );
-		var cornerTangents = NormalBake.ExportTangents( mesh, cornerNormals, normals );
+		// Tangents, the morph corner map and the morph deltas only read the mesh: build them side by side
+		// (they were ~60% of a live revision's load on a 175k-tri model, one after another).
+		var tangentsTask = System.Threading.Tasks.Task.Run( () => NormalBake.ExportTangents( mesh, cornerNormals, normals ) );
+		// A mesh with no shape keys needs neither (ApplyMorphWeights and the Face Poser treat null as none).
+		bool morphed = System.Linq.Enumerable.Any( mesh.ValidMorphs );
+		var cornerMapTask = morphed ? System.Threading.Tasks.Task.Run( () => CornerVertexMap.FromMeshBucketed( mesh, slot => nameForSlot( slot ) ) ) : System.Threading.Tasks.Task.FromResult<CornerVertexMap>( null );
+		var morphsTask = morphed ? System.Threading.Tasks.Task.Run( () => RetainedMeshMorphs.FromMesh( mesh, computeNormalDeltas: true ) ) : System.Threading.Tasks.Task.FromResult<RetainedMeshMorphs>( null );
+		var cornerTangents = tangentsTask.GetAwaiter().GetResult();
 
 		var buckets = new Dictionary<int, List<int>>();
 		for ( var fi = 0; fi < mesh.FaceCount; fi++ )
@@ -480,8 +493,8 @@ public sealed class ViewportMesh : IDisposable
 			BodyCount = bodyCount,
 			LoadSeconds = loadSeconds,
 			ExtractSeconds = sw.Elapsed.TotalSeconds,
-			MorphCornerMap = CornerVertexMap.FromMeshBucketed( mesh, slot => nameForSlot( slot ) ),
-			Morphs = RetainedMeshMorphs.FromMesh( mesh, computeNormalDeltas: true ),
+			MorphCornerMap = cornerMapTask.GetAwaiter().GetResult(),
+			Morphs = morphsTask.GetAwaiter().GetResult(),
 		};
 		result.SourceMesh = mesh; result._slotNames = nameForSlot;
 		result.Budget.RecordLoad( loadSeconds );
