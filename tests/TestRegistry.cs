@@ -93,6 +93,7 @@ internal static class DesktopTestHost
             AiBuilderHealerTests.Register( registry, settings );
             AiLiveTests.Register( registry, settings );
             ViewportCorrectionTests.Register( registry, settings );
+            OpenScriptStepTests.Register( registry, settings );
             HarnessTests.Register( registry, settings );
             AssetPathTests.Register( registry, settings );
             DocumentSessionTests.Register( registry, settings );

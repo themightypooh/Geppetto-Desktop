@@ -321,12 +321,16 @@ class CardTests(unittest.TestCase):
             chest._viewport_type_registered = True
         cls.tmp = tempfile.TemporaryDirectory()
         cls.host = chest.Host()
+        # This UI fixture must never discover/follow the user's actual live runs.
+        cls.host.runTimer.stop()
+        cls.host.pictureTimer.stop()
         cls.host._preferences_path = "/nonexistent/geppetto-test/preferences.json"
         cls.host.claude.close()
         cls.sent = []
         cls.host.claude = claude_link.ClaudeLink(on_change=cls.host.claudeChanged.emit,
-                                                 spawn=lambda a, **k: FakeProc(a, **k),
-                                                 state_path=os.path.join(cls.tmp.name, "chat.json"))
+                                                  spawn=lambda a, **k: FakeProc(a, **k),
+                                                  state_path=os.path.join(cls.tmp.name, "chat.json"), lockdown=True)
+        cls.host._claude_log.link = cls.host.claude
         chest.HOST = cls.host
         cls.engine = QQmlApplicationEngine()
         cls.engine.rootContext().setContextProperty("host", cls.host)

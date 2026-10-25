@@ -305,12 +305,21 @@ Window {
         window = engine.rootObjects()[0]
         try:
             self.settle()
+            destination = Path("/tmp/opencode/c1-previews")
+            destination.mkdir(exist_ok=True)
+            for pane in range(1, 5):
+                key = self.find(window, "viewportStop%d" % pane)
+                self.assertEqual(key.property("text"), "PAUSE")
+                self.assertGreaterEqual(key.width(), key.property("implicitWidth"))
+            window.grabWindow().save(str(destination / ("pause-lower-center-scale%s.png" % os.environ.get("QT_SCALE_FACTOR", "1"))))
             for layout in (1, 2, 4):
                 window.setProperty("panes", layout)
                 self.settle()
                 for n in range(1, layout + 1):
                     key = self.find(window, "viewportStop%d" % n)
                     self.assertIsNotNone(key, warnings)
+                    self.assertAlmostEqual(key.x() + key.width()/2, key.parentItem().width()/2, delta=1)
+                    self.assertAlmostEqual(key.y() + key.height(), key.parentItem().height() - 12, delta=1)
                     pos = key.mapToScene(QPointF(key.width()/2, key.height()/2))
                     QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, pos.toPoint())
                     self.settle()
@@ -340,6 +349,15 @@ Window {
                     chat_size = (chat.width(), chat.height())
                     window.resize(width, height)
                     self.settle()
+                    for pane in range(1, layout + 1):
+                        key = self.find(window, "viewportStop%d" % pane)
+                        parent = key.parentItem()
+                        self.assertAlmostEqual(key.x() + key.width()/2, parent.width()/2, delta=1)
+                        self.assertAlmostEqual(key.y() + key.height(), parent.height() - 12, delta=1)
+                        self.assertGreaterEqual(key.x(), 0)
+                        self.assertGreaterEqual(key.y(), 0)
+                        self.assertLessEqual(key.x() + key.width(), parent.width())
+                        self.assertLessEqual(key.y() + key.height(), parent.height())
                     self.assertEqual((chat.width(), chat.height()), chat_size, "viewport resizing must not squash the chat")
                     image = window.grabWindow()
                     self.assertFalse(image.isNull())

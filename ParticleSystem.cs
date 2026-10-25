@@ -10,11 +10,69 @@ namespace Marionette.Desktop;
 // Ticket 17: deterministic fixed-step particle system (CPU reference). Units are kernel inches,
 // Z-up, seconds. GpuParticleSystem runs the same per-particle integration in a compute shader;
 // any change to Integrate/ParticleMath must be mirrored in GpuParticleSystem's GLSL.
+// The Integrate collision report is CPU-only event reporting, not physics, and has no
+// GLSL counterpart (a GPU-driven system cannot raise per-particle events).
 
 public enum ParticleEmitterShape { Point, Area, MeshSurface, Box, Sphere }
 
 /// <summary>How a renderer should draw the particles. The simulation is identical for all three.</summary>
 public enum ParticleRenderType { Billboard, MeshInstance, Strand }
+
+/// <summary>Why a particle died: Expired = its lifetime ran out; Killed = a kill volume
+/// removed it; Collision = <see cref="ParticleEmitter.DieOnCollision"/> removed it on contact.</summary>
+public enum ParticleDeathReason { Expired, Killed, Collision }
+
+/// <summary>What a particle hit: the ground plane or the collision mesh.</summary>
+public enum ParticleCollisionKind { Ground, Mesh }
+
+/// <summary>Snapshot fired on <see cref="ParticleSystem.OnDeath"/>. Position/Velocity are the
+/// particle's final values; handlers must not mutate the system from the callback
+/// (no Step/AddEmitter/TriggerCue) — children are spawned by the system itself.</summary>
+public readonly record struct ParticleDeathInfo( int Slot, Vector3 Position, Vector3 Velocity, float Age, int Depth, ParticleDeathReason Reason );
+
+/// <summary>Snapshot fired on <see cref="ParticleSystem.OnCollision"/>. Velocity is the
+/// pre-response impact velocity; Normal is the contact normal.</summary>
+public readonly record struct ParticleCollisionInfo( int Slot, Vector3 Position, Vector3 Normal, Vector3 Velocity, ParticleCollisionKind Kind );
+
+/// <summary>Shape of a kill volume. A plane kills particles on the side its normal points away
+/// from (Normal·x &lt; Offset); a sphere kills inside when KillInside, outside otherwise.</summary>
+public enum ParticleKillVolumeKind { Plane, Sphere }
+
+/// <summary>A kill volume: an arbitrary plane or sphere that removes particles, beyond the
+/// ground plane and the collision mesh. Checked after every substep; an empty list is off.</summary>
+public sealed class ParticleKillVolume
+{
+	public ParticleKillVolumeKind Kind = ParticleKillVolumeKind.Plane;
+	public Vector3 Normal = new( 0, 0, 1 );
+	public float Offset;
+	public Vector3 Center;
+	public float Radius = 1f;
+	/// <summary>Sphere only: true = kill inside, false = kill outside. Ignored for planes.</summary>
+	public bool KillInside = true;
+
+	internal void Validate( int index )
+	{
+		if ( !ParticleMath.Finite( Normal ) || !ParticleMath.Finite( Center ) )
+			throw new ArgumentException( $"Kill volume {index}: normal/center must be finite." );
+		if ( Kind == ParticleKillVolumeKind.Plane && Normal.LengthSquared() < 1e-12f )
+			throw new ArgumentException( $"Kill volume {index}: plane normal must be non-zero." );
+		if ( Kind == ParticleKillVolumeKind.Sphere && ( !float.IsFinite( Radius ) || Radius <= 0 ) )
+			throw new ArgumentException( $"Kill volume {index}: sphere radius must be > 0." );
+		if ( Kind != ParticleKillVolumeKind.Plane && Kind != ParticleKillVolumeKind.Sphere )
+			throw new ArgumentException( $"Kill volume {index}: unknown kind {Kind}." );
+	}
+
+	internal bool Kills( Vector3 pos )
+	{
+		if ( Kind == ParticleKillVolumeKind.Plane )
+		{
+			var n = Vector3.Normalize( Normal );
+			return Vector3.Dot( n, pos ) < Offset;
+		}
+		float d = (pos - Center).Length();
+		return KillInside ? d < Radius : d > Radius;
+	}
+}
 
 /// <summary>Per-slot simulation state. 64 bytes, laid out as four std430 vec4s so the same
 /// array uploads unchanged to <see cref="GpuParticleSystem"/>.</summary>
@@ -230,6 +288,48 @@ public sealed class ParticleMesh
 }
 
 /// <summary>An emitter. Configure before or between steps; values are validated on each step.</summary>
+/// <summary>
+/// A child emitter fired when a particle dies or collides. The child is either a preset
+/// (ChildPreset, resolved through <see cref="ParticleEmitterPresets.ResolveName"/>) or an
+/// inline template (ChildTemplate, cloned per trigger); exactly one must be set.
+/// Children spawn at the trigger position with BaseVelocity = parent velocity × VelocityInherit,
+/// at the end of the step in which the parent died or collided, and begin integrating the
+/// next step. Depth: a depth-0 particle's children are depth 1, and so on; a spawn whose
+/// child depth would exceed MaxDepth is suppressed (counted, or thrown when
+/// ThrowOnDepthExceeded). Preset children carry no sub-emitter of their own, so preset
+/// chains always terminate at depth 1; template chains terminate at MaxDepth.
+/// </summary>
+public sealed class ParticleSubEmitter
+{
+	public string? ChildPreset;
+	public ParticleEmitter? ChildTemplate;
+	/// <summary>Children spawned per trigger. Must be 1..1024 (0 would be a silent no-op).</summary>
+	public int Count = 1;
+	/// <summary>Fraction of the parent's velocity inherited by children, 0..1.</summary>
+	public float VelocityInherit;
+	/// <summary>Deepest child depth this sub-emitter may spawn. Default 1: a firework's sparks
+	/// never spawn grandchildren. 0..16.</summary>
+	public int MaxDepth = 1;
+	/// <summary>When true, a spawn suppressed by MaxDepth throws instead of being counted.
+	/// Default false: suppression is counted in <see cref="ParticleSystem.SubEmitterSuppressedCount"/>
+	/// because throwing mid-step would crash normal firework chains when children die.</summary>
+	public bool ThrowOnDepthExceeded;
+
+	internal void Validate( string who )
+	{
+		if ( (ChildPreset is null) == (ChildTemplate is null) )
+			throw new ArgumentException( $"{who}: exactly one of ChildPreset / ChildTemplate must be set." );
+		if ( ChildPreset is not null && ParticleEmitterPresets.ResolveName( ChildPreset ) is null )
+			throw new ArgumentException( $"{who}: unknown child preset '{ChildPreset}'." );
+		if ( Count < 1 || Count > 1024 )
+			throw new ArgumentException( $"{who}: Count must be 1..1024." );
+		if ( !float.IsFinite( VelocityInherit ) || VelocityInherit < 0 || VelocityInherit > 1 )
+			throw new ArgumentException( $"{who}: VelocityInherit must be 0..1." );
+		if ( MaxDepth < 0 || MaxDepth > 16 )
+			throw new ArgumentException( $"{who}: MaxDepth must be 0..16." );
+	}
+}
+
 public sealed class ParticleEmitter
 {
 	public ParticleEmitterShape Shape = ParticleEmitterShape.Point;
@@ -261,11 +361,19 @@ public sealed class ParticleEmitter
 	/// <summary>Max angular speed (rad/s) about a random axis; initial rotation is random when > 0.</summary>
 	public float AngularSpeedMax;
 	public bool Enabled = true;
+	/// <summary>Children spawned when one of this emitter's particles dies (any reason).</summary>
+	public ParticleSubEmitter? DeathSubEmitter;
+	/// <summary>Children spawned when one of this emitter's particles contacts ground/mesh.</summary>
+	public ParticleSubEmitter? CollisionSubEmitter;
+	/// <summary>Hide on Contact: the particle dies on its first ground/mesh contact.</summary>
+	public bool DieOnCollision;
 
 	internal ParticleRng Rng;
 	internal double RateRemainder;
 
-	internal void Validate( int index )
+	internal void Validate( int index ) => Validate( index, 0 );
+
+	internal void Validate( int index, int depth )
 	{
 		ParticleEmitterName who = new( index );
 		if ( !ParticleMath.Finite( Position ) || !ParticleMath.Finite( Direction ) || !ParticleMath.Finite( BaseVelocity ) )
@@ -303,6 +411,41 @@ public sealed class ParticleEmitter
 			case ParticleEmitterShape.Point: break;
 			default: throw new ArgumentException( $"{who}: unknown shape {Shape}." );
 		}
+		ValidateSubs( who, depth );
+	}
+
+	/// <summary>Validate this emitter's sub-emitter configs, recursing into child templates
+	/// (depth-capped; true cycles are rejected at AddEmitter time).</summary>
+	void ValidateSubs( ParticleEmitterName who, int depth )
+	{
+		ValidateSub( DeathSubEmitter, who, depth );
+		ValidateSub( CollisionSubEmitter, who, depth );
+	}
+
+	void ValidateSub( ParticleSubEmitter? sub, ParticleEmitterName who, int depth )
+	{
+		if ( sub is null ) return;
+		sub.Validate( $"{who} sub-emitter" );
+		if ( sub.ChildTemplate is null ) return;
+		if ( ReferenceEquals( sub.ChildTemplate, this ) )
+			throw new ArgumentException( $"{who} sub-emitter: ChildTemplate must not be the emitter itself." );
+		if ( depth >= 32 )
+			throw new ArgumentException( $"{who} sub-emitter: template chain too deep." );
+		sub.ChildTemplate.Validate( -1, depth + 1 );
+	}
+
+	/// <summary>Clone for sub-emitter spawning: spawn fields only, no rate/bursts (the child
+	/// is spawned directly, never added as an emitter). Position/BaseVelocity are set by the caller.</summary>
+	internal ParticleEmitter CloneForChild()
+	{
+		return new ParticleEmitter
+		{
+			Shape = Shape, AreaU = AreaU, AreaV = AreaV, BoxHalfExtents = BoxHalfExtents, SphereRadius = SphereRadius, Mesh = Mesh,
+			LifetimeMin = LifetimeMin, LifetimeMax = LifetimeMax, SizeMin = SizeMin, SizeMax = SizeMax,
+			Direction = Direction, UseSurfaceNormal = UseSurfaceNormal, Speed = Speed, SpeedJitter = SpeedJitter,
+			SpreadDegrees = SpreadDegrees, AngularSpeedMax = AngularSpeedMax,
+			DeathSubEmitter = DeathSubEmitter, CollisionSubEmitter = CollisionSubEmitter, DieOnCollision = DieOnCollision,
+		};
 	}
 }
 
@@ -349,6 +492,8 @@ public sealed class ParticleSystemSettings
 	public ParticleRenderType RenderType = ParticleRenderType.Billboard;
 	/// <summary>Strand type: points of trailing history kept per particle (0 = off). Ring buffer, one point per step.</summary>
 	public int StrandPoints;
+	/// <summary>Kill volumes checked after every substep. Empty = off (default).</summary>
+	public List<ParticleKillVolume> KillVolumes = new();
 
 	public void Validate()
 	{
@@ -369,6 +514,7 @@ public sealed class ParticleSystemSettings
 		if ( !float.IsFinite( Friction ) || Friction < 0 || Friction > 1 ) throw new ArgumentOutOfRangeException( nameof( Friction ), "Friction must be 0..1." );
 		if ( StrandPoints < 0 || StrandPoints > 256 ) throw new ArgumentOutOfRangeException( nameof( StrandPoints ), "StrandPoints must be 0..256." );
 		if ( RenderType == ParticleRenderType.Strand && StrandPoints < 2 ) throw new ArgumentException( "Strand render type needs StrandPoints >= 2." );
+		for ( int i = 0; i < KillVolumes.Count; i++ ) KillVolumes[i].Validate( i );
 	}
 }
 
@@ -497,7 +643,14 @@ public static class ParticleMath
 /// Fixed-timestep, seeded particle system. <see cref="Step"/> advances exactly one fixed step:
 /// expire → emit → <see cref="ParticleSystemSettings.Substeps"/> × (forces, integrate, collide).
 /// After the first step the CPU path does not allocate.
+/// Death/collision events and sub-emitter children are CPU-path only: children queued by a
+/// step's deaths and contacts spawn after that step's integration and begin integrating the
+/// next step; kill volumes are checked after every substep.
 /// </summary>
+/// <summary>First contact in one Integrate substep. Internal: the public event carries
+/// <see cref="ParticleCollisionInfo"/> with the slot attached.</summary>
+internal readonly record struct ParticleCollisionHit( bool Hit, Vector3 Position, Vector3 Normal, Vector3 Velocity, ParticleCollisionKind Kind );
+
 public sealed class ParticleSystem
 {
 	public ParticleSystemSettings Settings { get; }
@@ -526,11 +679,35 @@ public sealed class ParticleSystem
 	readonly int[] _idxA, _idxB;
 	readonly int[] _radixCounts = new int[256];
 
+	// Per-slot sub-emitter state, set at spawn from the spawning emitter.
+	readonly int[] _slotDepth;
+	readonly ParticleSubEmitter?[] _slotDeathSub;
+	readonly ParticleSubEmitter?[] _slotCollisionSub;
+	readonly bool[] _slotDieOnCollision;
+
+	// Children queued by deaths/contacts this step, flushed after integration.
+	readonly List<PendingChild> _pendingChildren = new();
+	ParticleRng _childRng;
+
+	/// <summary>Deterministic stream for sub-emitter children (never touches main emitter streams).</summary>
+	const int ChildStream = 0x4348494C;
+
+	readonly record struct PendingChild( ParticleSubEmitter Sub, Vector3 Position, Vector3 Velocity, int Depth );
+
 	public long StepIndex { get; private set; }
 	public int AliveCount { get; private set; }
 	/// <summary>Highest used slot + 1. Live particles are in slots [0, HighWater) with Alive == 1.</summary>
 	public int HighWater => _highWater;
 	public long DroppedForCapacity { get; private set; }
+	/// <summary>Fired when a particle dies, for any reason. Handlers must not mutate the system.</summary>
+	public event Action<ParticleDeathInfo>? OnDeath;
+	/// <summary>Fired on a particle's first ground/mesh contact per substep. CPU path only:
+	/// a GPU-driven system cannot raise per-particle events.</summary>
+	public event Action<ParticleCollisionInfo>? OnCollision;
+	/// <summary>Death/contact child spawns suppressed by MaxDepth (see ThrowOnDepthExceeded).</summary>
+	public long SubEmitterSuppressedCount { get; private set; }
+	/// <summary>Children queued this step, not yet flushed. Always 0 after a Step() returns.</summary>
+	public int PendingChildCount => _pendingChildren.Count;
 	public long TotalEmitted => _nextId;
 	/// <summary>Set by <see cref="GpuParticleSystem"/>: CPU state of surviving particles is then stale.</summary>
 	public bool SimulatedOnGpu { get; internal set; }
@@ -561,6 +738,9 @@ public sealed class ParticleSystem
 		_freeCount = n;
 		if ( settings.StrandPoints > 0 ) _history = new Vector3[(long)n * settings.StrandPoints];
 		_keysA = new uint[n]; _keysB = new uint[n]; _idxA = new int[n]; _idxB = new int[n];
+		_slotDepth = new int[n]; _slotDeathSub = new ParticleSubEmitter?[n];
+		_slotCollisionSub = new ParticleSubEmitter?[n]; _slotDieOnCollision = new bool[n];
+		_childRng = ParticleRng.For( settings.Seed, ChildStream );
 		for ( int i = 0; i < n; i++ ) _state[i].Rotation = Quaternion.Identity;
 	}
 
@@ -568,11 +748,25 @@ public sealed class ParticleSystem
 	{
 		ArgumentNullException.ThrowIfNull( emitter );
 		if ( _emitters.Contains( emitter ) ) throw new ArgumentException( "Emitter already added." );
+		CheckSubEmitterCycles( emitter );
 		emitter.Validate( _emitters.Count );
 		emitter.Rng = ParticleRng.For( Settings.Seed, _emitters.Count );
 		emitter.RateRemainder = 0;
 		_emitters.Add( emitter );
 		return emitter;
+	}
+
+	static void CheckSubEmitterCycles( ParticleEmitter emitter )
+	{
+		var path = new HashSet<ParticleEmitter>();
+		void Walk( ParticleEmitter em )
+		{
+			if ( !path.Add( em ) ) throw new ArgumentException( "Sub-emitter template chain contains a cycle." );
+			foreach ( var sub in new[] { em.DeathSubEmitter, em.CollisionSubEmitter } )
+				if ( sub?.ChildTemplate is not null ) Walk( sub.ChildTemplate );
+			path.Remove( em );
+		}
+		Walk( emitter );
 	}
 
 	public bool IsAlive( int slot ) => (uint)slot < (uint)_highWater && _state[slot].Alive != 0;
@@ -585,6 +779,7 @@ public sealed class ParticleSystem
 		if ( SimulatedOnGpu ) throw new InvalidOperationException( "This system is driven by a GpuParticleSystem; call GpuParticleSystem.Step." );
 		BeginStep();
 		SimulateCpu();
+		FlushPendingChildren();
 		EndStep();
 	}
 
@@ -604,11 +799,7 @@ public sealed class ParticleSystem
 		for ( int s = 0; s < _highWater; s++ )
 		{
 			if ( _state[s].Alive == 0 || step < _deathStep[s] ) continue;
-			_state[s].Alive = 0;
-			_state[s].Velocity = Vector3.Zero;
-			_freeStack[_freeCount++] = s;
-			AliveCount--;
-			MarkChanged( s );
+			KillSlot( s, ParticleDeathReason.Expired );
 		}
 		// Keep the free stack popping the lowest slot so slot reuse is compact and deterministic.
 		if ( _changedCount > 0 ) SortFreeStackDescending();
@@ -626,7 +817,7 @@ public sealed class ParticleSystem
 			int fromRate = (int)Math.Floor( em.RateRemainder );
 			em.RateRemainder -= fromRate;
 			count += fromRate;
-			for ( int i = 0; i < count; i++ ) Spawn( em );
+			for ( int i = 0; i < count; i++ ) Spawn( em, 0 );
 		}
 	}
 
@@ -645,7 +836,66 @@ public sealed class ParticleSystem
 		_changed[_changedCount++] = slot;
 	}
 
-	void Spawn( ParticleEmitter em )
+	/// <summary>Expire one live slot: free it, fire OnDeath, and queue its death sub-emitter
+	/// children (flushed after this step's integration, so children start integrating next step).</summary>
+	void KillSlot( int slot, ParticleDeathReason reason )
+	{
+		if ( _state[slot].Alive == 0 ) return;
+		var pos = _state[slot].Position;
+		var vel = _state[slot].Velocity;
+		float age = _state[slot].Age;
+		int depth = _slotDepth[slot];
+		var sub = _slotDeathSub[slot];
+		_state[slot].Alive = 0;
+		_state[slot].Velocity = Vector3.Zero;
+		_freeStack[_freeCount++] = slot;
+		AliveCount--;
+		MarkChanged( slot );
+		OnDeath?.Invoke( new ParticleDeathInfo( slot, pos, vel, age, depth, reason ) );
+		if ( sub is not null ) QueueSubSpawn( sub, pos, vel, depth );
+	}
+
+	void QueueSubSpawn( ParticleSubEmitter sub, Vector3 position, Vector3 velocity, int parentDepth )
+	{
+		int childDepth = parentDepth + 1;
+		if ( childDepth > sub.MaxDepth )
+		{
+			SubEmitterSuppressedCount++;
+			if ( sub.ThrowOnDepthExceeded )
+				throw new InvalidOperationException( $"Sub-emitter spawn suppressed: child depth {childDepth} exceeds MaxDepth {sub.MaxDepth}." );
+			return;
+		}
+		_pendingChildren.Add( new PendingChild( sub, position, velocity, childDepth ) );
+	}
+
+	void FlushPendingChildren()
+	{
+		foreach ( var p in _pendingChildren ) SpawnChild( p );
+		_pendingChildren.Clear();
+	}
+
+	void SpawnChild( PendingChild p )
+	{
+		var sub = p.Sub;
+		ParticleEmitter em;
+		if ( sub.ChildPreset is not null )
+		{
+			em = ParticleEmitterPresets.Create( sub.ChildPreset, p.Position );
+			em.Bursts = new List<ParticleBurst>();
+			em.Rate = 0;
+		}
+		else
+		{
+			em = sub.ChildTemplate!.CloneForChild();
+		}
+		em.Position = p.Position;
+		em.BaseVelocity = p.Velocity * sub.VelocityInherit;
+		em.Rng = _childRng;
+		for ( int i = 0; i < sub.Count; i++ ) Spawn( em, p.Depth );
+		_childRng = em.Rng;
+	}
+
+	void Spawn( ParticleEmitter em, int depth )
 	{
 		ref var rng = ref em.Rng;
 		// Always draw the same number of random values, so a full pool does not shift later streams.
@@ -713,6 +963,10 @@ public sealed class ParticleSystem
 		s.AngularVelocity = spinAxis * spin;
 		s.Rotation = em.AngularSpeedMax > 0 ? Quaternion.CreateFromAxisAngle( rotAxis, rotAngle ) : Quaternion.Identity;
 		_ids[slot] = _nextId++;
+		_slotDepth[slot] = depth;
+		_slotDeathSub[slot] = em.DeathSubEmitter;
+		_slotCollisionSub[slot] = em.CollisionSubEmitter;
+		_slotDieOnCollision[slot] = em.DieOnCollision;
 		_lifeSeconds[slot] = life;
 		long lifeSteps = Math.Max( 1L, (long)Math.Ceiling( life / (double)Settings.FixedDeltaTime - 1e-6 ) );
 		_deathStep[slot] = StepIndex + lifeSteps;
@@ -754,13 +1008,39 @@ public sealed class ParticleSystem
 		float time0 = (float)(StepIndex * (double)st.FixedDeltaTime);
 		var p = new SimParams( st );
 		var mesh = st.CollisionMesh;
+		var volumes = st.KillVolumes;
 		for ( int s = 0; s < _highWater; s++ )
 		{
 			ref var ps = ref _state[s];
 			if ( ps.Alive == 0 ) continue;
 			for ( int k = 0; k < sub; k++ )
-				Integrate( ref ps, h, time0 + k * h, in p, mesh );
+			{
+				Integrate( ref ps, h, time0 + k * h, in p, mesh, out var hit );
+				if ( hit.Hit )
+				{
+					OnCollision?.Invoke( new ParticleCollisionInfo( s, hit.Position, hit.Normal, hit.Velocity, hit.Kind ) );
+					var csub = _slotCollisionSub[s];
+					if ( csub is not null ) QueueSubSpawn( csub, hit.Position, hit.Velocity, _slotDepth[s] );
+					if ( _slotDieOnCollision[s] )
+					{
+						KillSlot( s, ParticleDeathReason.Collision );
+						break;
+					}
+				}
+				if ( volumes.Count > 0 && IsKilledByVolume( volumes, ps.Position ) )
+				{
+					KillSlot( s, ParticleDeathReason.Killed );
+					break;
+				}
+			}
 		}
+	}
+
+	static bool IsKilledByVolume( List<ParticleKillVolume> volumes, Vector3 pos )
+	{
+		foreach ( var v in volumes )
+			if ( v.Kills( pos ) ) return true;
+		return false;
 	}
 
 	internal void EndStep()
@@ -795,9 +1075,13 @@ public sealed class ParticleSystem
 		}
 	}
 
-	/// <summary>One substep for one particle. GLSL mirror: GpuParticleSystem.SimSrc integrate().</summary>
-	internal static void Integrate( ref ParticleState ps, float h, float time, in SimParams p, ParticleMesh? mesh )
+	/// <summary>One substep for one particle. GLSL mirror: GpuParticleSystem.SimSrc integrate().
+	/// The out collision report is CPU-only reporting (first contact this substep, pre-response
+	/// velocity); it changes no physics and has no GLSL counterpart — a GPU-driven system
+	/// cannot raise per-particle events.</summary>
+	internal static void Integrate( ref ParticleState ps, float h, float time, in SimParams p, ParticleMesh? mesh, out ParticleCollisionHit collision )
 	{
+		collision = default;
 		Vector3 pos = ps.Position, vel = ps.Velocity;
 		Vector3 acc = p.Gravity;
 		if ( p.TurbStrength > 0 )
@@ -816,6 +1100,7 @@ public sealed class ParticleSystem
 		if ( mesh is not null && mesh.Raycast( pos, next, out float t, out var n ) )
 		{
 			var hit = pos + (next - pos) * t;
+			if ( !collision.Hit ) collision = new ParticleCollisionHit( true, hit, n, vel, ParticleCollisionKind.Mesh );
 			next = hit + n * p.Radius;
 			Respond( ref vel, n, p.Restitution, p.Friction );
 		}
@@ -825,6 +1110,7 @@ public sealed class ParticleSystem
 			if ( d < 0 )
 			{
 				next -= p.GroundNormal * d;
+				if ( !collision.Hit ) collision = new ParticleCollisionHit( true, next, p.GroundNormal, vel, ParticleCollisionKind.Ground );
 				Respond( ref vel, p.GroundNormal, p.Restitution, p.Friction );
 			}
 		}

@@ -1,5 +1,22 @@
 # C1 — Stop and cabinet-style correction pop-outs
 
+## Owner-authorized load
+
+User explicitly approved loading/restarting the cabinet after the chat audit.
+The first launch lacked desktop display variables and aborted before opening;
+the retry used the actual KDE environment from `systemctl --user show-environment`.
+Updated cabinet is now running (PID 1547954 at verification). Its own socket
+answered `where`, and `snap` saved `/tmp/opencode/c1-loaded-cabinet.png`; the app
+image was inspected. No forced quit or existing runner termination was needed.
+Startup log contained no QML errors.
+
+Knight run was read-only verified before/after: same run ID, sequence 227,
+**paused at revision 111**. No resume, review or model mutation was sent to it.
+There is no live build in the main viewport at this check, so the contextual
+Stop control is not visible there. This proves updated-cabinet loading, not a
+live correction interaction with that old knight runner. New review-barrier
+semantics apply to new runner processes; the compatibility protection remains.
+
 ## Chat audit follow-up — stacked messages (2026-10-24)
 
 This supersedes the original window's one-shot Send behavior. Source fixes:

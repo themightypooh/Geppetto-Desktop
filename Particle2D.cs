@@ -17,8 +17,25 @@ namespace Marionette.Desktop;
 // (see WriteDrawRecords). There is no rendering, no QML, and no cabinet/host
 // wiring in this file — that boundary is the 2D suite's, not a gap to fill
 // here by editing cabinet.qml.
+//
+// Lane 6 additions (particles session, 2026-10-24): Direction emission mode,
+// gravity as an angle, rotAuto / emitDirectionAsAngle, fadeIn + fadePower,
+// per-axis size growth, speed change over time, per-emitter sort modes in
+// WriteDrawRecords, caller-supplied emission masks (solid / border /
+// directed-border + capture colour from pixel), and wrap bounds. Angles in
+// this file are degrees in Y-down space: 0 = +X (right), 90 = +Y (down), so a
+// positive rotation turns clockwise on screen. Lane 1 behaviour is unchanged
+// when every new field holds its default (all-Index sort keeps exact slot
+// order in WriteDrawRecords; a null GravityAngleDegrees keeps the Gravity
+// vector as-is).
 
-public enum Particle2DEmitterShape { Point, Line, Box, Circle }
+public enum Particle2DEmitterShape { Point, Line, Box, Circle, Direction }
+
+/// <summary>Draw-record ordering within one emitter group (see WriteDrawRecords).</summary>
+public enum Particle2DSortMode { Index, Lifetime, Distance }
+
+/// <summary>How an emission mask picks spawn cells (see Particle2DMask).</summary>
+public enum Particle2DMaskMode { Solid, Border, DirectedBorder }
 
 /// <summary>RGBA color, channels 0..1. Y-down canvas space does not change color.</summary>
 public struct Particle2DColor
@@ -35,11 +52,15 @@ public struct Particle2DColor
 /// <summary>Emit <paramref name="Count"/> particles at the start of fixed step <paramref name="Step"/>.</summary>
 public readonly record struct Particle2DBurst( int Step, int Count );
 
-/// <summary>One particle's draw record: everything a 2D canvas needs to paint it for one frame.</summary>
+/// <summary>One particle's draw record: everything a 2D canvas needs to paint it for one frame.
+/// Size is the uniform size (start→end lerp over life); SizeX/SizeY are the axis-split sizes
+/// (uniform size plus per-axis growth, clamped at 0) — equal to Size when no size growth is set.</summary>
 public struct Particle2DDrawRecord
 {
 	public Vector2 Position;
 	public float Size;
+	public float SizeX;
+	public float SizeY;
 	public float Rotation;
 	public Particle2DColor Color;
 	public int Frame;
@@ -63,6 +84,84 @@ public struct Particle2DState
 	public int FrameCount;
 	public float FrameAdvance;
 	public bool Alive;
+	/// <summary>Index of the emitter that spawned this particle (position in the system's emitter list).</summary>
+	public int EmitterIndex;
+	/// <summary>When true, DrawRecordFor reports the movement-direction angle instead of Rotation.</summary>
+	public bool RotAuto;
+	/// <summary>Per-axis size growth, px/s, copied from the emitter at spawn.</summary>
+	public float SizeIncrX;
+	public float SizeIncrY;
+	/// <summary>Speed change over time, px/s², copied from the emitter at spawn.</summary>
+	public float SpeedIncr;
+	/// <summary>Fade-in portion of life (0..1) and fade-curve exponent, copied from the emitter at spawn.</summary>
+	public float FadeIn;
+	public float FadePower;
+}
+
+/// <summary>Caller-supplied emission mask: a grid of cells the emitter samples instead of a shape.
+/// Row-major: cell (x, y) is index y * Width + x. The grid is placed with its top-left corner at the
+/// emitter's Position and each cell MaskCellSize pixels square, so a cell centre is
+/// Position + ((x + 0.5) * MaskCellSize, (y + 0.5) * MaskCellSize). No texture or file loading happens
+/// here: the caller builds the grid (e.g. from a texture's alpha channel) and hands it over.
+/// Spawn candidates are precomputed once in the constructor, per mode, so spawning is a single pick.
+/// Outward is the normalized sum of unit vectors toward transparent 4-neighbours (out-of-bounds counts
+/// as transparent); it is Vector2.Zero for a border cell whose transparent neighbours cancel out
+/// (e.g. a lone opaque cell) — spawn then falls back to the emitter's launch direction.</summary>
+public sealed class Particle2DMask
+{
+	public int Width { get; }
+	public int Height { get; }
+	public bool[] Opaque { get; }
+	public Particle2DColor[]? Colors { get; }
+
+	readonly (int X, int Y, Vector2 Outward)[] _solid;
+	readonly (int X, int Y, Vector2 Outward)[] _border;
+	readonly (int X, int Y, Vector2 Outward)[] _directed;
+
+	public Particle2DMask( int width, int height, bool[] opaque, Particle2DColor[]? colors = null )
+	{
+		if ( width <= 0 || height <= 0 ) throw new ArgumentException( "Mask width and height must be > 0." );
+		ArgumentNullException.ThrowIfNull( opaque );
+		if ( opaque.Length != width * height ) throw new ArgumentException( $"Mask opaque grid holds {opaque.Length} cells but {width}x{height} needs {width * height}." );
+		if ( colors is not null )
+		{
+			if ( colors.Length != width * height ) throw new ArgumentException( $"Mask color grid holds {colors.Length} cells but {width}x{height} needs {width * height}." );
+			for ( int i = 0; i < colors.Length; i++ )
+				if ( !colors[i].ChannelsValid() ) throw new ArgumentException( $"Mask color cell {i} channels must be in 0..1." );
+		}
+		Width = width; Height = height; Opaque = opaque; Colors = colors;
+		var solid = new List<(int, int, Vector2)>();
+		var border = new List<(int, int, Vector2)>();
+		var directed = new List<(int, int, Vector2)>();
+		for ( int y = 0; y < height; y++ )
+		for ( int x = 0; x < width; x++ )
+		{
+			if ( !IsOpaque( x, y ) ) continue;
+			solid.Add( (x, y, Vector2.Zero) );
+			Vector2 outward = Vector2.Zero;
+			bool hasTransparent = false;
+			if ( !IsOpaque( x - 1, y ) ) { outward += new Vector2( -1, 0 ); hasTransparent = true; }
+			if ( !IsOpaque( x + 1, y ) ) { outward += new Vector2( 1, 0 ); hasTransparent = true; }
+			if ( !IsOpaque( x, y - 1 ) ) { outward += new Vector2( 0, -1 ); hasTransparent = true; }
+			if ( !IsOpaque( x, y + 1 ) ) { outward += new Vector2( 0, 1 ); hasTransparent = true; }
+			if ( !hasTransparent ) continue;
+			border.Add( (x, y, outward) );
+			directed.Add( (x, y, outward.LengthSquared() >= 1e-12f ? outward / outward.Length() : Vector2.Zero) );
+		}
+		_solid = solid.ToArray(); _border = border.ToArray(); _directed = directed.ToArray();
+	}
+
+	bool IsOpaque( int x, int y ) => x >= 0 && x < Width && y >= 0 && y < Height && Opaque[y * Width + x];
+
+	/// <summary>Spawn candidates for a mode: Solid = every opaque cell, Border = opaque cells with a
+	/// transparent 4-neighbour, DirectedBorder = border cells with an outward normal.</summary>
+	public IReadOnlyList<(int X, int Y, Vector2 Outward)> SpawnCells( Particle2DMaskMode mode ) => mode switch
+	{
+		Particle2DMaskMode.Solid => _solid,
+		Particle2DMaskMode.Border => _border,
+		Particle2DMaskMode.DirectedBorder => _directed,
+		_ => throw new ArgumentException( $"Unknown mask mode {mode}." ),
+	};
 }
 
 /// <summary>An emitter. Configure before or between steps; values are validated on each step.</summary>
@@ -97,6 +196,42 @@ public sealed class Particle2DEmitter
 	public Vector2 BaseVelocity;
 	/// <summary>Max angular speed, rad/s; spawn picks uniformly in [-max, +max].</summary>
 	public float AngularSpeedMax;
+	/// <summary>Direction-mode (Shape = Direction) perpendicular spread, px: spawn position is
+	/// Position + perp(direction) * uniform(-EmitDist, +EmitDist). Ignored by other shapes.</summary>
+	public float EmitDist;
+	/// <summary>Direction-mode base rotation, degrees (Y-down, positive = clockwise on screen),
+	/// applied to Direction before spread. Ignored by other shapes.</summary>
+	public float EmitAngleDegrees;
+	/// <summary>When true, a particle's draw rotation follows its movement direction (atan2 of velocity);
+	/// with near-zero velocity the stored rotation is kept, so still particles don't snap.</summary>
+	public bool RotAuto;
+	/// <summary>When true, a particle's initial rotation is the launch-direction angle (atan2 of the
+	/// final launch direction, after spread and any directed-border override). RotAuto, when also
+	/// set, wins at draw time since it recomputes from velocity.</summary>
+	public bool EmitDirectionAsAngle;
+	/// <summary>Portion of life spent fading in, 0..1 (0 = fully visible at birth).</summary>
+	public float FadeIn;
+	/// <summary>Fade-in curve exponent (1 = linear, 2 = ease-in). Applies to fade-in only; fade-out
+	/// stays the ColorStart→ColorEnd lerp.</summary>
+	public float FadePower = 1f;
+	/// <summary>Per-axis size growth, px/s, added to the uniform size over age (clamped at 0 at draw).</summary>
+	public float SizeIncrX;
+	public float SizeIncrY;
+	/// <summary>Speed change over time, px/s², applied along the current velocity direction each substep
+	/// (negative = deceleration). A motionless particle stays motionless.</summary>
+	public float SpeedIncr;
+	/// <summary>Draw-record ordering for this emitter's particles (see WriteDrawRecords).</summary>
+	public Particle2DSortMode SortMode = Particle2DSortMode.Index;
+	/// <summary>When set, spawn positions come from this mask instead of Shape (see Particle2DMask).
+	/// Direction, speed, lifetime, colour (unless captured), and frames still come from this emitter.</summary>
+	public Particle2DMask? Mask;
+	public Particle2DMaskMode MaskMode = Particle2DMaskMode.Solid;
+	/// <summary>Mask cell size, px (mask top-left sits at Position).</summary>
+	public float MaskCellSize = 1f;
+	/// <summary>When true, particles inherit their mask cell's colour at spawn (start = cell colour,
+	/// end = cell colour with alpha EndAlpha). Requires Mask with a colour grid. An explicit Palette
+	/// still wins over capture.</summary>
+	public bool CaptureColorFromMask;
 	/// <summary>Particle color at birth (before jitter/palette).</summary>
 	public Particle2DColor ColorStart = new( 1, 1, 1, 1 );
 	/// <summary>Particle color at end of life (before jitter; palette mode overrides, see below).</summary>
@@ -132,6 +267,25 @@ public sealed class Particle2DEmitter
 		if ( !float.IsFinite( SpreadDegrees ) || SpreadDegrees < 0 || SpreadDegrees > 180 )
 			throw new ArgumentException( $"{who}: SpreadDegrees must be in 0..180." );
 		if ( !float.IsFinite( AngularSpeedMax ) || AngularSpeedMax < 0 ) throw new ArgumentException( $"{who}: AngularSpeedMax must be finite and >= 0." );
+		if ( !float.IsFinite( EmitDist ) || EmitDist < 0 ) throw new ArgumentException( $"{who}: EmitDist must be finite and >= 0." );
+		if ( !float.IsFinite( EmitAngleDegrees ) ) throw new ArgumentException( $"{who}: EmitAngleDegrees must be finite." );
+		if ( !float.IsFinite( FadeIn ) || FadeIn < 0 || FadeIn > 1 ) throw new ArgumentException( $"{who}: FadeIn must be in 0..1." );
+		if ( !float.IsFinite( FadePower ) || FadePower <= 0 ) throw new ArgumentException( $"{who}: FadePower must be finite and > 0." );
+		if ( !float.IsFinite( SizeIncrX ) || !float.IsFinite( SizeIncrY ) ) throw new ArgumentException( $"{who}: SizeIncrX/SizeIncrY must be finite." );
+		if ( !float.IsFinite( SpeedIncr ) ) throw new ArgumentException( $"{who}: SpeedIncr must be finite." );
+		switch ( SortMode )
+		{
+			case Particle2DSortMode.Index: case Particle2DSortMode.Lifetime: case Particle2DSortMode.Distance: break;
+			default: throw new ArgumentException( $"{who}: unknown sort mode {SortMode}." );
+		}
+		if ( !float.IsFinite( MaskCellSize ) || MaskCellSize <= 0 ) throw new ArgumentException( $"{who}: MaskCellSize must be finite and > 0." );
+		switch ( MaskMode )
+		{
+			case Particle2DMaskMode.Solid: case Particle2DMaskMode.Border: case Particle2DMaskMode.DirectedBorder: break;
+			default: throw new ArgumentException( $"{who}: unknown mask mode {MaskMode}." );
+		}
+		if ( CaptureColorFromMask && (Mask is null || Mask.Colors is null) )
+			throw new ArgumentException( $"{who}: CaptureColorFromMask needs a Mask with a colour grid." );
 		if ( Direction.LengthSquared() < 1e-12f && Speed > 0 )
 			throw new ArgumentException( $"{who}: Direction must be non-zero when Speed > 0." );
 		if ( !ColorStart.ChannelsValid() || !ColorEnd.ChannelsValid() )
@@ -162,6 +316,7 @@ public sealed class Particle2DEmitter
 				if ( !float.IsFinite( CircleRadius ) || CircleRadius < 0 ) throw new ArgumentException( $"{who}: CircleRadius must be finite and >= 0." );
 				break;
 			case Particle2DEmitterShape.Point: break;
+			case Particle2DEmitterShape.Direction: break;
 			default: throw new ArgumentException( $"{who}: unknown shape {Shape}." );
 		}
 	}
@@ -178,6 +333,10 @@ public sealed class Particle2DSettings
 
 	/// <summary>Default 980 px/s² pointing +Y (down). Negative Y rises (bubbles).</summary>
 	public Vector2 Gravity = new( 0, 980f );
+	/// <summary>When set, gravity keeps the Gravity vector's magnitude but points along this angle,
+	/// degrees in Y-down space (0 = +X, 90 = +Y down, 180 = −X, −90 = up). Null (default) uses the
+	/// Gravity vector as-is, so lane-1 presets and systems are untouched.</summary>
+	public float? GravityAngleDegrees;
 	/// <summary>Air velocity. Only acts through <see cref="Drag"/> (drag pulls velocity toward wind).</summary>
 	public Vector2 Wind;
 	/// <summary>Linear drag coefficient, 1/s; integrated semi-implicitly (stable for any value >= 0).</summary>
@@ -198,6 +357,12 @@ public sealed class Particle2DSettings
 	public bool FloorEnabled;
 	/// <summary>Horizontal floor line: particles are clamped to y <= FloorY and bounce.</summary>
 	public float FloorY;
+	/// <summary>Wrap bounds: when enabled, a particle leaving the WrapMin..WrapMax box re-enters from
+	/// the opposite side (cheap rain/snow/dust pattern). Velocity is unchanged. Applied after each
+	/// position integration and before the floor check, so the floor still clamps after a wrap.</summary>
+	public bool WrapEnabled;
+	public Vector2 WrapMin;
+	public Vector2 WrapMax;
 	/// <summary>Normal velocity retained on floor contact (0 = dead stop, 1 = perfect bounce).</summary>
 	public float Restitution = 0.3f;
 	/// <summary>Tangential velocity retained on floor contact is (1 − Friction).</summary>
@@ -216,6 +381,12 @@ public sealed class Particle2DSettings
 		if ( !float.IsFinite( VortexStrength ) || !float.IsFinite( VortexRadius ) || VortexRadius <= 0 )
 			throw new ArgumentException( "Vortex needs finite strength and radius > 0." );
 		if ( FloorEnabled && !float.IsFinite( FloorY ) ) throw new ArgumentException( "FloorY must be finite when FloorEnabled." );
+		if ( GravityAngleDegrees is { } ga && !float.IsFinite( ga ) ) throw new ArgumentException( "GravityAngleDegrees must be finite when set." );
+		if ( WrapEnabled )
+		{
+			if ( !Particle2DMath.Finite( WrapMin ) || !Particle2DMath.Finite( WrapMax ) ) throw new ArgumentException( "WrapMin/WrapMax must be finite when WrapEnabled." );
+			if ( WrapMax.X <= WrapMin.X || WrapMax.Y <= WrapMin.Y ) throw new ArgumentException( "WrapMax must exceed WrapMin on both axes when WrapEnabled." );
+		}
 		if ( !float.IsFinite( Restitution ) || Restitution < 0 || Restitution > 1 ) throw new ArgumentOutOfRangeException( nameof( Restitution ), "Restitution must be 0..1." );
 		if ( !float.IsFinite( Friction ) || Friction < 0 || Friction > 1 ) throw new ArgumentOutOfRangeException( nameof( Friction ), "Friction must be 0..1." );
 	}
@@ -254,6 +425,14 @@ public static class Particle2DMath
 		float gy = (x1 - x0) * dy;
 		grad = new Vector2( gx, gy );
 		return v;
+	}
+
+	/// <summary>Wrap a point into [min, max) on each axis (modulo wrap; min + ((v − min) mod size)).</summary>
+	public static Vector2 Wrap( Vector2 p, Vector2 min, Vector2 max )
+	{
+		float x = (p.X - min.X) % (max.X - min.X); if ( x < 0 ) x += max.X - min.X;
+		float y = (p.Y - min.Y) % (max.Y - min.Y); if ( y < 0 ) y += max.Y - min.Y;
+		return new Vector2( min.X + x, min.Y + y );
 	}
 
 	/// <summary>Divergence-free 2D turbulence: the gradient of a noise potential, rotated 90°.</summary>
@@ -366,17 +545,49 @@ public sealed class Particle2DSystem
 			int fromRate = (int)Math.Floor( em.RateRemainder );
 			em.RateRemainder -= fromRate;
 			count += fromRate;
-			for ( int i = 0; i < count; i++ ) Spawn( em );
+			for ( int i = 0; i < count; i++ ) Spawn( em, e );
 		}
 	}
 
-	void Spawn( Particle2DEmitter em )
+	void Spawn( Particle2DEmitter em, int emitterIndex )
 	{
 		// Draw RNG values in a fixed order FIRST, so a full pool drops the particle
 		// without shifting later particles' streams (same discipline as the 3D system).
 		ref var rng = ref em.Rng;
 		Vector2 pos = em.Position;
-		switch ( em.Shape )
+		// Base launch direction, normalized (fallback +Y down). Direction mode rotates it by
+		// EmitAngleDegrees; other shapes use it as-is, so lane-1 spawn is unchanged.
+		Vector2 dirBase = em.Direction;
+		if ( dirBase.LengthSquared() > 1e-12f ) dirBase /= dirBase.Length();
+		else dirBase = new Vector2( 0, 1 );
+		Vector2 emitDir = dirBase;
+		if ( em.Shape == Particle2DEmitterShape.Direction && em.EmitAngleDegrees != 0 )
+		{
+			float a = em.EmitAngleDegrees * MathF.PI / 180f;
+			float c = MathF.Cos( a ), s = MathF.Sin( a );
+			emitDir = new Vector2( dirBase.X * c - dirBase.Y * s, dirBase.X * s + dirBase.Y * c );
+		}
+		Particle2DColor? maskColor = null;
+		Vector2 maskOutward = Vector2.Zero;
+		bool maskDirected = false;
+		if ( em.Mask is { } mask )
+		{
+			// One RNG draw even when the mode has no cells, so later particles' streams don't
+			// shift between an empty and a non-empty mask.
+			float pick = rng.NextFloat();
+			var cells = mask.SpawnCells( em.MaskMode );
+			if ( cells.Count == 0 ) return;
+			var cell = cells[(int)(pick * cells.Count) % cells.Count];
+			pos = em.Position + new Vector2( (cell.X + 0.5f) * em.MaskCellSize, (cell.Y + 0.5f) * em.MaskCellSize );
+			if ( em.MaskMode == Particle2DMaskMode.DirectedBorder )
+			{
+				maskDirected = true;
+				maskOutward = cell.Outward;
+			}
+			if ( em.CaptureColorFromMask && mask.Colors is not null )
+				maskColor = mask.Colors[cell.Y * mask.Width + cell.X];
+		}
+		else switch ( em.Shape )
 		{
 			case Particle2DEmitterShape.Line:
 			{
@@ -394,16 +605,22 @@ public sealed class Particle2DSystem
 				pos = em.Position + new Vector2( MathF.Cos( a ) * r, MathF.Sin( a ) * r );
 				break;
 			}
+			case Particle2DEmitterShape.Direction:
+			{
+				Vector2 perp = new Vector2( -emitDir.Y, emitDir.X );
+				pos = em.Position + perp * ((rng.NextFloat() * 2 - 1) * em.EmitDist);
+				break;
+			}
 		}
-		Vector2 dir = em.Direction;
-		if ( dir.LengthSquared() > 1e-12f ) dir /= dir.Length();
-		else dir = new Vector2( 0, 1 );
+		Vector2 dir = emitDir;
 		if ( em.SpreadDegrees > 0 )
 		{
 			float ang = (rng.NextFloat() * 2 - 1) * em.SpreadDegrees * MathF.PI / 180f;
 			float c = MathF.Cos( ang ), s = MathF.Sin( ang );
 			dir = new Vector2( dir.X * c - dir.Y * s, dir.X * s + dir.Y * c );
 		}
+		if ( maskDirected && maskOutward.LengthSquared() > 1e-12f )
+			dir = maskOutward / maskOutward.Length();
 		float speed = em.Speed;
 		if ( em.SpeedJitter > 0 ) speed = em.Speed * (1 + (rng.NextFloat() * 2 - 1) * em.SpeedJitter);
 		Vector2 vel = dir * speed + em.BaseVelocity;
@@ -417,6 +634,11 @@ public sealed class Particle2DSystem
 			var pick = em.Palette[(int)(rng.NextFloat() * em.Palette.Count) % em.Palette.Count];
 			start = pick;
 			end = pick.WithAlpha( em.EndAlpha );
+		}
+		else if ( maskColor is { } mc )
+		{
+			start = mc;
+			end = mc.WithAlpha( em.EndAlpha );
 		}
 		else
 		{
@@ -436,6 +658,8 @@ public sealed class Particle2DSystem
 		if ( em.AngularSpeedMax > 0 ) angVel = (rng.NextFloat() * 2 - 1) * em.AngularSpeedMax;
 		int frame = em.FrameMin;
 		if ( em.FrameMax > em.FrameMin ) frame = em.FrameMin + (int)(rng.NextFloat() * (em.FrameMax - em.FrameMin + 1)) % (em.FrameMax - em.FrameMin + 1);
+		float rotation = 0;
+		if ( em.EmitDirectionAsAngle ) rotation = MathF.Atan2( dir.Y, dir.X );
 
 		if ( _freeCount == 0 ) return;
 		int slot = _freeStack[--_freeCount];
@@ -445,10 +669,13 @@ public sealed class Particle2DSystem
 		{
 			Position = pos, Velocity = vel, Age = 0, Lifetime = lifetime,
 			SizeStart = size, SizeEnd = size * em.SizeEndScale,
-			Rotation = 0, AngularVelocity = angVel,
+			Rotation = rotation, AngularVelocity = angVel,
 			ColorStart = start, ColorEnd = end,
 			FrameBase = frame, FrameMin = em.FrameMin, FrameCount = em.FrameMax - em.FrameMin + 1, FrameAdvance = em.FrameAdvance,
 			Alive = true,
+			EmitterIndex = emitterIndex, RotAuto = em.RotAuto,
+			SizeIncrX = em.SizeIncrX, SizeIncrY = em.SizeIncrY, SpeedIncr = em.SpeedIncr,
+			FadeIn = em.FadeIn, FadePower = em.FadePower,
 		};
 		AliveCount++;
 	}
@@ -460,13 +687,20 @@ public sealed class Particle2DSystem
 		int sub = s.Substeps;
 		float h = dt / sub;
 		float time = (float)StepIndex * dt;
+		Vector2 gravity = s.Gravity;
+		if ( s.GravityAngleDegrees is { } ga )
+		{
+			float mag = gravity.Length();
+			float rad = ga * MathF.PI / 180f;
+			gravity = new Vector2( MathF.Cos( rad ), MathF.Sin( rad ) ) * mag;
+		}
 		for ( int k = 0; k < sub; k++ )
 		{
 			for ( int i = 0; i < _highWater; i++ )
 			{
 				if ( !_state[i].Alive ) continue;
 				ref var p = ref _state[i];
-				Vector2 acc = s.Gravity;
+				Vector2 acc = gravity;
 				if ( s.TurbulenceStrength != 0 )
 					acc += Particle2DMath.Curl( p.Position * s.TurbulenceFrequency + new Vector2( time * s.TurbulenceSpeed, 0 ), s.Seed ) * s.TurbulenceStrength;
 				if ( s.VortexStrength != 0 )
@@ -480,7 +714,10 @@ public sealed class Particle2DSystem
 					p.Velocity += (s.Wind - p.Velocity) * f;
 				}
 				p.Velocity += acc * h;
+				if ( p.SpeedIncr != 0 && p.Velocity.LengthSquared() > 1e-12f )
+					p.Velocity += Vector2.Normalize( p.Velocity ) * (p.SpeedIncr * h);
 				p.Position += p.Velocity * h;
+				if ( s.WrapEnabled ) p.Position = Particle2DMath.Wrap( p.Position, s.WrapMin, s.WrapMax );
 				p.Rotation += p.AngularVelocity * h;
 				if ( s.FloorEnabled && p.Position.Y > s.FloorY )
 				{
@@ -503,24 +740,74 @@ public sealed class Particle2DSystem
 		int frame = p.FrameBase;
 		if ( p.FrameAdvance > 0 && p.FrameCount > 1 )
 			frame = p.FrameMin + (p.FrameBase - p.FrameMin + (int)(p.Age * p.FrameAdvance)) % p.FrameCount;
+		float size = p.SizeStart + (p.SizeEnd - p.SizeStart) * t;
+		float rotation = p.Rotation;
+		if ( p.RotAuto && p.Velocity.LengthSquared() > 1e-12f )
+			rotation = MathF.Atan2( p.Velocity.Y, p.Velocity.X );
+		var color = Particle2DColor.Lerp( p.ColorStart, p.ColorEnd, t );
+		if ( p.FadeIn > 0 && t < p.FadeIn )
+			color = color.WithAlpha( Math.Clamp( color.A * MathF.Pow( t / p.FadeIn, p.FadePower ), 0, 1 ) );
 		return new Particle2DDrawRecord
 		{
 			Position = p.Position,
-			Size = p.SizeStart + (p.SizeEnd - p.SizeStart) * t,
-			Rotation = p.Rotation,
-			Color = Particle2DColor.Lerp( p.ColorStart, p.ColorEnd, t ),
+			Size = size,
+			SizeX = MathF.Max( 0, size + p.SizeIncrX * p.Age ),
+			SizeY = MathF.Max( 0, size + p.SizeIncrY * p.Age ),
+			Rotation = rotation,
+			Color = color,
 			Frame = frame,
 		};
 	}
 
-	/// <summary>Writes one draw record per live particle, in slot order (2D has no depth to sort by). Returns count written; throws when the destination is too small.</summary>
+	/// <summary>Writes one draw record per live particle. When every emitter uses Index (the default),
+	/// records come in slot order, exactly as lane 1 wrote them. When any emitter uses Lifetime or
+	/// Distance, records are grouped by emitter (add order) and ordered within each group by that
+	/// emitter's mode: Lifetime = oldest first, Distance = farthest from the emitter's current
+	/// position first (back-to-front), Index = slot order. The sorted path allocates one transient
+	/// index array per call; the slot-order path allocates nothing. Returns count written; throws
+	/// when the destination is too small.</summary>
 	public int WriteDrawRecords( Span<Particle2DDrawRecord> destination )
 	{
 		if ( destination.Length < AliveCount ) throw new ArgumentException( $"Destination holds {destination.Length} records but {AliveCount} particles are alive." );
-		int n = 0;
+		bool allIndex = true;
+		foreach ( var em in _emitters )
+			if ( em.SortMode != Particle2DSortMode.Index ) { allIndex = false; break; }
+		if ( allIndex )
+		{
+			int n = 0;
+			for ( int i = 0; i < _highWater; i++ )
+				if ( _state[i].Alive ) destination[n++] = DrawRecordFor( i );
+			return n;
+		}
+		var slots = new int[_highWater];
+		int m = 0;
 		for ( int i = 0; i < _highWater; i++ )
-			if ( _state[i].Alive ) destination[n++] = DrawRecordFor( i );
-		return n;
+			if ( _state[i].Alive ) slots[m++] = i;
+		Array.Sort( slots, 0, m, Comparer<int>.Create( ( a, b ) =>
+		{
+			var pa = _state[a]; var pb = _state[b];
+			int c = pa.EmitterIndex.CompareTo( pb.EmitterIndex );
+			if ( c != 0 ) return c;
+			var mode = _emitters[pa.EmitterIndex].SortMode;
+			float ka = mode switch
+			{
+				Particle2DSortMode.Lifetime => -pa.Age,
+				Particle2DSortMode.Distance => -(pa.Position - _emitters[pa.EmitterIndex].Position).Length(),
+				_ => 0,
+			};
+			float kb = mode switch
+			{
+				Particle2DSortMode.Lifetime => -pb.Age,
+				Particle2DSortMode.Distance => -(pb.Position - _emitters[pb.EmitterIndex].Position).Length(),
+				_ => 0,
+			};
+			c = ka.CompareTo( kb );
+			if ( c != 0 ) return c;
+			return a.CompareTo( b );
+		} ) );
+		int n2 = 0;
+		for ( int i = 0; i < m; i++ ) destination[n2++] = DrawRecordFor( slots[i] );
+		return n2;
 	}
 }
 
@@ -661,9 +948,10 @@ public static class Particle2DPresets
 	static Particle2DSettings Clone( Particle2DSettings s ) => new()
 	{
 		Capacity = s.Capacity, Seed = s.Seed, FixedDeltaTime = s.FixedDeltaTime, Substeps = s.Substeps,
-		Gravity = s.Gravity, Wind = s.Wind, Drag = s.Drag,
+		Gravity = s.Gravity, GravityAngleDegrees = s.GravityAngleDegrees, Wind = s.Wind, Drag = s.Drag,
 		TurbulenceStrength = s.TurbulenceStrength, TurbulenceFrequency = s.TurbulenceFrequency, TurbulenceSpeed = s.TurbulenceSpeed,
 		VortexStrength = s.VortexStrength, VortexCenter = s.VortexCenter, VortexRadius = s.VortexRadius,
 		FloorEnabled = s.FloorEnabled, FloorY = s.FloorY, Restitution = s.Restitution, Friction = s.Friction,
+		WrapEnabled = s.WrapEnabled, WrapMin = s.WrapMin, WrapMax = s.WrapMax,
 	};
 }

@@ -72,11 +72,11 @@ public sealed class OnionSettings
 	public float BeforeOpacity = 1f;
 	public float AfterOpacity = 1f;
 
-	/// <summary>Per-offset opacity multipliers, index 0 = distance 1. When present and long
-	/// enough, an entry REPLACES the linear falloff for that distance; beyond the list,
-	/// falloff resumes. Null = pure falloff. Krita exposes exactly this as per-frame
-	/// opacity sliders.</summary>
-	public float[]? PerOffsetOpacity;
+	/// <summary>Per-offset opacity multipliers, index 0 = the NEAREST ghost on a side
+	/// (rank, not frame distance — see Compute). When present and long enough, an entry
+	/// REPLACES the linear falloff for that rank; beyond the list, falloff resumes.
+	/// Null = pure falloff. Krita exposes exactly this as per-frame opacity sliders.</summary>
+	public float[] PerOffsetOpacity;
 
 	/// <summary>Linear distance falloff: distance 1 keeps full opacity, the farthest shown
 	/// frame keeps 1/count. With count 3: 1.00, 0.67, 0.33. Set count 0 on a side to hide it.</summary>
@@ -118,7 +118,7 @@ public static class OnionSkin
 {
 	public static List<OnionFrame> Compute(
 		OnionSettings settings, int currentFrame, int totalFrames,
-		IReadOnlyList<int>? keyFrames = null, IReadOnlyList<int>? selectedFrames = null, bool loop = false )
+		IReadOnlyList<int> keyFrames = null, IReadOnlyList<int> selectedFrames = null, bool loop = false )
 	{
 		if ( settings is null ) throw new ArgumentNullException( nameof( settings ) );
 		settings.Validate();
@@ -147,9 +147,16 @@ public static class OnionSkin
 				.Where( f => f >= 0 && f < totalFrames && f != currentFrame && (before ? f < currentFrame : f > currentFrame) )
 				.Select( f => (frame: f, dist: Math.Abs( f - currentFrame )) )
 				.OrderBy( x => x.dist ).Take( count ).ToList();
-			foreach ( var (frame, dist) in side )
+			// Opacity falls off by RANK (1st ghost, 2nd ghost, …), not by frame distance:
+			// in Keys mode two keys can be 20 frames apart, and a falloff in raw frames
+			// would fade the second key to nothing. Distance stays on the frame for
+			// labels and draw order; only the rank drives opacity.
+			for ( var rank = 0; rank < side.Count; rank++ )
+			{
+				var (frame, dist) = side[rank];
 				frames.Add( new OnionFrame( frame, before, dist,
-					OpacityFor( settings, before, dist, count, sideOpacity ), color, settings.TintStrength ) );
+					OpacityFor( settings, before, rank + 1, count, sideOpacity ), color, settings.TintStrength ) );
+			}
 		}
 		AddSide( true, settings.BeforeCount, settings.BeforeOpacity, settings.BeforeColor );
 		AddSide( false, settings.AfterCount, settings.AfterOpacity, settings.AfterColor );
@@ -161,8 +168,10 @@ public static class OnionSkin
 			&& !frames.Any( f => f.Frame == 0 ) )
 		{
 			var dist = totalFrames - currentFrame;
+			// Rank 1 on purpose: the loop joint must stay visible enough to judge,
+			// never faded out by being far away in frames from the playhead.
 			frames.Add( new OnionFrame( 0, false, dist,
-				OpacityFor( settings, false, dist, Math.Max( 1, settings.AfterCount ), settings.AfterOpacity ),
+				OpacityFor( settings, false, 1, Math.Max( 1, settings.AfterCount ), settings.AfterOpacity ),
 				settings.AfterColor, settings.TintStrength, isStartFrame: true ) );
 		}
 
@@ -171,13 +180,13 @@ public static class OnionSkin
 		return frames;
 	}
 
-	static float OpacityFor( OnionSettings s, bool before, int distance, int count, float sideOpacity )
+	static float OpacityFor( OnionSettings s, bool before, int rank, int count, float sideOpacity )
 	{
 		var factor = 1f;
-		if ( s.PerOffsetOpacity is not null && distance - 1 < s.PerOffsetOpacity.Length )
-			factor = s.PerOffsetOpacity[distance - 1];
+		if ( s.PerOffsetOpacity is not null && rank - 1 < s.PerOffsetOpacity.Length )
+			factor = s.PerOffsetOpacity[rank - 1];
 		else if ( s.UseFalloff && count > 0 )
-			factor = Math.Max( 0f, 1f - (distance - 1) / (float)count );
+			factor = Math.Max( 0f, 1f - (rank - 1) / (float)count );
 		return Math.Clamp( s.MasterOpacity * sideOpacity * factor, 0f, 1f );
 	}
 }
@@ -202,6 +211,6 @@ public sealed class OnionSkinSet
 		layerId is not null && _layers.TryGetValue( layerId, out var s ) ? s : Default;
 
 	public List<OnionFrame> ComputeForLayer( string layerId, int currentFrame, int totalFrames,
-		IReadOnlyList<int>? keyFrames = null, IReadOnlyList<int>? selectedFrames = null, bool loop = false ) =>
+		IReadOnlyList<int> keyFrames = null, IReadOnlyList<int> selectedFrames = null, bool loop = false ) =>
 		OnionSkin.Compute( ForLayer( layerId ), currentFrame, totalFrames, keyFrames, selectedFrames, loop );
 }

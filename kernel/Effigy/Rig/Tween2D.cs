@@ -134,9 +134,17 @@ public sealed class TweenTrack
 	// at it; the segment uses a's outgoing and b's incoming. Tangents start as per-frame
 	// slopes (neighbour deltas over neighbour frame spans, so uneven key spacing does not
 	// bend the curve) and are scaled by this segment's frame span into per-unit-t
-	// derivatives for the Hermite basis. At the ends the segment itself is the neighbour.
+	// derivatives for the Hermite basis. At the ends there is no neighbour, so the segment
+	// is EXTRAPOLATED (same delta, one more span) instead of reusing the key itself —
+	// reusing the key halves the end tangent and bends even a collinear line, which is
+	// exactly the bug a "through collinear keys is linear" test caught.
 	static float HermiteFactor( TweenKey a, TweenKey prev, TweenKey b, TweenKey next, float t, bool clamped )
 	{
+		var span0 = Math.Max( 1, b.Frame - a.Frame );
+		if ( prev.Frame == a.Frame )
+			prev = new TweenKey( a.Frame - span0, a.Value - (b.Value - a.Value) );
+		if ( next.Frame == b.Frame )
+			next = new TweenKey( b.Frame + span0, b.Value + (b.Value - a.Value) );
 		float SlopeIn( TweenKey key, TweenKey p, TweenKey n )
 		{
 			var sPrev = p.Frame == key.Frame ? 0f : (key.Value - p.Value) / Math.Max( 1, key.Frame - p.Frame );

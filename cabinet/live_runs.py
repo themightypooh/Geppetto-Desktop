@@ -5,6 +5,7 @@ import math
 import os
 import time
 import uuid
+import hashlib
 
 
 def valid_state(state):
@@ -374,8 +375,8 @@ def watch(root, state):
         except ValueError:
             pass
     code = script_line(root, op) if op.startswith("line ") else ""
-    if state.get("state") in ("open", "completed") and lines:
-        at = len(lines)                         # renders/saves after the last model step make no step of their own
+    # Keep the source line paired with the operation/code actually displayed.
+    # An open review hold can still have an unexecuted tail in script.txt.
     error = ""
     if state.get("state") in ("held", "failed"):
         error = str(state.get("outcome") or "")[:300]
@@ -402,7 +403,7 @@ def add_note(root, rev, op, text):
     if not text or len(text) > 2000:
         raise ValueError("a note must be 1 to 2000 characters")
     meta = run_meta(root)
-    note = {"time": time.strftime("%Y-%m-%dT%H:%M:%S"), "run": os.path.basename(root.rstrip(os.sep)),
+    note = {"id": uuid.uuid4().hex, "time": time.strftime("%Y-%m-%dT%H:%M:%S"), "run": os.path.basename(root.rstrip(os.sep)),
             "rev": int(rev), "op": op or "", "text": text, "script": meta.get("script", ""),
             "prompt": meta.get("prompt", ""), "read": False}
     if op.startswith("line "):
@@ -410,8 +411,7 @@ def add_note(root, rev, op, text):
             note["line"] = int(op[5:].split(":", 1)[0])
         except ValueError:
             pass
-    with open(os.path.join(root, "notes.jsonl"), "a") as stream:
-        stream.write(json.dumps(note) + "\n")
+    _append_note_record(os.path.join(root, "notes.jsonl"), note)
     return note
 
 
@@ -450,36 +450,66 @@ def add_draw_over_note(root, rev, op, text, rays, mesh, axis=None):
     import drawing_tools
     note = add_note(root, rev, op, text)
     hits = drawing_tools.raycast_stroke(mesh, rays, axis=axis)
+    return record_note_stroke(root, note, hits)
+
+
+def record_note_stroke(root, note, hits):
+    """Attach draw-over data in its own append-only log, without replacing approved notes."""
     stamped = attach_stroke(note, hits)
     if "stroke" not in stamped:
         return note
-    path = os.path.join(root, "notes.jsonl")
-    rows = notes(root)
-    for row in reversed(rows):
-        if (row.get("time"), row.get("rev"), row.get("text")) == (note["time"], note["rev"], note["text"]):
-            row["stroke"] = stamped["stroke"]
-            break
-    else:
-        return note
-    temp = path + ".tmp"
-    with open(temp, "w") as stream:
-        stream.writelines(json.dumps(n) + "\n" for n in rows)
-    os.replace(temp, path)
+    _append_note_record(os.path.join(root, "note-strokes.jsonl"),
+                        {"key": _note_key(note), "stroke": stamped["stroke"]})
     return stamped
 
 
-def notes(root):
+def _note_key(note):
+    if note.get("id"):
+        return "id:" + str(note["id"])
+    legacy = json.dumps([note.get("time"), note.get("rev"), note.get("text")], ensure_ascii=True)
+    return "legacy:" + hashlib.sha256(legacy.encode()).hexdigest()
+
+
+def _append_note_record(path, record):
+    # One append, never read/replace the writer's log. C# checkpoints append here too.
+    data = (json.dumps(record) + "\n").encode()
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    try:
+        if os.write(fd, data) != len(data):
+            raise OSError("Incomplete note write; correction was not acknowledged")
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _note_records(path):
     out = []
     try:
-        with open(os.path.join(root, "notes.jsonl")) as stream:
+        with open(path) as stream:
             for line in stream:
                 try:
-                    out.append(json.loads(line))
+                    row = json.loads(line)
+                    if isinstance(row, dict):
+                        out.append(row)
                 except ValueError:
                     pass
     except OSError:
         pass
     return out
+
+
+def notes(root):
+    """Merge append-only receipts/annotations without risking a concurrently appended note."""
+    read = {r.get("key") for r in _note_records(os.path.join(root, "notes-read.jsonl"))}
+    strokes = {r.get("key"): r.get("stroke") for r in _note_records(os.path.join(root, "note-strokes.jsonl"))}
+    rows = _note_records(os.path.join(root, "notes.jsonl"))
+    for note in rows:
+        key = _note_key(note)
+        if key in read:
+            note["read"] = True
+        if key in strokes:
+            note["stroke"] = strokes[key]
+    return rows
 
 
 def unread_notes(runs_root, script=None):
@@ -501,16 +531,10 @@ def unread_notes(runs_root, script=None):
 def mark_read(found):
     by_dir = {}
     for n in found:
-        by_dir.setdefault(n["dir"], set()).add((n.get("time"), n.get("rev"), n.get("text")))
+        by_dir.setdefault(n["dir"], set()).add(_note_key(n))
     for d, keys in by_dir.items():
-        rows = notes(d)
-        for n in rows:
-            if (n.get("time"), n.get("rev"), n.get("text")) in keys:
-                n["read"] = True
-        temp = os.path.join(d, "notes.jsonl.tmp")
-        with open(temp, "w") as stream:
-            stream.writelines(json.dumps(n) + "\n" for n in rows)
-        os.replace(temp, os.path.join(d, "notes.jsonl"))
+        for key in keys:
+            _append_note_record(os.path.join(d, "notes-read.jsonl"), {"key": key})
 
 
 def rewind_open(root, rev, op=""):

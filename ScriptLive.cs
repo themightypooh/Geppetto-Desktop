@@ -117,11 +117,28 @@ public static class ScriptLive
                 Inbox.Answer(root, entry, result, from, ok, pending.Sum(p => Lines(p.Text)));
                 live.Status(phase, outcome: ok ? "open for more lines" : $"line {result.ErrorLine}: {result.Error}");
 
-                var next = Inbox.Next(root, cancel.Token, TimeSpan.FromMinutes(idleMinutes), () =>
+                Inbox.Entry? next = null;
+                bool StepCanRun() => pending.Count > 0 && session.StepPending;
+                while (next is null && session.PauseRequested)
+                {
+                    next = Inbox.Next(root, cancel.Token, TimeSpan.FromSeconds(2), () =>
+                    {
+                        if (session.TakeReview()) session.ReviewReady();
+                    }, StepCanRun);
+                    if (next is null && StepCanRun()) break;
+                }
+                // STEP is an explicit allowance to run the preserved tail. Resume is
+                // not: it must still wait for the corrective inbox edit below.
+                if (next is null && StepCanRun()) continue;
+                next ??= Inbox.Next(root, cancel.Token, TimeSpan.FromMinutes(idleMinutes), () =>
                 {
                     if (session.TakeReview()) session.ReviewReady();
-                });
-                if (next is null) break;
+                }, StepCanRun);
+                if (next is null)
+                {
+                    if (StepCanRun()) continue;
+                    break;
+                }
                 entry = next.Value.Name;
                 from = result.Log.Count;
                 if (next.Value.Kind == "close") break;
@@ -482,8 +499,8 @@ public static class Inbox
         return name;
     }
 
-    /// <summary>Waits for the next request; null when nothing came for <paramref name="idle"/>.</summary>
-    public static Entry? Next(string root, CancellationToken ct, TimeSpan idle, Action? idleTick = null)
+    /// <summary>Waits for the next request; null on idle timeout or an interrupt, without consuming an entry.</summary>
+    public static Entry? Next(string root, CancellationToken ct, TimeSpan idle, Action? idleTick = null, Func<bool>? interrupt = null)
     {
         string folder = Folder(root);
         Directory.CreateDirectory(folder);
@@ -501,6 +518,9 @@ public static class Inbox
                 File.Move(path, path + ".taken", overwrite: true);
                 return new Entry(Path.GetFileNameWithoutExtension(path), Path.GetExtension(path)[1..], text);
             }
+            // Durable edits have priority over a STEP wake, so a queued correction
+            // remains ahead of the preserved tail. A wake never consumes the allowance.
+            if (interrupt?.Invoke() == true) return null;
             ct.WaitHandle.WaitOne(100);
         }
         return null;

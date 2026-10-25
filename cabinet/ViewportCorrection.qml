@@ -49,10 +49,11 @@ Item {
     C.Button {
         id: stopKey
         objectName: "viewportStop" + review.pane
-        anchors.top: parent.top; anchors.right: parent.right
-        anchors.margins: 12
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 12
         visible: review.paneVisible && (review.active || review.holding || (review.sameRun && review.session.sent))
-        text: review.holding ? "CHAT" : "STOP"
+        text: review.holding ? "CHAT" : "PAUSE"
         implicitWidth: stopLabel.implicitWidth + 42
         implicitHeight: Math.max(32, stopLabel.implicitHeight + 16)
         padding: 0
@@ -75,7 +76,7 @@ Item {
                 id: stopLabel
                 anchors.verticalCenter: parent.verticalCenter
                 text: stopKey.text; color: review.ink
-                font.family: review.mono; font.pixelSize: 11; font.bold: true
+                font.family: review.mono; font.pixelSize: 11 * review.textZoom; font.bold: true
             }
         }
         background: Rectangle {
@@ -83,7 +84,7 @@ Item {
             border.color: stopKey.activeFocus ? review.accent : "#55545a"
         }
         C.ToolTip.visible: hovered
-        C.ToolTip.text: "Stop this viewport’s build and give a correction. The model is kept."
+        C.ToolTip.text: "Pause this viewport’s build at the next safe step and give a correction. The model is kept."
     }
 
     Window {

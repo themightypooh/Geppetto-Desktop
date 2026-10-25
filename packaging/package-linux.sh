@@ -322,6 +322,7 @@ cat << 'EOF' > "${STAGE_DIR}/cabinet-requirements.txt"
 # The cabinet (Geppetto's AI modelling frontend) is Python + Qt Quick.
 # The native viewer in this bundle is self-contained; the cabinet needs:
 PySide6>=6.5
+numpy>=1.24
 EOF
 cat << 'EOF' > "${STAGE_DIR}/geppetto"
 #!/usr/bin/env bash
@@ -335,10 +336,10 @@ if [[ "${1:-}" == "--viewer" ]]; then
     shift
     exec "${SCRIPT_DIR}/marionette-desktop" "$@"
 fi
-if python3 -c "import PySide6" >/dev/null 2>&1; then
+if python3 -c "import PySide6, numpy" >/dev/null 2>&1; then
     exec python3 "${SCRIPT_DIR}/cabinet/host.py" "$@"
 fi
-echo "Geppetto's cabinet needs Python 3 + PySide6:  pip install -r cabinet-requirements.txt" >&2
+echo "Geppetto's cabinet needs Python 3 + PySide6 + NumPy:  pip install -r cabinet-requirements.txt" >&2
 echo "Opening the standalone viewer instead; FIRST-RUN.md explains the rest." >&2
 exec "${SCRIPT_DIR}/marionette-desktop" "$@"
 EOF

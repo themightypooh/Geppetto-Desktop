@@ -28,6 +28,13 @@ def fixture(**kw):
 
 
 class CatalogueTests(unittest.TestCase):
+    def setUp(self):
+        # These fixtures own their installed models; optional external catalogues
+        # have independent parity/portability tests and must not leak into them.
+        choices = patch.object(chat.roundtable_catalog, 'choices', return_value=[])
+        choices.start()
+        self.addCleanup(choices.stop)
+
     def test_discovers_installed_models_and_chat_only_rp(self):
         def get(url):
             if url.endswith('api/tags'):
@@ -35,9 +42,10 @@ class CatalogueTests(unittest.TestCase):
             return {'data': [{'id': 'koboldcpp/rp'}]}
         with patch.object(chat, '_get', side_effect=get), patch.object(chat, 'CONFIG', '/no/file'), patch.object(chat, 'DEFAULT_MODELS', []):
             models = chat.models()
-        self.assertEqual(models[0]['id'], 'ollama/prompt-pocket:latest')
-        self.assertTrue(models[0]['research'])
-        self.assertFalse(models[1]['research'])
+        by_id = {m['id']: m for m in models}
+        self.assertIn('ollama/prompt-pocket:latest', by_id)
+        self.assertTrue(by_id['ollama/prompt-pocket:latest']['research'])
+        self.assertFalse(by_id['koboldcpp/rp']['research'])
         self.assertNotIn('llama3.1:latest', [m['model'] for m in models])
 
     def test_custom_model_overrides_and_missing_key_is_visible(self):

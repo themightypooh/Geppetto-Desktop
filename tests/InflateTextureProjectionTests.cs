@@ -135,11 +135,15 @@ internal static class InflateTextureProjectionTests
 		{
 			var src = QuadrantCanvas();
 			var o = new InflateTextureProjection.Options();
+			(byte R, byte G, byte B, byte A) red = (255, 0, 0, 255);
+			(byte R, byte G, byte B, byte A) green = (0, 255, 0, 255);
+			(byte R, byte G, byte B, byte A) blue = (0, 0, 255, 255);
+			(byte R, byte G, byte B, byte A) white = (255, 255, 255, 255);
 			// Drawing-up = image-up: high v is the top row, low v the bottom row.
-			Require( InflateTextureProjection.Sample( src, new Vec2( 0.2f, 0.8f ), o ) == (255, 0, 0, 255), "top-left should be red" );
-			Require( InflateTextureProjection.Sample( src, new Vec2( 0.8f, 0.8f ), o ) == (0, 255, 0, 255), "top-right should be green" );
-			Require( InflateTextureProjection.Sample( src, new Vec2( 0.2f, 0.2f ), o ) == (0, 0, 255, 255), "bottom-left should be blue" );
-			Require( InflateTextureProjection.Sample( src, new Vec2( 0.8f, 0.2f ), o ) == (255, 255, 255, 255), "bottom-right should be white" );
+			Require( InflateTextureProjection.Sample( src, new Vec2( 0.2f, 0.8f ), o ) == red, "top-left should be red" );
+			Require( InflateTextureProjection.Sample( src, new Vec2( 0.8f, 0.8f ), o ) == green, "top-right should be green" );
+			Require( InflateTextureProjection.Sample( src, new Vec2( 0.2f, 0.2f ), o ) == blue, "bottom-left should be blue" );
+			Require( InflateTextureProjection.Sample( src, new Vec2( 0.8f, 0.2f ), o ) == white, "bottom-right should be white" );
 		} );
 
 		Check( "every face shows its own uv region", () =>
@@ -183,8 +187,10 @@ internal static class InflateTextureProjectionTests
 		{
 			var src = QuadrantCanvas();
 			var o = new InflateTextureProjection.Options { UvOffset = new Vec2( 0.25f, 0.25f ), UvScale = new Vec2( 0.5f, 0.5f ) };
-			Require( InflateTextureProjection.Sample( src, new Vec2( 0f, 0f ), o ) == (0, 0, 255, 255), "shifted origin should read bottom-left blue" );
-			Require( InflateTextureProjection.Sample( src, new Vec2( 1f, 1f ), o ) == (0, 255, 0, 255), "shifted far corner should read top-right green" );
+			(byte R, byte G, byte B, byte A) blue = (0, 0, 255, 255);
+			(byte R, byte G, byte B, byte A) green = (0, 255, 0, 255);
+			Require( InflateTextureProjection.Sample( src, new Vec2( 0f, 0f ), o ) == blue, "shifted origin should read bottom-left blue" );
+			Require( InflateTextureProjection.Sample( src, new Vec2( 1f, 1f ), o ) == green, "shifted far corner should read top-right green" );
 		} );
 
 		Check( "repeat wraps, clamp pins", () =>
@@ -192,8 +198,10 @@ internal static class InflateTextureProjectionTests
 			var src = QuadrantCanvas();
 			var rep = new InflateTextureProjection.Options { Wrap = InflateTextureProjection.Wrap.Repeat };
 			var clp = new InflateTextureProjection.Options { Wrap = InflateTextureProjection.Wrap.Clamp };
-			Require( InflateTextureProjection.Sample( src, new Vec2( 1.2f, 0.75f ), rep ) == (255, 0, 0, 255), "repeat past 1 should wrap to the left column" );
-			Require( InflateTextureProjection.Sample( src, new Vec2( 1.2f, 0.75f ), clp ) == (0, 255, 0, 255), "clamp past 1 should pin to the right column" );
+			(byte R, byte G, byte B, byte A) red = (255, 0, 0, 255);
+			(byte R, byte G, byte B, byte A) green = (0, 255, 0, 255);
+			Require( InflateTextureProjection.Sample( src, new Vec2( 1.2f, 0.75f ), rep ) == red, "repeat past 1 should wrap to the left column" );
+			Require( InflateTextureProjection.Sample( src, new Vec2( 1.2f, 0.75f ), clp ) == green, "clamp past 1 should pin to the right column" );
 		} );
 
 		Check( "degenerate inputs refuse loudly", () =>

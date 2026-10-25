@@ -176,22 +176,22 @@ internal static class ControllerFixTests
 			Check( Effigy.BuildScript.Mutates( "add" ) && Effigy.BuildScript.Mutates( "SET" ) && !Effigy.BuildScript.Mutates( "describe" ), "verb classes" );
 			Check( Effigy.BuildScript.VerbOf( "  edit Base x=1" ) == "edit" && Effigy.BuildScript.VerbOf( "# no" ) is null, "VerbOf" );
 
-			// Paced: one revision per changing line on top of the initial one, at least pace apart.
+			// Every non-caption operation is saved, including describe; only mutations are paced.
 			var root = Root();
 			var clock = System.Diagnostics.Stopwatch.StartNew();
 			var done = ScriptLive.Execute( new Effigy.PartStudio(), script, root, root, 0.25, new CancellationTokenSource() );
 			clock.Stop();
 			Check( done.State == "completed" && done.Result.Ok, $"run: {done.State} {done.Result}" );
-			Check( done.Revisions == 4, $"initial + 3 changing lines = 4 revisions, got {done.Revisions}" );
+			Check( done.Revisions == 5, $"initial + 4 non-caption operations = 5 revisions, got {done.Revisions}" );
 			Check( clock.Elapsed.TotalSeconds >= 0.45, $"pace 0.25 not honoured between 3 changes: {clock.Elapsed.TotalSeconds:0.00}s" );
 			var revisions = Directory.GetFiles( Path.Combine( root, ".live/revisions" ), "*.effigy" ).OrderBy( p => p ).ToArray();
-			Check( revisions.Length == 4, $"revision files {revisions.Length}" );
+			Check( revisions.Length == 5, $"revision files {revisions.Length}" );
 			var counts = revisions.Select( p => Effigy.StudioDocument.Read( File.ReadAllText( p ) ).Features.Count ).ToArray();
-			Check( string.Join( ",", counts ) == "0,1,1,2", $"features per revision {string.Join( ",", counts )}" );
+			Check( string.Join( ",", counts ) == "0,1,1,1,2", $"features per revision {string.Join( ",", counts )}" );
 			var latest = AiLiveRun.ReadLatest( root )!;
-			Check( latest["state"]!.GetValue<string>() == "completed" && latest["snapshot"]!["revision"]!.GetValue<long>() == 4, "journal end: " + latest.ToJsonString() );
+			Check( latest["state"]!.GetValue<string>() == "completed" && latest["snapshot"]!["revision"]!.GetValue<long>() == 5, "journal end: " + latest.ToJsonString() );
 			var lines = File.ReadAllLines( Path.Combine( root, ".live/events.jsonl" ) );
-			Check( lines.Count( l => l.Contains( "\"state\":\"revision\"" ) ) == 4, "revision events" );
+			Check( lines.Count( l => l.Contains( "\"state\":\"revision\"" ) ) == 5, "revision events" );
 			Check( lines.Any( l => l.Contains( "line 4: set Base" ) ), "operation names the line" );
 			Check( lines.Any( l => l.Contains( "\"paceSeconds\":0.25" ) ), "starting pace not published for the cabinet's pace control" );
 
@@ -217,7 +217,9 @@ internal static class ControllerFixTests
 			Directory.CreateDirectory( Path.Combine( slow, ".live/commands" ) );
 			AiLiveRun.AtomicWrite( Path.Combine( slow, ".live/commands/test-cancel.json" ), body.ToJsonString() );
 			Check( task.Wait( 3000 ), "cancel did not stop the paced run" );
-			Check( task.Result.State == "cancelled" && task.Result.Revisions == 2, $"cancelled run: {task.Result.State} {task.Result.Revisions}" );
+			Check( task.Result.State == "cancelled" && task.Result.Revisions is 2 or 3
+				&& task.Result.Studio.Features.Count == 1 && task.Result.Studio.Features[0].Name == "Base",
+				$"cancelled run must keep Base but never execute the next mutation: {task.Result.State} {task.Result.Revisions}" );
 			Check( AiLiveRun.ReadLatest( slow )!["state"]!.GetValue<string>() == "cancelled", "cancelled state" );
 		} );
 		registry.Add( "controller-fixes", "open script run: stays up for more lines, a bad line holds it, fix/skip/rewind/close, idle close", () =>
@@ -290,6 +292,30 @@ internal static class ControllerFixTests
 			var after = rewound.Result.Studio.Features.Select( f => f.Name ).ToArray();
 			Check( string.Join( ",", after ) == "A,B,F", "after rewind: " + string.Join( ",", after ) );
 			Check( File.ReadAllText( Path.Combine( back, ".live/events.jsonl" ) ).Contains( "rewind to step 3" ), "the rewind is a revision of its own" );
+
+			// Pause mid-script holds the unrun tail. An edit sent while held runs before that tail, not after it.
+			var heldRun = Root();
+			var pausing = Task.Run( () => ScriptLive.Execute( new Effigy.PartStudio(),
+				"add Primitive shape=Box name=Base\nadd Primitive shape=Box name=Tail position=6,0,0\n", heldRun, heldRun, 0.6, new CancellationTokenSource(), open: true, idleMinutes: 1 ) );
+			for ( int i = 0; i < 400 && (AiLiveRun.ReadLatest( heldRun )?["snapshot"]?["revision"]?.GetValue<long>() ?? 0) < 2; i++ ) Thread.Sleep( 25 );
+			string runId = AiLiveRun.ReadLatest( heldRun )!["runId"]!.GetValue<string>();
+			string pauseId = Guid.NewGuid().ToString( "N" );
+			Directory.CreateDirectory( Path.Combine( heldRun, ".live/commands" ) );
+			AiLiveRun.AtomicWrite( Path.Combine( heldRun, ".live/commands", pauseId + ".json" ),
+				new System.Text.Json.Nodes.JsonObject { ["schemaVersion"] = 1, ["runId"] = runId, ["id"] = pauseId, ["command"] = "pause" }.ToJsonString() );
+			for ( int i = 0; i < 400 && AiLiveRun.ReadLatest( heldRun )!["control"]?["paused"]?.GetValue<bool>() != true; i++ ) Thread.Sleep( 25 );
+			Check( AiLiveRun.ReadLatest( heldRun )!["control"]?["paused"]?.GetValue<bool>() == true, "pause did not hold the script" );
+			Check( !Directory.GetFiles( Path.Combine( heldRun, ".live/revisions" ) ).Any( p => File.ReadAllText( p ).Contains( "name=Tail" ) ), "tail ran through the pause" );
+			string edit = Inbox.Put( heldRun, "txt", "add Primitive shape=Sphere name=Edit position=0,3,0\n" );
+			Thread.Sleep( 400 );
+			Check( !File.Exists( Path.Combine( heldRun, ".live/answers", edit + ".txt" ) ), "the edit ran before resume, ahead of the hold" );
+			string resumeId = Guid.NewGuid().ToString( "N" );
+			AiLiveRun.AtomicWrite( Path.Combine( heldRun, ".live/commands", resumeId + ".json" ),
+				new System.Text.Json.Nodes.JsonObject { ["schemaVersion"] = 1, ["runId"] = runId, ["id"] = resumeId, ["command"] = "resume" }.ToJsonString() );
+			string editAnswer = Answer( heldRun, edit );
+			Check( editAnswer.IndexOf( "'Edit'" ) >= 0 && editAnswer.IndexOf( "'Edit'" ) < editAnswer.IndexOf( "'Tail'" ), "edit did not land before the paused tail: " + editAnswer );
+			Inbox.Put( heldRun, "close" );
+			Check( pausing.Wait( 5000 ), "paused run did not close" );
 
 			// Without --open nothing changed: a failure ends the run.
 			var once = Root();

@@ -32,7 +32,7 @@ public static class AiLiveControl
         readonly Queue<Direction> directions = new();
         readonly Stopwatch clock = Stopwatch.StartNew();
         bool pauseRequested, paused, closed;
-        bool reviewRequested;
+        bool reviewRequested, steppedMutation;
         bool checkpointContinue;        // a `continue` command arrived while the run waits at a checkpoint (Lane D)
         int steps;                      // STEP while paused: changes allowed through before holding again
         double pace, lastMutation = double.NegativeInfinity;
@@ -47,6 +47,9 @@ public static class AiLiveControl
 
         // Script runs yield back to their inbox so a correction runs before the
         // unexecuted tail of the old batch.
+        public bool PauseRequested { get { lock (gate) return pauseRequested; } }
+        public bool StepPending { get { lock (gate) return pauseRequested && steps > 0; } }
+
         public bool TakeReview()
         {
             lock (gate) { bool value = reviewRequested; reviewRequested = false; return value; }
@@ -83,7 +86,7 @@ public static class AiLiveControl
                     if (pauseRequested && steps > 0)
                     {
                         // a step lets the run go on to its next change, does that one, and holds again
-                        if (mutation) steps--;
+                        if (mutation) { steps--; steppedMutation = true; }
                         return;
                     }
                     if (pauseRequested)
@@ -99,7 +102,17 @@ public static class AiLiveControl
                 await Task.Delay(25, ct);
             }
         }
-        public void MutationFinished() { lock (gate) lastMutation = clock.Elapsed.TotalSeconds; }
+        public void MutationFinished()
+        {
+            lock (gate)
+            {
+                lastMutation = clock.Elapsed.TotalSeconds;
+                // An open script must yield back to its inbox after the last allowed
+                // STEP, not block inside the next line with corrections waiting outside.
+                if (steppedMutation && allowReview && pauseRequested && steps == 0) reviewRequested = true;
+                steppedMutation = false;
+            }
+        }
         public IReadOnlyList<Direction> TakeDirections()
         {
             lock (gate)
@@ -162,7 +175,12 @@ public static class AiLiveControl
                                         // (it carries no modelling text), so it is accepted even when
                                         // directions are locked, and ScriptLive polls TakeCheckpointContinue.
                                         checkpointContinue = true; Publish("checkpoint-continue", id, "accepted"); break;
-                                    case "pause": pauseRequested = true; Publish("pausing", id, "accepted"); break;
+                                    case "pause":
+                                        // Same hold as review on an open script: the next line boundary
+                                        // keeps the unrun tail and waits for an edit before that tail.
+                                        pauseRequested = true; steps = 0;
+                                        if (allowReview) reviewRequested = true;
+                                        Publish("pausing", id, "accepted"); break;
                                     case "review":
                                         pauseRequested = true; steps = 0;
                                         if (allowReview) reviewRequested = true;

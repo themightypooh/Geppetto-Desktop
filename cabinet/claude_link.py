@@ -12,19 +12,21 @@ Nothing here knows Qt: host.py turns `on_change` into a signal.
 """
 import json
 import os
+import chat_workspace
 import subprocess
 import threading
 import time
 import uuid
 
 import claude_gate
+from chat_phase import PHASE_PROMPT
 
 STATE = os.path.expanduser("~/.cache/geppetto/claude-chat.json")
 PROJECT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CLAUDE = os.environ.get("GEPPETTO_CLAUDE", "claude")
 PROMPT = ("You are talking to po through the CLAUDE card in the Geppetto chest, right over the viewport "
           "they are watching. Keep replies short: a few lines, no tables. Do the work yourself with "
-          "geppetto-live so it shows in the chest. If a hook says po pressed STOP, stop at once.")
+          "geppetto-live so it shows in the chest. If a hook says po pressed STOP, stop at once.") + PHASE_PROMPT
 KEEP = 200
 
 # --- Locked-down spawn environment (audit C2) — implemented, OFF by default. ---
@@ -95,17 +97,18 @@ def _partial(raw):
 
 
 class ClaudeLink:
-    def __init__(self, on_change=lambda: None, spawn=subprocess.Popen, state_path=STATE, cwd=PROJECT,
+    def __init__(self, on_change=lambda: None, spawn=subprocess.Popen, state_path=STATE, cwd=None,
                  lockdown=None):
         self.on_change = on_change
         self.spawn = spawn
         self.state_path = state_path
-        self.cwd = cwd
+        self.cwd = cwd or chat_workspace.workspace()
         # Audit C2 lockdown (see top of file): None = follow the GEPPETTO_CLAUDE_LINK_LOCKDOWN flag.
         self.lockdown = (os.environ.get(LOCKDOWN_FLAG) == "1") if lockdown is None else bool(lockdown)
         self.messages = []          # {"role": "you"|"claude"|"tool"|"note"|"ask", "text": ..., ...}
         self.model = ""             # the Claude model (opus, sonnet, haiku); "" = the CLI's default
         self.persona = ""           # extra system prompt for this card (e.g. Zoopa, from the picked model's persona file)
+        self.research_policy = ""
         self.status = "idle"        # idle | starting | working | paused | stopped | offline
         self.ask = None             # the permission question waiting on you: {"id", "tool", "text"}
         self.session = self._load().get("session", "")
@@ -166,6 +169,8 @@ class ClaudeLink:
     # ---- the process ----------------------------------------------------------------------------
     def _start(self):
         prompt = PROMPT + ("\n\n" + self.persona if self.persona else "")
+        if self.research_policy:
+            prompt += "\n\n" + self.research_policy
         args = [CLAUDE, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
                 "--include-partial-messages",
                 "--permission-mode", "auto", "--permission-prompt-tool", "stdio",
@@ -179,6 +184,7 @@ class ClaudeLink:
             for name in [k for k in env if k.startswith(("CLAUDE_CODE_", "CLAUDECODE"))]:
                 env.pop(name)       # a chest started from inside a Claude session must not look like its child
         self._set("starting")
+        os.makedirs(self.cwd, mode=0o700, exist_ok=True)
         self.proc = self.spawn(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                text=True, bufsize=1, cwd=self.cwd, env=env)
         proc = self.proc
@@ -200,7 +206,11 @@ class ClaudeLink:
         for line in proc.stderr:
             tail = (tail + [line.rstrip()])[-5:]
         if proc is self.proc and proc.poll() not in (None, 0) and tail:
-            self._add("note", "claude exited: " + " / ".join(t for t in tail if t)[:300])
+            self._add("note", "claude exited: " + self._source_error(" / ".join(t for t in tail if t)[:300]))
+
+    def _source_error(self, text):
+        """A persona is not a provider or a separate usage allowance."""
+        return ("Zoopa · " if self.persona else "") + "Claude CLI · " + (self.model or "default") + ": " + text
 
     def _read(self, proc):
         for line in proc.stdout:
@@ -246,7 +256,7 @@ class ClaudeLink:
             if self.status not in ("stopped",):
                 self._set("idle")
             if msg.get("is_error") and msg.get("subtype") not in ("success",):
-                self._add("note", str(msg.get("result") or msg.get("subtype") or "error")[:300])
+                self._add("note", self._source_error(str(msg.get("result") or msg.get("subtype") or "error")[:300]))
         elif kind == "system" and msg.get("subtype") == "init" and self.status == "starting":
             self._set("working")
 
@@ -399,6 +409,14 @@ class ClaudeLink:
         if persona == self.persona:
             return
         self.persona = persona
+        if self.proc is not None:
+            self.close()
+            self._set("idle")
+
+    def set_research_policy(self, policy):
+        if policy == self.research_policy:
+            return
+        self.research_policy = policy
         if self.proc is not None:
             self.close()
             self._set("idle")

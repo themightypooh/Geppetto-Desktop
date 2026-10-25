@@ -1,5 +1,48 @@
 # Assignment and evidence board
 
+## C3 — visible chat Build/Plan repair (2026-10-24)
+
+Assigned to current repair session by user's screenshot/help request. Owns scoped
+additions to `cabinet/ClaudePanel.qml`, `cabinet/host.py`,
+`cabinet/chat.py`, `tests/test_chat_modes.py`, and Model Hub's
+`providers.py` Codex/OpenCode launch functions only. Preserve existing edits.
+Verify actual visible card routing and workspace permissions; no chest launch.
+
+## C4 — asset workflow audit and centered viewport pause (2026-10-24)
+
+User placement correction supersedes center placement: **lower center of each
+viewport**. C1 placement follow-up owns only the pause-button anchor lines in
+`cabinet/ViewportCorrection.qml` and matching location assertions/screenshot
+names in `tests/test_viewport_correction.py`; C4 retains all other audit work.
+No viewer launch, restart or real-run control for this placement-only change.
+
+Current repair session, user-authorized follow-up. Owns
+`cabinet/ViewportCorrection.qml`, `tests/test_viewport_correction.py` center/scale
+assertions, and audit evidence in this board. Audit the live asset pipeline;
+do not touch real runs or open the closed chest.
+Also repair the earlier session's unsafe startup wait in
+`tests/ControllerFixTests.cs` (test-only directory race).
+
+C3 user follow-up: inline per-chat research opt-in (papers/photos/licensed
+reference models). Additional owned files: new `cabinet/research_consent.py`,
+new `tests/test_research_consent.py`, and scoped `cabinet/claude_link.py` policy
+propagation. No global consent, provider credentials, or automatic asset imports.
+
+User-authorized parallel audit leases: provider-portability agent is read-only
+except optional new `tests/test_provider_portability_audit.py`; control-audit
+agent is read-only except optional new `tests/test_asset_control_audit.py` and
+isolated `/tmp/opencode` harnesses. Neither owns shared production files.
+
+Provider-portability follow-up lease explicitly transferred: that agent alone
+now owns `cabinet/roundtable_catalog.py`, new `cabinet/provider_cli.py`,
+`tests/test_provider_portability_audit.py`, and NumPy declaration/import-check
+lines in `packaging/package-linux.sh`. Main retains chat/host/policy files.
+
+Control-audit follow-up lease: control agent owns `AiLiveControl.cs`,
+`ScriptLive.cs`, new `tests/OpenScriptStepTests.cs`, and only its registration in
+`tests/TestRegistry.cs`, for STEP after script pause. Main owns note-file race
+repair in `cabinet/live_runs.py` and new `tests/test_note_atomicity.py`.
+
 ## C1 — viewport-local stop and correction (2026-10-24)
 
 `implemented-unverified` (running-chest deployment gate open), current agent. User explicitly authorizes only Stop and its
@@ -35,6 +78,10 @@ same-run history, fixed pinned composer, shared auto-discovered skill. Evidence:
 `handoffs/C1-OWNER-ACCEPTANCE.md` follow-up. Python **15/15 at all three scales**,
 cabinet QML load **1/1**, real stacked notes/fix round-trip exit 0. No auto-send
 on Enter/close/reopen. No running-cabinet deployment claim; leases released.
+Owner subsequently authorized loading the cabinet. Updated GUI started and its
+socket/screenshot were checked; `handoffs/C1-OWNER-ACCEPTANCE.md` has evidence.
+Knight runner remains unchanged, paused at revision 111 / sequence 227. No live
+correction test was performed against that old runner or another session's pane.
 
 Last reconciled against the source on **2026-10-20** by the coordinator.
 

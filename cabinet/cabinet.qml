@@ -316,7 +316,28 @@ Window {
         Shade { visible: !chatBox.bare; x: 6; y: 6; width: chatBox.width; height: chatBox.height }
         Rectangle { visible: !chatBox.bare; anchors.fill: parent; color: root.sheetEdge }
         Rectangle { visible: !chatBox.bare; anchors.fill: parent; anchors.margins: 2; color: root.panelFill }
-        Tape { visible: !chatBox.bare; x: 6; y: -6; text: "CHAT" }
+        Tape {
+            visible: !chatBox.bare
+            x: 6; y: -6
+            text: "CHAT · " + (host.chatMode ? host.chatMode.toUpperCase() : "BUILD")
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: host.toggleChatMode()
+            }
+        }
+        // mode toggle button
+        Px {
+            x: parent.width - (chatBox.closable ? 146 : 94); y: chatBox.closable ? 8 : 4
+            text: host.chatMode === "plan" ? "[PLAN]" : "[BUILD]"
+            size: 6
+            color: host.chatMode === "plan" ? "#c8452f" : "#2f9a6a"
+            MouseArea {
+                anchors.fill: parent; anchors.margins: -4
+                cursorShape: Qt.PointingHandCursor
+                onClicked: host.toggleChatMode()
+            }
+        }
         // out into a window of its own, or back into the drawer
         Px {
             visible: !chatBox.bare

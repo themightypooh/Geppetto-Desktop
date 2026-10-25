@@ -242,7 +242,7 @@ public sealed class InflateTextureProjectionFeature : Feature
 			Fail( $"InflateTextureProjection cannot find image '{path}'.",
 				"The path did not resolve to a file.",
 				"Check the path, or copy the PNG next to the document" );
-		PaintCanvas source;
+		PaintCanvas source = default!;
 		try { source = InflateTextureProjection.FromPng( File.ReadAllBytes( path ) ); }
 		catch ( Exception ex ) when ( ex is IOException or InvalidDataException or NotSupportedException )
 		{

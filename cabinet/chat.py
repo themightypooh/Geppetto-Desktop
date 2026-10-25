@@ -15,15 +15,22 @@ import os
 import shutil
 import socket
 import subprocess
+import signal
 import tempfile
+import time
 import threading
 import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+import roundtable_catalog
+import chat_workspace
+from chat_phase import PHASE_PROMPT
 
 CONFIG = os.path.expanduser('~/.config/geppetto/chat-models.json')
-SYSTEM = "You are Geppetto's helpful chat assistant. Answer clearly and concretely. Do not claim you changed files or the scene: this chat has no editing tools."
+SYSTEM_PLAN = "You are Geppetto's helpful chat assistant in Plan mode. Discuss plans and research clearly and concretely. You are in read-only planning mode."
+SYSTEM_BUILD = "You are Geppetto's helpful chat assistant in Build mode. You have active modeling and build tools enabled. Answer clearly and concisely."
+SYSTEM = SYSTEM_PLAN
 OLLAMA = os.environ.get('OLLAMA_HOST', 'http://127.0.0.1:11434').rstrip('/')
 if not OLLAMA.startswith(('http://', 'https://')):
     OLLAMA = 'http://' + OLLAMA
@@ -34,17 +41,17 @@ if not OLLAMA.startswith(('http://', 'https://')):
 # specific model is ever tied to the app for anyone.
 DEFAULT_MODELS = []
 
-# Claude through the claude CLI, on its own login (the Max plan), never an API key
+# Claude through the user's CLI login; installation does not prove a subscription tier.
 CLAUDE = shutil.which('claude') or os.path.expanduser('~/.local/bin/claude')
 CLAUDE_MODELS = [
-    dict(id='claude/opus', label='Claude Opus · Max plan', kind='claude-cli', model='opus', endpoint='cli', research=False),
-    dict(id='claude/sonnet', label='Claude Sonnet · Max plan', kind='claude-cli', model='sonnet', endpoint='cli', research=False),
-    dict(id='claude/haiku', label='Claude Haiku · Max plan', kind='claude-cli', model='haiku', endpoint='cli', research=False),
+    dict(id='claude/opus', label='Claude Opus · CLI login', kind='claude-cli', model='opus', endpoint='cli', research=False),
+    dict(id='claude/sonnet', label='Claude Sonnet · CLI login', kind='claude-cli', model='sonnet', endpoint='cli', research=False),
+    dict(id='claude/haiku', label='Claude Haiku · CLI login', kind='claude-cli', model='haiku', endpoint='cli', research=False),
 ]
 
 ZOOPA_FILE = os.path.expanduser('~/.config/geppetto/zoopa.md')
 ZOOPA_MODELS = [
-    dict(id='zoopa/opus', label='Zoopa · Opus (Max)', kind='claude-cli', model='opus', endpoint='cli', research=False,
+    dict(id='zoopa/opus', label='Zoopa · Claude Opus · CLI login', kind='claude-cli', model='opus', endpoint='cli', research=False,
          system_file=ZOOPA_FILE),
 ]
 
@@ -200,6 +207,13 @@ def models(discover=True):
             out += [dict(m) for m in ZOOPA_MODELS]
     if os.access(GROK, os.X_OK):
         out += [dict(m) for m in GROK_MODELS]
+    for choice in roundtable_catalog.choices(discover):
+        # Keep persona/seat aliases, but don't list the same plain CLI model twice.
+        if not choice['id'].startswith('roundtable/seat/') and any(
+                m['kind'] == choice['kind'] and m['model'] == choice['model'] and not m.get('system_file')
+                for m in out):
+            continue
+        out.append(choice)
     for m in DEFAULT_MODELS:
         if key(m) or m.get('always'):
             out.append(dict(m))
@@ -212,12 +226,12 @@ def models(discover=True):
         m.setdefault('label', m['model'])
         m.setdefault('kind', 'openai')
         m.setdefault('research', True)
-        m['available'] = not m.get('key_env') or bool(key(m))
-        if not m['available']:
+        m['available'] = m.get('available', True) and (not m.get('key_env') or bool(key(m)))
+        m.setdefault('group', {'claude-cli': 'Claude', 'grok-cli': 'Grok', 'ollama': 'Local · Ollama'}.get(m['kind'], 'API / configured'))
+        m.setdefault('vision', False)
+        if m.get('key_env') and not key(m):
             m['label'] += ' (key missing)'
-    preferred = ['ollama/geppetto-chat:latest', 'ollama/prompt-pocket:latest']
-    return sorted(out, key=lambda m: (preferred.index(m['id']) if m['id'] in preferred else 2,
-                                     0 if m['kind'] == 'ollama' else 1, m['label'].lower()))
+    return sorted(out, key=lambda m: (m['group'].lower(), m['label'].lower()))
 
 
 def find(model_id, catalogue=None):
@@ -382,6 +396,8 @@ def _body(model, history, streaming=False, notes='', api=''):
     kind = model['kind']
     messages = _wire_messages(history, kind)
     system = _system(notes, api)
+    if model.get('research_policy'):
+        system += '\n\n' + model['research_policy']
     if kind == 'anthropic':
         return dict(model=model['model'], max_tokens=2048, system=system, messages=messages)
     if kind == 'google':
@@ -391,7 +407,9 @@ def _body(model, history, streaming=False, notes='', api=''):
     if kind == 'ollama':
         body.update(think=False, keep_alive='2m', options={'num_ctx': 8192, 'num_predict': 2048})
     else:
-        body.update(model.get('extra_body', {}))
+        # Provider tuning must not silently replace the selected model or policy/history.
+        body.update({k: v for k, v in model.get('extra_body', {}).items()
+                     if k not in ('model', 'messages', 'stream', 'system', 'systemInstruction', 'contents')})
     return body
 
 
@@ -422,6 +440,17 @@ def _request(model, history, streaming, notes='', api=''):
     return urllib.request.Request(_url(model), data=json.dumps(_body(model, history, streaming, notes, api)).encode(), headers=headers, method='POST')
 
 
+class ProviderRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Never forward a provider request or its credentials to a different origin."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        def origin(url):
+            parsed = urllib.parse.urlsplit(url)
+            return (parsed.scheme.lower(), parsed.hostname, parsed.port or (443 if parsed.scheme == 'https' else 80))
+        if origin(req.full_url) != origin(newurl):
+            raise RuntimeError('Provider redirect to a different origin was refused; no credentials were forwarded.')
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 CLAUDE_HOME = os.path.expanduser('~/.local/share/geppetto/chat')
 CLAUDE_TOOLS = ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Skill', 'WebSearch', 'WebFetch',
                 'Bash(geppetto-live *)', 'Bash(python3 */cabinet/host.py *)', 'Bash(ls *)', 'Bash(mkdir *)', 'Bash(cat *)']
@@ -431,7 +460,7 @@ CLAUDE_CHAT = ("You are the chat in Geppetto's cabinet (the paper ball), talking
                " with the model loaded: change it with `geppetto-live more RUN edit.txt` (a few lines), never a"
                " new run or a rebuild; a bad line holds the run, send the fix with `more`; `geppetto-live close RUN`"
                " when po is happy. po flags steps with notes in the chest; they reach you at your next tool call; `geppetto-live rewind RUN N` puts the model back to revision N. Never restart, quit or"
-               " take over the Geppetto chest. The chat window is small: keep replies short.")
+               " take over the Geppetto chest. The chat window is small: keep replies short.") + PHASE_PROMPT
 _claude_sessions = set()      # chat sessions the CLI has already started; later turns --resume them
 
 # Grok through the grok CLI, on its own grok.com login, never an API key.
@@ -456,6 +485,8 @@ def _extra_system(model):
             extra = (extra + '\n\n' + Path(path).expanduser().read_text()).strip()
         except OSError:
             pass
+    if model.get('research_policy'):
+        extra += '\n\n' + model['research_policy']
     return extra.strip()
 
 
@@ -583,11 +614,80 @@ def _grok_cli(model, history, cancel, timeout, session=''):
             pass
 
 
-def stream(model, history, cancel=None, timeout=120, notes='', api='', session=''):
+def _roundtable_cli(model, history, cancel, timeout, mode="build"):
+    """Reuse Roundtable's provider adapter, with private history and no seat/session mutation."""
+    base_sys = (CLAUDE_CHAT + '\n' + SYSTEM_BUILD) if mode == "build" else SYSTEM_PLAN
+    prompt = (base_sys + chr(10) + chr(10) + _extra_system(model) + chr(10) + chr(10) +
+              (chr(10) + chr(10)).join(("User: " if h["role"] == "you" else "Assistant: ") + _said(h)
+                               for h in history[-16:] if h["role"] in ("you", "model")))
+    os.makedirs(CLAUDE_HOME, mode=0o700, exist_ok=True)
+    workspace = chat_workspace.workspace()
+    os.makedirs(workspace, mode=0o700, exist_ok=True)
+    p = subprocess.Popen(roundtable_catalog.command(model, act=(mode == "build")), stdin=subprocess.PIPE,
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                          cwd=workspace, env=child_env(), start_new_session=True)
+    errors = []
+    def read_errors():
+        for line in p.stderr:
+            errors.append(line.rstrip())
+            del errors[:-5]
+    reader = threading.Thread(target=read_errors, daemon=True)
+    reader.start()
+    def terminate():
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    def guard():
+        deadline = time.monotonic() + max(timeout, 3600)
+        while p.poll() is None:
+            if (cancel is not None and cancel.wait(.05)) or time.monotonic() > deadline:
+                terminate()
+                return
+            if cancel is None:
+                time.sleep(.05)
+    threading.Thread(target=guard, daemon=True).start()
+    said = False
+    try:
+        p.stdin.write(prompt)
+        p.stdin.close()
+        for line in p.stdout:
+            if cancel is not None and cancel.is_set():
+                return
+            try:
+                data = json.loads(line)
+            except ValueError:
+                continue
+            event = data.get('event') or {}
+            delta = event.get('delta') or {}
+            if delta.get('type') == 'text_delta':
+                said = True
+                yield delta.get('text', '')
+            elif data.get('type') == 'result':
+                if data.get('is_error'):
+                    raise RuntimeError(str(data.get('result') or 'Provider failed'))
+                if not said:
+                    yield str(data.get('result') or '')
+        code = p.wait()
+        reader.join(timeout=1)
+        if code != 0 and not (cancel and cancel.is_set()):
+            raise RuntimeError(model['label'] + ': ' + (' / '.join(errors)[-600:] or 'CLI failed'))
+    finally:
+        if p.poll() is None:
+            terminate()
+        p.wait()
+        p.stdout.close()
+        p.stderr.close()
+
+
+def stream(model, history, cancel=None, timeout=120, notes="", api="", session="", mode="build"):
     """Yield answer text; native Ollama NDJSON and OpenAI SSE stream immediately."""
     if cancel is not None and cancel.is_set():
         return
     kind = model['kind']
+    if kind == 'roundtable-cli':
+        yield from _roundtable_cli(model, history, cancel, timeout, mode=mode)
+        return
     if kind == 'claude-cli':
         yield from _claude_cli(model, history, cancel, timeout, session)
         return
@@ -596,7 +696,7 @@ def stream(model, history, cancel=None, timeout=120, notes='', api='', session='
         return
     streaming = kind in ('ollama', 'openai')
     try:
-        with urllib.request.urlopen(_request(model, history, streaming, notes, api), timeout=timeout) as response:
+        with urllib.request.build_opener(ProviderRedirectHandler()).open(_request(model, history, streaming, notes, api), timeout=timeout) as response:
             ctype = response.headers.get('Content-Type', '')
             if not streaming or ('event-stream' not in ctype and kind != 'ollama'):
                 data = json.load(response)

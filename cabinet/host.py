@@ -26,6 +26,7 @@ import sys
 import time
 import threading
 import uuid
+import research_consent
 import subprocess
 import tempfile
 
@@ -38,6 +39,7 @@ from drawing_tools import (drawings as drawing_gallery, program as drawing_progr
 import chat as chatlib
 import claude_gate
 import claude_link
+from chat_log_model import ChatLogModel
 import claude_feed
 import model_sheet
 import panes as paneslib
@@ -354,6 +356,24 @@ class Host(QObject):
     faceChanged = Signal()             # the Face Poser panel: which pane it poses and that pane's flex sliders
     subSelectionChanged = Signal()     # faces/edges/vertices picked in the viewport (s&box-style sub-selection)
 
+    @property
+    def _preferences_path(self):
+        return self._preferences_path_store
+
+    @_preferences_path.setter
+    def _preferences_path(self, value):
+        self._preferences_path_store = value
+        try:
+            with open(value) as f:
+                self._model_preferences = json.load(f)
+        except (OSError, ValueError):
+            self._model_preferences = {}
+        if not isinstance(self._model_preferences, dict):
+            self._model_preferences = {}
+        self._claude_model = self._model_preferences.get("claude", "")
+        self._chat_model = self._model_preferences.get("chat", "")
+        self.ai_model = self._model_preferences.get("research", "")
+
     def __init__(self):
         super().__init__()
         self.window = None
@@ -380,18 +400,12 @@ class Host(QObject):
         self._chat_models = []
         self._chat_model = self._chat_models[0]["id"] if self._chat_models else ""
         self._chat_busy = False
+        self._chat_mode = "build"
         self._chat_request = 0
         self._chat_cancel = threading.Event()
         self._catalogue_busy = False
         self._model_preferences = {}
         self._preferences_path = os.path.expanduser("~/.config/geppetto/model-selection.json")
-        try:
-            with open(self._preferences_path) as f:
-                self._model_preferences = json.load(f)
-        except (OSError, ValueError):
-            pass
-        if not isinstance(self._model_preferences, dict):
-            self._model_preferences = {}
         self.drawing_key = drawing_socket_key()    # the socket the drawing tool listens on
         self.drawing_program = drawing_program      # what to run to start it
         self.model = ""
@@ -445,11 +459,14 @@ class Host(QObject):
         self.chatAnswer.connect(self._chat_done)
         # the CLAUDE card: a Claude Code session of its own (claude_link.py); its reader thread only
         # emits, Qt queues that onto this thread
-        self.claude = claude_link.ClaudeLink(on_change=self.claudeChanged.emit)
-        self._claude_model = self._model_preferences.get("claude", "")
+        self.claude = claude_link.ClaudeLink(on_change=self.claudeChanged.emit, lockdown=True)
+        self._claude_log = ChatLogModel(self.claude, self)
+        self.claudeChanged.connect(self._claude_log.schedule)
         self._other_session = str(uuid.uuid4())   # the CLI session (Grok) for a non-Claude model on the card
         self._other_cancel = threading.Event()
         self._other_request = 0
+        self._claude_research = None
+        self._claude_research_prompt = False
         self.otherChunk.connect(self._other_chunk)
         self.otherAnswer.connect(self._other_done)
         # pictures Claude reads or sends pop over the viewport (claude_feed.py, written by the gate hook)
@@ -523,7 +540,7 @@ class Host(QObject):
     drawingOpen = Property(bool, lambda self: self._drawing_open, notify=toolsChanged)
     chatMessages = Property("QVariantList", lambda self: self._chat, notify=chatChanged)
     chatImages = Property("QVariantList", lambda self: self._chat_pending, notify=chatChanged)
-    claudeMessages = Property("QVariantList", lambda self: list(self.claude.messages), notify=claudeChanged)
+    claudeMessages = Property(QObject, lambda self: self._claude_log, constant=True)
     claudeStatus = Property(str, lambda self: self.claude.status, notify=claudeChanged)
     claudePictures = Property("QVariantList", lambda self: [p["path"] for p in self.claudeFeed.pictures],
                               notify=claudePicturesChanged)
@@ -531,6 +548,7 @@ class Host(QObject):
     chatModels = Property("QVariantList", lambda self: self._chat_models, notify=chatChanged)
     chatModel = Property(str, lambda self: self._chat_model, notify=chatChanged)
     chatBusy = Property(bool, lambda self: self._chat_busy, notify=chatChanged)
+    chatMode = Property(str, lambda self: self._chat_mode, notify=chatChanged)
     catalogueBusy = Property(bool, lambda self: self._catalogue_busy, notify=chatChanged)
     replay = Property("QVariantMap", lambda self: self._replay, notify=replayChanged)
     def _get_notice(self):
@@ -933,24 +951,7 @@ class Host(QObject):
         try:
             note = live_runs.add_note(root, rev, "draw-over",
                                       "draw-over stroke: %d points, %d hit" % (len(hits), made))
-            stamped = live_runs.attach_stroke(note, hits)
-            if "stroke" in stamped:
-                # add_note already appended the plain note; rewrite its row with the stroke,
-                # the same way live_runs.add_draw_over_note does, so the note is never lost
-                # if the rewrite fails
-                path = os.path.join(root, "notes.jsonl")
-                rows = live_runs.notes(root)
-                for row in reversed(rows):
-                    if (row.get("time"), row.get("rev"), row.get("text")) == \
-                            (note["time"], note["rev"], note["text"]):
-                        row["stroke"] = stamped["stroke"]
-                        break
-                else:
-                    raise OSError("draw-over note row not found for rewrite")
-                temp = path + ".tmp"
-                with open(temp, "w") as stream:
-                    stream.writelines(json.dumps(n) + "\n" for n in rows)
-                os.replace(temp, path)
+            live_runs.record_note_stroke(root, note, hits)
             self.set_status("draw-over note: %d of %d points hit the model" % (made, len(hits)))
         except (OSError, ValueError) as e:
             self.set_status("draw-over: note failed (%s)" % e)
@@ -2424,6 +2425,16 @@ class Host(QObject):
         control = control_state(read_state(d))
         session = claude_gate.session_for_run(d)
         if control.get("paused") or control.get("pauseRequested"):
+            if live_runs.run_meta(d).get("script"):
+                # Resume alone must not skip a queued edit. A continue line is the
+                # inbox item that lets the preserved tail run after that edit.
+                directory = os.path.join(d, ".live", "inbox")
+                live_runs.makedirs_private(directory)
+                name = "%019d%s.txt" % (time.time_ns() // 100 + 621355968000000000, uuid.uuid4().hex[:6])
+                path = os.path.join(directory, name)
+                with open(path + ".tmp", "x") as stream:
+                    stream.write("# continue after pause\n")
+                os.replace(path + ".tmp", path)
             if self.live_command(d, "resume", "resume requested") and claude_gate.gate(session).get("state") == "paused":
                 claude_gate.clear_gate(session)
         elif self.live_command(d, "pause", "pausing after the current operation") and session:
@@ -2460,6 +2471,38 @@ class Host(QObject):
     # session (tools, ALLOW/DENY, PAUSE); any other model in the catalogue (Grok, a local Ollama
     # model, an API model) is asked through chat.py and answers in the same log.
     claudeModel = Property(str, lambda self: self._claude_model, notify=claudeChanged)
+    claudeMode = Property(str, lambda self: self._chat_mode, notify=chatChanged)
+
+    def _claude_mode_supported(self):
+        model = self._claude_model_record() or {}
+        return model.get("kind") == "roundtable-cli" and model.get("family") in ("codex", "opencode")
+
+    claudeModeSupported = Property(bool, _claude_mode_supported, notify=claudeChanged)
+    claudeResearch = Property("QVariantMap", lambda self: self._claude_research or {}, notify=claudeChanged)
+    claudeResearchPrompt = Property(bool, lambda self: self._claude_research_prompt, notify=claudeChanged)
+
+    @Slot()
+    def requestClaudeResearch(self):
+        if self.claude.status not in ("working", "starting", "paused"):
+            self._claude_research_prompt = True
+            self.claudeChanged.emit()
+
+    @Slot(bool, bool, bool)
+    def setClaudeResearch(self, papers, photos, models):
+        if self.claude.status in ("working", "starting", "paused"):
+            return
+        self._claude_research = dict(papers=bool(papers), photos=bool(photos), models=bool(models))
+        self._claude_research_prompt = False
+        self.claude.set_research_policy(research_consent.policy(self._claude_research))
+        self.claudeChanged.emit()
+
+    @Slot(str)
+    def setClaudeMode(self, mode):
+        if (mode not in ("build", "plan") or not self._claude_mode_supported()
+                or self.claude.status in ("working", "starting", "paused")):
+            return
+        self._chat_mode = mode
+        self.chatChanged.emit()
 
     def _claude_model_record(self):
         return chatlib.find(self._claude_model, self._chat_models)
@@ -2486,13 +2529,23 @@ class Host(QObject):
         self._save_model_preferences()
         self.claudeChanged.emit()
 
-    @Slot(str)
+    @Slot(str, result=bool)
     def claudeSend(self, text):
+        if not (text or "").strip() or self.claude.status in ("working", "starting", "paused"):
+            return False
+        if self._claude_research is None:
+            self.requestClaudeResearch()
+            return False
         model = self._claude_model_record()
-        if model is None or model["kind"] == "claude-cli":
+        if model is None or not model.get("available", True):
+            self.claude._add("note", "Choose an available model before sending. No provider was contacted.")
+            self.claudeChanged.emit()
+            return False
+        if model["kind"] == "claude-cli":
             self.claude.send(text)
         else:
             self._other_send(model, text)
+        return True
 
     def _other_send(self, model, text):
         """Ask a non-Claude model: its reply streams into the card's log like Claude's would."""
@@ -2509,12 +2562,14 @@ class Host(QObject):
         self._other_request += 1
         request_id = self._other_request
         api = chatlib.effigy_reference(text)
+        mode = self._chat_mode if self._claude_mode_supported() else "build"
+        model = dict(model, research_policy=research_consent.policy(self._claude_research))
         def work():
             got = ""
             last = 0.0
             error = ""
             try:
-                for chunk in chatlib.stream(model, history, cancel, api=api, session=self._other_session):
+                for chunk in chatlib.stream(model, history, cancel, api=api, session=self._other_session, mode=mode):
                     if cancel.is_set():
                         return
                     got += chunk
@@ -2583,6 +2638,10 @@ class Host(QObject):
     def claudeNew(self):
         self._other_session = str(uuid.uuid4())
         self.claude.fresh()
+        self._claude_research = None
+        self._claude_research_prompt = False
+        self.claude.set_research_policy(research_consent.policy(None))
+        self.claudeChanged.emit()
 
     def _poll_pictures(self):
         new = self.claudeFeed.poll(self.claude.session)
@@ -2635,6 +2694,18 @@ class Host(QObject):
         if model and model.get("available", True) and not self._chat_busy:
             self._chat_model = model_id
             self._save_model_preferences()
+            self.chatChanged.emit()
+
+    @Slot()
+    def toggleChatMode(self):
+        self._chat_mode = "plan" if self._chat_mode == "build" else "build"
+        self.set_status(f"chat mode: {self._chat_mode.upper()}")
+        self.chatChanged.emit()
+
+    @Slot(str)
+    def setChatMode(self, mode):
+        if mode in ("build", "plan"):
+            self._chat_mode = mode
             self.chatChanged.emit()
 
     @Slot()
@@ -2775,7 +2846,7 @@ class Host(QObject):
             text = ""
             last_update = 0.0
             try:
-                for chunk in chatlib.stream(model, history, cancel, api=api, session=self._chat_session):
+                for chunk in chatlib.stream(model, history, cancel, api=api, session=self._chat_session, mode=self._chat_mode):
                     if cancel.is_set():
                         return
                     text += chunk

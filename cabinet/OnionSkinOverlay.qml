@@ -45,14 +45,18 @@ Item {
     property var ghostFrames: []
 
     // ---- helpers (same numbers as OnionSkin.cs) ----
-    function opacityFor(distance, isBefore) {
+    // rank = 1 for the nearest ghost, 2 for the next, … — NOT the frame distance:
+    // in Keys mode two keys can be 20 frames apart, and a falloff in raw frames
+    // would fade the second key to nothing. ghostFrames entries already carry
+    // their host-computed opacity; this is only for QML-side plans.
+    function opacityFor(rank, isBefore) {
         var count = isBefore ? beforeCount : afterCount
         if (count <= 0) return 0
         var factor = 1.0
-        if (perOffsetOpacity.length >= distance)
-            factor = perOffsetOpacity[distance - 1]
+        if (perOffsetOpacity.length >= rank)
+            factor = perOffsetOpacity[rank - 1]
         else if (useFalloff)
-            factor = Math.max(0, 1 - (distance - 1) / count)
+            factor = Math.max(0, 1 - (rank - 1) / count)
         var side = isBefore ? beforeOpacity : afterOpacity
         return Math.min(1, Math.max(0, masterOpacity * side * factor))
     }

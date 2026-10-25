@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -74,7 +75,9 @@ public sealed class PoseLibrary
 		}
 	}
 
-	static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
+	// CamelCase on write so the file matches the documented format, case-insensitive
+	// on read so a hand-edited file with PascalCase keys is not silently empty.
+	static readonly JsonSerializerOptions Json = new() { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase, PropertyNameCaseInsensitive = true };
 
 	/// <summary>Sidecar path for a model, mirroring <see cref="FaceRig.SidecarPath"/>.</summary>
 	public static string SidecarPath( string model ) =>
@@ -108,7 +111,7 @@ public sealed class PoseLibrary
 		foreach ( var (name, pose) in Poses )
 		{
 			if ( string.IsNullOrWhiteSpace( name ) ) throw new InvalidDataException( "pose library has a pose with an empty name." );
-			if ( pose is null ) throw new InvalidDataException( $"pose '{name}' is empty." );
+			if ( pose is null || pose.Bones is null ) throw new InvalidDataException( $"pose '{name}' is empty." );
 			var bones = new Dictionary<string, BonePose>( StringComparer.OrdinalIgnoreCase );
 			foreach ( var (bone, bp) in pose.Bones )
 			{
