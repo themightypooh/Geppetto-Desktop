@@ -1,5 +1,17 @@
 # Assignment and evidence board
 
+## C5 — Build execution proof and usable modes (user escalation)
+
+Current C1 session owns new `cabinet/build_execution.py` and its new tests;
+scoped integration leases transferred from C3: mode-capability predicates and
+ClaudeLink construction in `cabinet/host.py`, mode-key enablement/tooltips in
+`cabinet/ClaudePanel.qml`, child environment / stream wrapper / mode arguments
+in `cabinet/chat.py`, and result verification / mode permission in
+`cabinet/claude_link.py`. Preserve all unrelated C3/policy/performance edits.
+Also owns an opt-in receipt hook only in `~/.local/bin/geppetto-live`.
+No provider-specific exemptions, no paid/live model tests, no real run changes,
+no chest restart. Plan stays read-only; Build text is not execution evidence.
+
 ## C3 — visible chat Build/Plan repair (2026-10-24)
 
 Assigned to current repair session by user's screenshot/help request. Owns scoped
@@ -42,6 +54,80 @@ Control-audit follow-up lease: control agent owns `AiLiveControl.cs`,
 `ScriptLive.cs`, new `tests/OpenScriptStepTests.cs`, and only its registration in
 `tests/TestRegistry.cs`, for STEP after script pause. Main owns note-file race
 repair in `cabinet/live_runs.py` and new `tests/test_note_atomicity.py`.
+
+### C3/C4 integration evidence — 2026-10-25
+
+Implemented, release certification **blocked**. Visible card now has working
+Codex/OpenCode Build/Plan and per-conversation research choices (papers, licensed
+photos, CC0/public-domain models). First send remains local until Apply/Skip;
+all choices default off, model switches keep them, New chat resets them. Policy
+is carried in actual provider prompts/bodies. It is **not** a research-category
+network sandbox or an automatic licence verifier. Ordinary HTTP/Ollama chat has
+no new tools simply because a category is selected.
+
+Bundled Codex/OpenCode routing no longer requires the developer's Roundtable or
+Model Hub checkouts; exact model/variant selection and each user's own CLI auth
+are retained. HTTP tuning cannot override selected model/history/policy.
+Cross-origin provider redirects are refused. Production Claude card uses the
+environment allowlist. Release workspace is user-owned data, not installation;
+development checkout remains editable. NumPy is declared and launcher-checked.
+
+Approved notes and draw-over annotations now append receipts/metadata instead
+of replacing notes.jsonl (including the host's second draw-over writer), so
+concurrent approvals are preserved. New notes have unique IDs. STEP after a
+script review pause now wakes the inbox; repeated STEP and correction-first
+ordering have executable regressions. Watch labels retain the actual operation
+source line rather than falsely pointing at an unexecuted script tail.
+
+Evidence (all commands exited 0 unless explicitly stated):
+- Focused Python chat/provider/consent/notes suites: **94/94**,
+  `/tmp/opencode/asset-audit-focused-final.log`.
+- Offscreen consent/mode/correction tests: **24/24** at 50%, 75%, 100%, 150%,
+  200% DPI/text test combinations. Screenshots under `/tmp/opencode/c1-previews/`
+  and `/tmp/opencode/research-consent-*.png`; high-DPI consent capture needs
+  rendering settled, final 200% proof is `research-consent-2-final.png`.
+  C1's subsequent lower-center placement is a separately owned follow-up.
+- Actual normal-build CPU fixtures: STEP **3/3**, viewport corrections **6/6**,
+  controller-fixes **12/12** (`asset-audit-final-*.log`). Save filter **33/33**,
+  export filter **17/17**, FBX/DMX **9/9**; groups overlap, do not sum as a full run.
+- Full native suite after integration: **652 pass / 29 fail / 8 skip**,
+  **689/689 selected**, exit 1; `/tmp/opencode/asset-audit-cpu-final.log` and
+  `/tmp/opencode/geppetto-desktop-tests-5c95bb183f7d4c7cb21ff90c6b1465f7/results.json`.
+- Full Python discovery snapshot: **272 tests / 6 failures**, exit 1,
+  `/tmp/opencode/asset-audit-python-final.log`; two additional wire tests were
+  subsequently added and pass in the focused 94-test run.
+- Normal Release/tests build succeeds (warnings remain); Linux package staged
+  at `/tmp/opencode/geppetto-audit-release-final`, exit 0. This is a candidate,
+  not certification that the entire asset-making workflow is shippable.
+- No interactive chest launch/restart or real-run manipulation by these audits.
+
+Remaining release blockers / limitations, not hidden by the focused passes:
+1. Explicit foreign-session pane commands are not ownership-authorized; owner
+   tracking is primarily Claude-specific. Exact-run monitors are safer than
+   script-name monitors shared by several runs.
+2. A close request behind an edit consumed while paused can remain blocked.
+   Checkpoint rewind alone does not release the checkpoint gate; checkpoint
+   `more` without review runs the old tail first. Checkpoint notes omit script
+   identity and can be missed by script-filtered followers.
+3. Package still omits portable live/research/notes helper entrypoints and the
+   versioned modelling skill/API reference that prompts require. Optional
+   non-native Model Hub providers retain external dependencies; Cursor is
+   ask-only and Model Hub OpenAI-compatible routing/config needs separate work.
+4. Live-script save and bench KEEP bypass atomic DocumentSaveService;
+   passing service tests do not certify their overwrite/crash behaviour.
+5. Many GPU tests still construct 20-float fixtures while production uses 24;
+   renderer failures cannot be honestly classified until fixtures are repaired.
+   Reload/DocumentLoader failures, live revision delivery/latency, selected
+   face/edge token rejection and six legacy QML/part-focus failures remain.
+6. Research approval, licence provenance, reference-model non-reuse and 9+ judging
+   are not uniformly hard gates across all providers. Script standalone judge
+   explicitly leaves vision/reference gates unscored; native judging may fall
+   back to vision-only when measurements fail. No in-engine s&box compile/load
+   or newly authored full asset was certified in this audit.
+
+Independent proof of the pre-fix control/note/pane findings is under
+`/tmp/opencode/asset-control-audit/`. Some broad-suite failures are stale
+expectations, others genuine integration gaps; do not call the product green.
 
 ## C1 — viewport-local stop and correction (2026-10-24)
 

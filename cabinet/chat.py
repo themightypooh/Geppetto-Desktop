@@ -25,6 +25,7 @@ import urllib.request
 from pathlib import Path
 import roundtable_catalog
 import chat_workspace
+import build_execution
 from chat_phase import PHASE_PROMPT
 
 CONFIG = os.path.expanduser('~/.config/geppetto/chat-models.json')
@@ -126,7 +127,7 @@ BASE_ENV_NAMES = ('PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'TERM', 'LANG', 'L
 def child_env():
     """A spawned CLI's environment: the baseline only — no provider keys at all. CLI models
     (Claude/Grok) authenticate with their own login files under $HOME, not with API keys."""
-    return {k: os.environ[k] for k in BASE_ENV_NAMES if k in os.environ}
+    return build_execution.child_environment({k: os.environ[k] for k in BASE_ENV_NAMES if k in os.environ})
 
 
 # What the native research child needs on top of the runtime baseline host.py assembles
@@ -490,11 +491,11 @@ def _extra_system(model):
     return extra.strip()
 
 
-def _chat_system(model):
+def _chat_system(model, mode="build"):
     extra = _extra_system(model)
-    return CLAUDE_CHAT + ('\n\n' + extra if extra else '')
+    return (CLAUDE_CHAT if mode == "build" else SYSTEM_PLAN + PHASE_PROMPT) + ('\n\n' + extra if extra else '')
 
-def _claude_cli(model, history, cancel, timeout, session=''):
+def _claude_cli(model, history, cancel, timeout, session='', mode="build"):
     """Claude via `claude -p` on its own login (the Max plan), with modelling tools, one CLI session per chat."""
     history = [h for h in history if h['role'] in ('you', 'model')][-16:]
     while history and history[0]['role'] != 'you':
@@ -508,7 +509,8 @@ def _claude_cli(model, history, cancel, timeout, session=''):
                   '\n\nReply to the user\'s latest message:\n\n' + _said(history[-1]))
     env = child_env()     # allowlist (audit C2): no ANTHROPIC_API_KEY etc. — the CLI's own login is used
     args = [CLAUDE, '-p', '--model', model['model'], '--output-format', 'stream-json', '--include-partial-messages',
-            '--verbose', '--setting-sources', 'user', '--append-system-prompt', _chat_system(model),
+            '--verbose', '--setting-sources', 'user', '--permission-mode', 'auto' if mode == 'build' else 'plan',
+            '--append-system-prompt', _chat_system(model, mode),
             '--allowedTools', *CLAUDE_TOOLS]
     if session:
         args += ['--resume', session] if resume else ['--session-id', session]
@@ -551,7 +553,7 @@ def _claude_cli(model, history, cancel, timeout, session=''):
             p.kill()
 
 
-def _grok_cli(model, history, cancel, timeout, session=''):
+def _grok_cli(model, history, cancel, timeout, session='', mode="build"):
     """Grok via `grok -p` on its grok.com login, one CLI session per chat."""
     history = [h for h in history if h['role'] in ('you', 'model')][-16:]
     while history and history[0]['role'] != 'you':
@@ -572,8 +574,8 @@ def _grok_cli(model, history, cancel, timeout, session=''):
     with os.fdopen(fd, 'w') as f:
         f.write(prompt)
     args = [GROK, '--prompt-file', prompt_path, '--model', model['model'], '--output-format', 'streaming-messages-json',
-            '--include-partial-messages', '--no-alt-screen', '--no-subagents', '--permission-mode', 'auto',
-            '--rules', _chat_system(model), '--cwd', CLAUDE_HOME]
+            '--include-partial-messages', '--no-alt-screen', '--no-subagents', '--permission-mode', 'auto' if mode == 'build' else 'plan',
+            '--rules', _chat_system(model, mode), '--cwd', CLAUDE_HOME]
     if session:
         args += ['--resume', session] if resume else ['--session-id', session]
     p = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
@@ -680,7 +682,17 @@ def _roundtable_cli(model, history, cancel, timeout, mode="build"):
         p.stderr.close()
 
 
-def stream(model, history, cancel=None, timeout=120, notes="", api="", session="", mode="build"):
+def stream(model, history, cancel=None, timeout=120, notes="", api="", session="", mode="plan"):
+    """Plan can discuss; Build completes only after a real live-tool receipt."""
+    def invoke(messages):
+        return _stream_once(model, messages, cancel, timeout, notes, api, session, mode)
+    if mode == "build":
+        yield from build_execution.checked_stream(model, history, invoke, cancel)
+    else:
+        yield from invoke(history)
+
+
+def _stream_once(model, history, cancel=None, timeout=120, notes="", api="", session="", mode="plan"):
     """Yield answer text; native Ollama NDJSON and OpenAI SSE stream immediately."""
     if cancel is not None and cancel.is_set():
         return
@@ -689,10 +701,10 @@ def stream(model, history, cancel=None, timeout=120, notes="", api="", session="
         yield from _roundtable_cli(model, history, cancel, timeout, mode=mode)
         return
     if kind == 'claude-cli':
-        yield from _claude_cli(model, history, cancel, timeout, session)
+        yield from _claude_cli(model, history, cancel, timeout, session, mode=mode)
         return
     if kind == 'grok-cli':
-        yield from _grok_cli(model, history, cancel, timeout, session)
+        yield from _grok_cli(model, history, cancel, timeout, session, mode=mode)
         return
     streaming = kind in ('ollama', 'openai')
     try:

@@ -37,6 +37,7 @@ from drawing_tools import (drawings as drawing_gallery, program as drawing_progr
                            resolve as drawing_resolve, socket_key as drawing_socket_key,
                            DRAWINGS as DRAWING_DIR)
 import chat as chatlib
+import build_execution
 import claude_gate
 import claude_link
 from chat_log_model import ChatLogModel
@@ -459,7 +460,8 @@ class Host(QObject):
         self.chatAnswer.connect(self._chat_done)
         # the CLAUDE card: a Claude Code session of its own (claude_link.py); its reader thread only
         # emits, Qt queues that onto this thread
-        self.claude = claude_link.ClaudeLink(on_change=self.claudeChanged.emit, lockdown=True)
+        self.claude = claude_link.ClaudeLink(on_change=self.claudeChanged.emit, lockdown=True,
+                                             build_guard_factory=build_execution.BuildTurn)
         self._claude_log = ChatLogModel(self.claude, self)
         self.claudeChanged.connect(self._claude_log.schedule)
         self._other_session = str(uuid.uuid4())   # the CLI session (Grok) for a non-Claude model on the card
@@ -2474,10 +2476,10 @@ class Host(QObject):
     claudeMode = Property(str, lambda self: self._chat_mode, notify=chatChanged)
 
     def _claude_mode_supported(self):
-        model = self._claude_model_record() or {}
-        return model.get("kind") == "roundtable-cli" and model.get("family") in ("codex", "opencode")
+        return build_execution.capabilities(self._claude_model_record())["plan"]
 
     claudeModeSupported = Property(bool, _claude_mode_supported, notify=claudeChanged)
+    claudeBuildSupported = Property(bool, lambda self: build_execution.capabilities(self._claude_model_record())["build"], notify=claudeChanged)
     claudeResearch = Property("QVariantMap", lambda self: self._claude_research or {}, notify=claudeChanged)
     claudeResearchPrompt = Property(bool, lambda self: self._claude_research_prompt, notify=claudeChanged)
 
@@ -2501,7 +2503,10 @@ class Host(QObject):
         if (mode not in ("build", "plan") or not self._claude_mode_supported()
                 or self.claude.status in ("working", "starting", "paused")):
             return
+        if not build_execution.capabilities(self._claude_model_record())[mode]:
+            return
         self._chat_mode = mode
+        self.claude.set_mode(mode)
         self.chatChanged.emit()
 
     def _claude_model_record(self):
@@ -2524,6 +2529,9 @@ class Host(QObject):
         if model is None or not model.get("available", True) or self.claude.status in ("working", "starting", "paused"):
             return
         self._claude_model = model_id
+        if not build_execution.capabilities(model)["build"]:
+            self._chat_mode = "plan"
+            self.chatChanged.emit()
         self.claude.set_model(model["model"] if model["kind"] == "claude-cli" else "")
         self._apply_claude_persona(model)
         self._save_model_preferences()
@@ -2542,6 +2550,7 @@ class Host(QObject):
             self.claudeChanged.emit()
             return False
         if model["kind"] == "claude-cli":
+            self.claude.set_mode(self._chat_mode)
             self.claude.send(text)
         else:
             self._other_send(model, text)
@@ -2562,7 +2571,7 @@ class Host(QObject):
         self._other_request += 1
         request_id = self._other_request
         api = chatlib.effigy_reference(text)
-        mode = self._chat_mode if self._claude_mode_supported() else "build"
+        mode = self._chat_mode
         model = dict(model, research_policy=research_consent.policy(self._claude_research))
         def work():
             got = ""

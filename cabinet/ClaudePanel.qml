@@ -143,17 +143,17 @@ Item {
             y: 82; spacing: 6
             CardKey {
                 objectName: "claudeBuildMode"; text: "Build"
-                hot: !host.claudeModeSupported || host.claudeMode === "build"
-                enabled: !card.busy && host.claudeModeSupported
+                hot: host.claudeMode === "build"
+                enabled: !card.busy && host.claudeBuildSupported
                 onClicked: host.setClaudeMode("build")
-                tip: "Allow tools and edits in the Geppetto Desktop workspace"
+                tip: host.claudeBuildSupported ? "Execute tools and edits; a printed script cannot complete a build" : "This connection has no execution tools. Plan remains available."
             }
             CardKey {
                 objectName: "claudePlanMode"; text: "Plan"
                 hot: host.claudeModeSupported && host.claudeMode === "plan"
                 enabled: !card.busy && host.claudeModeSupported
                 onClicked: host.setClaudeMode("plan")
-                tip: host.claudeModeSupported ? "Read-only research and planning; no workspace edits" : "Build/Plan switching is supported for Codex and OpenCode models"
+                tip: "Read-only research and planning; no workspace edits"
             }
             CardKey {
                 objectName: "claudeResearchOptions"; text: "Research…"; enabled: !card.busy
