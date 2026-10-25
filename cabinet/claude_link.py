@@ -24,18 +24,18 @@ from chat_phase import PHASE_PROMPT
 STATE = os.path.expanduser("~/.cache/geppetto/claude-chat.json")
 PROJECT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CLAUDE = os.environ.get("GEPPETTO_CLAUDE", "claude")
-PROMPT = ("You are talking to po through the CLAUDE card in the Geppetto chest, right over the viewport "
+PROMPT = ("You are talking to the user through the assistant card in the Geppetto chest, right over the viewport "
           "they are watching. Keep replies short: a few lines, no tables. Do the work yourself with "
-          "geppetto-live so it shows in the chest. If a hook says po pressed STOP, stop at once.") + PHASE_PROMPT
+          "geppetto-live so it shows in the chest. If a hook says the user pressed STOP, stop at once.") + PHASE_PROMPT
 KEEP = 200
 
-# --- Locked-down spawn environment (audit C2) — implemented, OFF by default. ---
+# --- Locked-down spawn environment (audit C2); enabled by the cabinet Host. ---
 # Today _start() hands the child the whole process environment minus CLAUDE_CODE_* names —
 # i.e. every provider key the cabinet process holds. The lockdown replaces that with the
 # allowlist below (baseline only, no provider keys; the Claude CLI authenticates from its
-# own files under $HOME / $CLAUDE_CONFIG_DIR). It is NOT the default: the live Zoopa card
-# session runs on this path, and changing what that session's tools inherit is Joshua's
-# call, not a silent ship. Full spec: CLAUDE_LINK_LOCKDOWN.spec.md in this folder.
+# own files under $HOME / $CLAUDE_CONFIG_DIR). Host passes lockdown=True. The constructor's
+# compatibility default remains opt-in for other callers; no claim of filesystem sandboxing.
+# Full spec: CLAUDE_LINK_LOCKDOWN.spec.md in this folder.
 # Enable per-process with GEPPETTO_CLAUDE_LINK_LOCKDOWN=1, or per-link with lockdown=True.
 LOCKDOWN_FLAG = "GEPPETTO_CLAUDE_LINK_LOCKDOWN"
 LOCKDOWN_ENV_ALLOW = ("PATH", "HOME", "USER", "LOGNAME", "SHELL", "TERM", "LANG", "LC_ALL",

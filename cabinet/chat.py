@@ -37,8 +37,8 @@ if not OLLAMA.startswith(('http://', 'https://')):
 
 # No model ships built in. Every model comes from the individual using the app:
 # their own CLI logins (Claude/Grok), local discovery (Ollama/KoboldCpp), or their
-# own ~/.config/geppetto/chat-models.json. Nothing here names a provider, so no
-# specific model is ever tied to the app for anyone.
+# own ~/.config/geppetto/chat-models.json. Known CLI aliases below never carry
+# credentials or grant an account/subscription to anyone.
 DEFAULT_MODELS = []
 
 # Claude through the user's CLI login; installation does not prove a subscription tier.
@@ -454,12 +454,12 @@ class ProviderRedirectHandler(urllib.request.HTTPRedirectHandler):
 CLAUDE_HOME = os.path.expanduser('~/.local/share/geppetto/chat')
 CLAUDE_TOOLS = ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Skill', 'WebSearch', 'WebFetch',
                 'Bash(geppetto-live *)', 'Bash(python3 */cabinet/host.py *)', 'Bash(ls *)', 'Bash(mkdir *)', 'Bash(cat *)']
-CLAUDE_CHAT = ("You are the chat in Geppetto's cabinet (the paper ball), talking to po. You can model:"
+CLAUDE_CHAT = ("You are the chat in Geppetto's cabinet, talking to the user. You can model:"
                " use the geppetto skill, write Effigy build scripts in this folder and run them with"
-               " `geppetto-live build.txt - outdir` so po watches each step in a viewport pane; the run stays open"
+               " `geppetto-live build.txt - outdir` so the user watches each step in a viewport pane; the run stays open"
                " with the model loaded: change it with `geppetto-live more RUN edit.txt` (a few lines), never a"
                " new run or a rebuild; a bad line holds the run, send the fix with `more`; `geppetto-live close RUN`"
-               " when po is happy. po flags steps with notes in the chest; they reach you at your next tool call; `geppetto-live rewind RUN N` puts the model back to revision N. Never restart, quit or"
+               " when the user accepts it. The user flags steps with notes in the chest; use the exact-run notes monitor to receive them; `geppetto-live rewind RUN N` puts the model back to revision N. Never restart, quit or"
                " take over the Geppetto chest. The chat window is small: keep replies short.") + PHASE_PROMPT
 _claude_sessions = set()      # chat sessions the CLI has already started; later turns --resume them
 
