@@ -130,7 +130,8 @@ public sealed class GeppettoDocument
 		if ( LastReport?.Errors.Count > 0 )
 			foreach ( var err in LastReport.Errors.Take( 3 ) ) GD.PushWarning( $"[Geppetto] {err}" );
 
-		var root = EditorInterface.Singleton.GetEditedSceneRoot();
+		// Outside the editor (headless tool tests) there is no open scene to update.
+		var root = Engine.IsEditorHint() && EditorInterface.Singleton != null ? EditorInterface.Singleton.GetEditedSceneRoot() : null;
 		if ( root != null )
 			foreach ( var node in CharacterRoots( root ) ) ApplyTo( node );
 		Changed?.Invoke();
