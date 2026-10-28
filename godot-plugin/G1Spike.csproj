@@ -3,11 +3,10 @@
     <TargetFramework>net8.0</TargetFramework>
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <Nullable>disable</Nullable>
-    <RootNamespace>Geppetto.G1</RootNamespace>
+    <RootNamespace>Geppetto</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="Effigy.Kernel">
-      <HintPath>$(MSBuildProjectDirectory)/.kernel/Effigy.Kernel.dll</HintPath>
-    </Reference>
+    <ProjectReference Include="../kernel/Effigy.Kernel.csproj" />
+    <ProjectReference Include="../core/Geppetto.Core.csproj" />
   </ItemGroup>
 </Project>

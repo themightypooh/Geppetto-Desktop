@@ -9,7 +9,7 @@ using System.Runtime.Loader;
 using Effigy;
 using Godot;
 
-namespace Geppetto.G1;
+namespace Geppetto;
 
 [Tool]
 public partial class GeppettoPlugin : EditorPlugin, ISerializationListener
@@ -18,6 +18,7 @@ public partial class GeppettoPlugin : EditorPlugin, ISerializationListener
 	Godot.Timer _nudge;
 	static PartStudio _held;                       // a kernel object parked in a static, like a cache would be
 	static CancellationTokenSource _cts;
+	private EffigySceneImporter _sceneImporter;
 
 	public void OnBeforeSerialize()
 	{
@@ -53,10 +54,18 @@ public partial class GeppettoPlugin : EditorPlugin, ISerializationListener
 	{
 		GD.Print( $"[G1] exit marker={Marker}" );
 		_nudge?.QueueFree();
+		if ( _sceneImporter != null )
+		{
+			RemoveSceneFormatImporterPlugin( _sceneImporter );
+			_sceneImporter = null;
+		}
 	}
 
 	public override void _EnterTree()
 	{
+		_sceneImporter = new EffigySceneImporter();
+		AddSceneFormatImporterPlugin( _sceneImporter );
+
 		var kernels = AppDomain.CurrentDomain.GetAssemblies().Count( a => a.GetName().Name == "Effigy.Kernel" );
 		GD.Print( $"[G1] enter marker={Marker} kernelAssembliesLoaded={kernels} ALCs={AssemblyLoadContext.All.Count()} ws={Process.GetCurrentProcess().WorkingSet64 / 1048576}MB" );
 		if ( System.Environment.GetEnvironmentVariable( "G1_NUDGE" ) == "1" )
