@@ -1,0 +1,65 @@
+effigy 1
+rollback 2147483647
+materiallook 0 color=#c8b090 rough=0.7 metal=0
+rig
+	bone Root
+		parent -1
+		x 1 0 0
+		y 0 1 0
+		z 0 0 1
+		origin 0 0 40
+		length 2
+	endbone
+	bone Upper
+		parent 0
+		x 1 0 0
+		y 0 1 0
+		z 0 0 1
+		origin 2 0 0
+		length 10
+	endbone
+	bone Lower
+		parent 1
+		x 1 0 0
+		y 0 1 0
+		z 0 0 1
+		origin 10 0 -0.5
+		length 10
+	endbone
+	bone Hand
+		parent 2
+		x 1 0 0
+		y 0 1 0
+		z 0 0 1
+		origin 10 0 0.5
+		length 3
+	endbone
+	bone Finger
+		parent 3
+		x 1 0 0
+		y 0 1 0
+		z 0 0 1
+		origin 3 0 0
+		length 2
+	endbone
+endrig
+feature PrimitiveFeature
+	id 7a11c0de
+	name ArmBlock
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position 12 0 40
+	param Radius 1.4
+	param RotationAngle 90
+	param RotationAxis 0 1 0
+	param Scale 1 1 1
+	param Segments 8
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 24
+	param UniformScale 0
+end
