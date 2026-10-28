@@ -73,6 +73,7 @@ public partial class GeppettoPlugin : EditorPlugin, ISerializationListener
 		SetupDial();
 		SetupViewportTools();
 		AddDock( _featureTree = GeppettoFeatureTree.Create() );
+		MaybeStartWindowRun();
 
 		var kernels = AppDomain.CurrentDomain.GetAssemblies().Count( a => a.GetName().Name == "Effigy.Kernel" );
 		GD.Print( $"[G1] enter marker={Marker} kernelAssembliesLoaded={kernels} ALCs={AssemblyLoadContext.All.Count()} ws={Process.GetCurrentProcess().WorkingSet64 / 1048576}MB" );
