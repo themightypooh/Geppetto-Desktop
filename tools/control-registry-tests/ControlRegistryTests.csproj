@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    G11: focused CPU runner for core/ControlRegistry.cs. It compiles the same
+    tests/ControlRegistryTests.cs that tests/TestRegistry.cs registers, against
+    Geppetto.Core only (no GL, no Godot), with a tiny TestRegistry shim.
+    Run: dotnet run (project tools/control-registry-tests/ControlRegistryTests.csproj, -c Release)
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>control-registry-tests</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../kernel/Effigy.Kernel.csproj" />
+    <ProjectReference Include="../../core/Geppetto.Core.csproj" />
+    <Compile Include="../../tests/ControlRegistryTests.cs" Link="ControlRegistryTests.cs" />
+  </ItemGroup>
+</Project>

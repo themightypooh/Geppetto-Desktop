@@ -185,6 +185,7 @@ internal static class DesktopTestHost
             FaceMaterialAssignTests.Register( registry, settings );
             FaceBoundaryEdgeTests.Register( registry, settings );
             OverlayDepthTests.Register( registry, settings );
+            ControlRegistryTests.Register( registry, settings );
             if ( settings.List )
             {
                 foreach ( var test in registry.Cases ) Console.WriteLine( $"{test.Group}/{test.Name} fixture={(test.Group == "survey" ? settings.SurveyPath : "synthetic")}" );
