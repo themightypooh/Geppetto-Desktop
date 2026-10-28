@@ -1,0 +1,13 @@
+<Project Sdk="Godot.NET.Sdk/4.7.2">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <Nullable>disable</Nullable>
+    <RootNamespace>Geppetto.G1</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Effigy.Kernel">
+      <HintPath>$(MSBuildProjectDirectory)/.kernel/Effigy.Kernel.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>

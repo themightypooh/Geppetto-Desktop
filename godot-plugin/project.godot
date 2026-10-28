@@ -1,0 +1,14 @@
+config_version=5
+
+[application]
+
+config/name="G1Spike"
+config/features=PackedStringArray("4.7", "C#")
+
+[dotnet]
+
+project/assembly_name="G1Spike"
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/geppetto/plugin.cfg")
