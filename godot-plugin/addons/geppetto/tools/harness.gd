@@ -86,6 +86,12 @@ func _check(importer, path: String) -> Dictionary:
 					m.albedo = mat.albedo_color.to_html()
 					m.roughness = mat.roughness
 					m.metallic = mat.metallic
+					m.transparency = mat.transparency
+					if mat.emission_enabled:
+						m.emission = mat.emission.to_html(false)
+						m.emission_energy = mat.emission_energy_multiplier
+					if mat.clearcoat_enabled:
+						m.clearcoat = mat.clearcoat
 				materials.append(m)
 
 	var bones := 0
