@@ -143,7 +143,10 @@ public partial class GeppettoPlugin
 		var root = EditorInterface.Singleton.GetEditedSceneRoot();
 		var sel = EditorInterface.Singleton.GetSelection();
 		sel.Clear();
-		var node = root?.FindChild( "Character", true, false ) ?? root;
+		// "Character", else the first imported .effigy in the scene (the test project names them LineCook etc.).
+		var node = root?.FindChild( "Character", true, false )
+			?? root?.FindChildren( "*", "", true, false ).FirstOrDefault( n => n.HasMeta( EffigySceneImporter.EffigyMeta ) )
+			?? root;
 		if ( node != null ) sel.AddNode( node );
 		RefreshDial();
 	}
