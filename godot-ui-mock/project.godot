@@ -11,8 +11,9 @@ config_version=5
 [application]
 
 config/name="Geppetto UI Mock"
+run/main_scene="res://test_room.tscn"
 config/features=PackedStringArray("4.7")
 
 [editor_plugins]
 
-enabled=PackedStringArray("res://addons/geppetto_mock/plugin.cfg")
+enabled=PackedStringArray("res://addons/geppetto_mock/plugin.cfg", "res://addons/sbox_chrome/plugin.cfg")
