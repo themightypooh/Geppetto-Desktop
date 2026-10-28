@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using Godot;
 using Marionette.Desktop;
 using Effigy;
@@ -90,6 +91,54 @@ public partial class TestMeshBridge : SceneTree
 				GD.Print( "[G4-TEST] SUCCESS: G4 EffigySkeletonBridge verified!" );
 			}
 
+			// G6: Test Material Bridge
+			GD.Print( "[G6-TEST] Testing EffigyMaterialBridge..." );
+			var desc = new MaterialDescriptor( "test_mat" )
+			{
+				BaseColorFactor = new Vec4( 0.2f, 0.4f, 0.8f, 1.0f ),
+				RoughnessFactor = 0.35f,
+				MetallicFactor = 0.85f,
+				EmissionFactor = new Vec3( 1.0f, 0.5f, 0.0f ),
+				DoubleSided = true,
+				AlphaMode = AlphaMode.Mask,
+				AlphaCutoff = 0.4f,
+				Clearcoat = 0.75f,
+				ClearcoatRoughness = 0.05f,
+				Subsurface = 0.5f,
+				SubsurfaceRadius = new Vec3( 0.9f, 0.2f, 0.1f ),
+				Transmission = 0.6f,
+				Sheen = 0.8f,
+				SheenRoughness = 0.25f,
+				Anisotropy = 0.45f,
+				NormalMap = TextureBinding.ForNormal( new AssetReference( "dummy_norm", "dummy_norm.png" ) ),
+				AmbientOcclusionMap = TextureBinding.ForData( new AssetReference( "dummy_ao", "dummy_ao.png" ) )
+			};
+
+			var godotMat = EffigyMaterialBridge.ToGodotMaterial( desc );
+			if ( Math.Abs( godotMat.AlbedoColor.R - 0.2f ) > 0.01f ||
+				 Math.Abs( godotMat.Roughness - 0.35f ) > 0.01f ||
+				 Math.Abs( godotMat.Metallic - 0.85f ) > 0.01f ||
+				 !godotMat.EmissionEnabled ||
+				 godotMat.CullMode != BaseMaterial3D.CullModeEnum.Disabled ||
+				 godotMat.Transparency != BaseMaterial3D.TransparencyEnum.AlphaScissor ||
+				 Math.Abs( godotMat.AlphaScissorThreshold - 0.4f ) > 0.01f ||
+				 !godotMat.ClearcoatEnabled ||
+				 Math.Abs( godotMat.Clearcoat - 0.75f ) > 0.01f ||
+				 !godotMat.SubsurfScatterEnabled ||
+				 Math.Abs( godotMat.SubsurfScatterStrength - 0.5f ) > 0.01f ||
+				 !godotMat.RefractionEnabled ||
+				 Math.Abs( godotMat.RefractionScale - 0.6f ) > 0.01f ||
+				 !godotMat.RimEnabled ||
+				 Math.Abs( godotMat.Rim - 0.8f ) > 0.01f ||
+				 !godotMat.AnisotropyEnabled ||
+				 Math.Abs( godotMat.Anisotropy - 0.45f ) > 0.01f ||
+				 !godotMat.NormalEnabled ||
+				 !godotMat.AOEnabled )
+			{
+				throw new Exception( "MaterialBridge property mapping check failed!" );
+			}
+			GD.Print( "[G6-TEST] SUCCESS: G6 EffigyMaterialBridge verified!" );
+
 			// G7: Test Clip Bridge
 			GD.Print( "[G7-TEST] Testing EffigyClipBridge..." );
 			var clip = new RigAnimFile
@@ -124,7 +173,7 @@ public partial class TestMeshBridge : SceneTree
 				GD.Print( "[G7-TEST] SUCCESS: G7 EffigyClipBridge verified!" );
 			}
 
-			// G8: Test Scene Importer
+			// G8: Test Scene Importer with materials
 			GD.Print( "[G8-TEST] Testing EffigySceneImporter._ImportScene..." );
 			var importer = new EffigySceneImporter();
 			var importedObj = importer._ImportScene( "spike/g1-spike.effigy", 0, new Godot.Collections.Dictionary() );
@@ -146,8 +195,40 @@ public partial class TestMeshBridge : SceneTree
 			if ( meshNode.Skin == null )
 				throw new Exception( "Body MeshInstance3D has null Skin" );
 
+			var surfMat = meshNode.Mesh.SurfaceGetMaterial( 0 );
+			if ( surfMat is not StandardMaterial3D stdMat )
+				throw new Exception( $"Surface material is {surfMat?.GetType().Name ?? "null"}, expected StandardMaterial3D" );
+
+			GD.Print( $"[G8-TEST] Surface 0 material: {stdMat.ResourceName}, Albedo={stdMat.AlbedoColor}, Roughness={stdMat.Roughness}, Metallic={stdMat.Metallic}" );
 			GD.Print( $"[G8-TEST] Skeleton bones: {skelNode.GetBoneCount()}, Skin binds: {meshNode.Skin.GetBindCount()}, Mesh surfaces: {meshNode.Mesh.GetSurfaceCount()}" );
 			GD.Print( "[G8-TEST] SUCCESS: G8 EffigySceneImporter verified!" );
+
+			// G9: Test Live Document Service and Undo/Redo Adapter
+			GD.Print( "[G9-TEST] Testing EffigyLiveDocumentService and EffigyUndoRedoAdapter..." );
+			using var liveDoc = EffigyLiveDocumentService.Open( "spike/g1-spike.effigy" );
+			var buildTask = liveDoc.RequestRebuildAsync();
+			buildTask.Wait();
+			var snapshot = buildTask.Result;
+			if ( snapshot == null || snapshot.Mesh == null )
+				throw new Exception( "EffigyLiveDocumentService background rebuild returned null snapshot or mesh." );
+			GD.Print( $"[G9-TEST] Rebuilt snapshot: revision={snapshot.Revision}, tris={snapshot.Mesh.TriangleCount}" );
+
+			// Test Undo/Redo adapter
+			int testValue = 100;
+			var godotUndoRedo = new UndoRedo();
+			var adapter = new EffigyUndoRedoAdapter( liveDoc.Session, godotUndoRedo );
+
+			var cmd = new ValueChangeCommand<int>( "Test change value", v => testValue = v, 100, 250 );
+			adapter.Execute( cmd );
+			if ( testValue != 250 ) throw new Exception( $"Expected testValue=250 after execute, got {testValue}" );
+
+			bool undone = adapter.Undo();
+			if ( !undone || testValue != 100 ) throw new Exception( $"Expected testValue=100 after undo, got {testValue} (undone={undone})" );
+
+			bool redone = adapter.Redo();
+			if ( !redone || testValue != 250 ) throw new Exception( $"Expected testValue=250 after redo, got {testValue} (redone={redone})" );
+
+			GD.Print( "[G9-TEST] SUCCESS: G9 EffigyLiveDocumentService and EffigyUndoRedoAdapter verified!" );
 		}
 		catch ( Exception ex )
 		{

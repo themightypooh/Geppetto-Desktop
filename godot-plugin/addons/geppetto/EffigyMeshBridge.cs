@@ -43,7 +43,7 @@ public static class EffigyMeshBridge
 	/// Converts a <see cref="CpuMesh"/> to a Godot <see cref="ArrayMesh"/>.
 	/// Each material batch creates one surface on the ArrayMesh.
 	/// </summary>
-	public static ArrayMesh ToGodotArrayMesh( CpuMesh mesh )
+	public static ArrayMesh ToGodotArrayMesh( CpuMesh mesh, MaterialResolver resolver = null )
 	{
 		ArgumentNullException.ThrowIfNull( mesh );
 		var arrayMesh = new ArrayMesh();
@@ -222,10 +222,18 @@ public static class EffigyMeshBridge
 				blendShapeArrays
 			);
 
-			// Surface name from material
-			arrayMesh.SurfaceSetName( arrayMesh.GetSurfaceCount() - 1, batch.MaterialName ?? $"surface_{batchIndex}" );
+			// Surface name and material
+			int surface = arrayMesh.GetSurfaceCount() - 1;
+			arrayMesh.SurfaceSetName( surface, batch.MaterialName ?? $"surface_{batchIndex}" );
+			arrayMesh.SurfaceSetMaterial( surface, EffigyMaterialBridge.ToGodotMaterial( batch, resolver ) );
 		}
 
 		return arrayMesh;
 	}
+
+	/// <summary>
+	/// Flat PBR factors from the batch (colour, roughness, metal, emission, alpha, sidedness).
+	/// </summary>
+	public static StandardMaterial3D ToGodotMaterial( in CpuMesh.DrawBatch batch, MaterialResolver resolver = null ) =>
+		EffigyMaterialBridge.ToGodotMaterial( batch, resolver );
 }

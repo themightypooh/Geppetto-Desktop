@@ -9,7 +9,7 @@ namespace Geppetto;
 
 /// <summary>
 /// Imports .effigy files into Godot scenes with Node3D root, Skeleton3D, MeshInstance3D (ArrayMesh + Skin),
-/// and AnimationPlayer.
+/// StandardMaterial3D materials, and AnimationPlayer.
 /// </summary>
 [Tool]
 public partial class EffigySceneImporter : EditorSceneFormatImporter
@@ -21,12 +21,14 @@ public partial class EffigySceneImporter : EditorSceneFormatImporter
 		try
 		{
 			GD.Print( $"[EffigyImporter] Importing scene: {path}" );
-			var studio = StudioDocument.ReadFile( path );
+			// Godot hands us res:// paths; the kernel and System.IO need real absolute file paths.
+			string diskPath = Path.GetFullPath( ProjectSettings.GlobalizePath( path ) );
+			var studio = StudioDocument.ReadFile( diskPath );
 			studio.Rebuild();
 
-			var cpuMesh = CpuMesh.FromStudio( studio, 0, path );
+			var cpuMesh = CpuMesh.FromStudio( studio, 0, diskPath );
 			var root = new Node3D();
-			root.Name = Path.GetFileNameWithoutExtension( path );
+			root.Name = Path.GetFileNameWithoutExtension( diskPath );
 
 			Skeleton3D skeleton = null;
 			if ( studio.Rig != null && studio.Rig.Count > 0 )
@@ -36,7 +38,15 @@ public partial class EffigySceneImporter : EditorSceneFormatImporter
 				skeleton.Owner = root;
 			}
 
-			var arrayMesh = EffigyMeshBridge.ToGodotArrayMesh( cpuMesh );
+			string dir = Path.GetDirectoryName( diskPath );
+			MaterialResolver resolver = null;
+			if ( !string.IsNullOrEmpty( dir ) && Directory.Exists( dir ) )
+			{
+				string fullDir = Path.GetFullPath( dir );
+				resolver = new MaterialResolver( fullDir, Path.GetFileNameWithoutExtension( diskPath ) );
+			}
+
+			var arrayMesh = EffigyMeshBridge.ToGodotArrayMesh( cpuMesh, resolver );
 			var meshInstance = new MeshInstance3D
 			{
 				Name = "Body",
@@ -57,8 +67,7 @@ public partial class EffigySceneImporter : EditorSceneFormatImporter
 			meshInstance.Owner = root;
 
 			// Look for companion .riganim or .clip.json files in the same directory
-			string dir = Path.GetDirectoryName( path );
-			string baseName = Path.GetFileNameWithoutExtension( path );
+			string baseName = Path.GetFileNameWithoutExtension( diskPath );
 			if ( !string.IsNullOrEmpty( dir ) && Directory.Exists( dir ) )
 			{
 				var clips = Directory.GetFiles( dir, $"{baseName}*.riganim" );
@@ -91,7 +100,7 @@ public partial class EffigySceneImporter : EditorSceneFormatImporter
 				}
 			}
 
-			GD.Print( $"[EffigyImporter] Successfully imported scene: {path} (verts={(cpuMesh.Vertices?.Length ?? 0) / CpuMesh.FloatsPerVertex}, tris={cpuMesh.TriangleCount})" );
+			GD.Print( $"[EffigyImporter] Successfully imported scene: {path} (verts={(cpuMesh.Vertices?.Length ?? 0) / CpuMesh.FloatsPerVertex}, tris={cpuMesh.TriangleCount}, surfaces={arrayMesh.GetSurfaceCount()})" );
 			return root;
 		}
 		catch ( Exception ex )

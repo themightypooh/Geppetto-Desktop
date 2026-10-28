@@ -78,6 +78,10 @@ public partial class GeppettoPlugin : EditorPlugin, ISerializationListener
 		GD.Print( $"[G1] enter. kernel={typeof( PartStudio ).Assembly.Location}" );
 		GD.Print( $"[G1] alc={alc?.Name} collectible={alc?.IsCollectible} runtime={System.Environment.Version} mvid={StudioCache.KernelStamp()}" );
 
+		// The G1 spike's load/rebuild probe only runs when asked for (G1_PROBE=1), so the
+		// plugin loads quietly in normal use.
+		if ( System.Environment.GetEnvironmentVariable( "G1_PROBE" ) != "1" ) return;
+
 		var doc = System.Environment.GetEnvironmentVariable( "G1_DOC" );
 		if ( string.IsNullOrEmpty( doc ) )
 			doc = ProjectSettings.GlobalizePath( "res://spike/g1-spike.effigy" );
