@@ -165,9 +165,13 @@ public partial class GeppettoPlugin
 			CheckClipping( "open" );
 			CheckDialOnScreen( "open" );
 
+			// GEPPETTO_WINDOW_WS=Animate runs just that workspace.
+			string only = System.Environment.GetEnvironmentVariable( "GEPPETTO_WINDOW_WS" ) ?? "";
 			for ( int w = 0; w < GeppettoDialData.Workspaces.Length; w++ )
 			{
 				var ws = GeppettoDialData.Workspaces[w];
+				if ( only.Length > 0 && ws.Name != only ) continue;
+				Note( $"{ws.Name}: switching" );
 				GeppettoDialState.Ws = w;
 				RefreshDial();
 				await Wait( 0.3 );
