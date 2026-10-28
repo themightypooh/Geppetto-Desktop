@@ -14,6 +14,9 @@ namespace Geppetto;
 [Tool]
 public partial class EffigySceneImporter : EditorSceneFormatImporter
 {
+	/// <summary>Root meta naming the .effigy a scene was imported from (the dial finds characters by it).</summary>
+	public const string EffigyMeta = "geppetto_effigy";
+
 	public override string[] _GetExtensions() => new[] { "effigy" };
 
 	public override GodotObject _ImportScene( string path, uint flags, Godot.Collections.Dictionary options )
@@ -29,6 +32,7 @@ public partial class EffigySceneImporter : EditorSceneFormatImporter
 			var cpuMesh = CpuMesh.FromStudio( studio, 0, diskPath );
 			var root = new Node3D();
 			root.Name = Path.GetFileNameWithoutExtension( diskPath );
+			root.SetMeta( EffigyMeta, path );
 
 			Skeleton3D skeleton = null;
 			if ( studio.Rig != null && studio.Rig.Count > 0 )
