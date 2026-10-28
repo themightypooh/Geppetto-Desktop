@@ -106,6 +106,9 @@ public static partial class GeppettoTools
 
 	static GeppettoPicker? _faceMaterial;
 
+	/// <summary>Faces picked with a running Face Material tool (0 when it isn't running).</summary>
+	public static int FaceMaterialPickCount => _faceMaterial is { } p && Active == p ? p.Faces.Count : 0;
+
 	static void StartFaceMaterial( GeppettoDocument doc, GeppettoCharacter character )
 	{
 		var picker = new GeppettoPicker( "Face Material", doc, PickKinds.Faces,
@@ -176,7 +179,7 @@ public static partial class GeppettoTools
 
 	/// <summary>The slot already showing this look (same preset, or same colour/roughness/metal), else
 	/// the lowest slot from 1 that nothing uses, names or shades.</summary>
-	static int SlotForLook( PartStudio studio, string name, SlotLook? look )
+	internal static int SlotForLook( PartStudio studio, string name, SlotLook? look )
 	{
 		if ( look != null )
 			foreach ( var (slot, l) in studio.MaterialLooks.OrderBy( kv => kv.Key ) )

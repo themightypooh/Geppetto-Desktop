@@ -43,6 +43,10 @@ public static class GeppettoDialState
 	public static event Action Changed;
 	public static event Action<string, string> ToolPicked;      // workspace, tool
 	public static event Action<GeppettoDialMaterial> MaterialPicked;
+	/// <summary>The "+" ball was clicked: make a new material.</summary>
+	public static event Action NewMaterialAsked;
+	/// <summary>A ball or recent was right-clicked: material, screen position for the menu.</summary>
+	public static event Action<GeppettoDialMaterial, Vector2> MaterialMenuAsked;
 
 	static bool _loaded;
 
@@ -58,8 +62,8 @@ public static class GeppettoDialState
 			LastStage[i] = GeppettoDialData.Workspaces[i].DefaultStage;
 			LastTool[i] = null;
 		}
-		Materials = GeppettoDialData.PresetMaterials();
-		Current = Materials.FirstOrDefault();
+		Materials = GeppettoDialData.RingMaterials();
+		Current = Materials.FirstOrDefault( m => !m.IsNew );
 
 		var es = EditorInterface.Singleton.GetEditorSettings();
 		Variant Get( string key, Variant def ) => es.GetProjectMetadata( Section, key, def );
@@ -148,7 +152,7 @@ public static class GeppettoDialState
 	public static void ToggleMaterials()
 	{
 		MatOpen = !MatOpen;
-		if ( MatOpen ) RingStart = Time.GetTicksMsec();
+		if ( MatOpen ) { RingStart = Time.GetTicksMsec(); ReloadMaterials(); }
 		Touch();
 	}
 
@@ -176,6 +180,26 @@ public static class GeppettoDialState
 		}
 		Touch();
 	}
+
+	/// <summary>Re-reads the saved materials (after a save, rename or delete, or when the ring opens).
+	/// Current and recents follow their names; ones that are gone drop out.</summary>
+	public static void ReloadMaterials()
+	{
+		Materials = GeppettoDialData.RingMaterials();
+		GeppettoDialMaterial Fresh( GeppettoDialMaterial m ) => m.Source == "preset" && m.Name.StartsWith( '#' ) ? m : Materials.FirstOrDefault( x => x.Name == m.Name );
+		for ( int i = Recent.Count - 1; i >= 0; i-- )
+		{
+			var f = Fresh( Recent[i] );
+			if ( f == null ) Recent.RemoveAt( i ); else Recent[i] = f;
+		}
+		if ( Current != null ) Current = Fresh( Current ) ?? Materials.FirstOrDefault( m => !m.IsNew );
+		int pages = Math.Max( 1, ( Materials.Count + 11 ) / 12 );
+		MatPage = Math.Min( MatPage, pages - 1 );
+		Save(); Touch();
+	}
+
+	public static void AskNewMaterial() => NewMaterialAsked?.Invoke();
+	public static void AskMaterialMenu( GeppettoDialMaterial m, Vector2 screen ) { if ( m != null && !m.IsNew ) MaterialMenuAsked?.Invoke( m, screen ); }
 
 	public static void PickRecent( int index )
 	{

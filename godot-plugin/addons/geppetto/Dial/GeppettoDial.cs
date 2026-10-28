@@ -290,7 +290,16 @@ public partial class GeppettoDial : Control
 					if ( h != _hover ) { _hover = h; QueueRedraw(); }
 				}
 				break;
-			// Right and middle buttons are never accepted: they reach the camera underneath.
+			// Right-click on a ball or a recent opens its menu (swap, edit, rename, delete). Every other right
+			// and middle click is never accepted: it reaches the camera underneath.
+			case InputEventMouseButton mb when mb.ButtonIndex == MouseButton.Right && HitTest( mb.Position ) is { Kind: Hit.Ball or Hit.Recent } rh:
+				if ( mb.Pressed )
+				{
+					var m = rh.Kind == Hit.Ball ? PageMaterials()[rh.Index] : rh.Index < GeppettoDialState.Recent.Count ? GeppettoDialState.Recent[rh.Index] : null;
+					GeppettoDialState.AskMaterialMenu( m, GetScreenTransform() * mb.Position );
+				}
+				AcceptEvent();
+				break;
 		}
 	}
 
@@ -322,7 +331,9 @@ public partial class GeppettoDial : Control
 				else { _picking = false; GeppettoDialState.SetMatMode( Tabs[h.Index].Mode ); }
 				break;
 			case Hit.Ball:
-				GeppettoDialState.PickMaterial( PageMaterials()[h.Index] ); SyncHsl(); break;
+				var ball = PageMaterials()[h.Index];
+				if ( ball.IsNew ) { GeppettoDialState.AskNewMaterial(); break; }
+				GeppettoDialState.PickMaterial( ball ); SyncHsl(); break;
 			case Hit.Recent:
 				GeppettoDialState.PickRecent( h.Index ); SyncHsl(); break;
 			case Hit.Shade:
@@ -488,7 +499,7 @@ public partial class GeppettoDial : Control
 		if ( m != null )
 		{
 			int bpx = Mathf.RoundToInt( 30 * _s );
-			DrawTextureRect( GeppettoDialData.Ball( m.Color, bpx ), new Rect2( _ctr + new Vector2( -bpx / 2f, -2 * _s - bpx / 2f ), new Vector2( bpx, bpx ) ), false );
+			DrawTextureRect( GeppettoDialData.Ball( m, bpx ), new Rect2( _ctr + new Vector2( -bpx / 2f, -2 * _s - bpx / 2f ), new Vector2( bpx, bpx ) ), false );
 			DrawFitted( _font, m.Name.ToUpperInvariant(), _ctr + new Vector2( 0, -26 * _s ), 66 * _s, 8 * _s, 6 * _s, CoreName, maxLines: 1 );
 		}
 
@@ -590,7 +601,18 @@ public partial class GeppettoDial : Control
 			bool current = GeppettoDialState.Current?.Name == page[i].Name;
 			float br = BallR * ( hover ? 1.08f : 1f );
 			int px = Mathf.RoundToInt( br * 2 * _s );
-			DrawTextureRect( GeppettoDialData.Ball( page[i].Color, px ), new Rect2( c - new Vector2( px, px ) / 2, new Vector2( px, px ) ), false, new Color( 1, 1, 1, alpha ) );
+			if ( page[i].IsNew )
+			{
+				// the "+" ball: an outlined socket with a plus, makes a new material
+				DrawCircle( c, br * _s, new Color( RingBody, alpha ), true, -1, true );
+				DrawCircle( c, br * _s, new Color( hover ? Gep : CoreName, alpha ), false, 1.4f * _s, true );
+				float k = br * 0.45f * _s;
+				var pc = new Color( hover ? Gep : CoreText, alpha );
+				DrawLine( c - new Vector2( k, 0 ), c + new Vector2( k, 0 ), pc, 1.8f * _s, true );
+				DrawLine( c - new Vector2( 0, k ), c + new Vector2( 0, k ), pc, 1.8f * _s, true );
+				continue;
+			}
+			DrawTextureRect( GeppettoDialData.Ball( page[i], px ), new Rect2( c - new Vector2( px, px ) / 2, new Vector2( px, px ) ), false, new Color( 1, 1, 1, alpha ) );
 			if ( current ) DrawCircle( c, ( br + 2.5f ) * _s, new Color( Gep, alpha ), false, 1.6f * _s, true );
 		}
 		int pages = Math.Max( 1, ( GeppettoDialState.Materials.Count + BallsPerPage - 1 ) / BallsPerPage );
@@ -652,7 +674,7 @@ public partial class GeppettoDial : Control
 			var m = GeppettoDialState.Recent[i];
 			var c = P( RRecent, RecentAngle( i ) );
 			int px = Mathf.RoundToInt( RecentR * 2 * _s );
-			DrawTextureRect( GeppettoDialData.Ball( m.Color, px ), new Rect2( c - new Vector2( px, px ) / 2, new Vector2( px, px ) ), false, new Color( 1, 1, 1, alpha ) );
+			DrawTextureRect( GeppettoDialData.Ball( m, px ), new Rect2( c - new Vector2( px, px ) / 2, new Vector2( px, px ) ), false, new Color( 1, 1, 1, alpha ) );
 			bool hot = _hover.Kind == Hit.Recent && _hover.Index == i;
 			if ( hot || GeppettoDialState.Current?.Name == m.Name )
 				DrawCircle( c, ( RecentR + 2 ) * _s, new Color( hot ? Colors.White : Gep, alpha ), false, 1.3f * _s, true );
@@ -678,7 +700,7 @@ public partial class GeppettoDial : Control
 		var bg = RingBody; bg.A *= alpha;
 		DrawStyleBox( new StyleBoxFlat { BgColor = bg, CornerRadiusTopLeft = 6, CornerRadiusTopRight = 6, CornerRadiusBottomLeft = 6, CornerRadiusBottomRight = 6, BorderColor = new Color( "3a3e46", alpha ), BorderWidthBottom = 1, BorderWidthTop = 1, BorderWidthLeft = 1, BorderWidthRight = 1 }, box );
 		int px = Mathf.RoundToInt( 22 * _s );
-		DrawTextureRect( GeppettoDialData.Ball( m.Color, px ), new Rect2( box.Position + new Vector2( 6 * _s, ( box.Size.Y - px ) / 2 ), new Vector2( px, px ) ), false, new Color( 1, 1, 1, alpha ) );
+		DrawTextureRect( GeppettoDialData.Ball( m, px ), new Rect2( box.Position + new Vector2( 6 * _s, ( box.Size.Y - px ) / 2 ), new Vector2( px, px ) ), false, new Color( 1, 1, 1, alpha ) );
 		var tx = box.Position.X + 34 * _s;
 		DrawFittedLeft( _bold, name, new Vector2( tx, box.Position.Y + 15 * _s ), tw, fs, new Color( CoreText, alpha ) );
 		DrawFittedLeft( _font, hex, new Vector2( tx, box.Position.Y + 28 * _s ), tw, hs, new Color( CoreName, alpha ) );

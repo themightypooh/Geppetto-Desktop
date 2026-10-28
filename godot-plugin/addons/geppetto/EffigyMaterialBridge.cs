@@ -271,17 +271,19 @@ public static class EffigyMaterialBridge
 			// The kernel shows the map's own colours (tint white) when a map is set.
 			mat.AlbedoColor = new Color( 1f, 1f, 1f, mat.AlbedoColor.A );
 		}
+		// One packed ORM file for rough and metal (the Linework / library layout): R=AO, G=rough, B=metal.
+		bool orm = !string.IsNullOrEmpty( look.RoughnessMap ) && look.RoughnessMap == look.MetalnessMap;
 		if ( LoadLookMap( id, "roughness", look.RoughnessMap, baseDir, unsupported ) is { } rough )
 		{
 			// Kernel: the map's red channel replaces the scalar. Godot multiplies, so scalar = 1.
 			mat.RoughnessTexture = rough;
-			mat.RoughnessTextureChannel = BaseMaterial3D.TextureChannel.Red;
+			mat.RoughnessTextureChannel = orm ? BaseMaterial3D.TextureChannel.Green : BaseMaterial3D.TextureChannel.Red;
 			mat.Roughness = 1f;
 		}
 		if ( LoadLookMap( id, "metalness", look.MetalnessMap, baseDir, unsupported ) is { } metal )
 		{
 			mat.MetallicTexture = metal;
-			mat.MetallicTextureChannel = BaseMaterial3D.TextureChannel.Red;
+			mat.MetallicTextureChannel = orm ? BaseMaterial3D.TextureChannel.Blue : BaseMaterial3D.TextureChannel.Red;
 			mat.Metallic = 1f;
 		}
 		if ( LoadLookMap( id, "normal", look.NormalMap, baseDir, unsupported ) is { } normal )

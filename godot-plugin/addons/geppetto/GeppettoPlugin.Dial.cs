@@ -60,6 +60,7 @@ public partial class GeppettoPlugin
 		GeppettoDialState.Changed += SyncTimeline;
 		GeppettoDialState.ToolPicked += OnToolPicked;
 		GeppettoDialState.MaterialPicked += OnMaterialPicked;
+		SetupMaterials();
 		SetProcess( true );
 		RefreshDial();
 
@@ -73,6 +74,7 @@ public partial class GeppettoPlugin
 		GeppettoDialState.Changed -= SyncTimeline;
 		GeppettoDialState.ToolPicked -= OnToolPicked;
 		GeppettoDialState.MaterialPicked -= OnMaterialPicked;
+		TeardownMaterials();
 		foreach ( var d in _dials ) if ( IsInstanceValid( d ) ) d.QueueFree();
 		_dials.Clear();
 		if ( _dialToggle != null ) { RemoveControlFromContainer( CustomControlContainer.SpatialEditorMenu, _dialToggle ); _dialToggle.QueueFree(); _dialToggle = null; }
@@ -267,14 +269,6 @@ public partial class GeppettoPlugin
 		ur.AddUndoMethod( root, Node.MethodName.RemoveChild, node );
 		ur.CommitAction();
 		return true;
-	}
-
-	void OnMaterialPicked( GeppettoDialMaterial m )
-	{
-		// Only Face Material applies a material; elsewhere the pick just becomes the current material.
-		if ( GeppettoDialState.Workspace.Name != "CAD" || GeppettoDialData.Clean( GeppettoDialState.CurrentTool ) != "Face Material" ) return;
-		// Colours only the faces picked with the Face Material tool (Tools/CadPick.cs).
-		GeppettoTools.FaceMaterialPicked( m );
 	}
 
 	public override void _Process( double delta )

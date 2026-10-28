@@ -12,10 +12,17 @@ namespace Geppetto;
 /// Marionette's RigControlWindow.cs for Animate), the same table the approved dial mock uses.</summary>
 public sealed record GeppettoWorkspace( string Name, string Tip, int DefaultStage, (string Stage, string[] Tools)[] Stages );
 
-/// <summary>A material the dial can hold: a kernel look preset, or a colour picked off the shades/HSL rings.</summary>
-public sealed record GeppettoDialMaterial( string Name, Color Color, float Rough, float Metal, SlotLook Look )
+/// <summary>A material the dial can hold: a kernel look preset, a colour picked off the shades/HSL rings, or
+/// a saved material from the library (<see cref="GeppettoMaterialLibrary"/>: Source "user" or "project",
+/// Dir its folder). Source "new" is the ring's "+" ball.</summary>
+public sealed record GeppettoDialMaterial( string Name, Color Color, float Rough, float Metal, SlotLook Look, string Source = "preset", string Dir = null )
 {
 	public string Hex => "#" + Color.ToHtml( false ).ToUpperInvariant();
+	public bool IsNew => Source == "new";
+	/// <summary>Saved in a library folder, so it can be edited, renamed and deleted.</summary>
+	public bool Custom => Source is "user" or "project";
+
+	public static readonly GeppettoDialMaterial New = new( "New material…", new Color( 0.25f, 0.26f, 0.28f ), 0.5f, 0f, new SlotLook(), "new" );
 
 	public static GeppettoDialMaterial FromPreset( string name, SlotLook look ) =>
 		new( name, new Color( look.Color.x, look.Color.y, look.Color.z ), look.Rough, look.Metal, look );
@@ -77,6 +84,16 @@ public static class GeppettoDialData
 	/// <summary>Kernel look presets, the dial's MATERIALS ring.</summary>
 	public static List<GeppettoDialMaterial> PresetMaterials() =>
 		SlotLook.Presets.Select( kv => GeppettoDialMaterial.FromPreset( kv.Key, kv.Value ) ).ToList();
+
+	/// <summary>The whole MATERIALS ring: saved materials (this project's, then the shared library), the
+	/// kernel presets, and the "+" ball that makes a new one.</summary>
+	public static List<GeppettoDialMaterial> RingMaterials()
+	{
+		var list = GeppettoMaterialLibrary.Scan();
+		list.AddRange( PresetMaterials() );
+		list.Add( GeppettoDialMaterial.New );
+		return list;
+	}
 
 	// Icons on a 24px grid, drawn as round-capped strokes (SVG path data, copied from the mock).
 	// Stages first, then tools; anything missing falls back to its stage's icon.
@@ -160,10 +177,17 @@ public static class GeppettoDialData
 
 	/// <summary>A shaded material ball: radial gradient from a light upper-left to a dark rim, plus a
 	/// soft highlight, like the mock's balls. Rendered once per colour and size.</summary>
-	public static ImageTexture Ball( Color c, int px )
+	public static ImageTexture Ball( Color c, int px ) => Ball( c, 0.5f, 0f, px );
+
+	/// <summary>A ball for a material: rough spreads and dims the highlight, metal darkens the body and
+	/// tints the highlight with the colour.</summary>
+	public static ImageTexture Ball( GeppettoDialMaterial m, int px ) => Ball( m.Color, m.Rough, m.Metal, px );
+
+	public static ImageTexture Ball( Color c, float rough, float metal, int px )
 	{
 		px = Math.Clamp( px, 8, 256 );
-		var key = $"{c.ToHtml()}|{px}";
+		rough = Mathf.Clamp( rough, 0f, 1f ); metal = Mathf.Clamp( metal, 0f, 1f );
+		var key = $"{c.ToHtml()}|{rough:0.00}|{metal:0.00}|{px}";
 		if ( BallCache.TryGetValue( key, out var tex ) && IsInstanceValid( tex ) ) return tex;
 		var img = Image.CreateEmpty( px, px, false, Image.Format.Rgba8 );
 		float r = px / 2f, cx = r, cy = r;
@@ -179,10 +203,13 @@ public static class GeppettoDialData
 				if ( cover <= 0f ) { img.SetPixel( x, y, Colors.Transparent ); continue; }
 				float t = Mathf.Sqrt( ( x + 0.5f - gx ) * ( x + 0.5f - gx ) + ( y + 0.5f - gy ) * ( y + 0.5f - gy ) ) / gr;
 				var col = t < 0.35f ? lightC.Lerp( c, t / 0.35f ) : c.Lerp( darkC, Mathf.Clamp( ( t - 0.35f ) / 0.65f, 0f, 1f ) );
-				// highlight ellipse at (-0.3r, -0.38r), radii 0.32r × 0.18r
-				float hx = ( dx + r * 0.3f ) / ( r * 0.32f ), hy = ( dy + r * 0.38f ) / ( r * 0.18f );
+				col = col.Lerp( darkC, 0.45f * metal * Mathf.Clamp( t, 0f, 1f ) );
+				// highlight ellipse at (-0.3r, -0.38r): small and bright when smooth, wide and faint when rough
+				float spread = Mathf.Lerp( 0.6f, 1.6f, rough );
+				float hx = ( dx + r * 0.3f ) / ( r * 0.32f * spread ), hy = ( dy + r * 0.38f ) / ( r * 0.18f * spread );
 				float h = 1f - Mathf.Clamp( Mathf.Sqrt( hx * hx + hy * hy ), 0f, 1f );
-				col = col.Lerp( Colors.White, 0.35f * Mathf.Clamp( h * 3f, 0f, 1f ) );
+				var spec = Colors.White.Lerp( c.Lerp( Colors.White, 0.4f ), metal );
+				col = col.Lerp( spec, Mathf.Lerp( 0.75f, 0.2f, rough ) * Mathf.Clamp( h * 3f, 0f, 1f ) );
 				col.A = cover;
 				img.SetPixel( x, y, col );
 			}

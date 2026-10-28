@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Effigy;
 using Godot;
 
 namespace Geppetto;
@@ -103,6 +104,18 @@ public partial class GeppettoPlugin
 	}
 
 	/// <summary>Fails when the shown dial's ring is not inside the editor window, where Poo can see it.</summary>
+	/// <summary>A dock with a tall minimum (an unsized wrapped label) makes the whole editor taller than
+	/// the window and pushes the bottom panel off screen; every Geppetto dock must leave it fitting.</summary>
+	void CheckEditorFits( string step )
+	{
+		var win = EditorInterface.Singleton.GetBaseControl().GetWindow().Size;
+		var min = EditorInterface.Singleton.GetBaseControl().GetWindow().GetContentsMinimumSize();
+		var docks = new List<string>();
+		foreach ( var d in new Control?[] { _featureTree, _timeline, RigPanel.Shown } )
+			if ( d != null && IsInstanceValid( d ) ) docks.Add( $"{d.Name} {d.GetCombinedMinimumSize().Y:0}" );
+		Note( $"{step}: editor minimum {min.X:0}x{min.Y:0} in window {win.X}x{win.Y} (dock minimums: {string.Join( ", ", docks )})", fail: min.Y > win.Y || min.X > win.X );
+	}
+
 	void CheckDialOnScreen( string step )
 	{
 		var win = EditorInterface.Singleton.GetBaseControl().GetWindow();
@@ -167,9 +180,11 @@ public partial class GeppettoPlugin
 			Shot( "open" );
 			CheckClipping( "open" );
 			CheckDialOnScreen( "open" );
+			CheckEditorFits( "open" );
 
-			// GEPPETTO_WINDOW_WS=Animate runs just that workspace.
+			// GEPPETTO_WINDOW_WS=Animate runs just that workspace (Materials: just the material checks).
 			string only = System.Environment.GetEnvironmentVariable( "GEPPETTO_WINDOW_WS" ) ?? "";
+			if ( only.Length == 0 || only == "Materials" ) await MaterialRun( doc );
 			for ( int w = 0; w < GeppettoDialData.Workspaces.Length; w++ )
 			{
 				var ws = GeppettoDialData.Workspaces[w];
@@ -231,6 +246,89 @@ public partial class GeppettoPlugin
 		}
 		catch ( Exception e ) { Note( "run threw: " + e, fail: true ); }
 		Finish();
+	}
+
+	/// <summary>The material ring's manager: save a custom material (with a texture) into this project,
+	/// see it on the ring, the new/edit box and right-click menu, put it on Model faces and on a whole
+	/// slot, rename it, delete it to .trash. Writes only under res://materials (run on a copy).</summary>
+	async Task MaterialRun( GeppettoDocument doc )
+	{
+		try
+		{
+			GeppettoDialState.Ws = Array.FindIndex( GeppettoDialData.Workspaces, w => w.Name == "Model" );
+			GeppettoDialState.MatOpen = false;
+			RefreshDial();
+			// a 64px checker as the colour texture
+			string png = Path.Combine( _runOut, "checker.png" );
+			var img = Image.CreateEmpty( 64, 64, false, Image.Format.Rgb8 );
+			for ( int y = 0; y < 64; y++ ) for ( int x = 0; x < 64; x++ ) img.SetPixel( x, y, ( ( x / 8 + y / 8 ) & 1 ) == 0 ? new Color( "c8462e" ) : new Color( "f0d9a0" ) );
+			img.SavePng( png );
+			var saved = GeppettoMaterialLibrary.Save( "Window Test Brick", new Color( "b04a2a" ), 0.8f, 0f, png, false, "project" );
+			var gold = GeppettoMaterialLibrary.Save( "Window Test Gold", new Color( "d9a93a" ), 0.25f, 1f, null, false, "project" );
+			Note( $"materials: saved {saved.Dir} (albedo={saved.Look.AlbedoMap != null}) and {gold.Name}", fail: saved.Look.AlbedoMap == null || !File.Exists( Path.Combine( saved.Dir!, "window_test_brick.tres" ) ) );
+			GeppettoDialState.ToggleMaterials();
+			await Wait( 0.6 );
+			bool onRing = GeppettoDialState.Materials.Any( m => m.Name == "Window Test Brick" ) && GeppettoDialState.Materials.Any( m => m.IsNew );
+			Note( $"materials: ring has {GeppettoDialState.Materials.Count} balls, custom + \"+\" on it={onRing}", fail: !onRing );
+			Shot( "materials-ring" );
+			CheckClipping( "materials ring" );
+			CheckDialOnScreen( "materials ring" );
+
+			var box = GeppettoMaterialDialog.Open( null, saved, null );
+			await Wait( 0.4 );
+			Shot( "materials-new-box" );
+			CheckClipping( "material box" );
+			box.QueueFree();
+			await Wait( 0.1 );
+
+			OnMaterialMenu( saved, new Vector2( 900, 400 ) );
+			await Wait( 0.4 );
+			if ( _matMenu != null )
+			{
+				_matMenu.GetTexture()?.GetImage()?.SavePng( Path.Combine( _runOut, $"{++_runShot:D3}-materials-menu.png" ) );
+				var items = Enumerable.Range( 0, _matMenu.ItemCount ).Select( i => _matMenu.GetItemText( i ) ).Where( t => t.Length > 0 ).ToList();
+				Note( $"materials: menu = {string.Join( " | ", items )}", fail: !items.Contains( "Rename…" ) || !items.Contains( "Delete" ) );
+				_matMenu.Hide();
+			}
+
+			// Model: select two faces, pick the brick, the faces move to its slot.
+			var edit = GeppettoModelEdit.For( doc );
+			edit.SetMode( EditElement.Face );
+			// the test character has several bodies: open the biggest, as clicking it would
+			if ( edit.Session == null && doc.Studio.Bodies.Where( b => b.Visible && b.Mesh is { FaceCount: > 1 } ).OrderByDescending( b => b.Mesh!.FaceCount ).FirstOrDefault() is { } body )
+				edit.Begin( body.Id );
+			if ( edit.Session is not { } ses || ses.Mesh.FaceCount < 2 ) Note( "materials: no Model session to test faces", fail: true );
+			else
+			{
+				ses.SelectFace( 0 ); ses.SelectFace( 1, MeshEditSession.Combine.Add ); edit.SelectionChanged();
+				GeppettoDialState.PickMaterial( saved );
+				await Wait( 0.5 );
+				var s2 = edit.Session!;
+				int slot0 = s2.Mesh.Faces[0].Material, slot1 = s2.Mesh.Faces[1].Material;
+				bool lookSet = doc.Studio.MaterialLooks.TryGetValue( slot0, out var lk ) && lk.AlbedoMap == saved.Look.AlbedoMap;
+				Note( $"materials: Model faces 0,1 on slot {slot0},{slot1}, look has the texture={lookSet}", fail: slot0 != slot1 || slot0 == 0 || !lookSet );
+				Shot( "materials-model-faces" );
+				// whole slot: the brick's slot turns gold, undoably
+				SetSlotLook( doc, slot0, gold );
+				await Wait( 0.4 );
+				bool isGold = doc.Studio.MaterialLooks.TryGetValue( slot0, out var g ) && g.Metal == 1f;
+				Note( $"materials: slot {slot0} now gold={isGold}", fail: !isGold );
+				Shot( "materials-slot-gold" );
+			}
+
+			var renamed = GeppettoMaterialLibrary.Rename( saved, "Window Test Brick Two" );
+			bool renOk = Directory.Exists( renamed.Dir! ) && !Directory.Exists( saved.Dir! ) && File.Exists( Path.Combine( renamed.Dir!, "window_test_brick_two_albedo.png" ) );
+			bool repointed = doc.Studio.MaterialLooks.Values.All( l => l.AlbedoMap == null || File.Exists( l.AlbedoMap ) );
+			Note( $"materials: renamed to {renamed.Dir}, files moved={renOk}, slot maps still found={repointed}", fail: !renOk || !repointed );
+			string trash = GeppettoMaterialLibrary.Delete( renamed );
+			GeppettoMaterialLibrary.Delete( gold );
+			GeppettoDialState.ReloadMaterials();
+			bool gone = !GeppettoDialState.Materials.Any( m => m.Name.StartsWith( "Window Test" ) ) && Directory.Exists( trash );
+			Note( $"materials: deleted to {trash}, off the ring={gone}", fail: !gone );
+			GeppettoDialState.MatOpen = false;
+			GeppettoDialState.Touch();
+		}
+		catch ( Exception e ) { Note( "materials: threw " + e, fail: true ); }
 	}
 
 	void Finish()
