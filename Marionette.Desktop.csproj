@@ -32,9 +32,9 @@
       tools/** holds standalone tools with their own project files (for example the
       local chat client). They must not be compiled into the desktop executable.
     -->
-    <Compile Remove="core/**;kernel/**;tests/**;tools/**;obj/**;bin/**" />
-    <EmbeddedResource Remove="core/**;kernel/**;tools/**" />
-    <None Remove="core/**;kernel/**;tools/**" />
+    <Compile Remove="core/**;kernel/**;tests/**;tools/**;godot-plugin/**;obj/**;bin/**" />
+    <EmbeddedResource Remove="core/**;kernel/**;tools/**;godot-plugin/**" />
+    <None Remove="core/**;kernel/**;tools/**;godot-plugin/**" />
   </ItemGroup>
 
   <ItemGroup>
