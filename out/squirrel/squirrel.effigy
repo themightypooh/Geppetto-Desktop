@@ -1,0 +1,159 @@
+effigy 1
+rollback 2147483647
+materiallook 1 color=#8b5a2b rough=0.9 metal=0
+materiallook 2 color=#c9a87c rough=0.95 metal=0
+materiallook 3 color=#1a1a1a rough=0.3 metal=0
+materiallook 4 color=#d4c5a9 rough=0.6 metal=0
+materiallook 5 color=#8b6914 rough=0.7 metal=0
+feature BlobFeature
+	id 81922b27
+	name Torso
+	suppressed 0
+	visible 1
+	param Blend 2
+	param CutBlend 0.05
+	param Material 1
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes capsule 0,5,0 0,13,0 3.6; sphere 0,9,1.2 2.8; sphere 0,5,-1.5 2.2
+	param Smooth 2
+	param Voxel 0.3
+end
+feature BlobFeature
+	id afc068d7
+	name Head
+	suppressed 0
+	visible 1
+	param Blend 2
+	param CutBlend 0.05
+	param Material 1
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes sphere 0,16,0.5 4.2; capsule 0,15,2.5 0,14,5 1.6; -sphere -1.6,16.5,3.8 1.1; -sphere 1.6,16.5,3.8 1.1
+	param Smooth 2
+	param Voxel 0.3
+end
+feature BlobFeature
+	id a3156b84
+	name Ears
+	suppressed 0
+	visible 1
+	param Blend 2
+	param CutBlend 0.05
+	param Material 1
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes capsule -3.2,18.5,-1 -3.8,22,-0.5 1.6; capsule 3.2,18.5,-1 3.8,22,-0.5 1.6
+	param Smooth 2
+	param Voxel 0.3
+end
+feature BlobFeature
+	id 38b974ec
+	name Tail
+	suppressed 0
+	visible 1
+	param Blend 2
+	param CutBlend 0.05
+	param Material 1
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes capsule 0,3,-3 0,6,-6 2.2; capsule 0,6,-6 0,10,-7 2.6; capsule 0,10,-7 0,14,-5 2.8; capsule 0,14,-5 0,15,0 2.6; capsule 0,15,0 0,13,3 2.2; capsule 0,13,3 0,10,4 1.8
+	param Smooth 2
+	param Voxel 0.3
+end
+feature BlobFeature
+	id 682aea9b
+	name HindLegs
+	suppressed 0
+	visible 1
+	param Blend 2
+	param CutBlend 0.05
+	param Material 1
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes capsule -2.5,4,-0.5 -2.5,1.5,-1.5 2.0; capsule 2.5,4,-0.5 2.5,1.5,-1.5 2.0; capsule -2.5,1.5,-1.5 -2.5,0.5,1.5 1.4; capsule 2.5,1.5,-1.5 2.5,0.5,1.5 1.4; capsule -2.5,0.5,1.5 -2.5,0.2,3.5 1.0; capsule 2.5,0.5,1.5 2.5,0.2,3.5 1.0
+	param Smooth 2
+	param Voxel 0.3
+end
+feature BlobFeature
+	id 9d80ba7e
+	name Forearms
+	suppressed 0
+	visible 1
+	param Blend 2
+	param CutBlend 0.05
+	param Material 1
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes capsule -2.8,12,1 -3.5,8,3 1.3; capsule 2.8,12,1 3.5,8,3 1.3; capsule -3.5,8,3 -2.5,6,4.5 1.0; capsule 3.5,8,3 2.5,6,4.5 1.0
+	param Smooth 2
+	param Voxel 0.3
+end
+feature BlobFeature
+	id 391ab3f6
+	name Nut
+	suppressed 0
+	visible 1
+	param Blend 2
+	param CutBlend 0.05
+	param Material 5
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes sphere 0,6,4.8 1.2
+	param Smooth 2
+	param Voxel 0.25
+end
+feature BlobFeature
+	id b9d80707
+	name Eyes
+	suppressed 0
+	visible 1
+	param Blend 2
+	param CutBlend 0.05
+	param Material 3
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes sphere -1.5,16.6,3.9 0.7; sphere 1.5,16.6,3.9 0.7
+	param Smooth 2
+	param Voxel 0.2
+end
+feature BlobFeature
+	id 0005834f
+	name Claws
+	suppressed 0
+	visible 1
+	param Blend 2
+	param CutBlend 0.05
+	param Material 4
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes capsule -2.3,6.2,4.6 -2.0,5.8,5.2 0.18; capsule -2.7,6.0,4.5 -2.4,5.6,5.1 0.18; capsule 2.3,6.2,4.6 2.0,5.8,5.2 0.18; capsule 2.7,6.0,4.5 2.4,5.6,5.1 0.18; capsule -2.4,0.4,3.6 -2.1,0.0,4.2 0.2; capsule 2.4,0.4,3.6 2.1,0.0,4.2 0.2
+	param Smooth 2
+	param Voxel 0.2
+end
+feature UVProjectFeature
+	id 776fae31
+	name UV project 1
+	suppressed 0
+	visible 1
+	param Atlas 0
+	bodies Bodies 81922b27b0 afc068d7b0 a3156b84b0 38b974ecb0 682aea9bb0 9d80ba7eb0 391ab3f6b0 b9d80707b0 0005834fb0
+	param ChartAngle 66
+	param Direction 0 0 1
+	param Margin 0.01
+	param MarginPixels 0
+	param Mode 3
+	param RotateIslands 0
+	param Scale 1
+	param TexelDensity 0
+	param TextureSize 1024
+end

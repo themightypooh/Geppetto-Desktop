@@ -311,6 +311,37 @@ public static class PaintLayers
 		return maps;
 	}
 
+	/// <summary>
+	/// The tri-planar replay: <see cref="Replay"/> with each channel's strokes modulated by a
+	/// world-space pattern (see <see cref="TriPlanar"/>). Channel grouping is identical, so a
+	/// patterned colour stroke and a plain height stroke on one layer never meet.
+	/// </summary>
+	public static PaintLayerMaps ReplayTriPlanar( PolyMesh mesh, IReadOnlyList<PaintStroke> strokes, int resolution,
+		TriPlanarPattern pattern, float scale, float sharpness )
+	{
+		var maps = new PaintLayerMaps { Size = resolution };
+
+		if ( strokes is not { Count: > 0 } )
+			return maps;
+
+		var byChannel = new Dictionary<PaintChannel, List<PaintStroke>>();
+
+		foreach ( var stroke in strokes )
+		{
+			if ( !byChannel.TryGetValue( stroke.Channel, out var list ) )
+				byChannel[stroke.Channel] = list = new List<PaintStroke>();
+
+			list.Add( stroke );
+		}
+
+		var bvh = MeshBVH.Build( mesh );
+
+		foreach ( var (channel, list) in byChannel )
+			maps.Set( channel, PaintReplay.ReplayTriPlanar( mesh, list, resolution, pattern, scale, sharpness, bvh ) );
+
+		return maps;
+	}
+
 	/// <summary>A canvas fully covered with one straight colour — a fill layer's content for one channel.</summary>
 	public static PaintCanvas Solid( int width, int height, byte r, byte g, byte b )
 	{

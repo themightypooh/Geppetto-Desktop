@@ -101,14 +101,17 @@ public readonly struct BrushSample
 	public readonly Vec3 Direction;
 	public readonly float Radius;
 	public readonly float Strength;
+	/// <summary>Extra alpha rotation for this dab alone, in degrees (per-dab jitter; 0 = none).</summary>
+	public readonly float AlphaRotation;
 
-	public BrushSample( Vec3 position, Vec3 normal, float radius, float strength, Vec3 direction = default )
+	public BrushSample( Vec3 position, Vec3 normal, float radius, float strength, Vec3 direction = default, float alphaRotation = 0f )
 	{
 		Position = position;
 		Normal = normal;
 		Direction = direction;
 		Radius = radius;
 		Strength = strength;
+		AlphaRotation = alphaRotation;
 	}
 }
 
@@ -124,6 +127,12 @@ public sealed class BrushAlpha
 	public int Width, Height;
 	public Vec3 Right = new( 1, 0, 0 );
 	public float Scale = 1f;
+	/// <summary>Stamp rotation in the surface plane, in degrees. 0 is the old behaviour.</summary>
+	public float RotationDegrees = 0f;
+	/// <summary>Pattern repeats per stamp footprint. 1 is the old behaviour; above 1 the pattern
+	/// tiles inside the same footprint (wrapped, never clipped, since Sample is 0 outside 0..1);
+	/// below 1 zooms into part of the stamp.</summary>
+	public float Density = 1f;
 
 	/// <summary>A brush alpha from PNG bytes: its brightness (times its own alpha, if it has one).</summary>
 	public static BrushAlpha FromPng( byte[] png )
@@ -150,11 +159,14 @@ public sealed class BrushAlpha
 	///
 	/// When an alpha name starts with <c>proc:</c> (or is exactly one of the names below),
 	/// <see cref="FromProcedural"/> builds a deterministic 256x256 float stamp instead of
-	/// reading a file. The script side (<c>StrokeFeature.LoadAlpha</c>) still only knows PNG
-	/// paths, so that hook is a follow-up in OrganicFeatures — this is the stamp library it
-	/// will call. Values are 0..1, deterministic per name (a hash, never a Random), so the
+	/// reading a file. The script side (<c>StrokeFeature.LoadAlpha</c>) accepts these names
+	/// and <c>linework:</c> drawings (see <c>LineworkAlpha</c>) as well as PNG paths.
+	/// Values are 0..1, deterministic per name (a hash, never a Random), so the
 	/// same stamp on another machine is the same stamp.
 	/// </summary>
+	/// <summary>Every built-in procedural stamp name (without the <c>proc:</c> prefix).</summary>
+	public static readonly string[] ProceduralNames = { "scales", "gill_slit", "pores", "wrinkles", "stitches", "veins", "rivets", "cracks", "softdisc", "smoke", "spark", "ember", "droplet", "ring", "streak" };
+
 	public static bool IsProcedural( string name ) => ProceduralName( name ) is not null;
 
 	/// <summary>A procedural stamp by name, or null when the name is not a known <c>proc:</c> stamp.</summary>
@@ -188,7 +200,7 @@ public sealed class BrushAlpha
 
 		return key switch
 		{
-			"scales" or "gill_slit" or "pores" or "wrinkles" or "stitches" or "veins" or "rivets" or "cracks" => key,
+			"scales" or "gill_slit" or "pores" or "wrinkles" or "stitches" or "veins" or "rivets" or "cracks" or "softdisc" or "smoke" or "spark" or "ember" or "droplet" or "ring" or "streak" => key,
 			_ => null,
 		};
 	}
@@ -203,6 +215,13 @@ public sealed class BrushAlpha
 		"veins" => Veins( u, v ),
 		"rivets" => Rivets( u, v ),
 		"cracks" => Cracks( u, v ),
+		"softdisc" => SoftDisc( u, v ),
+		"smoke" => Smoke( u, v ),
+		"spark" => Spark( u, v ),
+		"ember" => Ember( u, v ),
+		"droplet" => Droplet( u, v ),
+		"ring" => Ring( u, v ),
+		"streak" => Streak( u, v ),
 		_ => 0f,
 	};
 
@@ -284,6 +303,77 @@ public sealed class BrushAlpha
 	{
 		var edge = WorleyEdge( u, v, 11, 8f );
 		return Smooth( edge / 0.15f );
+	}
+
+
+	// --- Particle stamps (particles-textures P1) -----------------------------------
+	// Pure functions of (u, v), same style as the surface stamps above: 0..1,
+	// deterministic, centre of the stamp at (0.5, 0.5). These are texture shapes
+	// for baking sprite/flipbook sheets (see the alphatex/flipbook verbs), not
+	// live emitters — Geppetto bakes the textures a runtime emitter consumes.
+
+	static float DiscR( float u, float v )
+	{
+		var dx = u - 0.5f;
+		var dy = v - 0.5f;
+		return MathF.Sqrt( dx * dx + dy * dy );
+	}
+
+	// Radial smooth falloff: the default particle. Centre 1, edge midpoint 0.
+	static float SoftDisc( float u, float v )
+	{
+		var r = DiscR( u, v ) * 2f;
+		return 1f - Smooth( ( r - 0.5f ) / 0.5f );
+	}
+
+	// FBM-eroded disc: torn smoke edges, same noise family as the other stamps.
+	static float Smoke( float u, float v )
+	{
+		var n = ValueNoise( u * 4f, v * 4f, 11 ) * 0.6f + ValueNoise( u * 9f, v * 9f, 11 ) * 0.4f;
+		return SoftDisc( u, v ) * ( 0.55f + 0.45f * n );
+	}
+
+	// 4-point star: a thin cross plus a small core disc.
+	static float Spark( float u, float v )
+	{
+		var dx = MathF.Abs( u - 0.5f );
+		var dy = MathF.Abs( v - 0.5f );
+		var armH = ( 1f - Smooth( ( dy - 0.02f ) / 0.03f ) ) * ( 1f - Smooth( ( dx - 0.42f ) / 0.06f ) );
+		var armV = ( 1f - Smooth( ( dx - 0.02f ) / 0.03f ) ) * ( 1f - Smooth( ( dy - 0.42f ) / 0.06f ) );
+		var core = 1f - Smooth( ( DiscR( u, v ) * 2f - 0.18f ) / 0.12f );
+		return MathF.Max( core, MathF.Max( armH, armV ) );
+	}
+
+	// Small hard disc with a fast falloff: a hot ember, not a soft puff.
+	static float Ember( float u, float v )
+	{
+		var r = DiscR( u, v ) * 2f;
+		return 1f - Smooth( ( r - 0.28f ) / 0.17f );
+	}
+
+	// Teardrop: an ellipse stretched along v, narrowing toward the top.
+	static float Droplet( float u, float v )
+	{
+		var dx = u - 0.5f;
+		var dy = ( v - 0.5f ) * 0.62f;
+		var r = MathF.Sqrt( dx * dx + dy * dy ) * 2f;
+		var taper = v < 0.5f ? 0.65f + 0.7f * v : 1f;
+		return ( 1f - Smooth( ( r - 0.5f ) / 0.5f ) ) * taper;
+	}
+
+	// Annulus: a shockwave / ripple ring.
+	static float Ring( float u, float v )
+	{
+		var r = DiscR( u, v );
+		return 1f - Smooth( ( MathF.Abs( r - 0.35f ) - 0.03f ) / 0.07f );
+	}
+
+	// Horizontal bar with rounded ends: the base form P5 stretches into a trail.
+	static float Streak( float u, float v )
+	{
+		var dx = MathF.Abs( u - 0.5f );
+		var dy = MathF.Abs( v - 0.5f );
+		return ( 1f - Smooth( ( dy - 0.05f ) / 0.05f ) ) * ( 1f - Smooth( ( dx - 0.36f ) / 0.08f ) );
 	}
 
 	static float Frac( float x ) => x - MathF.Floor( x );
@@ -761,7 +851,22 @@ public static class Brush
 				var up = Vec3.Cross( areaN, right ).Normal;
 				var span = 2f * sample.Radius * alpha.Scale;
 				var d = pos - sample.Position;
-				weight *= alpha.Sample( 0.5f + Vec3.Dot( d, right ) / span, 0.5f - Vec3.Dot( d, up ) / span );
+				// Rotate the offset in the (right, up) plane by the stamp's rotation plus
+				// this dab's jitter rotation, then sample. Density wraps the coordinates so
+				// a repeat tiles inside the footprint instead of clipping at its edge
+				// (Sample is 0 outside 0..1); Density 1 keeps the old coordinates exactly.
+				var rot = (alpha.RotationDegrees + sample.AlphaRotation) * (MathF.PI / 180f);
+				var cos = MathF.Cos( rot ); var sin = MathF.Sin( rot );
+				var dx = Vec3.Dot( d, right ); var dy = Vec3.Dot( d, up );
+				var u = 0.5f + (dx * cos - dy * sin) / span;
+				var v = 0.5f - (dx * sin + dy * cos) / span;
+				var density = alpha.Density > 0f ? alpha.Density : 1f;
+				if ( density != 1f )
+				{
+					u = u * density - MathF.Floor( u * density );
+					v = v * density - MathF.Floor( v * density );
+				}
+				weight *= alpha.Sample( u, v );
 			}
 
 			if ( MathF.Abs( weight ) < 1e-8f )
@@ -1043,7 +1148,7 @@ public static class Brush
 			copy.Apply( s.Normal ),
 			s.Radius,
 			IsTurning( kind ) ? s.Strength * copy.Det : s.Strength,
-			copy.Apply( s.Direction ) );
+			copy.Apply( s.Direction ), s.AlphaRotation );
 
 	/// <summary>Brushes whose Strength is an angle about the surface normal.</summary>
 	static bool IsTurning( BrushKind kind ) => kind is BrushKind.Twist;

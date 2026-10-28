@@ -1,0 +1,2 @@
+# part	model	pivot x	y	z	size x	y	z
+hanging_menu_links	out/hanging_menu_links.vmdl	-0	-0.312	0.002	6.197	0.903	4.2

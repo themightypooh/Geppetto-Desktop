@@ -25,7 +25,7 @@ namespace Effigy;
 /// </summary>
 public static partial class BuildScript
 {
-	const string RigVerbs = "bone, chain, subdivide, twist, mirror bones, rig, bind, skin, play";
+	const string RigVerbs = "bone, chain, subdivide, twist, mirror bones, rig, bind, skin, play, rigcheck, bendy, dqs, ikfk, twiststations, fan, posecheck, deltamush";
 
 	static bool RigCommand( PartStudio studio, string verb, List<string> args, string baseDir, Result r, out bool ok )
 	{
@@ -42,6 +42,16 @@ public static partial class BuildScript
 			case "bind": ok = BindVerb( studio, args, r ); return true;
 			case "skin": ok = SkinVerb( studio, args, r ); return true;
 			case "play": ok = PlayVerb( studio, args, baseDir, r ); return true;
+		case "rigcheck":
+		case "bendy":
+		case "dqs":
+		case "ikfk":
+		case "twiststations":
+		case "fan":
+		case "posecheck":
+		case "deltamush":
+		case "bulge":
+			return RigWave3Command( studio, verb, args, r, out ok );
 		case "cables":
 			if ( args.Count == 0 ) { ok = Fail( r, "cables needs a file: cables rigging_cables.json [right=...] [counts=...]" ); return true; }
 			var cablesArgs = new List<string> { "from=" + args[0] };
@@ -199,6 +209,23 @@ public static partial class BuildScript
 
 		var bones = RigBuild.Chain( studio.Rig, args[0], parent, points, (int)Number( countText ) );
 		r.Log.Add( $"chain {args[0]}: {bones.Count} bones, {studio.Rig.Bones[bones[0]].Name}..{studio.Rig.Bones[bones[^1]].Name}, each {N( studio.Rig.Bones[bones[0]].Length )} long" );
+		if ( opts.TryGetValue( "bake", out var bake ) )
+		{
+			if ( !bake.Equals( "trail", StringComparison.OrdinalIgnoreCase ) )
+				return Fail( r, $"chain {args[0]}: bake={bake} — only bake=trail is supported." );
+			studio.Features.RemoveAll( f => f is TrailFeature t && string.Equals( t.Chain.Value, args[0], StringComparison.OrdinalIgnoreCase ) );
+			var trail = new TrailFeature();
+			trail.Name = args[0] + " trail";
+			trail.Chain.Value = args[0];
+			if ( opts.TryGetValue( "trailradius", out var trailRadius ) ) trail.Radius.Value = Number( trailRadius );
+			if ( opts.TryGetValue( "trailtip", out var trailTip ) ) trail.TipRatio.Value = Number( trailTip );
+			if ( opts.TryGetValue( "trailsides", out var trailSides ) ) trail.Sides.Value = (int)Number( trailSides );
+			studio.Features.Add( trail );
+			studio.Rebuild();
+			if ( trail.Error is not null )
+				return Fail( r, $"chain {args[0]}: trail failed: {trail.Error}" );
+			r.Log.Add( $"chain {args[0]}: trail body '{trail.Name}' added as a Trail feature" );
+		}
 		return AfterRig( studio, r );
 	}
 

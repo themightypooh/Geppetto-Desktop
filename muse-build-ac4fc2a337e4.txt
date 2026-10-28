@@ -1,0 +1,53 @@
+material 0 color=#23272c rough=0.45 metal=0.85
+material 1 color=#5a6650 rough=0.55 metal=0.35
+add Primitive name=Sole shape=Box width=30 depth=18 height=3 position=3,0,1.5 materialslot=0
+add Primitive name=FootBody shape=Box width=26 depth=16 height=6 position=2,0,6 materialslot=1
+add Primitive name=ToeCap shape=Box width=8 depth=14 height=4 position=19,0,5 materialslot=1
+add Primitive name=HeelBlock shape=Box width=6 depth=14 height=5 position=-14,0,5.5 materialslot=0
+material 4 color=#151619 rough=0.92 metal=0
+add Primitive name=ToeTread shape=Box width=1 depth=16 height=2 position=18.5,0,1.5 materialslot=4
+add Primitive name=HeelTread shape=Box width=1 depth=16 height=2 position=-12.5,0,1.5 materialslot=4
+add Primitive name=AnklePost shape=Cylinder radius=4 height=6 position=0,0,12 materialslot=0
+add Primitive name=AnkleHousing shape=Cylinder radius=5 height=14 position=0,0,14 rotationaxis=1,0,0 rotation=90 materialslot=0
+material 2 color=#c9ced6 rough=0.18 metal=1
+add Primitive name=AnkleRingL shape=Torus radius=5.5 tuberadius=0.8 segments=48 divisions=16 position=0,7.8,14 rotationaxis=1,0,0 rotation=90 materialslot=2
+add Primitive name=AnkleRingR shape=Torus radius=5.5 tuberadius=0.8 segments=48 divisions=16 position=0,-7.8,14 rotationaxis=1,0,0 rotation=90 materialslot=2
+add Primitive name=Shin shape=Box width=9 depth=11 height=28 position=0,0,33 materialslot=1
+add Primitive name=ShinFront shape=Box width=1.5 depth=9 height=24 position=5.25,0,33 materialslot=0
+add Primitive name=ShinSideL shape=Box width=7 depth=1.5 height=20 position=0,6.25,33 materialslot=1
+add Primitive name=ShinSideR shape=Box width=7 depth=1.5 height=20 position=0,-6.25,33 materialslot=1
+material 3 color=#d9a51f rough=0.5 metal=0.3
+add Primitive name=ShinStripeA shape=Box width=0.6 depth=9 height=2 position=6.3,0,40 materialslot=3
+add Primitive name=ShinStripeB shape=Box width=0.6 depth=9 height=2 position=6.3,0,26 materialslot=3
+add Primitive name=KneeHousing shape=Cylinder radius=6.5 height=15 position=0,0,53.5 rotationaxis=1,0,0 rotation=90 materialslot=0
+add Primitive name=KneeRingL shape=Torus radius=7 tuberadius=0.8 segments=48 divisions=16 position=0,8.3,53.5 rotationaxis=1,0,0 rotation=90 materialslot=2
+add Primitive name=KneeRingR shape=Torus radius=7 tuberadius=0.8 segments=48 divisions=16 position=0,-8.3,53.5 rotationaxis=1,0,0 rotation=90 materialslot=2
+add Primitive name=KneeBoltL shape=Cylinder radius=1.2 height=2 position=0,8.5,53.5 rotationaxis=1,0,0 rotation=90 materialslot=2
+add Primitive name=KneeBoltR shape=Cylinder radius=1.2 height=2 position=0,-8.5,53.5 rotationaxis=1,0,0 rotation=90 materialslot=2
+add Primitive name=Thigh shape=Box width=11 depth=13 height=30 position=0,0,75 materialslot=1
+add Primitive name=ThighFront shape=Box width=1.5 depth=11 height=26 position=6.25,0,75 materialslot=0
+add Primitive name=ThighSideL shape=Box width=9 depth=1.5 height=24 position=0,7.25,75 materialslot=1
+add Primitive name=ThighSideR shape=Box width=9 depth=1.5 height=24 position=0,-7.25,75 materialslot=1
+add Primitive name=ThighVentA shape=Box width=0.6 depth=8 height=1 position=7.3,0,68 materialslot=0
+add Primitive name=ThighVentB shape=Box width=0.6 depth=8 height=1 position=7.3,0,74 materialslot=0
+material 5 color=#ff4411 rough=0.4 metal=0.2 emit=#ff4411
+add Primitive name=SensorLight shape=Box width=0.6 depth=3 height=1.5 position=7.3,0,82 materialslot=5
+add Primitive name=HipHousing shape=Cylinder radius=7.5 height=17 position=0,0,97.5 rotationaxis=1,0,0 rotation=90 materialslot=0
+add Primitive name=HipRingL shape=Torus radius=8 tuberadius=0.9 segments=48 divisions=16 position=0,9.4,97.5 rotationaxis=1,0,0 rotation=90 materialslot=2
+add Primitive name=HipRingR shape=Torus radius=8 tuberadius=0.9 segments=48 divisions=16 position=0,-9.4,97.5 rotationaxis=1,0,0 rotation=90 materialslot=2
+add Primitive name=HipMount shape=Box width=14 depth=18 height=7 position=0,0,108.5 materialslot=1
+add Primitive name=HipSocket shape=Cylinder radius=5 height=4 position=0,0,114 materialslot=0
+add Primitive name=CalfRearLug shape=Box width=3.5 depth=5 height=4 position=-6.25,0,51 materialslot=0
+add Primitive name=RearKneeRod shape=Cylinder radius=1.1 height=15 position=-7.7,0,60.5 materialslot=2
+add Primitive name=RearKneeBarrel shape=Cylinder radius=2.2 height=18 position=-7.7,0,77 materialslot=0
+add Primitive name=FrontAnkleBarrel shape=Cylinder radius=1.6 height=14 position=7.6,0,30 materialslot=0
+add Primitive name=FrontAnkleRod shape=Cylinder radius=0.8 height=12 position=7.6,0,17 materialslot=2
+add Primitive name=AnkleFrontLug shape=Box width=6 depth=6 height=2 position=6,0,10 materialslot=0
+add Primitive name=RearAnkleBarrel shape=Cylinder radius=1.6 height=14 position=-6.1,0,30 materialslot=0
+add Primitive name=RearAnkleRod shape=Cylinder radius=0.8 height=12 position=-6.1,0,17 materialslot=2
+add Primitive name=AnkleRearLug shape=Box width=6 depth=6 height=2 position=-6,0,10 materialslot=0
+add Primitive name=HipFrontBarrel shape=Cylinder radius=2 height=14 position=9,0,80 materialslot=0
+add Primitive name=HipFrontRod shape=Cylinder radius=1 height=18 position=9,0,96 materialslot=2
+add Primitive name=HipFrontLug shape=Box width=4 depth=6 height=3 position=9,0,106.5 materialslot=0
+add Spline name=Hose points=-11,0,105;-12,0,80;-11,0,55;-12,0,30;-10,0,14 radius=0.7 materialslot=4
+save mech-leg.effigy

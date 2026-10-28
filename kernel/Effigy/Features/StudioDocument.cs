@@ -63,12 +63,15 @@ public static class StudioDocument
 	public static void WriteFile( PartStudio studio, string path ) =>
 		File.WriteAllText( path, Write( studio ) );
 
-	/// <summary>Lane P carry-up from the desktop mirror: one picture's document line, without the newline: refimage VIEW HEIGHT OX OY DEPTH OPACITY VISIBLE PATH.</summary>
+	/// <summary>One picture's document line, without the newline: refimage VIEW HEIGHT OX OY DEPTH OPACITY VISIBLE TAG KIND CAL PATH ('-' when untagged).</summary>
 	public static string ReferenceImageLine( ReferenceImage image ) =>
 		new StringBuilder( "refimage " ).Append( image.View ).Append( ' ' ).Append( Num( image.Height ) ).Append( ' ' )
 			.Append( Num( image.Offset.x ) ).Append( ' ' ).Append( Num( image.Offset.y ) ).Append( ' ' )
 			.Append( Num( image.Depth ) ).Append( ' ' ).Append( Num( image.Opacity ) ).Append( ' ' )
-			.Append( image.Visible ? 1 : 0 ).Append( ' ' ).Append( OneLine( image.Path ) ).ToString();
+			.Append( image.Visible ? 1 : 0 ).Append( ' ' )
+			.Append( string.IsNullOrWhiteSpace( image.Tag ) ? "-" : image.Tag ).Append( ' ' )
+			.Append( string.IsNullOrWhiteSpace( image.Kind ) ? "unknown" : image.Kind ).Append( ' ' )
+			.Append( image.Calibrated ? 1 : 0 ).Append( ' ' ).Append( OneLine( image.Path ) ).ToString();
 
 	public static string Write( PartStudio studio )
 	{
@@ -112,6 +115,64 @@ public static class StudioDocument
 			if ( look is not null )
 				sb.Append( "materiallook " ).Append( slot ).Append( ' ' ).Append( look.Describe() ).Append( '\n' );
 
+		// Only when the document names hitboxes or attachments: a document without them
+		// keeps its bytes, the same rule the origin and material scales follow above.
+		// Bone and attachment names are single tokens here, the same constraint the
+		// `hitbox` / `attachment` verbs already impose — a name with a space would not
+		// survive the split on read.
+		foreach ( var h in studio.Hitboxes )
+		{
+			if ( h is null || string.IsNullOrWhiteSpace( h.Bone ) )
+				continue;
+			sb.Append( "hitbox " ).Append( OneLine( h.Bone ) ).Append( ' ' ).Append( h.Kind ).Append( ' ' )
+				.Append( Vec( h.Point0 ) ).Append( ' ' ).Append( Vec( h.Point1 ) ).Append( ' ' )
+				.Append( Num( h.Radius ) ).Append( ' ' ).Append( Vec( h.Size ) ).Append( '\n' );
+		}
+
+		foreach ( var a in studio.Attachments )
+		{
+			if ( a is null || string.IsNullOrWhiteSpace( a.Name ) )
+				continue;
+			sb.Append( "attachment " ).Append( OneLine( a.Name ) ).Append( ' ' ).Append( OneLine( a.ParentBone ) ).Append( ' ' )
+				.Append( Vec( a.Origin ) ).Append( ' ' ).Append( Vec( a.Angles ) ).Append( '\n' );
+		}
+
+		foreach ( var g in studio.BodyGroups )
+		{
+			if ( g is null || string.IsNullOrWhiteSpace( g.Name ) || g.Meshes is null || g.Meshes.Count == 0 )
+				continue;
+			sb.Append( "bodygroup " ).Append( OneLine( g.Name ) ).Append( ' ' )
+				.Append( string.Join( ",", g.Meshes.Select( OneLine ) ) ).Append( '\n' );
+		}
+
+		foreach ( var bp in studio.BreakPieces )
+		{
+			if ( bp is null || string.IsNullOrWhiteSpace( bp.Name ) )
+				continue;
+			sb.Append( "breakpiece " ).Append( OneLine( bp.Name ) ).Append( ' ' )
+				.Append( OneLine( bp.MeshFilename ) ).Append( ' ' ).Append( Num( bp.Mass ) ).Append( '\n' );
+		}
+
+		foreach ( var lim in studio.RagdollLimits )
+		{
+			if ( lim is null || string.IsNullOrWhiteSpace( lim.Bone ) )
+				continue;
+			sb.Append( "ragdoll_limit " ).Append( OneLine( lim.Bone ) ).Append( ' ' )
+				.Append( Vec( lim.Min ) ).Append( ' ' ).Append( Vec( lim.Max ) ).Append( ' ' )
+				.Append( Num( lim.Weight ) ).Append( ' ' ).Append( lim.Enabled ? "1" : "0" ).Append( '\n' );
+		}
+
+		foreach ( var cue in studio.ParticleCues )
+		{
+			if ( cue is null || string.IsNullOrWhiteSpace( cue.Cue ) )
+				continue;
+			sb.Append( "particlecue " ).Append( cue.Frame ).Append( ' ' ).Append( OneLine( cue.Cue ) ).Append( ' ' )
+				.Append( cue.Count ).Append( ' ' )
+				.Append( Num( cue.SpeedMin ) ).Append( ' ' ).Append( Num( cue.SpeedMax ) ).Append( ' ' )
+				.Append( Num( cue.Life ) ).Append( ' ' )
+				.Append( Num( cue.SizeMin ) ).Append( ' ' ).Append( Num( cue.SizeMax ) ).Append( '\n' );
+		}
+
 		foreach ( var (id, name) in studio.BodyNames.OrderBy( kv => kv.Key, StringComparer.Ordinal ) )
 		{
 			if ( !string.IsNullOrWhiteSpace( id ) && !string.IsNullOrWhiteSpace( name ) )
@@ -146,7 +207,25 @@ public static class StudioDocument
 			sb.Append( "refimage " ).Append( image.View ).Append( ' ' ).Append( Num( image.Height ) ).Append( ' ' )
 				.Append( Num( image.Offset.x ) ).Append( ' ' ).Append( Num( image.Offset.y ) ).Append( ' ' )
 				.Append( Num( image.Depth ) ).Append( ' ' ).Append( Num( image.Opacity ) ).Append( ' ' )
-				.Append( image.Visible ? 1 : 0 ).Append( ' ' ).Append( OneLine( image.Path ) ).Append( '\n' );
+				.Append( image.Visible ? 1 : 0 ).Append( ' ' )
+				.Append( string.IsNullOrWhiteSpace( image.Tag ) ? "-" : image.Tag ).Append( ' ' )
+				.Append( string.IsNullOrWhiteSpace( image.Kind ) ? "unknown" : image.Kind ).Append( ' ' )
+				.Append( image.Calibrated ? 1 : 0 ).Append( ' ' ).Append( OneLine( image.Path ) ).Append( '\n' );
+		}
+
+		foreach ( var mark in studio.RefMarks )
+		{
+			if ( mark is null || string.IsNullOrWhiteSpace( mark.Name ) ) continue;
+			sb.Append( "refmark " ).Append( mark.View ).Append( ' ' ).Append( mark.Name ).Append( ' ' )
+				.Append( Num( mark.Px ) ).Append( ' ' ).Append( Num( mark.Py ) ).Append( ' ' )
+				.Append( string.IsNullOrWhiteSpace( mark.Tag ) ? "-" : mark.Tag ).Append( ' ' )
+				.Append( mark.ImgW ).Append( ' ' ).Append( mark.ImgH ).Append( '\n' );
+		}
+
+		foreach ( var step in studio.RefSteps )
+		{
+			if ( step is null || string.IsNullOrWhiteSpace( step.Name ) ) continue;
+			sb.Append( "refstep " ).Append( step.Name ).Append( ' ' ).Append( step.State ).Append( '\n' );
 		}
 
 		// Same rule as origin: a document with no variables must not grow a line. Names sorted so
@@ -469,10 +548,24 @@ public static class StudioDocument
 
 				return;
 
-			case null:
+			case Dictionary<string, VdmStampResult> results:
+			// VdmStamp diagnostic results, port-fix 2026-10-25: one line per body,
+			// body id + affected count + max tangential + max normal. Diagnostic
+			// only — a rebuild recomputes it — but it must round-trip, not kill
+			// the whole save (that was the port bug: save failed after a
+			// successful stamp).
+			foreach ( var (bodyId, r) in results )
+				sb.Append( "\tvdmresult " ).Append( field.Name ).Append( ' ' )
+					.Append( bodyId ).Append( ' ' ).Append( r.Affected ).Append( ' ' )
+					.Append( Num( r.MaxTangential ) ).Append( ' ' ).Append( Num( r.MaxNormal ) ).Append( '\n' );
+
+			return;
+
+		case null:
 				// A null nullable — no Face — is written as nothing at all. Absence IS the value,
 				// and a reader starting from a fresh feature already has it.
 				return;
+
 		}
 
 		// Unreachable while DocumentTests passes: it asserts every field of every feature type is a
@@ -520,6 +613,10 @@ public static class StudioDocument
 				// flag at a known offset. A variable-length record without a count would make that
 				// offset unknowable without counting backwards from the end, which works right up
 				// until a field is added.
+				case SketchBezier bezier:
+				sb.Append( "		bezier " ).Append( bezier.P0 ).Append( ' ' ).Append( bezier.P1 ).Append( ' ' ).Append( bezier.P2 ).Append( ' ' ).Append( bezier.P3 );
+				break;
+
 				case SketchSpline spline:
 					sb.Append( "\t\tspline " ).Append( spline.Closed ? 1 : 0 ).Append( ' ' )
 						.Append( spline.Points.Count );
@@ -638,6 +735,95 @@ public static class StudioDocument
 				continue;
 			}
 
+			if ( line.StartsWith( "hitbox " ) )
+			{
+				var parts = line[7..].Split( ' ', StringSplitOptions.RemoveEmptyEntries );
+
+				if ( parts.Length != 12 )
+					throw new InvalidDataException( $"Line {i + 1}: hitbox needs bone kind p0 p1 radius size, got '{line}'" );
+
+				studio.Hitboxes.Add( new VmdlDocument.Hitbox
+				{
+					Bone = parts[0], Kind = parts[1],
+					Point0 = new Vec3( ParseFloat( parts[2] ), ParseFloat( parts[3] ), ParseFloat( parts[4] ) ),
+					Point1 = new Vec3( ParseFloat( parts[5] ), ParseFloat( parts[6] ), ParseFloat( parts[7] ) ),
+					Radius = ParseFloat( parts[8] ),
+					Size = new Vec3( ParseFloat( parts[9] ), ParseFloat( parts[10] ), ParseFloat( parts[11] ) ),
+				} );
+
+				continue;
+			}
+
+			if ( line.StartsWith( "attachment " ) )
+			{
+				var parts = line[11..].Split( ' ', StringSplitOptions.RemoveEmptyEntries );
+
+				if ( parts.Length != 8 )
+					throw new InvalidDataException( $"Line {i + 1}: attachment needs name bone origin angles, got '{line}'" );
+
+				studio.Attachments.Add( new VmdlDocument.Attachment
+				{
+					Name = parts[0], ParentBone = parts[1],
+					Origin = new Vec3( ParseFloat( parts[2] ), ParseFloat( parts[3] ), ParseFloat( parts[4] ) ),
+					Angles = new Vec3( ParseFloat( parts[5] ), ParseFloat( parts[6] ), ParseFloat( parts[7] ) ),
+				} );
+
+				continue;
+			}
+
+			if ( line.StartsWith( "bodygroup " ) )
+			{
+				var rest = line[10..].Trim();
+				var sp = rest.IndexOf( ' ' );
+				if ( sp < 0 )
+					throw new InvalidDataException( $"Line {i + 1}: bodygroup needs name meshes, got '{line}'" );
+				studio.BodyGroups.Add( new VmdlDocument.BodyGroup
+				{
+					Name = rest[..sp],
+					Meshes = rest[(sp + 1)..].Split( ',', StringSplitOptions.RemoveEmptyEntries ).Select( m => m.Trim() ).ToList(),
+				} );
+				continue;
+			}
+
+			if ( line.StartsWith( "breakpiece " ) )
+			{
+				var parts = line[11..].Split( ' ', StringSplitOptions.RemoveEmptyEntries );
+				if ( parts.Length != 3 )
+					throw new InvalidDataException( $"Line {i + 1}: breakpiece needs name file mass, got '{line}'" );
+				studio.BreakPieces.Add( new VmdlDocument.BreakPiece { Name = parts[0], MeshFilename = parts[1], Mass = ParseFloat( parts[2] ) } );
+				continue;
+			}
+
+			if ( line.StartsWith( "ragdoll_limit " ) )
+			{
+				var parts = line[14..].Split( ' ', StringSplitOptions.RemoveEmptyEntries );
+				if ( parts.Length != 9 )
+					throw new InvalidDataException( $"Line {i + 1}: ragdoll_limit needs bone min max weight enabled, got '{line}'" );
+				studio.RagdollLimits.Add( new RigLimit
+				{
+					Bone = parts[0],
+					Min = new Vec3( ParseFloat( parts[1] ), ParseFloat( parts[2] ), ParseFloat( parts[3] ) ),
+					Max = new Vec3( ParseFloat( parts[4] ), ParseFloat( parts[5] ), ParseFloat( parts[6] ) ),
+					Weight = ParseFloat( parts[7] ),
+					Enabled = parts[8] != "0",
+				} );
+				continue;
+			}
+
+			if ( line.StartsWith( "particlecue " ) )
+			{
+				var parts = line[12..].Split( ' ', StringSplitOptions.RemoveEmptyEntries );
+				if ( parts.Length != 8 )
+					throw new InvalidDataException( $"Line {i + 1}: particlecue needs frame cue count speedmin speedmax life sizemin sizemax, got '{line}'" );
+				studio.ParticleCues.Add( new ParticleCue
+				{
+					Frame = ParseInt( parts[0], 0 ), Cue = parts[1], Count = ParseInt( parts[2], 0 ),
+					SpeedMin = ParseFloat( parts[3] ), SpeedMax = ParseFloat( parts[4] ), Life = ParseFloat( parts[5] ),
+					SizeMin = ParseFloat( parts[6] ), SizeMax = ParseFloat( parts[7] ),
+				} );
+				continue;
+			}
+
 			if ( line.StartsWith( "bodyname " ) )
 			{
 				var (id, name) = Split( line[9..] );
@@ -682,10 +868,19 @@ public static class StudioDocument
 
 			if ( line.StartsWith( "refimage " ) )
 			{
-				var parts = line[9..].Split( ' ', 8, StringSplitOptions.RemoveEmptyEntries );
+				var parts = line[9..].Split( ' ', 11, StringSplitOptions.RemoveEmptyEntries );
 
-				if ( parts.Length == 8 )
+				if ( parts.Length >= 8 )
 				{
+					// Old files: 8 tokens, no tag/kind/cal. New files: 11 tokens
+					// (tag, kind, calibrated before the path, '-' for no tag).
+					// New files: 11+ tokens (tag, kind, calibrated, then the path,
+					// which may itself contain spaces, so join the remainder).
+					// Old files: 8 tokens, or 9+ when the path has spaces.
+					var tag = parts.Length >= 11 ? (parts[7] == "-" ? "" : parts[7]) : parts.Length == 10 ? (parts[7] == "-" ? "" : parts[7]) : "";
+					var kind = parts.Length >= 11 ? parts[8] : parts.Length == 10 ? parts[8] : "unknown";
+					var cal = parts.Length >= 11 && parts[9] == "1";
+					var path = parts.Length >= 11 ? string.Join( " ", parts.Skip( 10 ) ) : parts.Length == 10 ? string.Join( " ", parts.Skip( 9 ) ) : string.Join( " ", parts.Skip( 7 ) );
 					studio.ReferenceImages.Add( new ReferenceImage
 					{
 						View = parts[0],
@@ -694,10 +889,27 @@ public static class StudioDocument
 						Depth = ParseFloat( parts[4] ),
 						Opacity = ParseFloat( parts[5] ),
 						Visible = parts[6] != "0",
-						Path = parts[7].Trim(),
+						Tag = tag, Kind = kind, Calibrated = cal,
+						Path = path.Trim(),
 					} );
 				}
 
+				continue;
+			}
+
+			if ( line.StartsWith( "refmark " ) )
+			{
+				var parts = line[8..].Split( ' ', StringSplitOptions.RemoveEmptyEntries );
+				if ( parts.Length == 7 && float.TryParse( parts[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mpx ) && float.TryParse( parts[3], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mpy ) && int.TryParse( parts[5], out var mw ) && int.TryParse( parts[6], out var mh ) )
+					studio.RefMarks.Add( new RefMark { View = parts[0], Name = parts[1], Px = mpx, Py = mpy, Tag = parts[4] == "-" ? "" : parts[4], ImgW = mw, ImgH = mh } );
+				continue;
+			}
+
+			if ( line.StartsWith( "refstep " ) )
+			{
+				var parts = line[8..].Split( ' ', StringSplitOptions.RemoveEmptyEntries );
+				if ( parts.Length == 2 )
+					studio.RefSteps.Add( new RefStep { Name = parts[0], State = parts[1] } );
 				continue;
 			}
 
@@ -1237,6 +1449,17 @@ public static class StudioDocument
 				return;
 			}
 
+			case "vdmresult":
+			{
+				if ( current is Dictionary<string, VdmStampResult> results )
+				{
+					var parts = value.Split( ' ', StringSplitOptions.RemoveEmptyEntries );
+					if ( parts.Length >= 4 )
+						results[parts[0]] = new VdmStampResult( ParseInt( parts[1], 0 ), ParseFloat( parts[2] ), ParseFloat( parts[3] ) );
+				}
+				return;
+			}
+
 			case "sketch":
 				field.SetValue( feature, ReadSketch( lines, ref i ) );
 				return;
@@ -1294,6 +1517,10 @@ public static class StudioDocument
 				case "ellipse":
 					sketch.Add( Tagged( new SketchEllipse(
 						ParseInt( parts[0], 0 ), ParseInt( parts[1], 0 ), ParseFloat( parts[2] ) ), parts, 3 ) );
+					break;
+
+				case "bezier":
+					sketch.Add( Tagged( new SketchBezier( ParseInt( parts[0], 0 ), ParseInt( parts[1], 0 ), ParseInt( parts[2], 0 ), ParseInt( parts[3], 0 ) ), parts, 4 ) );
 					break;
 
 				case "spline":

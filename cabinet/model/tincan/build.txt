@@ -1,0 +1,15 @@
+# Novelty chat button 1: a tin-can telephone. Two tin cans, one taut string.
+# Front view faces -Y; Z is up. Inches. A loose drawer object, not a flat badge.
+material 0 color=#c8ccd0 rough=0.3 metal=0.9
+material 1 color=#b8322a rough=0.6 metal=0.1
+material 2 color=#2a2420 rough=0.9 metal=0
+echo left can: tin body, rolled rims top and bottom, red label band
+add Blob name=CanL voxel=0.03 blend=0.01 shapes="cylinder -1.8,0,0 -1.8,0,1.4 0.7 r=0.05 mat=0; torus -1.8,0,1.4 0.7 0.06 mat=0; torus -1.8,0,0 0.7 0.06 mat=0; cylinder -1.8,0,0.45 -1.8,0,0.95 0.72 r=0.02 mat=1"
+echo right can: same tin, same rims, same red band
+add Blob name=CanR voxel=0.03 blend=0.01 shapes="cylinder 1.8,0,0 1.8,0,1.4 0.7 r=0.05 mat=0; torus 1.8,0,1.4 0.7 0.06 mat=0; torus 1.8,0,0 0.7 0.06 mat=0; cylinder 1.8,0,0.45 1.8,0,0.95 0.72 r=0.02 mat=1"
+echo the string: taut between the cans, so it reads as a telephone, not two loose cans
+add Blob name=String voxel=0.02 blend=0.01 shapes="cylinder -1.1,0,0.7 1.1,0,0.7 0.03 mat=2"
+describe
+turnaround out shade=material size=512 views=front,quarter,side,back name=tincan
+save tincan.effigy
+export out name=tincan

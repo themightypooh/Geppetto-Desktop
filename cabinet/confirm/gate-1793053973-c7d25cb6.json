@@ -1,0 +1,24 @@
+{
+  "created_at": 1793053973.858844,
+  "doc": "/home/poo/Projects/dotfiles/quickshell/wavegoo/fish/piranha3/v2/piranha.effigy",
+  "first_frame_at": 1793053980.6111035,
+  "id": "gate-1793053973-c7d25cb6",
+  "out": "/home/poo/games/projects/fishyflop/Assets/models/piranha",
+  "pane": "3",
+  "placed_at": 1793053978.4971747,
+  "preflight": {
+    "errors": [],
+    "first_geom_line": 2,
+    "first_shape": "Blob",
+    "lines": 24,
+    "materials_before_first": 0,
+    "ok": true,
+    "rotated_boxes": 0
+  },
+  "script": "/home/poo/games/projects/fishyflop/tools/effigy/export_piranha.txt",
+  "script_hash": "9a40e9aac268a913cadf09bb79bdbeae227c2cd1f132b2cbf62a7821020e927e",
+  "session": "grok-20261026-fishyflop",
+  "status": "placed",
+  "subject": "yo get the mf barraciuda and pirahnana models in mf fishy flop projct",
+  "worker": "grok-fishyflop"
+}

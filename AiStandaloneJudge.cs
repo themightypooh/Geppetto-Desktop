@@ -186,7 +186,7 @@ Standalone judge for a prebuilt model (no build, no vision score):
         {
             var input = AiGateInput.FromMesh(mesh);
             var result = AiJudge.Gate(input);
-            int loose = TopologyReport.Measure(mesh, name).LooseVertices;
+            int loose = Effigy.TopologyReport.Measure(mesh, name).LooseVertices;
             reports.Add(new StandaloneBodyReport(name, mesh.VertexCount, mesh.FaceCount, loose, input, result));
         }
         string verdict = rebuildFailed || reports.Count == 0 ? "error" : reports.SelectMany(b => b.HardFails).Any() ? "veto" : "pass";

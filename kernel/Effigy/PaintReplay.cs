@@ -71,7 +71,38 @@ public static class PaintReplay
 
 	/// <summary>The same replay over a tree the caller already built — a layer replays one canvas per
 	/// channel over one mesh, and building the tree once per channel is waste.</summary>
-	internal static PaintCanvas Replay( PolyMesh mesh, IReadOnlyList<PaintStroke> strokes, int resolution, MeshBVH tree )
+	internal static PaintCanvas Replay( PolyMesh mesh, IReadOnlyList<PaintStroke> strokes, int resolution, MeshBVH tree ) =>
+		ReplayCore( mesh, strokes, resolution, tree, null );
+
+	/// <summary>
+	/// Replay every stroke with a tri-planar pattern modulating the coverage: each texel's weight
+	/// is its falloff weight times the pattern sampled in world space at that texel's surface
+	/// point (see <see cref="TriPlanar"/>). A pattern of None behaves exactly like
+	/// <see cref="Replay"/> — same dabs, same coverage, same dilate.
+	/// </summary>
+	public static PaintCanvas ReplayTriPlanar( PolyMesh mesh, IReadOnlyList<PaintStroke> strokes, int resolution,
+		TriPlanarPattern pattern, float scale, float sharpness ) =>
+		ReplayTriPlanar( mesh, strokes, resolution, pattern, scale, sharpness, null );
+
+	/// <summary>The tri-planar replay over a tree the caller already built.</summary>
+	internal static PaintCanvas ReplayTriPlanar( PolyMesh mesh, IReadOnlyList<PaintStroke> strokes, int resolution,
+		TriPlanarPattern pattern, float scale, float sharpness, MeshBVH tree )
+	{
+		Func<Vec3, Vec3, float> modulator = pattern == TriPlanarPattern.None
+			? null
+			: ( p, n ) => TriPlanar.Sample( pattern, p, n, scale, sharpness );
+
+		return ReplayCore( mesh, strokes, resolution, tree, modulator );
+	}
+
+	/// <summary>
+	/// The one replay body. The plain path passes no modulator and behaves byte-for-bit as before;
+	/// the tri-planar path passes a world-space pattern sampler. Everything else — one composite
+	/// per stroke, max-not-sum coverage, erase tracking, the dilate — is shared, so the two paths
+	/// cannot drift apart about anything but the pattern.
+	/// </summary>
+	static PaintCanvas ReplayCore( PolyMesh mesh, IReadOnlyList<PaintStroke> strokes, int resolution, MeshBVH tree,
+		Func<Vec3, Vec3, float> pattern )
 	{
 		if ( mesh is null )
 			throw new ArgumentNullException( nameof( mesh ) );
@@ -97,7 +128,7 @@ public static class PaintReplay
 			foreach ( var stroke in strokes )
 			{
 				Array.Clear( coverage, 0, coverage.Length );
-				StampStroke( stroke, mesh, bvh, coverage, resolution, faces );
+				StampStroke( stroke, mesh, bvh, coverage, resolution, faces, pattern );
 				Apply( canvas, stroke, coverage );
 
 				if ( stroke.Erase )
@@ -160,7 +191,19 @@ public static class PaintReplay
 	/// uses this to seed its coverage from the stroke in flight, so it must not composite anything —
 	/// the composite is the caller's step, once, at the end.</summary>
 	internal static void StampStroke( PaintStroke stroke, PolyMesh mesh, MeshBVH bvh,
-		float[] coverage, int resolution, List<int> faces )
+		float[] coverage, int resolution, List<int> faces ) =>
+		StampStroke( stroke, mesh, bvh, coverage, resolution, faces, null );
+
+	/// <summary>
+	/// Stamp one stroke's dabs with an optional world-space pattern modulator: when
+	/// <paramref name="pattern"/> is set, each texel's weight is its falloff weight times the
+	/// pattern sampled at that texel's surface point and face normal (see
+	/// <see cref="TriPlanar"/>). A null modulator is the plain path, unchanged. The live session
+	/// calls the plain overload, so a pattern shows on rebuild replay — a live dab previews
+	/// unpatterned coverage, which is a stated limit, not a second code path.
+	/// </summary>
+	internal static void StampStroke( PaintStroke stroke, PolyMesh mesh, MeshBVH bvh,
+		float[] coverage, int resolution, List<int> faces, Func<Vec3, Vec3, float> pattern )
 	{
 		if ( stroke is null || stroke.Path.Count == 0 )
 			return;
@@ -171,7 +214,7 @@ public static class PaintReplay
 
 		foreach ( var point in stroke.Path )
 			StampDab( mesh, bvh, coverage, resolution, point.Position, point.Normal,
-				stroke.Radius, coverageScale, stroke.Falloff, faces );
+				stroke.Radius, coverageScale, stroke.Falloff, faces, pattern );
 	}
 
 	/// <summary>
@@ -191,7 +234,15 @@ public static class PaintReplay
 	/// stroke is composited from that once.
 	/// </summary>
 	internal static TexelBounds StampDab( PolyMesh mesh, MeshBVH bvh, float[] coverage, int resolution,
-		Vec3 point, Vec3 normal, float radius, float strength, BrushFalloff falloff, List<int> faces )
+		Vec3 point, Vec3 normal, float radius, float strength, BrushFalloff falloff, List<int> faces ) =>
+		StampDab( mesh, bvh, coverage, resolution, point, normal, radius, strength, falloff, faces, null );
+
+	/// <summary>The patterned dab: identical to <see cref="StampDab(PolyMesh, MeshBVH, float[], int, Vec3, Vec3, float, float, BrushFalloff, List{int})"/>
+	/// except each texel's weight is multiplied by <paramref name="pattern"/> at that texel's
+	/// rebuilt surface point and face normal, when a pattern is given.</summary>
+	internal static TexelBounds StampDab( PolyMesh mesh, MeshBVH bvh, float[] coverage, int resolution,
+		Vec3 point, Vec3 normal, float radius, float strength, BrushFalloff falloff, List<int> faces,
+		Func<Vec3, Vec3, float> pattern )
 	{
 		if ( radius <= 0f || strength <= 0f )
 			return default;
@@ -208,9 +259,11 @@ public static class PaintReplay
 			if ( face.Count < 3 || face.UVs is null || face.UVs.Length != face.Count )
 				continue;
 
+			var faceNormal = mesh.FaceNormal( face );
+
 			// The far side of a thin wall points away from the brush; a face exactly perpendicular to
 			// it belongs to the neighbouring face's own dab, not this one.
-			if ( Vec3.Dot( mesh.FaceNormal( face ), n ) <= 0f )
+			if ( Vec3.Dot( faceNormal, n ) <= 0f )
 				continue;
 
 			var corners = new List<Vec3>( face.Count );
@@ -233,9 +286,14 @@ public static class PaintReplay
 					// The barycentrics Rasterise hands back let a texel's 3D position be rebuilt from
 					// its three corners, so the falloff can be measured in object space rather than in
 					// UV space — the same distance that made the brush one consistent size everywhere.
+					// The pattern is measured at that same rebuilt point, which is what keeps it
+					// continuous across UV seams: the point, not the texel's UV, decides the value.
 					var p = p0 * wa + p1 * wb + p2 * wc;
 					var t = (p - point).Length / radius;
 					var weight = Brush.Falloff( t, falloff ) * strength;
+
+					if ( pattern is not null )
+						weight *= pattern( p, faceNormal );
 
 					if ( weight <= 0f )
 						return;

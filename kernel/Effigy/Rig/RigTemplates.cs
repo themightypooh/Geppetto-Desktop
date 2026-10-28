@@ -301,7 +301,18 @@ public static class RigTemplates
 		var spine1 = Add( "spine_1", spine0, l.Spine1, l.Spine2 );
 		var spine2 = Add( "spine_2", spine1, l.Spine2, l.Neck );
 		var neck = Add( "neck_0", spine2, l.Neck, l.Head );
-		Add( "head", neck, l.Head, l.Top );
+		var headBone = Add( "head", neck, l.Head, l.Top );
+		// Face bones (wave 3): brow inner/outer and lid upper/lower parented to head.
+		// Fractions of head height, forward +X, up +Z, lateral Y, left +Y.
+		// MirrorSide below mirrors every _L bone to _R.
+		{ var hc = (l.Head + l.Top) / 2f; var hh = MathF.Max( (l.Top - l.Head).z, 1f );
+		Add( "jaw", headBone, hc + new Vec3( 0.2f * hh, 0, -0.35f * hh ), hc + new Vec3( 0.35f * hh, 0, -0.45f * hh ) );
+		Add( "eye_L", headBone, hc + new Vec3( 0.25f * hh, 0.18f * hh, 0.15f * hh ), hc + new Vec3( 0.45f * hh, 0.18f * hh, 0.15f * hh ) );
+		Add( "brow_inner_L", headBone, hc + new Vec3( 0.30f * hh, 0.08f * hh, 0.32f * hh ), hc + new Vec3( 0.38f * hh, 0.08f * hh, 0.32f * hh ) );
+		Add( "brow_outer_L", headBone, hc + new Vec3( 0.28f * hh, 0.28f * hh, 0.30f * hh ), hc + new Vec3( 0.36f * hh, 0.28f * hh, 0.30f * hh ) );
+		Add( "lid_upper_L", headBone, hc + new Vec3( 0.25f * hh, 0.18f * hh, 0.20f * hh ), hc + new Vec3( 0.30f * hh, 0.28f * hh, 0.20f * hh ) );
+		Add( "lid_lower_L", headBone, hc + new Vec3( 0.25f * hh, 0.18f * hh, 0.10f * hh ), hc + new Vec3( 0.30f * hh, 0.28f * hh, 0.10f * hh ) ); }
+
 
 		var clavicle = Add( "clavicle_L", spine2, l.Clavicle, l.Shoulder );
 		var upperArm = Add( "arm_upper_L", clavicle, l.Shoulder, l.Elbow );

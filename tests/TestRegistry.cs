@@ -90,7 +90,16 @@ internal static class DesktopTestHost
             AiTests.Register( registry, settings );
             AiJudgeBackstopTests.Register( registry, settings );
             AiStandaloneJudgeTests.Register( registry, settings );
+            TopologyTests.Register( registry, settings );
+            PromptEngineeringTests.Register( registry, settings );
             AiBuilderHealerTests.Register( registry, settings );
+            SizeTests.Register( registry, settings );
+            SilhouetteTests.Register( registry, settings );
+            PhaseTwoTests.Register( registry, settings );
+            PhaseThreeTests.Register( registry, settings );
+            PhaseFourTests.Register( registry, settings );
+            PhaseFiveTests.Register( registry, settings );
+            StepMutationSafetyTests.Register( registry, settings );
             AiLiveTests.Register( registry, settings );
             ViewportCorrectionTests.Register( registry, settings );
             OpenScriptStepTests.Register( registry, settings );
@@ -155,6 +164,9 @@ internal static class DesktopTestHost
             MaterialChannelGpuTests.Register( registry, settings );
             VmdlReaderTests.Register( registry, settings );
             GpuParticleSystemTests.Register( registry, settings );
+            Particle2DTests.Register( registry, settings );
+            ParticleRenderLayerTests.Register( registry, settings );
+            ParticleCueTests.Register( registry, settings );
             VolumeTests.Register( registry, settings );
             LiveSceneTests.Register( registry, settings );
             SurveyMaterialMapTests.Register( registry, settings );
@@ -164,7 +176,9 @@ internal static class DesktopTestHost
             CrossFieldTests.Register( registry, settings );
             HeadlessImageTests.Register( registry, settings );
             AutoWeightTests.Register( registry, settings );
+            SkinBinderAutoBiharmonicTests.Register( registry, settings );
             WeightPaintTests.Register( registry, settings );
+            SkinBinderOptionsTests.Register( registry, settings );
             ControllerFixTests.Register( registry, settings );
             BenchTests.Register( registry, settings );
             SubSelectionTests.Register( registry, settings );

@@ -1,0 +1,428 @@
+"""The BYO-AI notices: cost pre-flight + first-send disclosure, as data plus pure logic.
+
+One source for the words (spec: geppetto-github/docs/gap-fixes-spec.md §1.1, copy verbatim
+from §2/§3). The cabinet card, the CLI pre-flight text and the docs pages all render from
+these strings so the surfaces cannot drift — the same reason guide.py exists.
+
+Consent state persists as JSON in ~/.config/geppetto/ai-consent.json, keyed by
+kind|host|key-env NAME (never a key value, never a full endpoint path; §1.2). A record
+covers exactly one destination: change the host or the key-env name and both notices
+show again. Acknowledging never sends anything — the user still presses SEND / START.
+
+Every function here is pure or file-tolerant so the unit tests need no Qt, no display
+and no network. Local models (loopback endpoint) never gate: there is no bill and
+nothing leaves the machine (§2.3 / §3.3 local base is informational only).
+"""
+
+import json
+import os
+from urllib.parse import urlparse
+
+VERSION = 1
+
+DEFAULT_CALLS = 60      # AiCli.cs:21 (Calls = 60, Minutes = 15) — always overridden by
+DEFAULT_MINUTES = 15    # the effective options the caller passes in (spec §1.3)
+
+OFFICIAL = {  # kind -> (plain name, official host, default key-env) — AiCli.cs Connection()
+    "openai": ("OpenAI", "api.openai.com", "OPENAI_API_KEY"),
+    "anthropic": ("Anthropic", "api.anthropic.com", "ANTHROPIC_API_KEY"),
+    "google": ("Google", "generativelanguage.googleapis.com", "GEMINI_API_KEY"),
+}
+CLI_TOOLS = {"claude-cli": "Claude", "grok-cli": "Grok"}
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+# --------------------------------------------------------------------- config
+
+def host_of(endpoint):
+    """The named host for a record's endpoint ('cli' and loopback included)."""
+    if not endpoint or endpoint == "cli":
+        return "cli"
+    host = urlparse(endpoint if "://" in endpoint else "//" + endpoint).hostname or ""
+    return host
+
+
+def port_of(endpoint):
+    try:
+        return urlparse(endpoint if "://" in endpoint else "//" + endpoint).port
+    except ValueError:
+        return None
+
+
+def is_local(model):
+    """A model that runs on this machine: ollama kind, or any loopback endpoint."""
+    if (model.get("kind") or "") == "ollama":
+        return True
+    return host_of(model.get("endpoint", "")) in LOOPBACK_HOSTS
+
+
+def is_cli(model):
+    return (model.get("kind") or "") in CLI_TOOLS
+
+
+def provider_name(model):
+    """The plain name the copy speaks to the user: the built-in company's name for an
+    official host, otherwise the record's own label (a custom server is not a company)."""
+    kind = model.get("kind") or ""
+    if is_cli(model):
+        return CLI_TOOLS[kind]
+    off = OFFICIAL.get(kind)
+    if off and host_of(model.get("endpoint", "")) in ("", off[1]):
+        return off[0]
+    label = (model.get("label") or kind or "this provider").split("·")[0].strip()
+    return label
+
+
+def record_key(model):
+    """kind|host|key-env NAME — spec §1.2. Local: no key-env. CLI: kind|cli|."""
+    kind = model.get("kind") or ""
+    if is_cli(model):
+        return "%s|cli|" % kind
+    host = host_of(model.get("endpoint", ""))
+    port = port_of(model.get("endpoint", ""))
+    if port and host in LOOPBACK_HOSTS:
+        host = "%s:%d" % (host, port)
+    return "%s|%s|%s" % (kind, host, model.get("key_env") or "")
+
+
+def config_from_model(model, calls=DEFAULT_CALLS, minutes=DEFAULT_MINUTES,
+                      research=False, brave=False, vision=False, judge=None):
+    """Everything the notices need about the run about to start. `judge` is None or
+    {'model': <record>, 'same': bool}. Caps are the EFFECTIVE options (spec §1.3)."""
+    cfg = {
+        "kind": model.get("kind") or "",
+        "label": model.get("label") or "",
+        "endpoint": model.get("endpoint") or "",
+        "host": host_of(model.get("endpoint", "")),
+        "key_env": model.get("key_env") or "",
+        "model_id": model.get("model") or "",
+        "calls": int(calls), "minutes": int(minutes),
+        "research": bool(research), "brave": bool(brave),
+        "vision": bool(vision),
+        "local": is_local(model), "cli": is_cli(model),
+        "provider": provider_name(model),
+        "key": record_key(model),
+        "judge": None,
+    }
+    if judge:
+        jm = judge["model"]
+        cfg["judge"] = {
+            "same": bool(judge.get("same")),
+            "provider": provider_name(jm),
+            "model_id": jm.get("model") or "",
+            "key_env": jm.get("key_env") or "",
+            "key": record_key(jm),
+            "local": is_local(jm), "cli": is_cli(jm),
+        }
+    return cfg
+
+
+# --------------------------------------------------------------------- copy
+# Verbatim from gap-fixes-spec.md §2/§3 (markdown bold stripped for display; the
+# wording is not paraphrased, except the API branches, rewritten 2026-10-24
+# at Joshua's order (shorter; no "you picked" claim for defaults).
+# Slots: {provider} {host} {key_env} {calls} {minutes}.
+
+def _fmt(text, cfg, **extra):
+    slots = {"provider": cfg["provider"], "host": cfg["host"],
+             "key_env": cfg["key_env"], "calls": cfg["calls"], "minutes": cfg["minutes"]}
+    slots.update(extra)
+    return text.format(**slots)
+
+
+# 2026-10-24, at Joshua's order: API cost/disclosure copy shortened, and the old
+# "a server you picked" claim removed — a built-in default is not something the user
+# picked. The words now lead with his rule: every model is one you're signed into
+# yourself, in your own apps and accounts on this machine.
+def cost_block(cfg):
+    """Cost pre-flight: cap-first, no money figures, and no specific model,
+    provider, host or key named anywhere — the notice talks about the user's own
+    setup in general terms (spec §2.1/§2.2; no longer verbatim from the spec,
+    whose examples name providers)."""
+    if cfg["local"]:
+        return {"id": "cost", "title": "NO METER, NO KEY", "lines": [
+            "This one lives on your own machine. No key, no account, no calls "
+            "counted — the work never leaves this machine at all."]}
+    if cfg["cli"]:
+        return {"id": "cost", "title": "YOUR PLAN, NOT A KEY", "lines": [_fmt(
+            "This one works through your own login on this machine — the plan "
+            "you already pay for. There is no API key for it in Geppetto at all, so there "
+            "is nothing here to leak and no per-call meter in Geppetto.",
+            cfg), _fmt(
+            "What it uses up is your plan's own allowance, not "
+            "Geppetto's {calls}-call / {minutes}-minute caps — those caps are for API "
+            "runs. If you hit your plan's limit, that's your provider saying so, in their "
+            "words.",
+            cfg)]}
+    first = (
+        "This run uses your own model, on your own account, with the key saved on "
+        "this machine. Geppetto has no account and no server in between — every model "
+        "here is one you're signed into yourself, in your own apps and accounts on "
+        "this machine.")
+    return {"id": "cost", "title": "FIRST, ABOUT THE MONEY", "lines": [first, _fmt(
+        "At most {calls} calls, over at most {minutes} minutes — "
+        "building, researching and judging all share the same {calls}. Then it stops "
+        "on its own, finished or not.",
+        cfg), _fmt(
+        "Geppetto doesn't count dollars or tokens yet and won't guess a price. Your usage page "
+        "at your provider is the true number — set a spending limit there if they let "
+        "you; that's a ceiling Geppetto can't go past, because the account is yours.",
+        cfg), _fmt(
+        "STOP stops it at the next safe point (Ctrl-C in a terminal). A call already "
+        "sent can't be un-sent, but nothing starts after you stop, and Geppetto "
+        "never quietly retries a failed call outside the {calls}.",
+        cfg)]}
+
+
+def disclosure_block(cfg):
+    """What-leaves disclosure (spec §2.2): plain list, nothing else leaves, key
+    routing named only in general terms — no provider, host or key_env named."""
+    if cfg["cli"]:
+        return {"id": "disclosure", "title": "WHAT LEAVES THIS MACHINE", "lines": [
+            "Your words go to your provider, through their own tool, signed in as "
+            "you — the same as if you'd typed them into that tool yourself. Geppetto "
+            "holds no key for it and adds no server of its own in between.",
+            "What your provider keeps is under your plan and their policy. Geppetto's side "
+            "of the bargain is the same as always: nothing from this machine goes "
+            "anywhere else, and your request is saved only here, in the run folder."]}
+    if cfg["local"]:
+        return {"id": "disclosure", "title": "WHAT LEAVES THIS MACHINE", "lines": [
+            "Nothing leaves this machine for the model — it runs here. The only "
+            "exception is if research is on: then the search words, not your files, "
+            "go to the public sources (the list is in Connect your own AI)."]}
+    lines = [
+        "To your provider, Geppetto sends:",
+        "• What you typed — your request, word for word.",
+        "• The plan and brief made from it.",
+        "• While it builds: notes about the model so far — parts, sizes, steps taken. "
+        "That's working data, not your finished file being shipped off. That is the list.",
+        "Your key is only ever shown to your provider itself — never to Geppetto "
+        "(there is no Geppetto server), never to another provider, and never "
+        "written into the run folder or the model. Your other files and models "
+        "are not sent. Your request is saved on this machine, in the run folder.",
+        "What your provider keeps is their policy, not Geppetto's. A local model "
+        "keeps everything home."]
+    return {"id": "disclosure", "title": "WHAT LEAVES THIS MACHINE", "lines": lines}
+
+
+def research_block(cfg):
+    brave = (", and the web through Brave, because a Brave key is set on this machine"
+             if cfg["brave"] else "")
+    return {"id": "research", "title": "BECAUSE RESEARCH IS ON, ALSO:", "lines": [
+        "• Before building, a researcher turns your request into searches. Those search "
+        "words go to the public sources Geppetto looks things up in — open museum and "
+        "library collections and Crossref%s. The list of sources is in Connect your "
+        "own AI." % brave,
+        "• Reference photos come the other way: they're downloaded onto this machine "
+        "and kept in the run folder. Raw web pages are not kept, and the builder only "
+        "ever sees the finished brief — not the pages."]}
+
+
+def vision_block(cfg):
+    return {"id": "vision", "title": "BECAUSE THIS MODEL CAN SEE:", "lines": [
+        "• It can also be sent pictures of the model while it builds — the same renders "
+        "you watch land in the viewport — so it can look at its own work."]}
+
+
+def judge_block(cfg):
+    j = cfg["judge"]
+    lines = [
+        "• Your request, the brief, and the locked score sheet (the rubric).",
+        "• The model's working data (parts, sizes, steps).",
+        "• Five pictures of the model, every judging round — front, quarter, side, "
+        "back and low, 768×768 — the actual renders, not a description of them."]
+    if j["same"]:
+        lines.append(_fmt(
+            "The judge for this run is the same model — nothing goes to "
+            "a second company. Judging rounds are part of the same {calls} calls. A "
+            "judged run can use more of them, and the run stops at the cap either "
+            "way.",
+            cfg))
+    else:
+        lines.append(
+            "The judge for this run is a different model — a second company. Everything in this "
+            "block goes to them as well as to your builder. That's why you're seeing "
+            "this notice even if you've already agreed to this provider for building: "
+            "judging is a second door, and it gets its own say-so. Its key is "
+            "presented only to them.")
+    return {"id": "judge", "title": "BECAUSE JUDGING IS ON, THE JUDGE ALSO GETS:", "lines": lines}
+
+
+CHAT_LINE = ("Chat only talks. It can't build, edit, or touch your files — those are "
+             "builds, and builds show you this notice again on their own terms.")
+
+
+def compact_line(cfg):
+    """§2.4 — after ack, hosted builds shrink to this one line; it never vanishes."""
+    if cfg["local"] or cfg["cli"]:
+        return ""
+    return _fmt("Your account · up to {calls} calls / {minutes} min · STOP "
+                "stops it · What leaves my machine? · Costs, in plain words", cfg)
+
+
+def chat_compact_line(cfg):
+    """§2.5 — drawer chat is not under the build caps, and its line says so."""
+    if cfg["local"] or cfg["cli"]:
+        return ""
+    return _fmt("Each message you send here is one call on your account. "
+                "Chat has no session cap — the {calls}-call cap is for builds. · "
+                "Costs, in plain words", cfg)
+
+
+def blocks_for(cfg, missing):
+    """Compose the one screen (spec §3.1): cost on top, what-leaves underneath,
+    add-ons for the features actually on. `missing` = block ids needs_notice() wants."""
+    out = []
+    if "cost" in missing:
+        out.append(cost_block(cfg))
+    if "disclosure" in missing:
+        out.append(disclosure_block(cfg))
+    if "research" in missing:
+        out.append(research_block(cfg))
+    if "vision" in missing:
+        out.append(vision_block(cfg))
+    if "judge" in missing:
+        out.append(judge_block(cfg))
+    if cfg.get("surface") == "chat":
+        out.append({"id": "chat", "title": "", "lines": [CHAT_LINE]})
+    return out
+
+
+# --------------------------------------------------------------------- consent state
+
+def default_state():
+    return {"version": VERSION, "show_cost_every_build": False, "never_show": False, "providers": {}}
+
+
+def load_state(path):
+    """File-tolerant like guide.py: any problem degrades to 'show everything'."""
+    try:
+        with open(path) as f:
+            state = json.load(f)
+        if not isinstance(state, dict) or not isinstance(state.get("providers"), dict):
+            return default_state()
+    except (OSError, ValueError):
+        return default_state()
+    out = default_state()
+    out["show_cost_every_build"] = bool(state.get("show_cost_every_build", False))
+    out["never_show"] = bool(state.get("never_show", False))
+    out["providers"] = {k: v for k, v in state["providers"].items() if isinstance(v, dict)}
+    return out
+
+
+def save_state(path, state):
+    """Persist; a failed save must never break the app, so it returns bool."""
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(state, f)
+        return True
+    except OSError:
+        return False
+
+
+def _record(state, key):
+    return state.get("providers", {}).get(key, {})
+
+
+def needs_notice(state, cfg):
+    """Should the gate show before this send, and which blocks? Local never gates
+    (no cost gate for a model at home — task/spec §2.3 handling in the cabinet is
+    informational only there). Returns {show, missing, blocks, key, compact}."""
+    if state.get("never_show"):
+        # DO NOT SHOW THIS AGAIN: the card never comes back, for any provider
+        return {"show": False, "missing": [], "blocks": [], "key": cfg["key"],
+                "compact": "", "chat_compact": ""}
+    if cfg["local"]:
+        # a model at home never gates on its own — but a hosted judge on a local
+        # build is a second door and gets its own say-so (spec §3.3, local base)
+        j = cfg["judge"]
+        if j and not j["same"] and not j["local"]:
+            jrec = _record(state, j["key"])
+            if not (jrec.get("disclosure_seen") and jrec.get("judge_ack")):
+                blocks = [judge_block(cfg)]
+                return {"show": True, "missing": ["judge"], "blocks": blocks,
+                        "key": cfg["key"], "compact": "", "chat_compact": ""}
+        return {"show": False, "missing": [], "blocks": [], "key": cfg["key"],
+                "compact": "", "chat_compact": ""}
+    rec = _record(state, cfg["key"])
+    missing = []
+    acked = bool(rec.get("disclosure_seen") and rec.get("cost_ack"))
+    caps_grew = (cfg["calls"] > int(rec.get("acked_calls") or 0)
+                 or cfg["minutes"] > int(rec.get("acked_minutes") or 0))
+    if not acked or caps_grew or state.get("show_cost_every_build"):
+        missing += ["cost", "disclosure"]
+    if cfg["research"] and not rec.get("research_ack"):
+        missing.append("research")
+    if cfg["vision"] and not rec.get("vision_ack"):
+        missing.append("vision")
+    if cfg["judge"]:
+        j = cfg["judge"]
+        if j["same"]:
+            if not rec.get("judge_ack"):
+                missing.append("judge")
+        else:
+            jrec = _record(state, j["key"])
+            if not (jrec.get("disclosure_seen") and jrec.get("judge_ack")):
+                missing.append("judge")
+    blocks = blocks_for(cfg, missing)
+    return {"show": bool(blocks), "missing": missing, "blocks": blocks,
+            "key": cfg["key"], "compact": compact_line(cfg),
+            "chat_compact": chat_compact_line(cfg)}
+
+
+def ack_notice(state, cfg, missing, every_time=False, never_show=False):
+    """Record that the words were shown and agreed to. Never sends anything.
+    Mutates and returns the state dict; the caller saves it."""
+    state.setdefault("providers", {})
+    if never_show:
+        state["never_show"] = True
+    if every_time:
+        state["show_cost_every_build"] = True
+    now_caps = {"acked_calls": cfg["calls"], "acked_minutes": cfg["minutes"]}
+    if "cost" in missing or "disclosure" in missing:
+        rec = dict(_record(state, cfg["key"]))
+        rec.update(disclosure_seen=True, cost_ack=True, **now_caps)
+        state["providers"][cfg["key"]] = rec
+    rec = dict(_record(state, cfg["key"]))
+    if "research" in missing:
+        rec["research_ack"] = True
+    if "vision" in missing:
+        rec["vision_ack"] = True
+    if "judge" in missing and cfg["judge"]:
+        if cfg["judge"]["same"]:
+            rec["judge_ack"] = True
+        else:
+            jrec = dict(_record(state, cfg["judge"]["key"]))
+            jrec.update(disclosure_seen=True, judge_ack=True, **now_caps)
+            state["providers"][cfg["judge"]["key"]] = jrec
+    state["providers"][cfg["key"]] = rec
+    return state
+
+
+def notice_map(state, cfg, show=False):
+    """Everything QML needs in one map, guide_map-style."""
+    need = needs_notice(state, cfg) if cfg else {"show": False, "missing": [], "blocks": [],
+                                                "compact": "", "chat_compact": ""}
+    return {
+        "show": bool(show and need["show"]),
+        "needed": bool(need["show"]),
+        "missing": need["missing"],
+        "blocks": need["blocks"],
+        "compact": need["compact"],
+        "chatCompact": need["chat_compact"],
+        "everyTime": bool(state.get("show_cost_every_build")),
+        "provider": cfg["provider"] if cfg else "",
+        "key": cfg["key"] if cfg else "",
+    }
+
+
+def cli_text(cfg, missing):
+    """The same screen as plain text for a terminal (spec §2.1 — the cabinet renders
+    blocks; the CLI ticket T3 prints this before its prompt)."""
+    out = []
+    for b in blocks_for(cfg, missing):
+        out.append(b["title"])
+        out.extend(b["lines"])
+        out.append("")
+    return "\n".join(out).strip() + "\n"

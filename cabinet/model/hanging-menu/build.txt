@@ -1,0 +1,20 @@
+# Small chest-matched hanging file sign. Front view faces -Y; Z is up.
+# Existing chest nameplate is a style reference beside the object, not under it.
+refimage front /home/poo/Desktop/geppetto-desktop/cabinet/art/nameplate.png height=4 offset=10,2 depth=0 opacity=0.8
+echo Sign core: a thin dark enamel plaque gives the menu enough mass to feel hung from chains.
+add Blob name=SignCore voxel=0.04 blend=0.04 shapes="box 0,0,1.25 6.2,0.28,2.5 r=0.15 mat=0"
+material 0 color=#20262a rough=0.35 metal=0.35
+echo Brass rim: a narrow raised frame catches light without crowding the text inside.
+add Blob name=SignRim voxel=0.025 blend=0.02 shapes="box 0,-0.18,0.1 6.12,0.12,0.12 r=0.03 mat=1; box 0,-0.18,2.4 6.12,0.12,0.12 r=0.03 mat=1; box -3,-0.18,1.25 0.12,0.12,2.3 r=0.03 mat=1; box 3,-0.18,1.25 0.12,0.12,2.3 r=0.03 mat=1"
+material 1 color=#b58b47 rough=0.34 metal=0.8
+echo Chain mounts: two silver lugs show exactly where the weight reaches the sign.
+add Blob name=Mounts voxel=0.025 blend=0.02 shapes="sphere -2.6,-0.24,2.52 0.2 mat=2; sphere 2.6,-0.24,2.52 0.2 mat=2; cylinder -2.6,-0.3,2.52 -2.6,-0.3,2.88 0.08 mat=2; cylinder 2.6,-0.3,2.52 2.6,-0.3,2.88 0.08 mat=2"
+material 2 color=#aeb5b9 rough=0.27 metal=0.9
+echo Left chain: individual offset rings make the hanging support read as linked metal.
+add Blob name=LeftChain voxel=0.022 blend=0.01 shapes="torus -2.6,-0.31,3.05 0.21 0.07 rot=90,0,0 mat=2; torus -2.6,-0.27,3.38 0.21 0.07 rot=90,0,0 mat=2; torus -2.6,-0.31,3.71 0.21 0.07 rot=90,0,0 mat=2; torus -2.6,-0.27,4.04 0.21 0.07 rot=90,0,0 mat=2"
+echo Right chain: matching rings keep the sign visually balanced at both anchors.
+add Blob name=RightChain voxel=0.022 blend=0.01 shapes="torus 2.6,-0.31,3.05 0.21 0.07 rot=90,0,0 mat=2; torus 2.6,-0.27,3.38 0.21 0.07 rot=90,0,0 mat=2; torus 2.6,-0.31,3.71 0.21 0.07 rot=90,0,0 mat=2; torus 2.6,-0.27,4.04 0.21 0.07 rot=90,0,0 mat=2"
+describe
+turnaround out shade=material size=512 views=front,quarter,side,back name=hanging_menu
+save hanging_menu.effigy
+export out name=hanging_menu

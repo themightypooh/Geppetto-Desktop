@@ -1,0 +1,13 @@
+{
+  "id": "gate-1793004377-cd2d111b",
+  "pid": 4096114,
+  "registered_at": 1793004384.8516915,
+  "run": "/home/poo/.local/share/geppetto/research/script-holo-joi-20261026-044624-4096082",
+  "script": "/home/poo/workspace/holo-joi/holo-joi.txt",
+  "script_hash": "667ccd6be0ff179666a54980f6a9a978a06428f4fd717f39c93d03e215046e20",
+  "session": "72d53e0b-8689-4d94-bbc5-de86f9c15afb",
+  "subject": "blonde hologram woman, black tank, navy pleated skirt, arms out, full body",
+  "used_at": 1793004384.7666352,
+  "worker": "subagent-holo-joi",
+  "yes_at": 1793004383.2416108
+}

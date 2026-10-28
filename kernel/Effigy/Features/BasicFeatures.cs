@@ -16,13 +16,14 @@ public sealed class PrimitiveFeature : Feature
 	public override string TypeName => Shape.Value;
 
 	public readonly ChoiceParam Shape = new( "Shape",
-		new[] { "Box", "Cylinder", "Sphere", "Wedge", "Tube", "Plane" } );
+		new[] { "Box", "Cylinder", "Sphere", "Wedge", "Tube", "Torus", "Cone", "Capsule", "Plane" } );
 
 	public readonly FloatParam SizeX = new( "Width", 1f, 0.0001f, unit: "u" );
 	public readonly FloatParam SizeY = new( "Depth", 1f, 0.0001f, unit: "u" );
 	public readonly FloatParam SizeZ = new( "Height", 1f, 0.0001f, unit: "u" );
 	public readonly FloatParam Radius = new( "Radius", 0.5f, 0.0001f, unit: "u" );
 	public readonly FloatParam InnerRadius = new( "Inner radius", 0.3f, 0f, unit: "u" );
+    public readonly FloatParam TubeRadius = new( "Tube radius", 0.5f, 0.0001f, unit: "u" );
 	public readonly IntParam Segments = new( "Segments", 16, 3, 512 );
 	public readonly IntParam Divisions = new( "Divisions", 4, 1, 64 );
 	public readonly Vec3Param Position = new( "Position", Vec3.Zero );
@@ -66,6 +67,9 @@ public sealed class PrimitiveFeature : Feature
 		"Sphere" => new IParam[] { Shape, Radius, Divisions, Position, Scale, UniformScale, RotationAxis, RotationAngle, Material },
 		"Wedge" => new IParam[] { Shape, SizeX, SizeY, SizeZ, Position, Scale, UniformScale, RotationAxis, RotationAngle, Material },
 		"Tube" => new IParam[] { Shape, Radius, InnerRadius, SizeZ, Segments, Position, Scale, UniformScale, RotationAxis, RotationAngle, Material },
+        "Torus" => new IParam[] { Shape, Radius, TubeRadius, Segments, Divisions, Position, Scale, UniformScale, RotationAxis, RotationAngle, Material },
+		"Cone" => new IParam[] { Shape, Radius, SizeZ, Segments, Position, Scale, UniformScale, RotationAxis, RotationAngle, Material },
+		"Capsule" => new IParam[] { Shape, Radius, SizeZ, Segments, Divisions, Position, Scale, UniformScale, RotationAxis, RotationAngle, Material },
 		"Plane" => new IParam[] { Shape, SizeX, SizeY, Segments, Position, Scale, UniformScale, RotationAxis, RotationAngle, Material },
 		_ => new IParam[] { Shape }
 	};
@@ -79,13 +83,16 @@ public sealed class PrimitiveFeature : Feature
 			"Sphere" => Primitives.QuadSphere( Radius.Clamped, Divisions.Clamped, Material.Clamped ),
 			"Wedge" => Primitives.Wedge( SizeX.Clamped, SizeY.Clamped, SizeZ.Clamped, Material.Clamped ),
 			"Tube" => BuildTube(),
+            "Torus" => BuildTorus(),
+			"Cone" => BuildCone(),
+			"Capsule" => BuildCapsule(),
 			"Plane" => Primitives.Plane( SizeX.Clamped, SizeY.Clamped, Segments.Clamped, Segments.Clamped, Material.Clamped ),
 			_ => throw new FeatureException( new FeatureDiagnostic(
 				DiagnosticSeverity.Error,
 				$"unknown shape '{Shape.Value}'",
 				"The shape dropdown has a value this feature does not build.",
 				"Shape",
-				remedies: new[] { "Pick Box, Cylinder, Sphere, Wedge, Tube or Plane" } ) )
+				remedies: new[] { "Pick Box, Cylinder, Sphere, Wedge, Tube, Torus, Cone, Capsule or Plane" } ) )
 		};
 
 		var scale = Scale.Value;
@@ -127,6 +134,63 @@ public sealed class PrimitiveFeature : Feature
 		}
 
 		return Primitives.Tube( Radius.Clamped, InnerRadius.Clamped, SizeZ.Clamped, Segments.Clamped, Material.Clamped );
+	}
+
+	PolyMesh BuildTorus()
+	{
+		if ( TubeRadius.Clamped >= Radius.Clamped )
+		{
+			FailOn( "Tube radius",
+				"Tube radius must be smaller than radius",
+				$"Tube radius is {TubeRadius.Clamped:0.###} and radius is {Radius.Clamped:0.###}.",
+				"Reduce Tube radius",
+				"Increase Radius" );
+		}
+
+		return Primitives.Torus( Radius.Clamped, TubeRadius.Clamped, Segments.Clamped, Divisions.Clamped, Material.Clamped );
+	}
+
+	PolyMesh BuildCone()
+	{
+		if ( Radius.Clamped <= 0f )
+		{
+			FailOn( "Radius",
+				"Radius must be greater than 0",
+				$"Radius is {Radius.Clamped:0.###}.",
+				"Increase Radius" );
+		}
+		if ( SizeZ.Clamped <= 0f )
+		{
+			FailOn( "Height",
+				"Height must be greater than 0",
+				$"Height is {SizeZ.Clamped:0.###}.",
+				"Increase Height" );
+		}
+
+		return Primitives.Cone( Radius.Clamped, SizeZ.Clamped, Segments.Clamped, Material.Clamped );
+	}
+
+	PolyMesh BuildCapsule()
+	{
+		// Height is the total pole-to-pole height; the straight section is
+		// height - 2*radius, so a shorter height cannot be a capsule at all.
+		if ( SizeZ.Clamped < 2f * Radius.Clamped )
+		{
+			FailOn( "Height",
+				"Height must be at least twice the radius for a capsule",
+				$"Height is {SizeZ.Clamped:0.###} and radius is {Radius.Clamped:0.###}, so the straight section would be {SizeZ.Clamped - 2f * Radius.Clamped:0.###}.",
+				"Increase Height",
+				"Reduce Radius" );
+		}
+		if ( Divisions.Clamped < 1 )
+		{
+			FailOn( "Divisions",
+				"Cap segments must be at least 1",
+				$"Divisions is {Divisions.Clamped}.",
+				"Increase Divisions" );
+		}
+
+		return Primitives.Capsule( Radius.Clamped, SizeZ.Clamped, Segments.Clamped, Divisions.Clamped, Material.Clamped );
 	}
 }
 
@@ -181,6 +245,71 @@ public sealed class TransformFeature : Feature
 	}
 }
 
+/// <summary>Shared variation for pattern features: skip, and jitter applied to a placed copy about its own centre. Spacing/step is never jittered — jitter moves the instance, never the step.</summary>
+static class PatternVariation
+{
+	public static bool Skip( int i, int skipEvery, float skipProb, Random rng )
+	{
+		if ( skipEvery > 0 && i % skipEvery == 0 )
+			return true;
+
+		if ( skipProb > 0f && (float)rng.NextDouble() < skipProb )
+			return true;
+
+		return false;
+	}
+
+	public static Vec3 Centroid( PolyMesh mesh )
+	{
+		var c = new Vec3( 0, 0, 0 );
+
+		if ( mesh.Positions.Count == 0 )
+			return c;
+
+		foreach ( var p in mesh.Positions )
+			c += p;
+
+		return c * (1f / mesh.Positions.Count);
+	}
+
+	public static int TriCount( PolyMesh mesh )
+	{
+		var t = 0;
+
+		foreach ( var f in mesh.Faces )
+			t += Math.Max( 0, f.Count - 2 );
+
+		return t;
+	}
+
+	public static PolyMesh Jittered( PolyMesh original, Xform placement, float scaleJitter, float rotJitterDeg, Vec3 rotAxis, float posJitter, float posStep, Vec3 posDirA, Vec3 posDirB, Random rng )
+	{
+		var copy = MeshTransform.Transformed( original, placement );
+		var c = Centroid( copy );
+
+		if ( scaleJitter > 0f )
+		{
+			var f = MathF.Max( 0.05f, 1f + (float)(rng.NextDouble() * 2 - 1) * scaleJitter );
+			MeshTransform.Apply( copy, Xform.Translate( c ) * Xform.Scale( new Vec3( f, f, f ) ) * Xform.Translate( -c ) );
+		}
+
+		if ( rotJitterDeg > 0f )
+		{
+			var a = (float)(rng.NextDouble() * 2 - 1) * rotJitterDeg * MathF.PI / 180f;
+			MeshTransform.Apply( copy, Xform.RotateAbout( c, rotAxis, a ) );
+		}
+
+		if ( posJitter > 0f && posStep > 0f )
+		{
+			var o = posDirA * ((float)(rng.NextDouble() * 2 - 1) * posJitter * posStep)
+				+ posDirB * ((float)(rng.NextDouble() * 2 - 1) * posJitter * posStep);
+			MeshTransform.Apply( copy, Xform.Translate( o ) );
+		}
+
+		return copy;
+	}
+}
+
 /// <summary>Copies along a direction. Onshape's Linear pattern.</summary>
 public sealed class LinearPatternFeature : Feature
 {
@@ -193,9 +322,16 @@ public sealed class LinearPatternFeature : Feature
 	public readonly FloatParam Spacing = new( "Spacing", 1f, unit: "u" );
 	public readonly IntParam Count = new( "Instances", 3, 1, 4096 );
 	public readonly BoolParam Merge = new( "Merge into one body", false );
+	public readonly IntParam Seed = new( "Seed", 0, 0, 1000000 );
+	public readonly FloatParam ScaleJitter = new( "Scale jitter", 0f, 0f, 1f );
+	public readonly FloatParam RotJitter = new( "Rot jitter", 0f, 0f, 180f, "deg" );
+	public readonly FloatParam PosJitter = new( "Pos jitter", 0f, 0f, 0.5f );
+	public readonly IntParam SkipEvery = new( "Skip every", 0, 0, 4096 );
+	public readonly FloatParam SkipProb = new( "Skip probability", 0f, 0f, 1f );
+	public readonly FloatParam FitLength = new( "Fit length", 0f, 0f, 100000f, "u" );
 
 	public override IReadOnlyList<IParam> Parameters =>
-		new IParam[] { Bodies, Direction, Spacing, Count, Merge };
+		new IParam[] { Bodies, Direction, Spacing, Count, Merge, Seed, ScaleJitter, RotJitter, PosJitter, SkipEvery, SkipProb, FitLength };
 
 	protected override void Execute( FeatureContext ctx )
 	{
@@ -209,6 +345,10 @@ public sealed class LinearPatternFeature : Feature
 
 		var dir = Direction.Value.Normal;
 		var sources = RequireBodies( ctx, Bodies );
+		var step = FitLength.Clamped > 0f && Count.Clamped > 1 ? FitLength.Clamped / (Count.Clamped - 1) : Spacing.Value;
+		var rng = new Random( Seed.Clamped );
+		var perp = MathF.Abs( dir.y ) < 0.9f ? Vec3.Cross( dir, new Vec3( 0, 1, 0 ) ).Normal : Vec3.Cross( dir, new Vec3( 1, 0, 0 ) ).Normal;
+		var perp2 = Vec3.Cross( dir, perp );
 
 		// Instance 0 is the original, so a count of 3 means the original plus two copies — which
 		// is what Onshape's instance count means too.
@@ -218,16 +358,26 @@ public sealed class LinearPatternFeature : Feature
 			// reading source.Mesh each iteration would copy the copies too and the instance count
 			// would double rather than increment: 6, 12, 24, 48 faces instead of 6, 12, 18, 24.
 			var original = source.Mesh.Clone();
+			var emitted = 0;
 
 			for ( var i = 1; i < Count.Clamped; i++ )
 			{
-				var copy = MeshTransform.Transformed( original, Xform.Translate( dir * (Spacing.Value * i) ) );
+				if ( PatternVariation.Skip( i, SkipEvery.Clamped, SkipProb.Clamped, rng ) )
+					continue;
+
+				var copy = PatternVariation.Jittered( original, Xform.Translate( dir * (step * i) ), ScaleJitter.Clamped, RotJitter.Clamped, dir, PosJitter.Clamped, step, perp, perp2, rng );
+				emitted++;
 
 				if ( Merge.Value )
 					MeshWeldMerge.WeldInto( source.Mesh, copy );
 				else
 					ctx.Bodies.Add( new Body( ctx.NewBodyId(), $"{Name} {i}", copy ) );
 			}
+
+			var totalTris = Merge.Value ? PatternVariation.TriCount( source.Mesh ) : PatternVariation.TriCount( original ) * emitted;
+
+			if ( totalTris > 200000 )
+				Warn( $"Linear pattern emitted about {totalTris} triangles.", "Large patterns get heavy to edit, save and render.", "Lower Instances", "Use a lower-poly source" );
 		}
 	}
 }
@@ -245,9 +395,15 @@ public sealed class CircularPatternFeature : Feature
 	public readonly IntParam Count = new( "Instances", 4, 1, 4096 );
 	public readonly FloatParam TotalAngle = new( "Angle", 360f, unit: "deg" );
 	public readonly BoolParam Merge = new( "Merge into one body", false );
+	public readonly IntParam Seed = new( "Seed", 0, 0, 1000000 );
+	public readonly FloatParam ScaleJitter = new( "Scale jitter", 0f, 0f, 1f );
+	public readonly FloatParam RotJitter = new( "Rot jitter", 0f, 0f, 180f, "deg" );
+	public readonly FloatParam PosJitter = new( "Pos jitter", 0f, 0f, 0.5f );
+	public readonly IntParam SkipEvery = new( "Skip every", 0, 0, 4096 );
+	public readonly FloatParam SkipProb = new( "Skip probability", 0f, 0f, 1f );
 
 	public override IReadOnlyList<IParam> Parameters =>
-		new IParam[] { Bodies, AxisPoint, AxisDirection, Count, TotalAngle, Merge };
+		new IParam[] { Bodies, AxisPoint, AxisDirection, Count, TotalAngle, Merge, Seed, ScaleJitter, RotJitter, PosJitter, SkipEvery, SkipProb };
 
 	protected override void Execute( FeatureContext ctx )
 	{
@@ -267,24 +423,201 @@ public sealed class CircularPatternFeature : Feature
 		// sweep spreads the instances across the arc inclusive of both ends instead.
 		var full = MathF.Abs( MathF.Abs( TotalAngle.Value ) - 360f ) < 1e-3f;
 		var step = count <= 1 ? 0f : TotalAngle.Value / (full ? count : count - 1);
+		var rng = new Random( Seed.Clamped );
+		var axisDir = AxisDirection.Value.Normal;
 
 		foreach ( var source in sources )
 		{
 			// Snapshot before the loop — same compounding trap as the linear pattern.
 			var original = source.Mesh.Clone();
+			var origCentroid = PatternVariation.Centroid( original );
+			var emitted = 0;
 
 			for ( var i = 1; i < count; i++ )
 			{
+				if ( PatternVariation.Skip( i, SkipEvery.Clamped, SkipProb.Clamped, rng ) )
+					continue;
+
 				var xform = Xform.RotateAbout(
 					AxisPoint.Value, AxisDirection.Value, step * i * MathF.PI / 180f );
-
-				var copy = MeshTransform.Transformed( original, xform );
+				var placedCentroid = xform.TransformPoint( origCentroid );
+				var radialVec = placedCentroid - AxisPoint.Value;
+				radialVec -= axisDir * Vec3.Dot( radialVec, axisDir );
+				var radius = radialVec.Length;
+				var radial = radius > 1e-6f ? radialVec * (1f / radius) : new Vec3( 1, 0, 0 );
+				var arcStep = MathF.Abs( step ) * MathF.PI / 180f * radius;
+				var copy = PatternVariation.Jittered( original, xform, ScaleJitter.Clamped, RotJitter.Clamped, axisDir, PosJitter.Clamped, arcStep, radial, axisDir, rng );
+				emitted++;
 
 				if ( Merge.Value )
 					MeshWeldMerge.WeldInto( source.Mesh, copy );
 				else
 					ctx.Bodies.Add( new Body( ctx.NewBodyId(), $"{Name} {i}", copy ) );
 			}
+
+			var totalTris = Merge.Value ? PatternVariation.TriCount( source.Mesh ) : PatternVariation.TriCount( original ) * emitted;
+
+			if ( totalTris > 200000 )
+				Warn( $"Circular pattern emitted about {totalTris} triangles.", "Large patterns get heavy to edit, save and render.", "Lower Instances", "Use a lower-poly source" );
+		}
+	}
+}
+
+/// <summary>Copies along a named Spline, source +z along the curve tangent, with a
+/// parallel-transport frame so the run does not twist. Spacing 0 means fit Count
+/// samples along the whole curve; Spacing above 0 steps by arc length (capped by
+/// Instances). The source body itself stays where it was; copies ride the curve.
+/// Variation knobs match Linear/Circular patterns: jitter moves the instance,
+/// never the step, and Skip counts samples from 1.</summary>
+public sealed class CurvePatternFeature : Feature
+{
+	public override string TypeName => "Curve pattern";
+
+	public override GeometryKind Accepts => GeometryKind.Body;
+
+	public readonly BodySelectionParam Bodies = new( "Bodies" );
+	public readonly StringParam Curve = new( "Curve", "" );
+	public readonly IntParam Count = new( "Instances", 8, 1, 4096 );
+	public readonly FloatParam Spacing = new( "Spacing", 0f, 0f, 100000f, "u" );
+	public readonly BoolParam Merge = new( "Merge into one body", false );
+	public readonly IntParam Seed = new( "Seed", 0, 0, 1000000 );
+	public readonly FloatParam ScaleJitter = new( "Scale jitter", 0f, 0f, 1f );
+	public readonly FloatParam RotJitter = new( "Rot jitter", 0f, 0f, 180f, "deg" );
+	public readonly FloatParam PosJitter = new( "Pos jitter", 0f, 0f, 0.5f );
+	public readonly IntParam SkipEvery = new( "Skip every", 0, 0, 4096 );
+	public readonly FloatParam SkipProb = new( "Skip probability", 0f, 0f, 1f );
+
+	public override IReadOnlyList<IParam> Parameters =>
+		new IParam[] { Bodies, Curve, Count, Spacing, Merge, Seed, ScaleJitter, RotJitter, PosJitter, SkipEvery, SkipProb };
+
+	protected override void Execute( FeatureContext ctx )
+	{
+		var sources = RequireBodies( ctx, Bodies );
+
+		if ( string.IsNullOrWhiteSpace( Curve.Value ) )
+			Fail( "Curve pattern needs a curve.", "Curve is empty, so there is no path to run along.", "Name a Spline feature that has run before this one" );
+
+		if ( !ctx.Splines.TryGetValue( Curve.Value, out var spline ) )
+			Fail( "Curve pattern's curve is not above it.", $"Curve names '{Curve.Value}', which is not a Spline feature that has run before this one.", "Add the Spline first", "Check the name in Curve" );
+
+		var polyline = spline.Sample( 8 );
+
+		if ( polyline.Count < 2 )
+			Fail( "Curve pattern's curve has fewer than two points.", "A curve needs a path to run along.", "Give the Spline two or more points" );
+
+		var n = polyline.Count;
+		var closed = spline.Closed;
+		var lengths = new List<float> { 0f };
+		var total = 0f;
+
+		for ( var i = 0; i < n; i++ )
+		{
+			var next = closed ? polyline[(i + 1) % n] : i + 1 < n ? polyline[i + 1] : polyline[i];
+			var segLen = (next - polyline[i]).Length;
+			total += segLen;
+			lengths.Add( total );
+		}
+
+		if ( total <= 0f )
+			Fail( "Curve pattern's curve has no length.", "All of its points sit in one place.", "Spread the Spline points out" );
+
+		Vec3 PointAt( float d )
+		{
+			var seg = 0;
+
+			while ( seg < n - 1 && lengths[seg + 1] < d )
+				seg++;
+
+			var segLen = lengths[seg + 1] - lengths[seg];
+			var t = segLen <= 0f ? 0f : (d - lengths[seg]) / segLen;
+			var a = polyline[seg];
+			var b = closed ? polyline[(seg + 1) % n] : polyline[Math.Min( seg + 1, n - 1 )];
+			return a + (b - a) * t;
+		}
+
+		var samples = new List<Vec3>();
+		float stepLen;
+
+		if ( Spacing.Clamped > 0f )
+		{
+			stepLen = Spacing.Clamped;
+			var steps = closed ? (int)MathF.Floor( total / stepLen ) : (int)MathF.Floor( total / stepLen ) + 1;
+			steps = Math.Max( 1, Math.Min( steps, Count.Clamped ) );
+
+			for ( var k = 0; k < steps; k++ )
+				samples.Add( PointAt( k * stepLen ) );
+		}
+		else
+		{
+			var count = Count.Clamped;
+			stepLen = closed ? total / count : total / Math.Max( 1, count - 1 );
+
+			for ( var k = 0; k < count; k++ )
+				samples.Add( PointAt( k * stepLen ) );
+		}
+
+		var m = samples.Count;
+		var tangents = new List<Vec3>();
+		var xs = new List<Vec3>();
+
+		for ( var i = 0; i < m; i++ )
+		{
+			var prev = closed ? samples[(i - 1 + m) % m] : samples[Math.Max( 0, i - 1 )];
+			var next = closed ? samples[(i + 1) % m] : samples[Math.Min( m - 1, i + 1 )];
+			var tangent = next - prev;
+			tangent = tangent.LengthSquared < 1e-12f ? new Vec3( 0, 0, 1 ) : tangent.Normal;
+			tangents.Add( tangent );
+
+			Vec3 x;
+
+			if ( i == 0 )
+			{
+				var helper = MathF.Abs( tangent.y ) < 0.9f ? new Vec3( 0, 1, 0 ) : new Vec3( 1, 0, 0 );
+				x = Vec3.Cross( helper, tangent ).Normal;
+			}
+			else
+			{
+				x = xs[i - 1] - tangent * Vec3.Dot( xs[i - 1], tangent );
+
+				if ( x.LengthSquared < 1e-6f )
+				{
+					var helper = MathF.Abs( tangent.y ) < 0.9f ? new Vec3( 0, 1, 0 ) : new Vec3( 1, 0, 0 );
+					x = Vec3.Cross( helper, tangent ).Normal;
+				}
+				else
+					x = x.Normal;
+			}
+
+			xs.Add( x );
+		}
+
+		var rng = new Random( Seed.Clamped );
+
+		foreach ( var source in sources )
+		{
+			var original = source.Mesh.Clone();
+			var emitted = 0;
+
+			for ( var i = 0; i < m; i++ )
+			{
+				if ( PatternVariation.Skip( i + 1, SkipEvery.Clamped, SkipProb.Clamped, rng ) )
+					continue;
+
+				var y = Vec3.Cross( tangents[i], xs[i] );
+				var frame = new Xform( xs[i], y, tangents[i], samples[i] );
+				var copy = PatternVariation.Jittered( original, frame, ScaleJitter.Clamped, RotJitter.Clamped, tangents[i], PosJitter.Clamped, stepLen, xs[i], y, rng );
+				emitted++;
+
+				if ( Merge.Value )
+					MeshWeldMerge.WeldInto( source.Mesh, copy );
+				else
+					ctx.Bodies.Add( new Body( ctx.NewBodyId(), $"{Name} {i}", copy ) );
+			}
+
+			var totalTris = Merge.Value ? PatternVariation.TriCount( source.Mesh ) : PatternVariation.TriCount( original ) * emitted;
+
+			if ( totalTris > 200000 )
+				Warn( $"Curve pattern emitted about {totalTris} triangles.", "Large patterns get heavy to edit, save and render.", "Lower Instances", "Use a lower-poly source" );
 		}
 	}
 }
@@ -424,7 +757,78 @@ public sealed class SubdivideFeature : Feature
 	/// </summary>
 	public readonly BoolParam AllFaces = new( "All faces", false );
 
-	public override IReadOnlyList<IParam> Parameters => new IParam[] { Bodies, Levels, AllFaces };
+	/// <summary>
+	/// The clearer name for the linear path <see cref="AllFaces"/> selects: split every face
+	/// without moving any vertex, so the size is preserved exactly. Either flag selects it;
+	/// neither is a second, different operation. The default (both off) is unchanged: the full
+	/// Catmull-Clark that smooths and shrinks the cage toward its limit surface.
+	/// </summary>
+	public readonly BoolParam Preserve = new( "Preserve size", false );
+
+	/// <summary>
+	/// Volume-preserving smooth subdivision (organic P3): after the Catmull-Clark
+	/// step, rescale the mesh about its centroid to restore its pre-subdivision
+	/// volume exactly (for a closed mesh). The smoothed shape is kept; only the
+	/// shrink is undone. Off by default so existing smooth-subdivision behaviour
+	/// is unchanged; Preserve size already preserves shape exactly by splitting
+	/// without moving vertices.
+	/// </summary>
+	public readonly BoolParam Volume = new( "Preserve volume", false );
+
+	/// <summary>
+	/// Creases on the smooth path (wave 3, research P1). DeRose semi-sharp creases
+	/// that the Catmull-Clark engine already implemented but Subdivide never
+	/// exposed: an edge stays a hard fold for N levels, then rounds.
+	///
+	/// Three ways to name them, all optional and all off by default, so a
+	/// feature with none of them set rebuilds byte-identically to before:
+	/// <list type="bullet">
+	/// <item><see cref="AutoCreaseAngle"/>: tag every edge whose dihedral angle
+	/// exceeds it (default suggestion 30, matching EditOp's sharp:30) at
+	/// <see cref="CreaseSharpness"/>. This is what makes the feature usable at
+	/// scale — a box cage becomes a correctly smoothed box without hand-picking
+	/// its 12 edges.</item>
+	/// <item><see cref="CreaseEdges"/>: explicit cage edges, "a-b[:sharpness];…"
+	/// with a, b cage vertex indices. Explicit edges override auto-creases
+	/// where they disagree.</item>
+	/// <item><see cref="CornerVertices"/> and <see cref="BoundaryMode"/> (P5):
+	/// vertices pinned through every level, and how open borders behave.</item>
+	/// </list>
+	/// Creases are a property of the smooth rule only. On the linear paths
+	/// (face picks, All faces, Preserve size) they are ignored with a warning,
+	/// never silently applied to nothing. Crease sets are stored in these
+	/// parameters, so they survive save → reload → rebuild like any other
+	/// parameter; what does NOT survive is a raw edge index after upstream
+	/// geometry changes — unresolvable edges are counted and warned about,
+	/// the same resolve-and-warn story face picks already have.
+	/// </summary>
+	public readonly FloatParam AutoCreaseAngle = new( "Auto crease angle", 0f, 0f, 180f, "°" );
+	public readonly FloatParam CreaseSharpness = new( "Crease sharpness", 2f, 0f, 6f );
+	public readonly StringParam CreaseEdges = new( "Crease edges", "" );
+	public readonly BoolParam FitLimit = new( "Fit limit", false );
+
+	/// <summary>
+	/// Bounds-preserving smooth subdivision (wave 3, research P2, finite-level
+	/// answer). After the Catmull-Clark step (and after Preserve volume, if
+	/// that is also on), rescale the mesh per axis about its centroid to
+	/// restore its pre-subdivision bounding box exactly. This is the option
+	/// that actually holds a size at the levels people use (1-2): Fit limit
+	/// preserves the LIMIT surface, and at level 2 a fitted box still
+	/// measures 7.02 wide against a 4.0 cage, because the limit corner sits
+	/// at half the cage while the surface extent converges much more slowly.
+	/// Fit bounds is cruder — if the shrink was non-uniform across axes the
+	/// proportions shift by the same ratio — but for the usual near-uniform
+	/// shrink it restores the size with no shape change worth naming. Off by
+	/// default so existing behaviour is unchanged; if both Fit limit and
+	/// Fit bounds are on, Fit bounds is applied last and wins.
+	/// </summary>
+	public readonly BoolParam FitBounds = new( "Fit bounds", false );
+	public readonly BoolParam PinCreaseEnds = new( "Pin crease ends", true );
+	public readonly StringParam CornerVertices = new( "Corner vertices", "" );
+	public readonly ChoiceParam BoundaryMode = new( "Boundary mode", new[] { "Curve", "Pin border", "Pin corners" }, 0 );
+	public readonly IntParam Polish = new( "Polish", 0, 0, 10 );
+
+	public override IReadOnlyList<IParam> Parameters => new IParam[] { Bodies, Levels, AllFaces, Preserve, Volume, AutoCreaseAngle, CreaseSharpness, CreaseEdges, FitLimit, FitBounds, PinCreaseEnds, CornerVertices, BoundaryMode, Polish };
 
 	/// <summary>What this feature will cost at the current settings, for a UI that warns before
 	/// rather than after. Levels are exponential and the jump from 4 to 6 is 16x.</summary>
@@ -455,7 +859,7 @@ public sealed class SubdivideFeature : Feature
 
 		foreach ( var body in list.Where( Bodies.Matches ) )
 		{
-			var (bv, bf) = AllFaces.Value
+			var (bv, bf) = (AllFaces.Value || Preserve.Value)
 				? CatmullClark.PredictLocalCost( body.Mesh, AllIndices( body.Mesh ), Levels.Clamped )
 				: CatmullClark.PredictCost( body.Mesh, Levels.Clamped );
 
@@ -508,6 +912,11 @@ public sealed class SubdivideFeature : Feature
 			// is not consulted here. Two picks on the same body are subdivided in ONE call rather than
 			// one call each: the second call would be running against a mesh whose face indices the
 			// first has already renumbered.
+			if ( SmoothOptionsSet() )
+				Warn( "Creases, fit limit, fit bounds, polish, corners and boundary mode do not apply to picked faces",
+					"The picked-face path is linear densify, not the smooth rule, so those options are ignored here.",
+					"Clear the picks to subdivide the whole body if the smooth options are wanted" );
+
 			var picked = Resolve( ctx.Bodies, out var lost );
 
 			if ( picked.Count == 0 )
@@ -535,13 +944,321 @@ public sealed class SubdivideFeature : Feature
 
 		// No picks. AllFaces chooses between densifying every face (linear, shape unchanged) and
 		// the whole-body Catmull-Clark that smooths.
+		if ( (AllFaces.Value || Preserve.Value) && SmoothOptionsSet() )
+			Warn( "Creases, fit limit, fit bounds, polish, corners and boundary mode do not apply to the linear path",
+				"All faces / Preserve size split every face without moving any vertex, so the smooth rule — and everything attached to it — is ignored here.",
+				"Turn All faces and Preserve size off to subdivide the whole body smoothly" );
+
+		if ( !AllFaces.Value && !Preserve.Value && FitLimit.Value && FitBounds.Value )
+			Warn( "Fit bounds overrides fit limit",
+				"Both size options are on; fit bounds is applied last, so the final bounds are the cage bounds, not the limit fit.",
+				"Turn one of them off if the combination was accidental" );
+
+		if ( !AllFaces.Value && !Preserve.Value && FitLimit.Value
+			&& (AutoCreaseAngle.Value > 0f || !string.IsNullOrWhiteSpace( CreaseEdges.Value )) )
+			Warn( "Fit limit ignores creases",
+				"The limit-surface fit is computed for the smooth rule; a creased cage's limit is not modelled, so a fitted cage can fight its creases slightly.",
+				"Use fit limit for smooth block-outs, and creases for hard edges, rather than both at full strength" );
+
 		foreach ( var body in RequireBodies( ctx, Bodies ) )
 		{
-			if ( AllFaces.Value )
+			if ( AllFaces.Value || Preserve.Value )
 				body.Mesh = CatmullClark.SubdivideFaces( body.Mesh, AllIndices( body.Mesh ), Levels.Clamped );
 			else
-				body.Mesh = CatmullClark.Subdivide( body.Mesh, Levels.Clamped );
+			{
+				var before = Volume.Value ? PressureBalloon.Volume( body.Mesh ) : 0f;
+			var (preMin, preMax) = ModelMeasure.Bounds( body.Mesh );
+				body.Mesh = SmoothSubdivide( body.Mesh );
+				if ( Volume.Value && before > 1e-9f )
+				{
+					var after = PressureBalloon.Volume( body.Mesh );
+					if ( after > 1e-9f && float.IsFinite( after ) )
+					{
+						var s = MathF.Pow( before / after, 1f / 3f );
+						var c = body.Mesh.Positions.Aggregate( Vec3.Zero, ( a, b ) => a + b ) / Math.Max( 1, body.Mesh.VertexCount );
+						for ( var v = 0; v < body.Mesh.VertexCount; v++ ) body.Mesh.Positions[v] = c + (body.Mesh.Positions[v] - c) * s;
+					}
+				}
+			if ( FitBounds.Value )
+			{
+				var (postMin, postMax) = ModelMeasure.Bounds( body.Mesh );
+				var c = body.Mesh.Positions.Aggregate( Vec3.Zero, ( a, b ) => a + b ) / Math.Max( 1, body.Mesh.VertexCount );
+				var sx = (postMax.x - postMin.x) > 1e-9f ? (preMax.x - preMin.x) / (postMax.x - postMin.x) : 1f;
+				var sy = (postMax.y - postMin.y) > 1e-9f ? (preMax.y - preMin.y) / (postMax.y - postMin.y) : 1f;
+				var sz = (postMax.z - postMin.z) > 1e-9f ? (preMax.z - preMin.z) / (postMax.z - postMin.z) : 1f;
+				for ( var v = 0; v < body.Mesh.VertexCount; v++ )
+				{
+					var q = body.Mesh.Positions[v] - c;
+					body.Mesh.Positions[v] = c + new Vec3( q.x * sx, q.y * sy, q.z * sz );
+				}
+			}
+			}
 		}
+	}
+
+	/// <summary>Whether any smooth-rule option is set. Only used to warn on the
+	/// linear paths, where those options are ignored; a feature with none of
+	/// them set takes the old path untouched.</summary>
+	bool SmoothOptionsSet() =>
+		AutoCreaseAngle.Value > 0f
+		|| !string.IsNullOrWhiteSpace( CreaseEdges.Value )
+		|| FitLimit.Value
+		|| FitBounds.Value
+		|| !string.IsNullOrWhiteSpace( CornerVertices.Value )
+		|| BoundaryMode.Index != 0
+		|| Polish.Value > 0;
+
+	/// <summary>Resolve the crease set for one cage. Auto-creases come first;
+	/// explicit edges override them. <paramref name="lost"/> counts explicit
+	/// edges that are not in this cage — auto-creases can never be lost, they
+	/// are computed from the cage in front of us.</summary>
+	Dictionary<EdgeKey, float> ResolveCreases( PolyMesh mesh, out int lost )
+	{
+		lost = 0;
+		var result = new Dictionary<EdgeKey, float>();
+		var edgeFaces = mesh.BuildEdgeFaces();
+		var sharp = CreaseSharpness.Clamped;
+
+		if ( AutoCreaseAngle.Value > 0f )
+		{
+			var cos = MathF.Cos( AutoCreaseAngle.Value * MathF.PI / 180f );
+			var normals = new Vec3[mesh.FaceCount];
+
+			for ( var f = 0; f < mesh.FaceCount; f++ )
+				normals[f] = mesh.FaceNormal( mesh.Faces[f] );
+
+			foreach ( var (key, faces) in edgeFaces )
+			{
+				if ( faces.Count != 2 )
+					continue;
+
+				if ( Vec3.Dot( normals[faces[0]], normals[faces[1]] ) < cos )
+					result[key] = sharp;
+			}
+		}
+
+		if ( !string.IsNullOrWhiteSpace( CreaseEdges.Value ) )
+		{
+			foreach ( var raw in CreaseEdges.Value.Split( ';' ) )
+			{
+				var token = raw.Trim();
+
+				if ( token.Length == 0 )
+					continue;
+
+				var parts = token.Split( ':' );
+				var ends = parts[0].Split( '-' );
+
+				if ( ends.Length != 2
+					|| !int.TryParse( ends[0].Trim(), out var a )
+					|| !int.TryParse( ends[1].Trim(), out var b ) )
+				{
+					lost++;
+					continue;
+				}
+
+				var s = sharp;
+
+				if ( parts.Length > 1 && !TryFloat( parts[1].Trim(), out s ) )
+				{
+					lost++;
+					continue;
+				}
+
+				var key = new EdgeKey( a, b );
+
+				if ( a < 0 || b < 0 || a >= mesh.VertexCount || b >= mesh.VertexCount || !edgeFaces.ContainsKey( key ) )
+				{
+					lost++;
+					continue;
+				}
+
+				result[key] = Math.Clamp( s, 0f, 6f );
+			}
+		}
+
+		return result;
+	}
+
+	/// <summary>Vertices pinned through every level, by original cage index.
+	/// Original vertices keep their indices at every level (SubdivideOnce's
+	/// layout is originals first, in order), so one set serves all levels.
+	/// Sources: named corner vertices, the boundary mode, and — when on —
+	/// the endpoints of crease chains, which otherwise round off at their ends
+	/// because a vertex with a single crease gets no crease treatment.</summary>
+	HashSet<int> ResolvePinned( PolyMesh mesh, Dictionary<EdgeKey, float> creases, out int lost )
+	{
+		lost = 0;
+		var pinned = new HashSet<int>();
+
+		if ( !string.IsNullOrWhiteSpace( CornerVertices.Value ) )
+		{
+			foreach ( var raw in CornerVertices.Value.Split( new[] { ',', ';' } ) )
+			{
+				var token = raw.Trim();
+
+				if ( token.Length == 0 )
+					continue;
+
+				if ( !int.TryParse( token, out var v ) || v < 0 || v >= mesh.VertexCount )
+				{
+					lost++;
+					continue;
+				}
+
+				pinned.Add( v );
+			}
+		}
+
+		if ( BoundaryMode.Index != 0 )
+		{
+			var boundaryCount = new Dictionary<int, int>();
+
+			foreach ( var (key, faces) in mesh.BuildEdgeFaces() )
+			{
+				if ( faces.Count != 1 )
+					continue;
+
+				boundaryCount[key.A] = boundaryCount.TryGetValue( key.A, out var ca ) ? ca + 1 : 1;
+				boundaryCount[key.B] = boundaryCount.TryGetValue( key.B, out var cb ) ? cb + 1 : 1;
+			}
+
+			foreach ( var (v, count) in boundaryCount )
+			{
+				if ( BoundaryMode.Index == 1 || count != 2 )
+					pinned.Add( v );
+			}
+		}
+
+		if ( PinCreaseEnds.Value )
+		{
+			var incident = new Dictionary<int, int>();
+
+			foreach ( var key in creases.Keys )
+			{
+				incident[key.A] = incident.TryGetValue( key.A, out var ca ) ? ca + 1 : 1;
+				incident[key.B] = incident.TryGetValue( key.B, out var cb ) ? cb + 1 : 1;
+			}
+
+			foreach ( var (v, count) in incident )
+			{
+				if ( count == 1 )
+					pinned.Add( v );
+			}
+		}
+
+		return pinned;
+	}
+
+	static bool TryFloat( string text, out float value ) =>
+		float.TryParse( text, System.Globalization.NumberStyles.Float,
+			System.Globalization.CultureInfo.InvariantCulture, out value );
+
+	/// <summary>The smooth path, level by level, so pinned vertices can be
+	/// restored after each level and crease vertices tracked for polish.
+	/// With no creases, no pins, no fit and no polish this runs the same
+	/// SubdivideOnce steps the old one-call path ran, in the same order.</summary>
+	PolyMesh SmoothSubdivide( PolyMesh cage )
+	{
+		var mesh = cage.Clone();
+		var creases = ResolveCreases( mesh, out var lostCreases );
+
+		if ( lostCreases > 0 )
+			Warn( $"{lostCreases} crease edge(s) could not be resolved",
+				"A cage edge named by Crease edges is not in this body.",
+				"Check the cage vertex indices, or re-pick the edges" );
+
+		var pinned = ResolvePinned( mesh, creases, out var lostCorners );
+
+		if ( lostCorners > 0 )
+			Warn( $"{lostCorners} corner vertex/vertices could not be resolved",
+				"A vertex named by Corner vertices is not in this body.",
+				"Check the cage vertex indices" );
+
+		if ( FitLimit.Value )
+		{
+			var miss = SubdivisionLimit.FitToLimit( mesh );
+			var (min, max) = ModelMeasure.Bounds( mesh );
+			var size = (max - min).Length;
+
+			if ( miss > 0.01f * Math.Max( size, 1e-6f ) )
+				Warn( $"Fit limit left a miss of {miss:0.###} units",
+					"The cage is fighting the limit surface — it is too coarse for the shape it claims.",
+					"Add cage density near the worst vertex, or accept the miss" );
+		}
+
+		// Vertices polish must never move: crease vertices (originals and the
+		// edge points that land on crease edges, tracked level by level) plus
+		// every pinned vertex. Without creases this set is empty and polish is
+		// plain Taubin.
+		var creaseVerts = new HashSet<int>( pinned );
+
+		foreach ( var key in creases.Keys )
+		{
+			creaseVerts.Add( key.A );
+			creaseVerts.Add( key.B );
+		}
+
+		var live = creases;
+
+		for ( var level = 0; level < Levels.Clamped; level++ )
+		{
+			var before = mesh.Positions.ToArray();
+			var edgeFaces = mesh.BuildEdgeFaces();
+			var sorted = new List<EdgeKey>( edgeFaces.Keys );
+			sorted.Sort( ( a, b ) => a.A != b.A ? a.A.CompareTo( b.A ) : a.B.CompareTo( b.B ) );
+			var edgeIndex = new Dictionary<EdgeKey, int>();
+
+			for ( var i = 0; i < sorted.Count; i++ )
+				edgeIndex[sorted[i]] = i;
+
+			var vertCount = mesh.VertexCount;
+			mesh = CatmullClark.Subdivide( mesh, 1, live, out var remaining );
+
+			foreach ( var p in pinned )
+			{
+				if ( p < before.Length && p < mesh.VertexCount )
+					mesh.Positions[p] = before[p];
+			}
+
+			var next = new HashSet<int>();
+
+			foreach ( var v in creaseVerts )
+			{
+				if ( v < vertCount )
+					next.Add( v );
+			}
+
+			foreach ( var key in live.Keys )
+			{
+				if ( edgeIndex.TryGetValue( key, out var ei ) )
+					next.Add( vertCount + ei );
+			}
+
+			foreach ( var p in pinned )
+				next.Add( p );
+
+			creaseVerts = next;
+			live = remaining;
+		}
+
+		for ( var p = 0; p < Polish.Clamped; p++ )
+		{
+			var saved = new Dictionary<int, Vec3>();
+
+			foreach ( var v in creaseVerts )
+			{
+				if ( v < mesh.VertexCount )
+					saved[v] = mesh.Positions[v];
+			}
+
+			MeshSmooth.Taubin( mesh, 1 );
+
+			foreach ( var (v, pos) in saved )
+				mesh.Positions[v] = pos;
+		}
+
+		return mesh;
 	}
 
 	/// <summary>Every face index of a mesh, as a list — the "all faces" version of a pick list.</summary>

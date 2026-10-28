@@ -547,6 +547,38 @@ public sealed class SweepFeature : SketchConsumingFeature
 
 	public readonly FloatParam Twist = new( "Twist", 0f, unit: "deg" );
 
+	/// <summary>Resample the path to this many stations, evenly by arc length, before sweeping.
+	/// 0 means the path's own tessellation, exactly as before — so existing sweeps do not move.
+	/// Set it to give a sparse path enough stations for a taper mid-point to appear.</summary>
+	public readonly IntParam PathStations = new( "Path stations", 0, 0, 512 );
+
+	/// <summary>Rotate the profile about its own centre before sweeping, in degrees. The
+	/// connector-point override: when Align-style correspondence guesses the wrong start
+	/// angle, turn the profile here instead of redrawing it.</summary>
+	public readonly FloatParam StartAngle = new( "Start angle", 0f, unit: "deg" );
+
+	/// <summary>How the profile frame is carried along the path. Parallel transport is the
+	/// default and the right one for most sweeps; Fixed up keeps the profile upright to
+	/// world up; Frenet follows the path's curvature (and is undefined at inflections, where
+	/// it carries the last good normal forward).</summary>
+	public readonly ChoiceParam FrameMode = new( "Frame mode", new[] { "Parallel transport", "Fixed up", "Frenet" } );
+
+	public readonly BoolParam BendGuard = new( "Bend guard", true );
+
+	/// <summary>Sample taper and twist by arc length along the path instead of by station
+	/// index, matching SplineTube. On a path whose stations bunch on a bend, station-index
+	/// taper bunches there too; arc length does not. Turn this off for the old behaviour.</summary>
+	public readonly BoolParam ArcTaper = new( "Arc length taper", true );
+
+	/// <summary>Feature id of a sketch whose open chain is a second rail for a two-rail sweep:
+	/// the profile is scaled (and, with both rails, shifted) so it spans rail to rail at
+	/// every station. Empty means a plain sweep.</summary>
+	public string RailSketchId = "";
+
+	/// <summary>Feature id of a sketch whose open chain is the second rail of a two-rail sweep.
+	/// Only used together with RailSketchId.</summary>
+	public string Rail2SketchId = "";
+
 	/// <summary>Scale along the sweep as "t:scale,…" pairs, t in 0..1 along the path — e.g.
 	/// "0:1,0.5:1.4,1:0.2" swells mid-sweep and tapers to a point — BUT ONLY IF THE PATH
 	/// HAS STATIONS NEAR THOSE t VALUES. The taper is sampled at the path's stations, so a
@@ -557,9 +589,9 @@ public sealed class SweepFeature : SketchConsumingFeature
 
 	public readonly IntParam Material = new( "Material slot", 0, 0, 63 ) { Slider = false };
 
-	public override IReadOnlyList<IParam> Parameters => new IParam[] { Twist, Taper, Result, Material };
+	public override IReadOnlyList<IParam> Parameters => new IParam[] { Twist, Taper, PathStations, StartAngle, FrameMode, Result, Material };
 
-	public override IReadOnlyList<IParam> AdvancedParameters => new IParam[] { Material };
+	public override IReadOnlyList<IParam> AdvancedParameters => new IParam[] { Material, BendGuard, ArcTaper };
 
 	protected override void Execute( FeatureContext ctx )
 	{
@@ -594,6 +626,19 @@ public sealed class SweepFeature : SketchConsumingFeature
 					"Leave the path open" );
 		}
 
+		// Path stations (wave 3): resample arc-length-even when asked. 0 keeps the path's
+		// own tessellation, so existing sweeps do not move.
+		if ( PathStations.Clamped > 0 )
+		{
+			if ( !closed && PathStations.Clamped < 2 )
+				Fail(
+					"Path stations needs at least two stations for an open path.",
+					"Path stations was set to 1, which is a point, not a path.",
+					"Set Path stations to 0 (as tessellated) or to 2 or more" );
+
+			path = ResamplePath( path, PathStations.Clamped, closed );
+		}
+
 		var taper = ParseTaper( Taper.Value );
 
 		// TAPER STATIONS ARE THE CONTRACT (wave 2 decision, with evidence in the tests):
@@ -613,9 +658,14 @@ public sealed class SweepFeature : SketchConsumingFeature
 			if ( closed && Twist.Value != 0f )
 				Warning = "Twist was ignored: a closed path has to meet itself, so it cannot end turned.";
 
-			var frames = BuildFrames( sketch, path, closed, out var holonomy );
+			var frames = BuildFrames( sketch, path, closed, out var holonomy, FrameMode.Index );
 			var centre = CentreOf( profile.Outer );
-			var rings = RingsForLoop( profile.Outer, centre, path, frames, holonomy, closed ? 0f : Twist.Value, taper, closed );
+			var outerLoop = StartAngle.Value == 0f ? profile.Outer : RotateLoopGeom( profile.Outer, centre, StartAngle.Value * MathF.PI / 180f );
+			var arcFracs = ArcFractions( path, closed );
+			if ( BendGuard.Value )
+				CheckBend( path, frames, closed, outerLoop, centre, taper, arcFracs, ArcTaper.Value, holonomy, closed ? 0f : Twist.Value, StartAngle.Value * MathF.PI / 180f );
+			var (railScales, railShifts) = RailScalesAndShifts( ctx, path, frames, closed, outerLoop, centre, holonomy, closed ? 0f : Twist.Value, arcFracs, ArcTaper.Value, StartAngle.Value * MathF.PI / 180f, taper );
+			var rings = RingsForLoop( profile.Outer, centre, path, frames, holonomy, closed ? 0f : Twist.Value, taper, closed, arcFracs, ArcTaper.Value, railScales, railShifts, StartAngle.Value * MathF.PI / 180f );
 
 			PolyMesh mesh;
 
@@ -627,8 +677,8 @@ public sealed class SweepFeature : SketchConsumingFeature
 			{
 				// One hole keeps its annular quad bands — the path every existing holed sweep
 				// already rebuilds on, left exactly alone.
-				var holeLoop = PrepareHoleLoop( profile.Outer, profile.Holes[0], profile.Outer.Count );
-				var holeRings = RingsForLoop( holeLoop, centre, path, frames, holonomy, closed ? 0f : Twist.Value, taper, closed );
+				var holeLoop = PrepareHoleLoop( outerLoop, profile.Holes[0], profile.Outer.Count );
+				var holeRings = RingsForLoop( holeLoop, centre, path, frames, holonomy, closed ? 0f : Twist.Value, taper, closed, arcFracs, ArcTaper.Value, railScales, railShifts, StartAngle.Value * MathF.PI / 180f );
 
 				mesh = Skinner.SkinWithHole( rings, holeRings, Material.Clamped, wrap: closed );
 			}
@@ -639,10 +689,10 @@ public sealed class SweepFeature : SketchConsumingFeature
 				// are what the rings are built from, so the triangulation's indices map
 				// straight onto the ring vertices.
 				var prepared = profile.Holes
-					.Select( h => PrepareHoleLoop( profile.Outer, h, profile.Outer.Count ) )
+					.Select( h => PrepareHoleLoop( outerLoop, h, profile.Outer.Count ) )
 					.ToList();
 				var allHoleRings = prepared
-					.Select( loop => RingsForLoop( loop, centre, path, frames, holonomy, closed ? 0f : Twist.Value, taper, closed ) )
+					.Select( loop => RingsForLoop( loop, centre, path, frames, holonomy, closed ? 0f : Twist.Value, taper, closed, arcFracs, ArcTaper.Value, railScales, railShifts, StartAngle.Value * MathF.PI / 180f ) )
 					.ToList();
 				var tris = Triangulate.WithHoles( profile.Outer, prepared.Cast<IReadOnlyList<Vec2>>().ToList() );
 
@@ -658,6 +708,10 @@ public sealed class SweepFeature : SketchConsumingFeature
 
 			Emit( ctx, mesh );
 		}
+		var _profileId = ctx.Sketches.FirstOrDefault( kv => ReferenceEquals( kv.Value, sketch ) ).Key;
+		var _pathSketch = ResolvePathSketch( ctx, sketch );
+		var _pathName = !string.IsNullOrEmpty( PathSplineId ) && ctx.Splines.ContainsKey( PathSplineId ) ? $"spline {PathSplineId}" : _pathSketch is not null ? SketchNameFor( ctx, _pathSketch ) : "(last spline)";
+		NoteChoice( $"Sweep: profile={SketchNameFor( ctx, sketch )}" + ( string.IsNullOrEmpty( SketchFeatureId ) ? " (auto-selected)" : "" ) + $", path={_pathName}" + ( string.IsNullOrEmpty( PathSketchId ) && string.IsNullOrEmpty( PathSplineId ) ? " (auto-selected)" : "" ) );
 	}
 
 	static float PathScale( IReadOnlyList<Vec3> path )
@@ -687,8 +741,17 @@ public sealed class SweepFeature : SketchConsumingFeature
 	/// a naive closed sweep would leave as a kink at the seam. It is 0 for a planar loop
 	/// and non-zero for a loop that leaves its plane — exactly the case that used to kink.
 	/// </summary>
-	internal static List<(Vec3 U, Vec3 V, Vec3 Tangent)> BuildFrames( Sketch sketch, List<Vec3> path, bool closed, out float holonomy )
+	internal static List<(Vec3 U, Vec3 V, Vec3 Tangent)> BuildFrames( Sketch sketch, List<Vec3> path, bool closed, out float holonomy ) =>
+		BuildFrames( sketch, path, closed, out holonomy, 0 );
+
+	internal static List<(Vec3 U, Vec3 V, Vec3 Tangent)> BuildFrames( Sketch sketch, List<Vec3> path, bool closed, out float holonomy, int frameMode )
 	{
+		if ( frameMode == 1 )
+			return BuildFixedUpFrames( path, closed, out holonomy );
+
+		if ( frameMode == 2 )
+			return BuildFrenetFrames( sketch, path, closed, out holonomy );
+
 		var frames = new List<(Vec3 U, Vec3 V, Vec3 Tangent)>( path.Count );
 		var tangent = (path[1] - path[0]).Normal;
 		var u = sketch.Plane.XAxis;
@@ -726,6 +789,209 @@ public sealed class SweepFeature : SketchConsumingFeature
 		return frames;
 	}
 
+	static List<(Vec3 U, Vec3 V, Vec3 Tangent)> BuildFixedUpFrames( List<Vec3> path, bool closed, out float holonomy )
+	{
+		holonomy = 0f;
+		var frames = new List<(Vec3 U, Vec3 V, Vec3 Tangent)>( path.Count );
+
+		for ( var i = 0; i < path.Count; i++ )
+		{
+			var tangent = TangentAtPath( path, i, closed );
+			var up = MathF.Abs( tangent.z ) < 0.9f ? new Vec3( 0, 0, 1 ) : new Vec3( 1, 0, 0 );
+			var u = Vec3.Cross( up, tangent );
+			if ( u.LengthSquared < 1e-12f )
+				u = frames.Count > 0 ? frames[^1].U : new Vec3( 1, 0, 0 );
+			else
+				u = u.Normal;
+			var v = Vec3.Cross( tangent, u );
+			frames.Add( (u, v, tangent) );
+		}
+
+		return frames;
+	}
+
+	static List<(Vec3 U, Vec3 V, Vec3 Tangent)> BuildFrenetFrames( Sketch sketch, List<Vec3> path, bool closed, out float holonomy )
+	{
+		holonomy = 0f;
+		var frames = new List<(Vec3 U, Vec3 V, Vec3 Tangent)>( path.Count );
+		var n = path.Count;
+		var prevNormal = Vec3.Zero;
+
+		for ( var i = 0; i < n; i++ )
+		{
+			var tangent = TangentAtPath( path, i, closed );
+			var tPrev = TangentAtPath( path, closed ? (i - 1 + n) % n : Math.Max( i - 1, 0 ), closed );
+			var tNext = TangentAtPath( path, closed ? (i + 1) % n : Math.Min( i + 1, n - 1 ), closed );
+			var curve = tNext - tPrev;
+			Vec3 normal;
+			if ( curve.LengthSquared > 1e-8f )
+				normal = curve.Normal;
+			else if ( prevNormal.LengthSquared > 1e-12f )
+				normal = prevNormal;
+			else
+			{
+				normal = sketch.Plane.XAxis - tangent * Vec3.Dot( sketch.Plane.XAxis, tangent );
+				normal = normal.LengthSquared > 1e-12f ? normal.Normal : new Vec3( 1, 0, 0 );
+			}
+			// Keep the normal square to the tangent (central-difference curvature is only
+			// approximately perpendicular on uneven stations).
+			normal = (normal - tangent * Vec3.Dot( normal, tangent ));
+			normal = normal.LengthSquared > 1e-12f ? normal.Normal : prevNormal;
+			prevNormal = normal;
+			var binormal = Vec3.Cross( tangent, normal );
+			frames.Add( (normal, binormal, tangent) );
+		}
+
+		return frames;
+	}
+
+	static Vec3 TangentAtPath( List<Vec3> path, int i, bool closed )
+	{
+		var n = path.Count;
+		if ( n < 2 )
+			return new Vec3( 1, 0, 0 );
+		if ( closed )
+		{
+			var d = path[(i + 1) % n] - path[((i - 1) % n + n) % n];
+			return d.LengthSquared < 1e-12f ? new Vec3( 1, 0, 0 ) : d.Normal;
+		}
+		if ( i == 0 )
+		{
+			var d = path[1] - path[0];
+			return d.LengthSquared < 1e-12f ? new Vec3( 1, 0, 0 ) : d.Normal;
+		}
+		if ( i == n - 1 )
+		{
+			var d = path[n - 1] - path[n - 2];
+			return d.LengthSquared < 1e-12f ? new Vec3( 1, 0, 0 ) : d.Normal;
+		}
+		var dd = path[i + 1] - path[i - 1];
+		return dd.LengthSquared < 1e-12f ? new Vec3( 1, 0, 0 ) : dd.Normal;
+	}
+
+	/// <summary>Resample a polyline to exactly <paramref name="count"/> stations, evenly by
+	/// arc length. Open paths keep both ends; closed paths wrap (no duplicated end point).</summary>
+	internal static List<Vec3> ResamplePath( List<Vec3> path, int count, bool closed )
+	{
+		var n = path.Count;
+		var cum = new float[n + 1];
+		for ( var i = 1; i < n; i++ )
+			cum[i] = cum[i - 1] + (path[i] - path[i - 1]).Length;
+		var total = cum[n - 1];
+		if ( closed )
+			total += (path[0] - path[n - 1]).Length;
+		if ( total < 1e-9f )
+			return new List<Vec3>( path );
+		var result = new List<Vec3>( count );
+		for ( var k = 0; k < count; k++ )
+		{
+			var target = closed ? total * k / count : total * k / (count - 1);
+			if ( !closed && k == count - 1 )
+			{
+				result.Add( path[n - 1] );
+				continue;
+			}
+			var seg = 0;
+			while ( seg + 1 < n && cum[seg + 1] < target )
+				seg++;
+			// Closing segment for a closed path.
+			if ( closed && target >= cum[n - 1] )
+			{
+				var span = total - cum[n - 1];
+				var t = span > 1e-9f ? (target - cum[n - 1]) / span : 0f;
+				result.Add( path[n - 1] + (path[0] - path[n - 1]) * t );
+				continue;
+			}
+			var span2 = cum[seg + 1] - cum[seg];
+			var tt = span2 > 1e-9f ? (target - cum[seg]) / span2 : 0f;
+			result.Add( path[seg] + (path[seg + 1] - path[seg]) * tt );
+		}
+		return result;
+	}
+
+	/// <summary>Arc-length fraction of each path station, 0 at the start. Closed paths use
+	/// the full loop length including the closing edge.</summary>
+	internal static List<float> ArcFractions( List<Vec3> path, bool closed )
+	{
+		var n = path.Count;
+		var cum = new float[n];
+		for ( var i = 1; i < n; i++ )
+			cum[i] = cum[i - 1] + (path[i] - path[i - 1]).Length;
+		var total = cum[n - 1];
+		if ( closed )
+			total += (path[0] - path[n - 1]).Length;
+		if ( total < 1e-9f )
+			return path.Select( _ => 0f ).ToList();
+		return cum.Select( c => c / total ).ToList();
+	}
+
+	/// <summary>Rotate a 2D loop geometrically about its centre by <paramref name="angleRad"/>.</summary>
+	internal static List<Vec2> RotateLoopGeom( List<Vec2> loop, Vec2 centre, float angleRad )
+	{
+		var cos = MathF.Cos( angleRad );
+		var sin = MathF.Sin( angleRad );
+		var result = new List<Vec2>( loop.Count );
+		foreach ( var p in loop )
+		{
+			var d = p - centre;
+			result.Add( centre + new Vec2( d.x * cos - d.y * sin, d.x * sin + d.y * cos ) );
+		}
+		return result;
+	}
+
+	/// <summary>Bend-radius guard: at every interior station, the bend radius implied by the
+	/// turn between neighbouring stations must exceed the profile's extent toward the
+	/// centre of curvature, or the inner wall folds through itself. Fails loudly with the
+	/// station, radius, and extent instead of building silent garbage.</summary>
+	void CheckBend( List<Vec3> path, List<(Vec3 U, Vec3 V, Vec3 Tangent)> frames, bool closed,
+		List<Vec2> loop, Vec2 centre, List<(float T, float Scale)> taper, List<float> arcFracs, bool useArc,
+		float holonomy, float twistDegrees, float startAngleRad )
+	{
+		var n = path.Count;
+		for ( var i = 0; i < n; i++ )
+		{
+			if ( !closed && (i == 0 || i == n - 1) )
+				continue;
+			var prev = path[(i - 1 + n) % n];
+			var next = path[(i + 1) % n];
+			if ( !closed && (i == 0 || i == n - 1) )
+				continue;
+			var tIn = (path[i] - prev).LengthSquared < 1e-12f ? frames[i].Tangent : (path[i] - prev).Normal;
+			var tOut = (next - path[i]).LengthSquared < 1e-12f ? frames[i].Tangent : (next - path[i]).Normal;
+			var cosTheta = Math.Clamp( Vec3.Dot( tIn, tOut ), -1f, 1f );
+			var theta = MathF.Acos( cosTheta );
+			if ( theta < 1e-4f )
+				continue;
+			var chord = (next - prev).Length;
+			var radius = chord / (2f * MathF.Sin( theta ));
+			var centreDir = tOut - tIn;
+			if ( centreDir.LengthSquared < 1e-12f )
+				continue;
+			centreDir = centreDir.Normal;
+			var frac = useArc ? arcFracs[i] : (closed ? i / (float)n : (n > 1 ? i / (float)(n - 1) : 0f));
+			var scale = taper is null ? 1f : TaperAt( taper, frac );
+			var (u, v, _) = frames[i];
+			var angle = twistDegrees * MathF.PI / 180f * frac - holonomy * frac + startAngleRad;
+			var cos = MathF.Cos( angle );
+			var sin = MathF.Sin( angle );
+			var tu = u * cos + v * sin;
+			var tv = v * cos - u * sin;
+			var extent = 0f;
+			foreach ( var p in loop )
+			{
+				var local = p - centre;
+				var off = tu * local.x + tv * local.y;
+				extent = MathF.Max( extent, Vec3.Dot( off, centreDir ) * scale );
+			}
+			if ( extent > 0f && radius <= extent )
+				Fail(
+					$"This sweep folds at station {i}: the bend radius is {radius:0.##} but the profile reaches {extent:0.##} toward the centre of the bend.",
+					"On the inside of a bend, rings converge; when the bend radius drops below the profile's extent in that direction, the inner wall passes through itself.",
+					"Widen the bend in the path",
+					"Shrink the profile, or turn Bend guard off to build it anyway" );
+		}
+	}
+
 	/// <summary>
 	/// Rings for one loop (outer or hole) from shared frames. A closed sweep distributes
 	/// -holonomy * i/N across the rings, so the ring beside the seam meets ring 0 with no
@@ -734,7 +1000,14 @@ public sealed class SweepFeature : SketchConsumingFeature
 	/// </summary>
 	internal static List<List<Vec3>> RingsForLoop( List<Vec2> loop, Vec2 centre, List<Vec3> path,
 		List<(Vec3 U, Vec3 V, Vec3 Tangent)> frames, float holonomy, float twistDegrees,
-		List<(float T, float Scale)> taper, bool closed )
+		List<(float T, float Scale)> taper, bool closed ) =>
+		RingsForLoop( loop, centre, path, frames, holonomy, twistDegrees, taper, closed,
+			ArcFractions( path, closed ), false, null, null, 0f );
+
+	internal static List<List<Vec3>> RingsForLoop( List<Vec2> loop, Vec2 centre, List<Vec3> path,
+		List<(Vec3 U, Vec3 V, Vec3 Tangent)> frames, float holonomy, float twistDegrees,
+		List<(float T, float Scale)> taper, bool closed, List<float> arcFracs, bool useArc,
+		List<float> railScales, List<Vec3> railShifts, float startAngleRad )
 	{
 		var rings = new List<List<Vec3>>( path.Count );
 
@@ -742,8 +1015,8 @@ public sealed class SweepFeature : SketchConsumingFeature
 		{
 			// Twist accumulates along the path rather than being applied at the end, so a swept
 			// square with 90 degrees of twist turns steadily instead of shearing at the last ring.
-			var frac = closed ? i / (float)path.Count : (path.Count > 1 ? i / (float)(path.Count - 1) : 0f);
-			var angle = twistDegrees * MathF.PI / 180f * frac - holonomy * frac;
+			var frac = useArc && arcFracs is not null ? arcFracs[i] : (closed ? i / (float)path.Count : (path.Count > 1 ? i / (float)(path.Count - 1) : 0f));
+			var angle = twistDegrees * MathF.PI / 180f * frac - holonomy * frac + startAngleRad;
 			var cos = MathF.Cos( angle );
 			var sin = MathF.Sin( angle );
 
@@ -751,19 +1024,179 @@ public sealed class SweepFeature : SketchConsumingFeature
 			var tu = u * cos + v * sin;
 			var tv = v * cos - u * sin;
 			var scale = taper is null ? 1f : TaperAt( taper, frac );
+			if ( railScales is not null && i < railScales.Count )
+				scale *= railScales[i];
+			var origin = path[i];
+			if ( railShifts is not null && i < railShifts.Count )
+				origin = origin + railShifts[i];
 
 			var ring = new List<Vec3>( loop.Count );
 
 			foreach ( var p in loop )
 			{
 				var local = p - centre;
-				ring.Add( path[i] + (tu * local.x + tv * local.y) * scale );
+				ring.Add( origin + (tu * local.x + tv * local.y) * scale );
 			}
 
 			rings.Add( ring );
 		}
 
 		return rings;
+	}
+
+	/// <summary>Per-station rail scales/shifts for a two-rail (or single-rail) sweep. A rail
+	/// is an open chain in another sketch; at each station the rail is intersected with the
+	/// station's frame plane. One rail scales the profile so its extent in the rail
+	/// direction reaches the rail; two rails scale and shift it so it spans rail to rail.
+	/// A station whose frame plane a rail never crosses fails loudly, naming the station.</summary>
+	(List<float>, List<Vec3>) RailScalesAndShifts( FeatureContext ctx, List<Vec3> path,
+		List<(Vec3 U, Vec3 V, Vec3 Tangent)> frames, bool closed, List<Vec2> loop, Vec2 centre,
+		float holonomy, float twistDegrees, List<float> arcFracs, bool useArc, float startAngleRad,
+		List<(float T, float Scale)> taper )
+	{
+		if ( string.IsNullOrEmpty( RailSketchId ) )
+			return (null, null);
+		var (rail1, rail1Name) = ResolveRail( ctx, RailSketchId );
+		List<Vec3> rail2 = null;
+		var rail2Name = "";
+		if ( !string.IsNullOrEmpty( Rail2SketchId ) )
+			(rail2, rail2Name) = ResolveRail( ctx, Rail2SketchId );
+		var scales = new List<float>( path.Count );
+		var shifts = new List<Vec3>( path.Count );
+		for ( var i = 0; i < path.Count; i++ )
+		{
+			var tangent = frames[i].Tangent;
+			var p1 = IntersectPlane( rail1, path[i], tangent );
+			if ( p1 is null )
+				Fail(
+					$"Rail '{rail1Name}' does not cross the sweep's frame plane at station {i}.",
+					"A rail must cross every station plane to scale the profile there.",
+					"Extend the rail past that station",
+					"Remove the rail to sweep without it" );
+			if ( rail2 is null )
+			{
+				var dir = p1.Value - path[i];
+				var inPlane = dir - tangent * Vec3.Dot( dir, tangent );
+				if ( inPlane.LengthSquared < 1e-12f )
+				{
+					scales.Add( 1f );
+					shifts.Add( Vec3.Zero );
+					continue;
+				}
+				var d = inPlane.Normal;
+				var (tu, tv) = RailAxes( frames[i], i, path.Count, closed, holonomy, twistDegrees, arcFracs, useArc, startAngleRad );
+				var extent = 0f;
+				foreach ( var p in loop )
+				{
+					var local = p - centre;
+					extent = MathF.Max( extent, Vec3.Dot( tu * local.x + tv * local.y, d ) );
+				}
+				if ( extent <= 1e-9f )
+				{
+					scales.Add( 1f );
+					shifts.Add( Vec3.Zero );
+					continue;
+				}
+				var frac1 = useArc && arcFracs is not null ? arcFracs[i] : (closed ? i / (float)path.Count : (path.Count > 1 ? i / (float)(path.Count - 1) : 0f));
+				var taperScale1 = taper is null ? 1f : TaperAt( taper, frac1 );
+				scales.Add( inPlane.Length / (extent * taperScale1) );
+				shifts.Add( Vec3.Zero );
+			}
+			else
+			{
+				var p2 = IntersectPlane( rail2, path[i], tangent );
+				if ( p2 is null )
+					Fail(
+						$"Rail '{rail2Name}' does not cross the sweep's frame plane at station {i}.",
+						"A rail must cross every station plane to scale the profile there.",
+						"Extend the rail past that station",
+						"Remove the rail to sweep without it" );
+				var spanVec = p2.Value - p1.Value;
+				var span = spanVec.Length;
+				if ( span < 1e-9f )
+				{
+					scales.Add( 1f );
+					shifts.Add( Vec3.Zero );
+					continue;
+				}
+				var d = spanVec.Normal;
+				var (tu, tv) = RailAxes( frames[i], i, path.Count, closed, holonomy, twistDegrees, arcFracs, useArc, startAngleRad );
+				var lo = float.MaxValue;
+				var hi = float.MinValue;
+				foreach ( var p in loop )
+				{
+					var local = p - centre;
+					var dot = Vec3.Dot( tu * local.x + tv * local.y, d );
+					lo = MathF.Min( lo, dot );
+					hi = MathF.Max( hi, dot );
+				}
+				var extent = hi - lo;
+				if ( extent <= 1e-9f )
+				{
+					scales.Add( 1f );
+					shifts.Add( Vec3.Zero );
+					continue;
+				}
+				var frac2 = useArc && arcFracs is not null ? arcFracs[i] : (closed ? i / (float)path.Count : (path.Count > 1 ? i / (float)(path.Count - 1) : 0f));
+				var taperScale2 = taper is null ? 1f : TaperAt( taper, frac2 );
+				var finalScale = span / extent;
+				scales.Add( finalScale / taperScale2 );
+				var mid = (p1.Value + p2.Value) * 0.5f;
+				// Shift so the profile's mid-extent in the rail direction lands on the rails' midpoint.
+				var profileMid = (lo + hi) * 0.5f;
+				shifts.Add( mid - path[i] - d * (profileMid * finalScale) );
+			}
+		}
+		return (scales, shifts);
+	}
+
+	(Vec3, Vec3) RailAxes( (Vec3 U, Vec3 V, Vec3 Tangent) frame, int i, int count, bool closed,
+		float holonomy, float twistDegrees, List<float> arcFracs, bool useArc, float startAngleRad )
+	{
+		var frac = useArc && arcFracs is not null ? arcFracs[i] : (closed ? i / (float)count : (count > 1 ? i / (float)(count - 1) : 0f));
+		var angle = twistDegrees * MathF.PI / 180f * frac - holonomy * frac + startAngleRad;
+		var cos = MathF.Cos( angle );
+		var sin = MathF.Sin( angle );
+		return (frame.U * cos + frame.V * sin, frame.V * cos - frame.U * sin);
+	}
+
+	(List<Vec3>, string) ResolveRail( FeatureContext ctx, string id )
+	{
+		if ( !ctx.Sketches.TryGetValue( id, out var railSketch ) )
+			Fail(
+				$"No sketch named '{id}' in the tree (have: {SketchList( ctx )})",
+				"The rail sketch this sweep was pointed at does not exist at this point in the tree.",
+				"Check the spelling of the rail sketch id",
+				"Remove the rail to sweep without it" );
+		var chain = SketchChain.Walk( railSketch );
+		if ( chain.Count < 2 )
+			Fail(
+				$"Rail sketch '{SketchNameFor( ctx, railSketch )}' has no connected chain to sweep along.",
+				"The rail sketch's curves do not join into a walk of two or more points.",
+				"Join the rail curves end to end",
+				"Draw a single line or polyline as the rail" );
+		return (chain.Select( railSketch.Plane.ToWorld ).ToList(), SketchNameFor( ctx, railSketch ));
+	}
+
+	static Vec3? IntersectPlane( List<Vec3> polyline, Vec3 point, Vec3 normal )
+	{
+		for ( var i = 0; i + 1 < polyline.Count; i++ )
+		{
+			var a = polyline[i];
+			var b = polyline[i + 1];
+			var da = Vec3.Dot( a - point, normal );
+			var db = Vec3.Dot( b - point, normal );
+			if ( MathF.Abs( da ) < 1e-9f )
+				return a;
+			if ( MathF.Abs( db ) < 1e-9f )
+				return b;
+			if ( da * db < 0f )
+			{
+				var t = da / (da - db);
+				return a + (b - a) * t;
+			}
+		}
+		return null;
 	}
 
 	/// <summary>
@@ -947,6 +1380,13 @@ public sealed class SweepFeature : SketchConsumingFeature
 	/// </summary>
 	List<Vec3> ResolvePath( FeatureContext ctx, Sketch profileSketch )
 	{
+		if ( !string.IsNullOrEmpty( PathSplineId ) && !ctx.Splines.TryGetValue( PathSplineId, out var _ ) )
+			Fail(
+				$"No spline named '{PathSplineId}' in the tree",
+				"The path spline this sweep was pointed at does not exist at this point in the tree.",
+				"Check the spelling of the path spline id",
+				"Leave the path spline empty to use a path sketch instead" );
+
 		if ( !string.IsNullOrEmpty( PathSplineId ) && ctx.Splines.TryGetValue( PathSplineId, out var named ) )
 			return SplinePath( named );
 
@@ -1036,7 +1476,15 @@ public sealed class SweepFeature : SketchConsumingFeature
 	Sketch ResolvePathSketch( FeatureContext ctx, Sketch profileSketch )
 	{
 		if ( !string.IsNullOrEmpty( PathSketchId ) )
-			return ctx.Sketches.TryGetValue( PathSketchId, out var named ) ? named : null;
+		{
+			if ( !ctx.Sketches.TryGetValue( PathSketchId, out var named ) )
+			Fail(
+				$"No sketch named '{PathSketchId}' in the tree (have: {SketchList( ctx )})",
+				"The path sketch this sweep was pointed at does not exist at this point in the tree.",
+				"Check the spelling of the path sketch id",
+				"Pick a sketch that sits above this sweep" );
+			return named;
+		}
 
 		// Whatever is not the profile. Preferring one with no closed region of its own keeps a
 		// studio holding two closed sketches from sweeping one round the other by accident.
@@ -1054,11 +1502,10 @@ public sealed class SweepFeature : SketchConsumingFeature
 /// stitched — see Skinner.Resample and Skinner.Align for why both are needed and what goes wrong
 /// without them.
 ///
-/// STRAIGHT BETWEEN SECTIONS, NOT SMOOTHLY THROUGH THEM. Each pair of neighbouring sections is
-/// joined by a ruled surface, so a three-section loft has a crease at the middle one. A lofted
-/// surface that arrives tangent needs a spline through corresponding points in three dimensions,
-/// which is real work and buys a smooth result only when the sections are already well spaced. The
-/// honest version first; add sections to get a smoother shape.
+/// RULED BETWEEN SECTIONS BY DEFAULT, NOT SMOOTHLY THROUGH THEM. Each pair of neighbouring
+/// sections is joined by a ruled surface, so a three-section loft has a crease at the middle one.
+/// Turn Smooth loft on to insert Catmull-Rom interpolated rings between sections instead; the
+/// ruled mode stays the default so existing lofts do not move.
 /// </summary>
 public sealed class LoftFeature : SketchConsumingFeature
 {
@@ -1080,11 +1527,33 @@ public sealed class LoftFeature : SketchConsumingFeature
 	/// last section — same spelling as Sweep's taper. Empty means no taper.</summary>
 	public readonly StringParam Taper = new( "Taper (t:scale,…)", "" );
 
+	/// <summary>Smooth loft: insert interpolated rings between sections (Catmull-Rom through
+	/// corresponding points) instead of ruled straight spans. Off keeps the old ruled loft,
+	/// so existing lofts do not move.</summary>
+	public readonly BoolParam SmoothLoft = new( "Smooth loft", false );
+
+	/// <summary>Interpolated rings inserted between each pair of sections when Smooth loft is on.</summary>
+	public readonly IntParam SmoothRings = new( "Smooth rings", 2, 0, 16 );
+
+	/// <summary>Rotate every section about its own centroid, in degrees, before skinning.
+	/// The connector-point override for a loft whose automatic alignment guessed wrong.</summary>
+	public readonly FloatParam StartAngle = new( "Start angle", 0f, unit: "deg" );
+
+	public readonly BoolParam BendGuard = new( "Bend guard", true );
+
+	/// <summary>Feature id of a sketch whose open chain is a guide rail: at each section's
+	/// plane the rail intersection scales the section so its perimeter reaches the rail.</summary>
+	public string GuideSketchId = "";
+
+	/// <summary>Feature id of a sketch whose open chain is a centreline: at each section's
+	/// plane the centreline intersection becomes the section's new centroid.</summary>
+	public string CentrelineSketchId = "";
+
 	public readonly IntParam Material = new( "Material slot", 0, 0, 63 ) { Slider = false };
 
-	public override IReadOnlyList<IParam> Parameters => new IParam[] { Segments, Closed, Taper, Result, Material };
+	public override IReadOnlyList<IParam> Parameters => new IParam[] { Segments, Closed, Taper, SmoothLoft, SmoothRings, StartAngle, Result, Material };
 
-	public override IReadOnlyList<IParam> AdvancedParameters => new IParam[] { Material };
+	public override IReadOnlyList<IParam> AdvancedParameters => new IParam[] { Material, BendGuard };
 
 	protected override void Execute( FeatureContext ctx )
 	{
@@ -1194,7 +1663,13 @@ public sealed class LoftFeature : SketchConsumingFeature
 					if ( holeRingsByHole.Count <= h )
 						holeRingsByHole.Add( new List<List<Vec3>>( sketches.Count ) );
 
-					holeRingsByHole[h].Add( hole.Select( sketch.Plane.ToWorld ).ToList() );
+					var holeRing3 = hole.Select( sketch.Plane.ToWorld ).ToList();
+					if ( StartAngle.Value != 0f )
+					{
+						var sc = SweepFeature.CentreOf3( outer.Select( sketch.Plane.ToWorld ).ToList() );
+						holeRing3 = RotateRingGeom( holeRing3, sc, sketch.Plane.Normal, StartAngle.Value * MathF.PI / 180f );
+					}
+					holeRingsByHole[h].Add( holeRing3 );
 				}
 
 				sectionOuters.Add( outer );
@@ -1205,6 +1680,12 @@ public sealed class LoftFeature : SketchConsumingFeature
 
 			if ( !anyHoles && rings.Count > 0 )
 				ring = Skinner.Align( ring, rings[^1] );
+
+			if ( StartAngle.Value != 0f )
+			{
+				var c = SweepFeature.CentreOf3( ring );
+				ring = RotateRingGeom( ring, c, sketch.Plane.Normal, StartAngle.Value * MathF.PI / 180f );
+			}
 
 			rings.Add( ring );
 		}
@@ -1235,6 +1716,108 @@ public sealed class LoftFeature : SketchConsumingFeature
 			}
 		}
 
+		// Guide rail / centreline (wave 3), applied to the section rings before skinning.
+		if ( !string.IsNullOrEmpty( GuideSketchId ) || !string.IsNullOrEmpty( CentrelineSketchId ) )
+		{
+			List<Vec3> guide = null;
+			List<Vec3> centreline = null;
+			if ( !string.IsNullOrEmpty( GuideSketchId ) )
+				guide = ResolveLoftRail( ctx, GuideSketchId );
+			if ( !string.IsNullOrEmpty( CentrelineSketchId ) )
+				centreline = ResolveLoftRail( ctx, CentrelineSketchId );
+			for ( var i = 0; i < rings.Count; i++ )
+			{
+				var centroid = SweepFeature.CentreOf3( rings[i] );
+				var normal = sketches[i].Plane.Normal;
+				if ( guide is not null )
+				{
+					var hit = IntersectPlaneLoft( guide, centroid, normal );
+					if ( hit is null )
+						Fail(
+							$"Guide rail '{GuideSketchId}' does not cross section {i}'s plane.",
+							"A guide rail must cross every section plane to scale that section.",
+							"Extend the guide rail past that section",
+							"Remove the guide rail to loft without it" );
+					var dir = hit.Value - centroid;
+					if ( dir.LengthSquared > 1e-12f )
+					{
+						var d = dir.Normal;
+						var radiusInDir = 0f;
+						foreach ( var p in rings[i] )
+							radiusInDir = MathF.Max( radiusInDir, Vec3.Dot( p - centroid, d ) );
+						if ( radiusInDir > 1e-9f )
+						{
+							var scale = dir.Length / radiusInDir;
+							for ( var k = 0; k < rings[i].Count; k++ )
+								rings[i][k] = centroid + (rings[i][k] - centroid) * scale;
+							foreach ( var holeRing in holeRingsByHole )
+								for ( var k = 0; k < holeRing[i].Count; k++ )
+									holeRing[i][k] = centroid + (holeRing[i][k] - centroid) * scale;
+						}
+					}
+				}
+				if ( centreline is not null )
+				{
+					var hit = IntersectPlaneLoft( centreline, centroid, normal );
+					if ( hit is null )
+						Fail(
+							$"Centreline '{CentrelineSketchId}' does not cross section {i}'s plane.",
+							"A centreline must cross every section plane to move that section.",
+							"Extend the centreline past that section",
+							"Remove the centreline to loft without it" );
+					var shift = hit.Value - centroid;
+					for ( var k = 0; k < rings[i].Count; k++ )
+						rings[i][k] = rings[i][k] + shift;
+					foreach ( var holeRing in holeRingsByHole )
+						for ( var k = 0; k < holeRing[i].Count; k++ )
+							holeRing[i][k] = holeRing[i][k] + shift;
+				}
+			}
+		}
+
+		// Bend guard for lofts: the centroid polyline's bend radius must exceed each
+		// section's extent toward the centre of curvature, or the loft folds there.
+		if ( BendGuard.Value )
+		{
+			var n = rings.Count;
+			for ( var i = 0; i < n; i++ )
+			{
+				if ( !Closed.Value && (i == 0 || i == n - 1) )
+					continue;
+				var prev = SweepFeature.CentreOf3( rings[(i - 1 + n) % n] );
+				var next = SweepFeature.CentreOf3( rings[(i + 1) % n] );
+				var cur = SweepFeature.CentreOf3( rings[i] );
+				var tIn = (cur - prev).LengthSquared < 1e-12f ? new Vec3( 1, 0, 0 ) : (cur - prev).Normal;
+				var tOut = (next - cur).LengthSquared < 1e-12f ? new Vec3( 1, 0, 0 ) : (next - cur).Normal;
+				var theta = MathF.Acos( Math.Clamp( Vec3.Dot( tIn, tOut ), -1f, 1f ) );
+				if ( theta < 1e-4f )
+					continue;
+				var radius = (next - prev).Length / (2f * MathF.Sin( theta ));
+				var centreDir = tOut - tIn;
+				if ( centreDir.LengthSquared < 1e-12f )
+					continue;
+				centreDir = centreDir.Normal;
+				var extent = 0f;
+				foreach ( var p in rings[i] )
+					extent = MathF.Max( extent, Vec3.Dot( p - cur, centreDir ) );
+				if ( extent > 0f && radius <= extent )
+					Fail(
+						$"This loft folds at section {i}: the bend radius is {radius:0.##} but the section reaches {extent:0.##} toward the centre of the bend.",
+						"On the inside of a bend, sections converge; when the bend radius drops below the section's extent in that direction, the surface passes through itself.",
+						"Straighten the section path",
+						"Shrink the sections, or turn Bend guard off to build it anyway" );
+			}
+		}
+
+		// Smooth loft (wave 3): Catmull-Rom interpolated rings between sections, after
+		// taper/guide/centreline, so interpolation is between the final sections.
+		if ( SmoothLoft.Value && SmoothRings.Clamped > 0 && rings.Count >= 2 )
+		{
+			rings = ExpandSmoothRings( rings, Closed.Value, SmoothRings.Clamped );
+			for ( var h = 0; h < holeRingsByHole.Count; h++ )
+				holeRingsByHole[h] = ExpandSmoothRings( holeRingsByHole[h], Closed.Value, SmoothRings.Clamped );
+		}
+
 		// Closed skins the last section back to the FIRST ONE'S vertices rather than to a copy
 		// of them, which is the only way the seam is genuinely closed — see Skinner.Skin.
 		if ( !anyHoles )
@@ -1258,6 +1841,93 @@ public sealed class LoftFeature : SketchConsumingFeature
 
 			Emit( ctx, Skinner.SkinWithHoles( rings, holeRingsByHole, nearTris, farTris, Material.Clamped, wrap: Closed.Value ) );
 		}
+		NoteChoice( "Loft: sections=" + string.Join( ", ", sketches.Select( s => SketchNameFor( ctx, s ) ) ) + ( Sections.Count < 2 ? " (auto-selected: all sketches)" : "" ) + ( SmoothLoft.Value ? $" (smooth, {SmoothRings.Clamped} between)" : "" ) );
+	}
+
+	static List<Vec3> RotateRingGeom( List<Vec3> ring, Vec3 centre, Vec3 axis, float angleRad )
+	{
+		var cos = MathF.Cos( angleRad );
+		var sin = MathF.Sin( angleRad );
+		axis = axis.LengthSquared > 1e-12f ? axis.Normal : new Vec3( 0, 0, 1 );
+		var result = new List<Vec3>( ring.Count );
+		foreach ( var p in ring )
+		{
+			var d = p - centre;
+			// Rodrigues rotation about the section plane normal.
+			var rotated = d * cos + Vec3.Cross( axis, d ) * sin + axis * (Vec3.Dot( axis, d ) * (1f - cos));
+			result.Add( centre + rotated );
+		}
+		return result;
+	}
+
+	static List<List<Vec3>> ExpandSmoothRings( List<List<Vec3>> rings, bool closed, int between )
+	{
+		var n = rings.Count;
+		var expanded = new List<List<Vec3>>();
+		for ( var i = 0; i < n; i++ )
+		{
+			expanded.Add( rings[i] );
+			if ( !closed && i == n - 1 )
+				continue;
+			var next = (i + 1) % n;
+			var prev = closed ? (i - 1 + n) % n : Math.Max( i - 1, 0 );
+			var nextNext = closed ? (i + 2) % n : Math.Min( i + 2, n - 1 );
+			for ( var j = 1; j <= between; j++ )
+			{
+				var t = j / (float)(between + 1);
+				var interp = new List<Vec3>( rings[i].Count );
+				for ( var k = 0; k < rings[i].Count; k++ )
+				{
+					var p0 = rings[prev][k];
+					var p1 = rings[i][k];
+					var p2 = rings[next][k];
+					var p3 = rings[nextNext][k];
+					var point = 0.5f * ((2f * p1) + (-p0 + p2) * t + (2f * p0 - 5f * p1 + 4f * p2 - p3) * (t * t) + (-p0 + 3f * p1 - 3f * p2 + p3) * (t * t * t));
+					interp.Add( point );
+				}
+				expanded.Add( interp );
+			}
+		}
+		return expanded;
+	}
+
+	List<Vec3> ResolveLoftRail( FeatureContext ctx, string id )
+	{
+		if ( !ctx.Sketches.TryGetValue( id, out var railSketch ) )
+			Fail(
+				$"No sketch named '{id}' in the tree (have: {SketchList( ctx )})",
+				"The rail sketch this loft was pointed at does not exist at this point in the tree.",
+				"Check the spelling of the rail sketch id",
+				"Remove the rail to loft without it" );
+		var chain = SketchChain.Walk( railSketch );
+		if ( chain.Count < 2 )
+			Fail(
+				$"Rail sketch '{id}' has no connected chain to loft along.",
+				"The rail sketch's curves do not join into a walk of two or more points.",
+				"Join the rail curves end to end",
+				"Draw a single line or polyline as the rail" );
+		return chain.Select( railSketch.Plane.ToWorld ).ToList();
+	}
+
+	static Vec3? IntersectPlaneLoft( List<Vec3> polyline, Vec3 point, Vec3 normal )
+	{
+		for ( var i = 0; i + 1 < polyline.Count; i++ )
+		{
+			var a = polyline[i];
+			var b = polyline[i + 1];
+			var da = Vec3.Dot( a - point, normal );
+			var db = Vec3.Dot( b - point, normal );
+			if ( MathF.Abs( da ) < 1e-9f )
+				return a;
+			if ( MathF.Abs( db ) < 1e-9f )
+				return b;
+			if ( da * db < 0f )
+			{
+				var t = da / (da - db);
+				return a + (b - a) * t;
+			}
+		}
+		return null;
 	}
 
 	List<Sketch> ResolveSections( FeatureContext ctx )
@@ -1273,7 +1943,7 @@ public sealed class LoftFeature : SketchConsumingFeature
 			{
 				Fail(
 					$"Sketch '{id}' is not available at this point in the tree",
-					"A section this loft was pointed at has been deleted, suppressed, or sits below this feature.",
+					"A section this loft was pointed at has been deleted, suppressed, or sits below this feature. Sketches available at this point: " + SketchList( ctx ) + ".",
 					"Pick a sketch that sits above this feature",
 					"Move this feature below that sketch" );
 			}

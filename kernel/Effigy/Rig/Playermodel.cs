@@ -438,6 +438,25 @@ public static class Playermodel
 		+ "\t}\n"
 		+ "}\n";
 
+	/// <summary>Playermodel VMDL with custom game data: whenever custom hitboxes,
+	/// attachments or bodygroups exist they replace the citizen prefabs for those
+	/// lists instead of the model silently inheriting citizen's. Citizen physics
+	/// and joint prefabs are still used — no custom physics shapes are stored yet.
+	/// With no custom data this is byte-identical to <see cref="Vmdl"/>.</summary>
+	public static string VmdlWithGameData( string meshFilename, Skeleton skeleton,
+		IReadOnlyList<VmdlDocument.Hitbox> hitboxes, IReadOnlyList<VmdlDocument.Attachment> attachments,
+		IReadOnlyList<VmdlDocument.BodyGroup> bodygroups )
+	{
+		var vmdl = Vmdl( meshFilename, skeleton );
+		if ( hitboxes is { Count: > 0 } )
+			vmdl = vmdl.Replace( Prefabs( "HitboxSetList", "citizen_hitboxsetlist" ), VmdlDocument.HitboxSetList( hitboxes ) );
+		if ( attachments is { Count: > 0 } )
+			vmdl = vmdl.Replace( Prefabs( "AttachmentList", "citizen_attachmentlist" ), VmdlDocument.AttachmentList( attachments ) );
+		if ( bodygroups is { Count: > 0 } )
+			vmdl = vmdl.Replace( "\t\t]\n\t\tmodel_archetype", VmdlDocument.BodyGroupList( bodygroups ) + "\t\t]\n\t\tmodel_archetype" );
+		return vmdl;
+	}
+
 	static string PrefabLine( string prefab ) =>
 		$"\t\t\t\t\t{{ \"_class\" = \"Prefab\" target_file = \"models/citizen/prefabs/{prefab}.vmdl_prefab\" }},\n";
 

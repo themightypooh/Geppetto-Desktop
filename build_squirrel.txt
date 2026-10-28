@@ -1,0 +1,26 @@
+echo "Torso: upright oval body, slightly hunched"
+add Blob name=Torso shapes="capsule 0,5,0 0,13,0 3.6; sphere 0,9,1.2 2.8; sphere 0,5,-1.5 2.2" voxel=0.3
+
+echo "Head: large rounded head on top of torso"
+add Blob name=Head shapes="sphere 0,16,0.5 4.2; capsule 0,15,2.5 0,14,5 1.6; -sphere -1.6,16.5,3.8 1.1; -sphere 1.6,16.5,3.8 1.1" voxel=0.3
+
+echo "Ears: large rounded ears on top-back of head"
+add Blob name=Ears shapes="capsule -3.2,18.5,-1 -3.8,22,-0.5 1.6; capsule 3.2,18.5,-1 3.8,22,-0.5 1.6" voxel=0.3
+
+echo "Tail: long bushy tail arched up and over back"
+add Blob name=Tail shapes="capsule 0,3,-3 0,6,-6 2.2; capsule 0,6,-6 0,10,-7 2.6; capsule 0,10,-7 0,14,-5 2.8; capsule 0,14,-5 0,15,0 2.6; capsule 0,15,0 0,13,3 2.2; capsule 0,13,3 0,10,4 1.8" voxel=0.3
+
+echo "Hind legs: bulky thighs and calves folded under body"
+add Blob name=HindLegs shapes="capsule -2.5,4,-0.5 -2.5,1.5,-1.5 2.0; capsule 2.5,4,-0.5 2.5,1.5,-1.5 2.0; capsule -2.5,1.5,-1.5 -2.5,0.5,1.5 1.4; capsule 2.5,1.5,-1.5 2.5,0.5,1.5 1.4; capsule -2.5,0.5,1.5 -2.5,0.2,3.5 1.0; capsule 2.5,0.5,1.5 2.5,0.2,3.5 1.0" voxel=0.3
+
+echo "Forearms: reaching forward holding a nut"
+add Blob name=Forearms shapes="capsule -2.8,12,1 -3.5,8,3 1.3; capsule 2.8,12,1 3.5,8,3 1.3; capsule -3.5,8,3 -2.5,6,4.5 1.0; capsule 3.5,8,3 2.5,6,4.5 1.0" voxel=0.3
+
+echo "Nut: small held object between paws"
+add Blob name=Nut shapes="sphere 0,6,4.8 1.2" voxel=0.25
+
+echo "Save blockout"
+save squirrel.effigy
+
+echo "Turnaround render"
+render out.png shade=clay views=4 size=512

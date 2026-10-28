@@ -1,0 +1,1 @@
+{"turn_id": "df701c68fb50", "session_id": "muse-test-plan", "prompt": "Plan test: say hi in one sentence.\n", "status": "pending", "provider": "muse", "model": "muse-bridge", "act": false, "mode": "plan", "build_receipts": null, "build_token": null, "cwd": "/home/poo/Desktop/geppetto-desktop"}

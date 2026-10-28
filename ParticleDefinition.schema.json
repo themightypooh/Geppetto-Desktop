@@ -1,0 +1,376 @@
+{
+  "$id": "particle-definition-v1",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": true,
+  "definitions": {
+    "mesh": {
+      "additionalProperties": true,
+      "description": "Inline triangle geometry. Indices must be a non-empty multiple of 3, every index must be inside the vertex list, and total triangle area must be > 0 (degenerate meshes fail). The collision-grid size guard (4,000,000 cells) is validator-only.",
+      "properties": {
+        "indices": {
+          "description": "Triangle indices, triples into vertices.",
+          "items": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "vertices": {
+          "description": "Triangle soup vertices, each a [x, y, z] array of finite numbers.",
+          "items": {
+            "$ref": "#/definitions/vec3"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "vertices",
+        "indices"
+      ],
+      "type": "object"
+    },
+    "vec3": {
+      "description": "A 3-component vector [x, y, z]. Must be exactly 3 finite numbers; null fails in settings (a settings vector must be an array), and counts as absent on an emitter field.",
+      "items": {
+        "type": "number"
+      },
+      "maxItems": 3,
+      "minItems": 3,
+      "type": "array"
+    }
+  },
+  "description": "JSON Schema for the versioned particle system definition that particles lane 5 (ParticleAuthoring.cs, ParticleSystemDef) reads and writes: a version stamp, an optional name, settings, and emitters, with inline mesh geometry for MeshSurface emitters and settings collision meshes. Units are kernel inches, Z-up, seconds, vectors as [x, y, z] arrays. A seed is always serialized (Geppetto's sim is deterministic per seed). This schema states the CANONICAL document shape: canonical spellings, the one required field, and the numeric ranges of ParticleSystemSettings.Validate() / ParticleEmitter.Validate(). Parser tolerances that JSON Schema cannot express live in the companion validator (ParticleSchema.cs), which is authoritative for them: unknown fields are IGNORED at every level (forward compat, never rejected); field names match case-insensitively, last-wins; enum spellings are case-insensitive and whitespace-tolerant and numeric strings parse as their enum value (a renderType numeric string that parses but names no member is still accepted by lane 5, which only special-cases Strand); preset names resolve loosely (fx:/vfx:/particle: prefixes, dashes/spaces/slashes as underscores, a preset carried as a whole underscore-separated word). Cross-field rules (lifetimeMin <= lifetimeMax, sizeMin <= sizeMax, groundNormal non-zero only when groundEnabled, vortexAxis non-zero only when vortexStrength is non-zero, direction non-zero except Area/MeshSurface with UseSurfaceNormal, mesh total area > 0) are validator-only and noted on the fields they guard. P50 (definition migration) consumes this file.",
+  "properties": {
+    "emitters": {
+      "description": "Emitters in this system. Optional: when omitted the system has no emitters (valid, emitterless). An explicit null fails in lane 5.",
+      "items": {
+        "additionalProperties": true,
+        "properties": {
+          "angularSpeedMax": {
+            "description": "Max angular speed, radians/s, about a random axis.",
+            "minimum": 0,
+            "type": "number"
+          },
+          "areaU": {
+            "$ref": "#/definitions/vec3",
+            "description": "Area shape: half-extent edge vector U of the parallelogram. Area edges must be finite and non-parallel (validator-only rule)."
+          },
+          "areaV": {
+            "$ref": "#/definitions/vec3",
+            "description": "Area shape: half-extent edge vector V of the parallelogram."
+          },
+          "baseVelocity": {
+            "$ref": "#/definitions/vec3",
+            "description": "Added to every launch velocity (for example emitter motion)."
+          },
+          "boxHalfExtents": {
+            "$ref": "#/definitions/vec3",
+            "description": "Box shape: axis-aligned half extents, each >= 0."
+          },
+          "bursts": {
+            "description": "Step bursts. A present list replaces a preset's bursts wholesale, even when empty. Each entry defaults step/count to 0 when omitted.",
+            "items": {
+              "additionalProperties": true,
+              "properties": {
+                "count": {
+                  "description": "Particles in the burst.",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "step": {
+                  "description": "Fixed step at which the burst fires.",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "direction": {
+            "$ref": "#/definitions/vec3",
+            "description": "Launch direction. For Area/MeshSurface with useSurfaceNormal the surface normal is used instead. Zero direction + speed > 0 fails, except for Area/MeshSurface with useSurfaceNormal; a preset emitter's zero direction override is ignored (the preset direction stands) (validator-only rules)."
+          },
+          "enabled": {
+            "description": "Whether the emitter emits.",
+            "type": "boolean"
+          },
+          "lifetimeMax": {
+            "description": "Maximum particle lifetime, seconds.",
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          "lifetimeMin": {
+            "description": "Minimum particle lifetime, seconds. Must satisfy 0 < lifetimeMin <= lifetimeMax against the merged (preset + override) values (validator-only cross-field rule).",
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          "mesh": {
+            "$ref": "#/definitions/mesh",
+            "description": "Inline triangle geometry. Required when shape is MeshSurface; when present on any shape it is validated (a degenerate mesh fails even on a Point emitter). Null counts as absent."
+          },
+          "name": {
+            "description": "Optional emitter label. Ignored by the simulation (a preset name is a construction shortcut, not state, and does not survive FromSystem).",
+            "type": "string"
+          },
+          "position": {
+            "$ref": "#/definitions/vec3",
+            "description": "Point position / area, box, sphere centre. For a preset emitter this is the preset's origin."
+          },
+          "preset": {
+            "description": "Preset to start from (ParticleEmitterPresets); fields actually present in this emitter override it, and a present bursts list replaces the preset's bursts wholesale. Canonical names: water_splash, bubbles, blood_mist, sparks, dust_motes, breath_frost, fire, smoke, rain, snow, leaves, confetti, steam, magic_sparkle. The validator resolves names loosely per lane 5 (prefixes, separators, whole-word carrying); this schema deliberately does not enum-constrain the field so those spellings stay describable.",
+            "type": "string"
+          },
+          "rate": {
+            "description": "Particles per second (continuous, fractional remainder carried between steps).",
+            "minimum": 0,
+            "type": "number"
+          },
+          "shape": {
+            "description": "Emitter shape. Canonical names only here; the validator additionally accepts lane 5's ParseEnum spellings, and rejects integer strings that name no member (for example \"5\").",
+            "enum": [
+              "Point",
+              "Area",
+              "MeshSurface",
+              "Box",
+              "Sphere"
+            ],
+            "type": "string"
+          },
+          "sizeMax": {
+            "description": "Maximum particle size.",
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          "sizeMin": {
+            "description": "Minimum particle size. Must satisfy 0 < sizeMin <= sizeMax against the merged values (validator-only cross-field rule).",
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          "speed": {
+            "description": "Launch speed; actual speed is uniformly in speed * (1 +/- speedJitter).",
+            "minimum": 0,
+            "type": "number"
+          },
+          "speedJitter": {
+            "description": "Fractional speed variation.",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "sphereRadius": {
+            "description": "Sphere shape: radius, >= 0.",
+            "minimum": 0,
+            "type": "number"
+          },
+          "spreadDegrees": {
+            "description": "Cone half-angle around the launch direction, degrees (180 = any direction).",
+            "maximum": 180,
+            "minimum": 0,
+            "type": "number"
+          },
+          "useSurfaceNormal": {
+            "description": "For Area/MeshSurface, launch along the surface normal instead of direction.",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "name": {
+      "description": "Optional human-readable name for the definition. Carried through round-trips; ignored by the simulation.",
+      "type": "string"
+    },
+    "settings": {
+      "additionalProperties": true,
+      "description": "System-wide simulation settings. Optional: when omitted, every field takes the live ParticleSystemSettings default. An explicit null fails in lane 5.",
+      "if": {
+        "properties": {
+          "renderType": {
+            "const": "Strand"
+          }
+        },
+        "required": [
+          "renderType"
+        ]
+      },
+      "properties": {
+        "capacity": {
+          "default": 10000,
+          "description": "Maximum live particles.",
+          "maximum": 4000000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "collisionMesh": {
+          "$ref": "#/definitions/mesh",
+          "description": "Optional inline collision mesh. Null is accepted (no mesh); when present it is validated like an emitter mesh."
+        },
+        "collisionRadius": {
+          "default": 0.01,
+          "description": "Particle radius / contact skin, inches.",
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "drag": {
+          "default": 0,
+          "description": "Linear drag coefficient, 1/s.",
+          "minimum": 0,
+          "type": "number"
+        },
+        "fixedDeltaTime": {
+          "default": 0.016666667,
+          "description": "Fixed step in seconds (60 Hz by default).",
+          "exclusiveMinimum": 0,
+          "maximum": 1,
+          "type": "number"
+        },
+        "friction": {
+          "default": 0.2,
+          "description": "Tangential velocity retained on contact is (1 - friction).",
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        "gravity": {
+          "$ref": "#/definitions/vec3",
+          "default": [
+            0,
+            0,
+            -386.0886
+          ],
+          "description": "Gravity acceleration, inches/s^2. Default is 9.80665 m/s^2 in inches/s^2, pointing -Z."
+        },
+        "groundEnabled": {
+          "default": false,
+          "description": "Whether the ground plane is active. A zero groundNormal is only an error when this is true (validator-only rule).",
+          "type": "boolean"
+        },
+        "groundNormal": {
+          "$ref": "#/definitions/vec3",
+          "default": [
+            0,
+            0,
+            1
+          ]
+        },
+        "groundOffset": {
+          "default": 0,
+          "description": "Ground plane offset; the free half space is Normal.x >= Offset + CollisionRadius.",
+          "type": "number"
+        },
+        "renderType": {
+          "default": "Billboard",
+          "description": "How a renderer should draw the particles; the simulation is identical for all three. Canonical names only here; the validator additionally accepts lane 5's ParseEnum spellings (case/whitespace variants and integer strings).",
+          "enum": [
+            "Billboard",
+            "MeshInstance",
+            "Strand"
+          ],
+          "type": "string"
+        },
+        "restitution": {
+          "default": 0.3,
+          "description": "Bounciness on contact.",
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        "seed": {
+          "default": 1,
+          "description": "Deterministic seed, always serialized. 0 is valid (the RNG remaps it); the full uint32 range is accepted.",
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "strandPoints": {
+          "default": 0,
+          "description": "Strand history points kept per particle (0 = off). Strand render type needs at least 2 (see the if/then below).",
+          "maximum": 256,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "substeps": {
+          "default": 1,
+          "description": "Substeps per fixed step.",
+          "maximum": 64,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "turbulenceFrequency": {
+          "default": 0.1,
+          "description": "Noise lattice frequency, 1/inch.",
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "turbulenceSpeed": {
+          "default": 0,
+          "description": "How fast the noise field scrolls, noise units/s. Any finite value.",
+          "type": "number"
+        },
+        "turbulenceStrength": {
+          "default": 0,
+          "description": "Curl-noise acceleration magnitude scale, inches/s^2. 0 disables.",
+          "minimum": 0,
+          "type": "number"
+        },
+        "vortexAxis": {
+          "$ref": "#/definitions/vec3",
+          "default": [
+            0,
+            0,
+            1
+          ],
+          "description": "Vortex rotation axis. Must be non-zero when vortexStrength is non-zero (validator-only rule)."
+        },
+        "vortexCenter": {
+          "$ref": "#/definitions/vec3",
+          "default": [
+            0,
+            0,
+            0
+          ]
+        },
+        "vortexRadius": {
+          "default": 1,
+          "description": "Vortex core radius in the acceleration denominator.",
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "vortexStrength": {
+          "default": 0,
+          "description": "Vortex acceleration scale. 0 disables; a non-zero strength requires a non-zero vortexAxis (validator-only rule).",
+          "type": "number"
+        },
+        "wind": {
+          "$ref": "#/definitions/vec3",
+          "default": [
+            0,
+            0,
+            0
+          ],
+          "description": "Air velocity; only acts through drag."
+        }
+      },
+      "then": {
+        "properties": {
+          "strandPoints": {
+            "minimum": 2
+          }
+        }
+      },
+      "type": "object"
+    },
+    "version": {
+      "const": 1,
+      "description": "Schema version. Lane 5 reads version 1 only; a missing, non-integer, or non-1 version fails. Matched case-sensitively for presence by lane 5's pre-check, case-insensitively and last-wins by its deserializer.",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "version"
+  ],
+  "title": "Geppetto particle system definition, schema v1",
+  "type": "object"
+}

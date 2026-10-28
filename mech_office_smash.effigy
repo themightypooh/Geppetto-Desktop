@@ -1,0 +1,625 @@
+effigy 1
+rollback 2147483647
+materiallook 0 color=#7a7568 rough=0.95 metal=0
+materiallook 1 color=#b8b2a4 rough=0.9 metal=0
+materiallook 2 color=#8a6a44 rough=0.8 metal=0.05
+materiallook 3 color=#3a332c rough=0.95 metal=0
+materiallook 4 color=#545b63 rough=0.55 metal=0.7
+materiallook 5 color=#6b3a2a rough=0.7 metal=0.4
+materiallook 6 color=#3a332d rough=0.65 metal=0.85
+materiallook 7 color=#2a3a44 rough=0.2 metal=0.1
+feature PrimitiveFeature
+	id 3a41a672
+	name FloorSlab
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position 0 0.2 0
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 12
+	param SizeY 10
+	param SizeZ 0.4
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 2e07fd46
+	name BackWallLeft
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -2.5 2 5
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 7
+	param SizeY 0.4
+	param SizeZ 3.2
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id e58532dc
+	name BackWallRight
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 5.25 2 5
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 1.5
+	param SizeY 0.4
+	param SizeZ 3.2
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 0aad4948
+	name WallRight
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 6 2 0
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.4
+	param SizeY 10
+	param SizeZ 3.2
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 3346e308
+	name CeilingSlabIntact
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position -2.5 3.4 0
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 7
+	param SizeY 10
+	param SizeZ 0.4
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 902c71ca
+	name CeilingSlabBroken
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position 3.6 2.6 -0.5
+	param Radius 0.5
+	param RotationAngle -18
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 4.2
+	param SizeY 4.5
+	param SizeZ 0.35
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id a8ae8733
+	name UpperBackWallLeft
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -2.5 5.4 5
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 7
+	param SizeY 0.4
+	param SizeZ 3.2
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 54c8c00d
+	name UpperBackWallRight
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 5.25 5.4 5
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 1.5
+	param SizeY 0.4
+	param SizeZ 3.2
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id a2aea90b
+	name UpperWallRight
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 6 5.4 0
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.4
+	param SizeY 10
+	param SizeZ 3.2
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 3fc664a5
+	name RoofSlabBroken
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position 0 6.9 0
+	param Radius 0.5
+	param RotationAngle 10
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 6
+	param SizeY 6
+	param SizeZ 0.35
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 73b5c767
+	name ColumnFront
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position -5 1.6 -4
+	param Radius 0.4
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 3.2
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 6b53cb2b
+	name ColumnBack
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position -5 1.6 4
+	param Radius 0.4
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 3.2
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id b9dccf9d
+	name ColumnUpper
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position -5 5 -4
+	param Radius 0.35
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 3.2
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id b4d3c759
+	name Rebar1
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 6
+	param Position 5.8 2.2 -5.8
+	param Radius 0.05
+	param RotationAngle 12
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 1.6
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id e4d21f9e
+	name Rebar2
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 6
+	param Position 6.2 2.3 -6.1
+	param Radius 0.05
+	param RotationAngle -15
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 1.8
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 6c4c97ed
+	name PipeWall
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 6
+	param Position -2 2.8 4.7
+	param Radius 0.12
+	param RotationAngle 90
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 8
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 75d52109
+	name DeskTop
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 2
+	param Position -1 1.11 2.7
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 4.4
+	param SizeY 1
+	param SizeZ 0.08
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id ee38a556
+	name DeskLegLeft
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 6
+	param Position -3 0.75 2.7
+	param Radius 0.06
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 0.7
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 4c626028
+	name DeskLegRight
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 6
+	param Position 1 0.75 2.7
+	param Radius 0.06
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 0.7
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 2721aa5d
+	name PartitionBack
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 2
+	param Position 0 1.3 3.25
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 5
+	param SizeY 0.3
+	param SizeZ 1.8
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 02a6bcfd
+	name FallenPartition
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 2
+	param Position 0.8 0.5 -0.5
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 2.5
+	param SizeY 1.8
+	param SizeZ 0.2
+	param UniformScale 0
+end
+feature BlobFeature
+	id b40d12db
+	name MechFoot
+	suppressed 0
+	visible 1
+	param Blend 2
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes capsule 1.8,0.6,-1.2 4.2,0.6,1.2 0.9; sphere 2.0,0.5,-2.0 0.7; sphere 4.0,0.5,-2.0 0.7; sphere 3.0,0.5,2.0 0.6
+	param Smooth 2
+	param Voxel 0.3
+end
+feature PrimitiveFeature
+	id a6762fa5
+	name MechAnkle
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 4
+	param Position 3 1.4 0.3
+	param Radius 0.8
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 1.4
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id d744b3e3
+	name MechShin
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 5
+	param Position 3 4.2 0.3
+	param Radius 0.9
+	param RotationAngle -5
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 2.5
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 01c692b6
+	name MechThigh
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 4
+	param Position 3 6.5 0.3
+	param Radius 0.85
+	param RotationAngle -5
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 2.5
+	param UniformScale 0
+end
+feature BlobFeature
+	id 6c5909b3
+	name MechKnee
+	suppressed 0
+	visible 1
+	param Blend 2
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes sphere 3.0,5.5,0.3 0.9
+	param Smooth 2
+	param Voxel 0.3
+end
+feature BlobFeature
+	id 7d67e091
+	name DebrisMound
+	suppressed 0
+	visible 1
+	param Blend 2
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes sphere 4.5,0.6,3.5 1.0; sphere 5.2,0.5,2.5 0.8; capsule 3.5,0.5,4.0 5.5,0.5,4.2 0.6
+	param Smooth 2
+	param Voxel 0.3
+end
+feature BlobFeature
+	id 0ca6a38c
+	name RubbleFoot
+	suppressed 0
+	visible 1
+	param Blend 2
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes sphere 1.5,0.5,2.5 0.7; sphere 0.8,0.4,1.5 0.5; capsule 1.0,0.4,3.0 2.0,0.4,3.5 0.4
+	param Smooth 2
+	param Voxel 0.3
+end
+feature BlobFeature
+	id 2d9562f0
+	name FallenChair
+	suppressed 0
+	visible 1
+	param Blend 2
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes sphere 0,0.5,-1.5 0.5; capsule -0.5,0.5,-1.5 0.5,0.5,-1.5 0.3
+	param Smooth 2
+	param Voxel 0.25
+end
+feature PrimitiveFeature
+	id 0c629939
+	name ScorchWall
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 3
+	param Position 3.75 1.4 4.78
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 2.5
+	param SizeY 0.05
+	param SizeZ 1.2
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id ef76869c
+	name FootDebrisShard
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position 2 0.35 3.4
+	param Radius 0.5
+	param RotationAngle 22
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.9
+	param SizeY 0.6
+	param SizeZ 0.25
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 3fd653ef
+	name DanglingCable
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 6
+	param Position 4.2 2 -0.8
+	param Radius 0.04
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 1.4
+	param UniformScale 0
+end

@@ -1,0 +1,28 @@
+material 0 color=#b87333 rough=0.35 metal=1
+material 1 color=#8a4a20 rough=0.4 metal=1
+material 2 color=#d98a4a rough=0.3 metal=1
+add Primitive name=CoinBody shape=Cylinder width=7.5 depth=7.5 height=0.6 position=0,0,0.3 materialslot=0
+add Primitive name=RimTop shape=Cylinder width=7.6 depth=7.6 height=0.12 position=0,0,0.6 materialslot=1
+add Primitive name=RimBottom shape=Cylinder width=7.6 depth=7.6 height=0.12 position=0,0,0.0 materialslot=1
+add Primitive name=LincolnHead shape=Cylinder width=2.0 depth=2.8 height=0.18 position=0.2,0.9,0.69 materialslot=1
+add Primitive name=LincolnBust shape=Box width=3.4 depth=1.4 height=0.18 position=0,-1.1,0.69 materialslot=1
+add Primitive name=MottoTop shape=Box width=4.0 depth=0.3 height=0.12 position=0,2.9,0.66 materialslot=2
+add Primitive name=LibertyLeft shape=Box width=0.3 depth=1.6 height=0.12 position=-3.0,0.5,0.66 materialslot=2
+add Primitive name=DateRight shape=Box width=0.3 depth=1.0 height=0.12 position=3.0,-0.5,0.66 materialslot=2
+add Primitive name=ShieldBody shape=Box width=3.6 depth=4.0 height=0.18 position=0,0,-0.09 materialslot=1
+add Primitive name=ShieldBar shape=Box width=3.6 depth=0.8 height=0.18 position=0,1.6,-0.09 materialslot=2
+add Primitive name=ShieldStripe1 shape=Box width=0.24 depth=2.8 height=0.06 position=-1.68,0,-0.19 materialslot=2
+add Primitive name=ShieldStripe2 shape=Box width=0.24 depth=2.8 height=0.06 position=-1.4,0,-0.19 materialslot=0
+add Primitive name=ShieldStripe3 shape=Box width=0.24 depth=2.8 height=0.06 position=-1.12,0,-0.19 materialslot=2
+add Primitive name=ShieldStripe4 shape=Box width=0.24 depth=2.8 height=0.06 position=-0.84,0,-0.19 materialslot=0
+add Primitive name=ShieldStripe5 shape=Box width=0.24 depth=2.8 height=0.06 position=-0.56,0,-0.19 materialslot=2
+add Primitive name=ShieldStripe6 shape=Box width=0.24 depth=2.8 height=0.06 position=-0.28,0,-0.19 materialslot=0
+add Primitive name=ShieldStripe7 shape=Box width=0.24 depth=2.8 height=0.06 position=0,0,-0.19 materialslot=2
+add Primitive name=ShieldStripe8 shape=Box width=0.24 depth=2.8 height=0.06 position=0.28,0,-0.19 materialslot=0
+add Primitive name=ShieldStripe9 shape=Box width=0.24 depth=2.8 height=0.06 position=0.56,0,-0.19 materialslot=2
+add Primitive name=ShieldStripe10 shape=Box width=0.24 depth=2.8 height=0.06 position=0.84,0,-0.19 materialslot=0
+add Primitive name=ShieldStripe11 shape=Box width=0.24 depth=2.8 height=0.06 position=1.12,0,-0.19 materialslot=2
+add Primitive name=ShieldStripe12 shape=Box width=0.24 depth=2.8 height=0.06 position=1.4,0,-0.19 materialslot=0
+add Primitive name=ShieldStripe13 shape=Box width=0.24 depth=2.8 height=0.06 position=1.68,0,-0.19 materialslot=2
+add Primitive name=Scroll shape=Box width=4.2 depth=0.7 height=0.18 position=0,-0.8,-0.19 materialslot=2
+save penny.effigy

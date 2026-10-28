@@ -1,0 +1,36 @@
+echo "Adding architectural window apertures and lintels to 2nd floor"
+add Primitive name=WindowLintel1 shape=Box width=1.4 depth=0.5 height=0.25 position=-4.5,5.8,-6.05 materialslot=0
+add Primitive name=WindowSill1 shape=Box width=1.4 depth=0.5 height=0.2 position=-4.5,4.2,-6.05 materialslot=0
+add Primitive name=WindowFrameLeft1 shape=Box width=0.15 depth=0.25 height=1.4 position=-5.1,5.0,-6 materialslot=1
+add Primitive name=WindowFrameRight1 shape=Box width=0.15 depth=0.25 height=1.4 position=-3.9,5.0,-6 materialslot=1
+
+echo "Adding side wall window reveals"
+add Primitive name=SideWindowLintel shape=Box width=0.5 depth=1.6 height=0.25 position=-6.05,5.8,2 materialslot=0
+add Primitive name=SideWindowSill shape=Box width=0.5 depth=1.6 height=0.2 position=-6.05,4.2,2 materialslot=0
+
+echo "Adding broken floor tile layer to exposed 2nd floor slab"
+add Primitive name=TileLayerFloor1 shape=Box width=6.6 depth=11.8 height=0.08 position=-2.5,3.64,0 materialslot=4
+material 4 color=#4a555e rough=0.3 metal=0.1
+
+echo "Adding hanging severed electrical conduit and dangling rebar strands"
+add Primitive name=HangingWire1 shape=Cylinder radius=0.03 height=1.8 position=1.8,2.8,-1.2 rotationaxis=1,0,0 rotation=35 materialslot=1
+add Primitive name=HangingWire2 shape=Cylinder radius=0.025 height=2.2 position=2.6,2.5,-3.0 rotationaxis=0,0,1 rotation=40 materialslot=1
+add Primitive name=HangingRebarFloor2 shape=Cylinder radius=0.04 height=2.4 position=3.5,4.8,-2.8 rotationaxis=1,0,1 rotation=-25 materialslot=1
+
+echo "Adding commercial store signage mount above shutter"
+add Primitive name=StoreSignboard shape=Box width=4.6 depth=0.2 height=0.8 position=-3,3.0,-6.15 materialslot=3
+add Primitive name=SignSupportLeft shape=Box width=0.1 depth=0.3 height=0.9 position=-5.1,3.0,-6.1 materialslot=1
+add Primitive name=SignSupportRight shape=Box width=0.1 depth=0.3 height=0.9 position=-0.9,3.0,-6.1 materialslot=1
+
+echo "Adding satellite dish on roof parapet"
+add Primitive name=SatelliteDishStand shape=Cylinder radius=0.04 height=0.9 position=-5.2,11.0,5.2 rotationaxis=1,0,0 rotation=10 materialslot=1
+add Primitive name=SatelliteDishBowl shape=Cylinder radius=0.6 height=0.1 position=-5.2,11.5,5.3 rotationaxis=1,1,0 rotation=45 materialslot=3
+
+echo "Scattered cinder blocks and fine rubble on debris slope"
+add Primitive name=CinderBlock1 shape=Box width=0.4 depth=0.8 height=0.4 position=2.8,0.7,-4.8 rotationaxis=0,1,0 rotation=28 materialslot=2
+add Primitive name=CinderBlock2 shape=Box width=0.4 depth=0.8 height=0.4 position=4.0,1.2,-5.2 rotationaxis=0,1,0 rotation=65 materialslot=2
+add Primitive name=CinderBlock3 shape=Box width=0.4 depth=0.8 height=0.4 position=5.5,0.6,-4.2 rotationaxis=0,0,1 rotation=-30 materialslot=2
+add Primitive name=CinderBlock4 shape=Box width=0.4 depth=0.8 height=0.4 position=3.8,0.5,-2.2 rotationaxis=0,1,0 rotation=-40 materialslot=2
+
+echo "Update render milestone"
+render war_torn_building_sheet.png shade=material views=4 size=512

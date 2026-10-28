@@ -1,0 +1,67 @@
+effigy 1
+rollback 2147483647
+materiallook 0 color=#e07a2a rough=0.6 metal=0.05
+materiallook 1 color=#101010 rough=0.3 metal=0.1
+feature PrimitiveFeature
+	id 5b09a7f5
+	name Body
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position 0 0 0
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 10
+	param SizeY 4
+	param SizeZ 4
+	param TubeRadius 0.5
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 01f18cd7
+	name Eye
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -4 2.2 1
+	param Radius 0.8
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 0.3
+	param TubeRadius 0.5
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 034b90dc
+	name Tail
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position 6 0 0
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 3
+	param SizeX 4
+	param SizeY 3
+	param SizeZ 3
+	param TubeRadius 0.5
+	param UniformScale 0
+end

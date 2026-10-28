@@ -1,0 +1,146 @@
+effigy 1
+rollback 2147483647
+materiallook 0 color=#7a7568 rough=0.95 metal=0
+materiallook 1 color=#b8b2a4 rough=0.9 metal=0
+materiallook 2 color=#c2b49a rough=0.95 metal=0
+materiallook 3 color=#8a8578 rough=0.85 metal=0.05
+feature PrimitiveFeature
+	id 0f36ff99
+	name FloorSlab
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position 0 0.2 0
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 12
+	param SizeY 10
+	param SizeZ 0.4
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id ee0b4292
+	name WallBack
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 0 2 5
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 12
+	param SizeY 0.4
+	param SizeZ 3.2
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 30be61fd
+	name WallRight
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 6 2 0
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.4
+	param SizeY 10
+	param SizeZ 3.2
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 87f3014a
+	name PartitionWest
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 2
+	param Position -2.5 1.3 1
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.3
+	param SizeY 4.5
+	param SizeZ 1.8
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id c2bb5864
+	name PartitionEast
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 2
+	param Position 2.5 1.3 1
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.3
+	param SizeY 4.5
+	param SizeZ 1.8
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 5d31b5ca
+	name PartitionBack
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 2
+	param Position 0 1.3 3.25
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 5.3
+	param SizeY 0.3
+	param SizeZ 1.8
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id bf4a1022
+	name DeskBlock
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 3
+	param Position 0 0.775 2.6
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 4.4
+	param SizeY 1
+	param SizeZ 0.75
+	param UniformScale 0
+end

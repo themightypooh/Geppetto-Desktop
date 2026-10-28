@@ -38,6 +38,8 @@ public sealed class EditOpFeature : Feature
 		// Appended, never inserted: the choice index is what saved documents hold, so the
 		// first eleven operations keep their indices and old documents keep their meaning.
 		"Knife", "Spin", "Slide", "Poke", "Tris to quads", "Grid fill",
+		// Appended, never inserted: Move/Rotate/Scale are 17/18/19, so older indices keep meaning.
+		"Move", "Rotate", "Scale",
 	};
 
 	public static readonly string[] Elements = { "Auto", "Faces", "Edges", "Vertices" };
@@ -60,7 +62,22 @@ public sealed class EditOpFeature : Feature
 	public readonly ChoiceParam Axis = new( "Axis", Axes, 2 );
 	public readonly ChoiceParam Side = new( "Side", Sides );
 
-	public override IReadOnlyList<IParam> Parameters => new IParam[] { Bodies, Op, Select, Element, Distance, Segments, At, Axis, Side };
+	/// <summary>Move: the translation vector. Rotate: unused (axis + distance are the turn).
+	/// Scale: unused (factor is the scale).</summary>
+	public readonly Vec3Param Delta = new( "Delta", Vec3.Zero );
+
+	/// <summary>Scale: the scale factor (1 = no change). Move/Rotate: unused.</summary>
+	public readonly FloatParam Factor = new( "Factor", 1f );
+
+	/// <summary>Proportional editing radius, in mesh units. 0 = only the selected
+	/// vertices move (no falloff). Larger = neighbours within this distance move less.</summary>
+	public readonly FloatParam FalloffRadius = new( "Falloff radius", 0f, 0f, 100000f, "u" );
+
+	/// <summary>How the falloff fades with distance: Smooth (cosine), Sphere, Root,
+	/// InverseSquare, Sharp, or Linear. All are 1 at the selection and 0 at the radius.</summary>
+	public readonly ChoiceParam FalloffCurve = new( "Falloff curve", new[] { "Smooth", "Sphere", "Root", "InverseSquare", "Sharp", "Linear" } );
+
+	public override IReadOnlyList<IParam> Parameters => new IParam[] { Bodies, Op, Select, Element, Distance, Segments, At, Axis, Side, Delta, Factor, FalloffRadius, FalloffCurve };
 
 	string OpName => Op.Value;
 
@@ -263,6 +280,27 @@ public sealed class EditOpFeature : Feature
 				s.GridFill();
 				return s;
 
+			case 17: // Move, with proportional falloff.
+			{
+				SelectVertices( s, selector, name );
+				s.ProportionalMove( Delta.Value, FalloffRadius.Value, FalloffCurve.Value );
+				return s;
+			}
+
+			case 18: // Rotate, with proportional falloff, about At (or the selection centroid).
+			{
+				SelectVertices( s, selector, name );
+				s.ProportionalRotate( PivotFor( s ), AxisVector( Axis.Index ), Distance.Value, FalloffRadius.Value, FalloffCurve.Value );
+				return s;
+			}
+
+			case 19: // Scale, with proportional falloff, about At (or the selection centroid).
+			{
+				SelectVertices( s, selector, name );
+				s.ProportionalScale( PivotFor( s ), Factor.Value, FalloffRadius.Value, FalloffCurve.Value );
+				return s;
+			}
+
 			case 10: // Delete
 			{
 				var element = ElementFor( EditElement.Face );
@@ -281,6 +319,19 @@ public sealed class EditOpFeature : Feature
 
 		Fail( $"'{OpName}' is not an operation", "The operation index is out of range.", $"Use one of {string.Join( ", ", Operations )}" );
 		return s;
+	}
+
+	/// <summary>Pivot for Rotate/Scale: the At point when the user set one
+	/// (anything other than the 0,0,0 default), else the centroid of the selected vertices.</summary>
+	Vec3 PivotFor( MeshEditSession s )
+	{
+		if ( At.Value.LengthSquared > 1e-12f )
+			return At.Value;
+		var verts = s.AffectedVertices();
+		var c = Vec3.Zero;
+		foreach ( var v in verts )
+			c += s.Mesh.Positions[v];
+		return verts.Count > 0 ? c * (1f / verts.Count) : Vec3.Zero;
 	}
 
 	EditElement ElementFor( EditElement auto ) => Element.Index switch

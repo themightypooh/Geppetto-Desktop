@@ -40,6 +40,10 @@ namespace Effigy;
 ///
 ///   ellipsoid 0,0,1 4,3,4; -ellipsoid 3.8,1.2,0.1 0.5,0.8,0.5 k=0.2; ellipsoid 3.3,1.2,0.1 0.5,0.7,0.4 k=0.1
 ///
+/// FILTERS: one filter over the fused field, before meshing, via the Filter parameter:
+/// taper:Z:0.5 fattens the cross-section toward +Z, growth:0.3:0.5:7 grows fold ridges
+/// out of the skin, repeat:X:3 tiles the field 3 times along X. See SdfFilter.
+///
 /// PAINT EXISTS FOR WHAT HAS NO SHAPE. A face takes the slot of the shape nearest its corner, so a
 /// window, label or inlay flush with the shell (nothing proud of it) can never get a slot of its own
 /// without changing the skin. A paint shape is not part of the field: after meshing, every face
@@ -66,8 +70,12 @@ public sealed class BlobFeature : Feature
 	public readonly IntParam Seed = new( "Seed", 1, 0, 100000 ) { Slider = false };
 	public readonly IntParam Material = new( "Material slot", 0, 0, 63 ) { Slider = false };
 
+	/// <summary>One SDF filter over the fused field, before meshing: taper:AXIS:amount,
+	/// growth:amp:freq[:seed[:sharpness]], or repeat:AXIS:count. Empty means no filter.</summary>
+	public readonly StringParam Filter = new( "Filter", "" );
+
 	public override IReadOnlyList<IParam> Parameters =>
-		new IParam[] { Shapes, Blend, CutBlend, Voxel, Smooth, Noise, NoiseSize, Seed, Material };
+		new IParam[] { Shapes, Blend, CutBlend, Voxel, Smooth, Noise, NoiseSize, Seed, Material, Filter };
 
 	public override IReadOnlyList<IParam> AdvancedParameters => new IParam[] { Smooth, Seed, Material };
 
@@ -129,6 +137,16 @@ public sealed class BlobFeature : Feature
 
 		if ( Noise.Value > 0f )
 			field = new SdfDisplace( field, Noise.Clamped, 1f / NoiseSize.Clamped, 3, Seed.Clamped );
+
+		if ( !string.IsNullOrWhiteSpace( Filter.Value ) )
+		{
+			try { field = SdfFilter.Parse( field, Filter.Value.Trim() ); }
+			catch ( ArgumentException ex )
+			{
+				FailOn( "Filter", ex.Message, "The filter line is not one I know.",
+					"Use taper:AXIS:amount, growth:amp:freq[:seed[:sharpness]], or repeat:AXIS:count" );
+			}
+		}
 
 		var voxel = Voxel.Clamped;
 		var size = field.Max - field.Min + Vec3.One * voxel * 4f;
@@ -394,11 +412,21 @@ public sealed class StrokeFeature : Feature
 	public readonly ChoiceParam Mask = new( "Only", new[] { "Everywhere", "Creases", "Ridges" } );
 	public readonly StringParam Alpha = new( "Alpha PNG", "" );
 	public readonly FloatParam AlphaScale = new( "Alpha scale", 1f, 0.01f, 100f );
+	/// <summary>Stamp rotation in the surface plane, in degrees. 0 is the old behaviour.</summary>
+	public readonly FloatParam AlphaRotation = new( "Alpha rotation", 0f, -360f, 360f );
+	/// <summary>Pattern repeats per stamp footprint. 1 is the old behaviour; above 1 the pattern tiles.</summary>
+	public readonly FloatParam AlphaDensity = new( "Alpha density", 1f, 0.25f, 16f );
+	/// <summary>Maximum extra rotation per dab, in degrees, seeded by Alpha seed. 0 (default) is off.</summary>
+	public readonly FloatParam AlphaJitter = new( "Alpha jitter", 0f, 0f, 180f );
+	/// <summary>Seed for per-dab alpha jitter. Same seed and path rebuild identically.</summary>
+	public readonly IntParam AlphaSeed = new( "Alpha seed", 0 );
+	/// <summary>Read Strength on the shared calibrated scale (see BrushCalibration) instead of raw kernel units.</summary>
+	public readonly BoolParam Calibrated = new( "Calibrated", false );
 
 	public override IReadOnlyList<IParam> Parameters =>
-		new IParam[] { Bodies, Brush, Radius, Strength, Invert, Falloff, Mirror, Radial, RadialAxis, Spacing, Mask, Alpha, AlphaScale };
+		new IParam[] { Bodies, Brush, Radius, Strength, Invert, Falloff, Mirror, Radial, RadialAxis, Spacing, Mask, Alpha, AlphaScale, AlphaRotation, AlphaDensity, AlphaJitter, AlphaSeed, Calibrated };
 
-	public override IReadOnlyList<IParam> AdvancedParameters => new IParam[] { Falloff, RadialAxis, Spacing, Mask, Alpha, AlphaScale };
+	public override IReadOnlyList<IParam> AdvancedParameters => new IParam[] { Falloff, RadialAxis, Spacing, Mask, Alpha, AlphaScale, AlphaRotation, AlphaDensity, AlphaJitter, AlphaSeed, Calibrated };
 
 	protected override void Execute( FeatureContext ctx )
 	{
@@ -432,6 +460,7 @@ public sealed class StrokeFeature : Feature
 				Radial = Radial.Clamped,
 				RadialAxis = (MirrorAxis)(RadialAxis.Index + 1),
 				Alpha = alpha,
+				Calibrated = Calibrated.Value,
 			};
 
 			// Reach: far enough to forgive a path drawn off the skin, near enough that a path over one
@@ -457,6 +486,16 @@ public sealed class StrokeFeature : Feature
 						stroke.Samples.Add( new BrushSample( hit.Point, hit.Normal, radius, strength, drag ) );
 				}
 			}
+
+			// Per-dab alpha jitter: each dab turns by a bounded, seeded amount, so repeated
+				// stamps stop tiling like wallpaper. Same seed and path rebuild identically.
+			if ( AlphaJitter.Clamped > 0f )
+				for ( var si = 0; si < stroke.Samples.Count; si++ )
+				{
+					var s = stroke.Samples[si];
+					stroke.Samples[si] = new BrushSample( s.Position, s.Normal, s.Radius, s.Strength, s.Direction,
+						(JitterHash( AlphaSeed.Value, si ) - 0.5f) * 2f * AlphaJitter.Clamped );
+				}
 
 			if ( stroke.Samples.Count == 0 )
 			{
@@ -528,6 +567,30 @@ public sealed class StrokeFeature : Feature
 		if ( path.Length == 0 )
 			return null;
 
+		// A proc: name that is not a built-in stamp is an unknown stamp, not a missing file:
+		// without this it falls through to the PNG branch and fails as "no file at proc:...".
+		if ( path.StartsWith( "proc:", StringComparison.OrdinalIgnoreCase ) && !BrushAlpha.IsProcedural( path ) )
+			FailOn( "Alpha",
+				"Unknown procedural alpha",
+				$"'{path}' is not a built-in stamp.",
+				"Pick one of: " + string.Join( ", ", BrushAlpha.ProceduralNames ),
+				"Or clear Alpha for a plain brush" );
+
+		if ( LineworkAlpha.IsAlphaSpec( path ) )
+		{
+			if ( !LineworkAlpha.TryResolveSpec( path, out var spec, out var specError ) )
+				FailOn( "Alpha",
+					"The alpha spec is not usable",
+					specError,
+					"Give 'proc:<name>' for a built-in stamp, or 'linework:<path-or-id>' for a drawing",
+					"Or clear Alpha for a plain brush" );
+
+			spec.Scale = AlphaScale.Clamped;
+			spec.RotationDegrees = AlphaRotation.Clamped;
+			spec.Density = AlphaDensity.Clamped;
+			return spec;
+		}
+
 		if ( !File.Exists( path ) )
 		{
 			FailOn( "Alpha PNG",
@@ -539,7 +602,17 @@ public sealed class StrokeFeature : Feature
 
 		var alpha = BrushAlpha.FromPng( File.ReadAllBytes( path ) );
 		alpha.Scale = AlphaScale.Clamped;
+		alpha.RotationDegrees = AlphaRotation.Clamped;
+		alpha.Density = AlphaDensity.Clamped;
 		return alpha;
+	}
+
+	/// <summary>Deterministic 0..1 hash of (seed, index) for per-dab jitter: no Random, so a
+	/// saved feature rebuilds the same jitter on every machine and every run.</summary>
+	static float JitterHash( int seed, int index )
+	{
+		var x = MathF.Sin( seed * 127.1f + index * 311.7f ) * 43758.5453f;
+		return x - MathF.Floor( x );
 	}
 
 	static List<Vec3> Resample( List<Vec3> points, float step )
@@ -594,7 +667,7 @@ public sealed class DetailFeature : Feature
 	public override GeometryKind Accepts => GeometryKind.Body;
 
 	public readonly BodySelectionParam Bodies = new( "Bodies" );
-	public readonly ChoiceParam Pass = new( "Pass", new[] { "Grain", "Pustules", "Scatter", "Sag folds" } );
+	public readonly ChoiceParam Pass = new( "Pass", new[] { "Grain", "Pustules", "Scatter", "Sag folds", "Direction folds", "Anchored folds", "Pores" } );
 
 	/// <summary>Grain: the crease cells' width. Pustules: the biggest one's radius. Scatter: each
 	/// stamp's radius. Sag folds: the distance between fold crests.</summary>
@@ -616,13 +689,19 @@ public sealed class DetailFeature : Feature
 	public readonly Vec3Param Near = new( "Near", Vec3.Zero );
 	public readonly FloatParam Reach = new( "Reach", 0f, 0f, unit: "u" );
 	public readonly Vec3Param Up = new( "Up", new Vec3( 0, 0, 1 ) );
+	/// <summary>Direction folds: direction of compression / muscle pull; crests run perpendicular to it.</summary>
+	public readonly Vec3Param Direction = new( "Direction", new Vec3( 0, 1, 0 ) );
+	/// <summary>Direction folds: rolled-lip height as a share of Depth.</summary>
+	public readonly FloatParam Lip = new( "Lip", 0.5f, 0f, 2f );
+	/// <summary>Direction folds: extra amplitude on the bunched side, 0..1.</summary>
+	public readonly FloatParam Bunch = new( "Bunch", 0.5f, 0f, 1f );
 	public readonly IntParam Seed = new( "Seed", 1, 0, 100000 ) { Slider = false };
 
 	public override IReadOnlyList<IParam> Parameters =>
-		new IParam[] { Bodies, Pass, Size, Depth, Lumps, LumpSize, Clusters, PerCluster, Spread, Spacing, Pits, Busy, BusySize, Only, Near, Reach, Up, Seed };
+		new IParam[] { Bodies, Pass, Size, Depth, Lumps, LumpSize, Clusters, PerCluster, Spread, Spacing, Pits, Busy, BusySize, Only, Near, Reach, Up, Direction, Lip, Bunch, Seed };
 
 	public override IReadOnlyList<IParam> AdvancedParameters =>
-		new IParam[] { Lumps, LumpSize, Clusters, PerCluster, Spread, Spacing, Pits, BusySize, Up, Seed };
+		new IParam[] { Lumps, LumpSize, Clusters, PerCluster, Spread, Spacing, Pits, BusySize, Up, Direction, Lip, Bunch, Seed };
 
 	protected override void Execute( FeatureContext ctx )
 	{
@@ -659,6 +738,33 @@ public sealed class DetailFeature : Feature
 					break;
 				}
 
+				case 3:
+					SurfaceDetail.SagFolds( mesh, mask, new FoldOptions { Spacing = Size.Clamped, Amplitude = Depth.Value, Up = Up.Value, Seed = Seed.Clamped } );
+					break;
+
+				case 4:
+					SurfaceDetail.DirectionFolds( mesh, mask, new DirectionFoldOptions { Direction = Direction.Value, Spacing = Size.Clamped, Amplitude = Depth.Value, Lip = Lip.Clamped, Bunch = Bunch.Clamped, Seed = Seed.Clamped } );
+					break;
+
+				case 5:
+				{
+					// Anchor = Near point; folds hang on the side below it along Up. Distance is
+					// the drop below the anchor; vertices above it are out of reach.
+					var dist = new float[mesh.VertexCount];
+					for ( var v = 0; v < mesh.VertexCount; v++ )
+					{
+						var d = Vec3.Dot( Near.Value - mesh.Positions[v], Up.Value );
+						dist[v] = d > 0f ? d : float.MaxValue;
+					}
+					SurfaceDetail.AnchoredFolds( mesh, dist, v => dist[v] < float.MaxValue,
+						new AnchoredFoldOptions { Count = Clusters.Clamped, First = Size.Clamped * 0.5f, Spacing = Size.Clamped, Amplitude = Depth.Value, Up = Up.Value, Seed = Seed.Clamped } );
+					break;
+				}
+
+				case 6:
+					SurfaceDetail.Pores( mesh, mask, new PoreOptions { Spacing = Spacing.Clamped, Depth = Depth.Value, Seed = Seed.Clamped } );
+					break;
+
 				default:
 					SurfaceDetail.SagFolds( mesh, mask, new FoldOptions { Spacing = Size.Clamped, Amplitude = Depth.Value, Up = Up.Value, Seed = Seed.Clamped } );
 					break;
@@ -673,7 +779,7 @@ public sealed class DetailFeature : Feature
 			var edge = StrokeFeature.MeanEdge( mesh );
 			if ( edge > Size.Clamped * 0.5f )
 			{
-				coarse.Add( $"{body.Name ?? body.Id} (edges {edge:0.##}, size {Size.Clamped:0.##})" );
+				coarse.Add( $"{body.Name ?? body.Id}: the detail is {Size.Clamped:0.##} across and its edges are {edge:0.##} long, so no vertex sits under it" );
 				coarseIds.Add( body.Id );
 				coarsest = MathF.Max( coarsest, edge );
 			}
@@ -702,14 +808,21 @@ public sealed class DetailFeature : Feature
 				"Widen Reach, raise Busy, or set Only to Everywhere" );
 		}
 
+		// Sculpt/paint reporting, 2026-10-25: a detail finer than the mesh is
+			// an error in Stroke's own words, not a parenthetical note. Stroke
+			// fails "the brush is X across and its edges are Y long, so no
+			// vertex sits under it" with Subdivide / bigger-radius remedies;
+			// Detail now fails the same way, with the Subdivide remedy action
+			// attached, whether or not a few vertices happened to move. The
+			// moved-nothing case below is kept for masks that exclude all skin.
 		if ( coarse.Count > 0 )
 		{
-			Warn(
+			Fail(
 				subdivide,
-				"Some detail is finer than the mesh",
-				"Edges longer than half the detail size alias it into facets: " + string.Join( ", ", coarse ) + ".",
-				"Put a Subdivide above this",
-				"Or make Size bigger" );
+				"The detail is finer than the mesh",
+				string.Join( "; ", coarse ) + ".",
+				"Put a Subdivide above this, or make Size bigger",
+				"Widen Reach, raise Busy, or set Only to Everywhere" );
 		}
 	}
 
@@ -736,5 +849,184 @@ public sealed class DetailFeature : Feature
 		}
 
 		return mask;
+	}
+}
+
+/// <summary>
+/// Muscle bulge: a flexed muscle belly on an existing body. Vertices near the
+/// origin-to-insertion axis are pushed along their normals, thickest mid-belly
+/// (sin profile) and fading toward the tendons, so a limb reads flexed rather
+/// than uniformly fat. With Preserve volume on, the mesh is then rescaled about
+/// its centroid to restore its pre-bulge volume, so bulge shortens/thickens
+/// instead of inflating. This is the static half of pose-driven bulge; the
+/// pose-driven half already exists as Corrective Shape Key (angle driver).
+/// </summary>
+public sealed class MuscleBulgeFeature : Feature
+{
+	public override string TypeName => "Muscle bulge";
+	public override GeometryKind Accepts => GeometryKind.Body;
+	public readonly BodySelectionParam Bodies = new( "Bodies" );
+	public readonly Vec3Param Origin = new( "Origin", Vec3.Zero );
+	public readonly Vec3Param Insertion = new( "Insertion", new Vec3( 0, 0, 10 ) );
+	public readonly FloatParam Radius = new( "Radius", 3f, 0.01f, unit: "u" );
+	public readonly FloatParam Bulge = new( "Bulge", 0.5f, unit: "u" );
+	public readonly BoolParam PreserveVolume = new( "Preserve volume", true );
+	public override IReadOnlyList<IParam> Parameters => new IParam[] { Bodies, Origin, Insertion, Radius, Bulge, PreserveVolume };
+	protected override void Execute( FeatureContext ctx )
+	{
+		var axis = Insertion.Value - Origin.Value;
+		var len = axis.Length;
+		if ( len < 1e-6f ) { Fail( "Muscle bulge has no axis", "Origin and Insertion are the same point.", "Move Insertion away from Origin" ); return; }
+		var dir = axis / len;
+		foreach ( var body in RequireBodies( ctx, Bodies ) )
+		{
+			var mesh = body.Mesh;
+			var normals = SurfaceDetail.VertexNormals( mesh );
+			var before = PreserveVolume.Value ? MathF.Abs( PressureBalloon.Volume( mesh ) ) : 0f;
+			for ( var v = 0; v < mesh.VertexCount; v++ )
+			{
+				var rel = mesh.Positions[v] - Origin.Value;
+				var t = Math.Clamp( Vec3.Dot( rel, dir ) / len, 0f, 1f );
+				var closest = Origin.Value + dir * (t * len);
+				var radial = mesh.Positions[v] - closest;
+				var r = radial.Length;
+				var profile = MathF.Pow( MathF.Max( 0f, MathF.Sin( MathF.PI * t ) ), 0.7f );
+				var w = r <= Radius.Clamped ? 1f : MathF.Exp( -((r - Radius.Clamped) / Radius.Clamped) * ((r - Radius.Clamped) / Radius.Clamped) );
+				mesh.Positions[v] += normals[v] * (Bulge.Value * profile * w);
+			}
+			if ( PreserveVolume.Value && before > 1e-9f )
+			{
+				var after = MathF.Abs( PressureBalloon.Volume( mesh ) );
+				if ( after > 1e-9f && float.IsFinite( after ) )
+				{
+					var s = MathF.Pow( before / after, 1f / 3f );
+					var c = mesh.Positions.Aggregate( Vec3.Zero, ( a, b ) => a + b ) / Math.Max( 1, mesh.VertexCount );
+					for ( var v = 0; v < mesh.VertexCount; v++ ) mesh.Positions[v] = c + (mesh.Positions[v] - c) * s;
+				}
+			}
+		}
+	}
+}
+
+/// <summary>
+/// Break symmetry: tertiary detail differs left from right, as real skin does.
+/// Each side of the chosen axis gets a different noise field, so detail (not
+/// primary proportions) stops mirroring. Strength is in model units along the
+/// normal; keep it small relative to the form.
+/// </summary>
+public sealed class AsymmetryFeature : Feature
+{
+	public override string TypeName => "Break symmetry";
+	public override GeometryKind Accepts => GeometryKind.Body;
+	public readonly BodySelectionParam Bodies = new( "Bodies" );
+	public readonly ChoiceParam Axis = new( "Axis", new[] { "X", "Y", "Z" } );
+	public readonly FloatParam Strength = new( "Strength", 0.05f, 0f, unit: "u" );
+	public readonly FloatParam Scale = new( "Scale", 3f, 0.1f, unit: "u" );
+	public readonly IntParam Seed = new( "Seed", 1, 0, 100000 ) { Slider = false };
+	public override IReadOnlyList<IParam> Parameters => new IParam[] { Bodies, Axis, Strength, Scale, Seed };
+	protected override void Execute( FeatureContext ctx )
+	{
+		var ax = Axis.Index switch { 1 => new Vec3( 0, 1, 0 ), 2 => new Vec3( 0, 0, 1 ), _ => new Vec3( 1, 0, 0 ) };
+		var n1 = new Noise3( Seed.Clamped );
+		var n2 = new Noise3( Seed.Clamped + 101 );
+		foreach ( var body in RequireBodies( ctx, Bodies ) )
+		{
+			var mesh = body.Mesh;
+			var normals = SurfaceDetail.VertexNormals( mesh );
+			var c = mesh.Positions.Aggregate( Vec3.Zero, ( a, b ) => a + b ) / Math.Max( 1, mesh.VertexCount );
+			for ( var v = 0; v < mesh.VertexCount; v++ )
+			{
+				var side = Vec3.Dot( mesh.Positions[v] - c, ax ) >= 0f;
+				var noise = side ? n1 : n2;
+				mesh.Positions[v] += normals[v] * (Strength.Value * noise.Sample( mesh.Positions[v] * (1f / Scale.Clamped) ));
+			}
+		}
+	}
+}
+
+/// <summary>
+/// Whole-mesh sculpt filter, exposing <see cref="MeshFilter"/> to scripts,
+/// including SurfaceSmooth (HC-Laplacian: smooths without the shrink of plain
+/// Laplacian). Strength is per iteration, in the filter's own units.
+/// </summary>
+public sealed class MeshFilterFeature : Feature
+{
+	public override string TypeName => "Mesh filter";
+	public override GeometryKind Accepts => GeometryKind.Body;
+	public readonly BodySelectionParam Bodies = new( "Bodies" );
+	public readonly ChoiceParam Filter = new( "Filter", Enum.GetNames( typeof( MeshFilterKind ) ) );
+	public readonly FloatParam Strength = new( "Strength", 0.5f, -1f, 1f );
+	public readonly IntParam Iterations = new( "Iterations", 1, 1, 20 );
+	public override IReadOnlyList<IParam> Parameters => new IParam[] { Bodies, Filter, Strength, Iterations };
+	protected override void Execute( FeatureContext ctx )
+	{
+		var kind = (MeshFilterKind)Math.Clamp( Filter.Index, 0, Enum.GetNames( typeof( MeshFilterKind ) ).Length - 1 );
+		foreach ( var body in RequireBodies( ctx, Bodies ) )
+			MeshFilter.Apply( body.Mesh, kind, Strength.Value, Iterations.Clamped );
+	}
+}
+
+/// <summary>
+/// Path mark: veins, stretch marks, and scars as first-class passes over a
+/// path, instead of hand-painted lines. Vein raises a soft tube-like ridge
+/// and recolours nearby faces to the given slot; Stretch Mark sinks pale
+/// striations; Scar raises a pale keloid ridge. Path is "x,y,z; x,y,z; ...".
+/// </summary>
+public sealed class PathMarkFeature : Feature
+{
+	public override string TypeName => "Path mark";
+	public override GeometryKind Accepts => GeometryKind.Body;
+	public readonly BodySelectionParam Bodies = new( "Bodies" );
+	public readonly ChoiceParam Kind = new( "Kind", new[] { "Vein", "Stretch mark", "Scar" } );
+	public readonly StringParam Path = new( "Path", "" );
+	public readonly FloatParam Width = new( "Width", 0.5f, 0.01f, unit: "u" );
+	public readonly FloatParam Height = new( "Height", 0.1f, unit: "u" );
+	public readonly IntParam Slot = new( "Material slot", 1, 0, 63 ) { Slider = false };
+	public override IReadOnlyList<IParam> Parameters => new IParam[] { Bodies, Kind, Path, Width, Height, Slot };
+	protected override void Execute( FeatureContext ctx )
+	{
+		var pts = new List<Vec3>();
+		foreach ( var piece in (Path.Value ?? "").Split( ';', StringSplitOptions.RemoveEmptyEntries ) )
+		{
+			if ( !ModelMeasure.TryParseVec3( piece.Trim(), out var p ) )
+			{ FailOn( "Path", "A path point cannot be read", $"'{piece.Trim()}' is not x,y,z.", "Write points as x,y,z separated by ;" ); return; }
+			pts.Add( p );
+		}
+		if ( pts.Count < 2 ) { Fail( "Path mark needs a path", "Fewer than two points were given.", "Give two or more points separated by ;" ); return; }
+		float DistToPath( Vec3 p )
+		{
+			var best = float.MaxValue;
+			for ( var i = 0; i + 1 < pts.Count; i++ )
+			{
+				var ab = pts[i + 1] - pts[i];
+				var t = Math.Clamp( ab.LengthSquared > 1e-12f ? Vec3.Dot( p - pts[i], ab ) / ab.LengthSquared : 0f, 0f, 1f );
+				best = Math.Min( best, (p - (pts[i] + ab * t)).Length );
+			}
+			return best;
+		}
+		var sign = Kind.Index == 1 ? -1f : 1f;
+		foreach ( var body in RequireBodies( ctx, Bodies ) )
+		{
+			var mesh = body.Mesh;
+			var normals = SurfaceDetail.VertexNormals( mesh );
+			for ( var v = 0; v < mesh.VertexCount; v++ )
+			{
+				var d = DistToPath( mesh.Positions[v] );
+				if ( d > Width.Clamped * 2f ) continue;
+				var w = MathF.Exp( -(d / Width.Clamped) * (d / Width.Clamped) );
+				mesh.Positions[v] += normals[v] * (sign * Height.Value * w);
+			}
+			for ( var f = 0; f < mesh.FaceCount; f++ )
+			{
+				var face = mesh.Faces[f];
+				// Any corner within Width recolours the face: centroid distance
+				// misses the band on coarse meshes, where centroids sit off-path
+				// even though the face itself straddles the mark.
+				var near = false;
+				foreach ( var i in face.Indices )
+					if ( DistToPath( mesh.Positions[i] ) <= Width.Clamped ) { near = true; break; }
+				if ( near ) face.Material = Slot.Clamped;
+			}
+		}
 	}
 }

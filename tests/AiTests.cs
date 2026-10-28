@@ -187,34 +187,36 @@ internal static class AiTests
             Assert(File.Exists(Path.Combine(options.Output, "round-00.effigy")));
             Assert(JsonNode.Parse(File.ReadAllText(Path.Combine(options.Output, "stopped.json")))!["targetMet"]!.GetValue<bool>() == false);
         });
-        r.Add("ai", "actual EGL build judge revise reaches target", () => {
-            var handler = new ScriptHandler();
-            var options = new AiOptions { Command = "create", Model = "fixture", Endpoint = "http://localhost:5678/v1/", Output = Path.Combine(settings.WorkDirectory, "ai-judge-egl"), Prompt = "make a test block", Judge = true, Vision = true, Calls = 15 };
+        Check("builder can use more than 24 tool rounds within its explicit budget", () => {
+            var handler = new LongBuildHandler();
+            var options = new AiOptions { Command = "create", Model = "fixture", Endpoint = "http://localhost:5678/v1/", Output = Path.Combine(settings.WorkDirectory, "ai-long-build"), Prompt = "make a test block", Calls = 28 };
             Assert(new AiSession(options, new HttpClient(handler)).RunAsync(default).GetAwaiter().GetResult() == 0);
-            Assert(handler.JudgeCalls == 2 && handler.BuildCalls == 4);
-            Assert(Directory.GetFiles(options.Output, "*.png").Length == 10);
+            Assert(handler.Calls == 28);
+            Assert(File.Exists(Path.Combine(options.Output, "task-00-best.effigy")));
+        });
+        Check("legacy judge flags do not grade revise render or require another provider", () => {
+            var handler = new ScriptHandler();
+            var options = new AiOptions { Command = "create", Model = "fixture", Endpoint = "http://localhost:5678/v1/", Output = Path.Combine(settings.WorkDirectory, "ai-no-auto-judge"), Prompt = "make a test block", Judge = true, JudgeProvider = "not-a-provider", RubricPath = "/missing/rubric.json", Target = 10, Floor = 10, Rounds = 12, Calls = 2 };
+            Assert(new AiSession(options, new HttpClient(handler)).RunAsync(default).GetAwaiter().GetResult() == 0);
+            Assert(handler.BuildCalls == 2);
+            Assert(Directory.GetFiles(options.Output, "*.png").Length == 0);
+            Assert(!Directory.GetFiles(options.Output, "*judge*.json").Any());
+            Assert(!Directory.GetFiles(options.Output, "*rubric*.json").Any());
+            Assert(!Directory.GetFiles(options.Output, "*backstop*.json").Any());
             var result = JsonNode.Parse(File.ReadAllText(Path.Combine(options.Output, "task-00-result.json")))!;
-            Assert(result["status"]!.GetValue<string>() == "target-met");
-            var best = Effigy.StudioDocument.ReadFile(Path.Combine(options.Output, "task-00-best.effigy"));
-            Assert(((Effigy.PrimitiveFeature)best.Features.Single()).SizeX.Value == 16);
-        }, () => Environment.GetEnvironmentVariable("AI_REQUIRE_EGL") == "1" ? null : "Set AI_REQUIRE_EGL=1 for real windowless rendering + mocked provider integration.");
-        r.Add("ai", "actual EGL plateau returns below target and best not latest", () => {
-            var handler = new ScriptHandler(new[]{6, 5, 5});
-            var options = new AiOptions { Command = "create", Model = "fixture", Endpoint = "http://localhost:5678/v1/", Output = Path.Combine(settings.WorkDirectory, "ai-plateau-egl"), Prompt = "make a test block", Judge = true, Vision = true, Calls = 15 };
-            Assert(new AiSession(options, new HttpClient(handler)).RunAsync(default).GetAwaiter().GetResult() == 2);
-            var result = JsonNode.Parse(File.ReadAllText(Path.Combine(options.Output, "task-00-result.json")))!;
-            Assert(result["status"]!.GetValue<string>() == "plateau-below-target");
+            Assert(result["status"]!.GetValue<string>() == "built-unjudged");
             Assert(!result["targetMet"]!.GetValue<bool>());
+            Assert(result["rounds"]!.AsArray().Count == 0);
             var best = Effigy.StudioDocument.ReadFile(Path.Combine(options.Output, "task-00-best.effigy"));
             Assert(((Effigy.PrimitiveFeature)best.Features.Single()).SizeX.Value == 12);
-        }, () => Environment.GetEnvironmentVariable("AI_REQUIRE_EGL") == "1" ? null : "Set AI_REQUIRE_EGL=1 for real windowless plateau regression.");
-        r.Add("ai", "actual EGL budget stop records earlier best selection", () => {
-            var options = new AiOptions { Command = "create", Model = "fixture", Endpoint = "http://localhost:5678/v1/", Output = Path.Combine(settings.WorkDirectory, "ai-judge-budget-egl"), Prompt = "make a test block", Judge = true, Vision = true, Calls = 4 };
+        });
+        Check("legacy judge flag cannot spend an extra call after the builder budget", () => {
+            var options = new AiOptions { Command = "create", Model = "fixture", Endpoint = "http://localhost:5678/v1/", Output = Path.Combine(settings.WorkDirectory, "ai-no-judge-budget"), Prompt = "make a test block", Judge = true, Calls = 1 };
             Throws(() => new AiSession(options, new HttpClient(new ScriptHandler())).RunAsync(default).GetAwaiter().GetResult());
             var stop = JsonNode.Parse(File.ReadAllText(Path.Combine(options.Output, "stopped.json")))!;
-            Assert(stop["calls"]!.GetValue<int>() == 4);
-            Assert(stop["bestCheckpoint"]!.GetValue<string>() == "round-00.effigy");
-        }, () => Environment.GetEnvironmentVariable("AI_REQUIRE_EGL") == "1" ? null : "Set AI_REQUIRE_EGL=1 for checkpoint stop regression.");
+            Assert(stop["calls"]!.GetValue<int>() == 1);
+            Assert(File.Exists(Path.Combine(options.Output, "round-00.effigy")));
+        });
         foreach (string kind in new[]{"openai", "anthropic", "google"})
         Check(kind + " request and tool response round trip", () => {
             var handler = new StubHandler(kind);
@@ -233,25 +235,36 @@ internal static class AiTests
         });
     }
 
-    sealed class ScriptHandler(int[]? scores = null) : HttpMessageHandler
+    sealed class LongBuildHandler : HttpMessageHandler
     {
-        public int BuildCalls, JudgeCalls;
+        public int Calls;
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            Calls++;
+            var message = new JsonObject { ["role"] = "assistant", ["content"] = "Built." };
+            if (Calls <= 27)
+            {
+                string name = Calls == 27 ? "add_feature" : "catalog";
+                var args = Calls == 27 ? new JsonObject { ["type"] = "Primitive", ["fields"] = new JsonObject() } : new JsonObject();
+                message["tool_calls"] = new JsonArray(new JsonObject { ["id"] = "tool-" + Calls, ["type"] = "function", ["function"] = new JsonObject { ["name"] = name, ["arguments"] = args.ToJsonString() } });
+            }
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(new JsonObject { ["choices"] = new JsonArray(new JsonObject { ["message"] = message }) }.ToJsonString(), Encoding.UTF8, "application/json") });
+        }
+    }
+
+    sealed class ScriptHandler : HttpMessageHandler
+    {
+        public int BuildCalls;
         string featureId = "";
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             var body = JsonNode.Parse(await request.Content!.ReadAsStringAsync(ct))!;
             string system = body["messages"]![0]!["content"]!.GetValue<string>();
             string text; JsonArray? calls = null;
-            if (system.StartsWith("Design an evidence-based", StringComparison.Ordinal)) text = "{\"target\":9,\"floor\":7,\"maxRounds\":3,\"plateauRounds\":2,\"minImprovement\":0.2,\"categories\":[{\"name\":\"form\",\"weight\":1,\"description\":\"proportions against brief\"}]}";
-            else if (system.StartsWith("You are an independent", StringComparison.Ordinal))
-            {
-                JudgeCalls++;
-                // Actual PNGs must be carried to the independent judge over the protocol.
-                if (!body.ToJsonString().Contains("data:image/png;base64,")) throw new Exception("No visual evidence supplied");
-                int score = scores == null ? (JudgeCalls == 1 ? 6 : 9) : scores[Math.Min(scores.Length - 1, JudgeCalls - 1)];
-                text = $"{{\"categories\":[{{\"name\":\"form\",\"score\":{score},\"evidence\":\"front/side render proportions\",\"fix\":\"increase width to 16\"}}]}}";
-            }
-            else
+            if (!system.StartsWith("You are Geppetto's creation assistant.", StringComparison.Ordinal))
+                throw new Exception("Unexpected non-builder provider call: " + system);
+            foreach (string removed in new[] { "LOCKED RUBRIC", "primitive pile", "primary forms", "TOPOLOGY RULES" })
+                if (system.Contains(removed)) throw new Exception("Prescriptive workflow was injected: " + removed);
             {
                 BuildCalls++;
                 if (BuildCalls % 2 == 0)

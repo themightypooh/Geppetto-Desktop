@@ -1,0 +1,13 @@
+{
+  "id": "gate-1793053004-e8481292",
+  "pid": 52407,
+  "registered_at": 1793053007.042754,
+  "run": "/home/poo/.local/share/geppetto/research/script-export_piranha-20261026-181646-52390",
+  "script": "/home/poo/games/projects/fishyflop/tools/effigy/export_piranha.txt",
+  "script_hash": "fb2416e8fc633a864b93b3c62b5cbc42156ca242943015812f951abed6c6c28c",
+  "session": "grok-20261026-fishyflop",
+  "subject": "yo get the mf barraciuda and pirahnana models in mf fishy flop projct",
+  "used_at": 1793053006.9600425,
+  "worker": "grok-fishyflop",
+  "yes_at": 1793053006.4416754
+}

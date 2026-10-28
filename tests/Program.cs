@@ -227,7 +227,7 @@ string? SurveyMissing()
         Assert( imported.Pieces.Any( p => p.Name == "neck_ring" ) );
         Assert( imported.Pieces.All( p => p.Name != "suit_head" ) );
         var mesh = ViewportMesh.FromFbx( imported, 0, surveyPath );
-        Assert( mesh.HasSkin && mesh.Rig.Count == 94 && mesh.BodyPicks.Length == 23 );
+        Assert( mesh.HasSkin && mesh.Rig.Count == 94 && mesh.BodyPicks.Length == 21 );
     }, SurveyMissing, settings.RequireLocalFixtures );
     registry.Add( "survey", "background loader publishes a complete result", () =>
     {

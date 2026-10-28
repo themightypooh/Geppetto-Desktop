@@ -1,0 +1,23 @@
+{
+  "cancel_reason": "launch dispatch failed: reserved viewport is gone or Geppetto closed \u2014 no run started",
+  "created_at": 1793005314.4271314,
+  "doc": "-",
+  "id": "gate-1793005313-006c4829",
+  "out": "/home/poo/workspace/her-separate",
+  "pane": "2",
+  "preflight": {
+    "errors": [],
+    "first_geom_line": 9,
+    "first_shape": "Profile",
+    "lines": 65,
+    "materials_before_first": 2,
+    "ok": true,
+    "rotated_boxes": 0
+  },
+  "script": "/home/poo/workspace/her-separate/her-separate.txt",
+  "script_hash": "ed41a2c857d229557b531aae0b27cbc9d139d4bb24e4f797118a4a2739cc593a",
+  "session": "fdca4882-6f7e-44d9-9644-47a158969d07",
+  "status": "cancelled",
+  "subject": "blonde woman, separate shirt, pants, socks, undies and bra, arcade character method, full body",
+  "worker": "subagent-her-separate-paneonly"
+}

@@ -216,7 +216,7 @@ public static class SkinBlockout
 			}
 
 			if ( best < 0 )
-				throw new InvalidOperationException( "A joint has more than six bones meeting at it, which is more than a cube joint can take. Build it with hull joints instead, which take any number." );
+				throw new InvalidOperationException( $"A joint at {nodes[node].x:0.##},{nodes[node].y:0.##},{nodes[node].z:0.##} has more than six bones meeting at it, which is more than a cube joint can take. Build it with hull joints instead (Body from Bones joints=Hull, or joints=Auto), which take any number." );
 
 			faceTaken[node][best] = true;
 			return best;

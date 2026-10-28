@@ -13,9 +13,15 @@ namespace Effigy;
 /// Modes:
 /// - Grid: Count stations along the target's longest axis, Rings angles around it.
 /// - StationRing: Rings stations along the axis, Count instances around each ring.
-/// - CurveIMM: ZBrush tri-part welded brushes along a named Spline: the first
+/// - CurveIMM: ZBrush tri-part brushes along a named Spline: the first
 ///   instance is StartCap, the last is EndCap, the rest are Middle, all welded into
 ///   one body, each link rolled 90 degrees from its neighbours like a real chain.
+///   Merged is not welded: the links interlock geometrically but share NO vertices,
+///   and no Weld option ships — a MeshWeld pass was tried and measured (see
+///   BuildCurveImm and CurveImmWeldTests): it joins same-parity rings but turns
+///   them non-manifold, so it makes the mesh worse, not welded. True single-shell
+///   welding needs a working exact boolean union, which today still fails on
+///   overlapping bolts and leaves boundary edges on cap-bolt pairs.
 ///   An empty cap name falls back to Source. Target is not used in this mode —
 ///   the chain hangs on the curve, not on a surface.
 /// - Poisson: Count area-weighted random points, Spacing as a minimum distance when set.
@@ -69,8 +75,50 @@ public sealed class ScatterFeature : Feature
 	/// <summary>CurveIMM only: library part or body name for the last link. Empty = Source.</summary>
 	public readonly StringParam EndCap = new( "End cap", "" );
 
+	/// <summary>Random seed for placement and jitter. Default 12345 is the
+	/// hardcoded seed every scatter used before, so old documents rebuild identically.</summary>
+	public readonly IntParam Seed = new( "Seed", 12345, 0, 1000000 );
+
+	/// <summary>Per-instance rotation jitter in degrees, in the instance local frame after AlignToNormal/Tilt. 0 = off.</summary>
+	public readonly FloatParam RotJitter = new( "Rot jitter", 0f, 0f, 180f, "deg" );
+
+	/// <summary>Per-instance uniform scale jitter as a fraction: scale is multiplied by 1 +/- this. 0 = off.</summary>
+	public readonly FloatParam ScaleJitter = new( "Scale jitter", 0f, 0f, 1f );
+
+	/// <summary>Variant sources with weights, as name:weight pairs, e.g. Bolt:0.7,LongBolt:0.2,Empty:0.1. Empty places nothing (a deliberate gap). Names resolve like Source: library parts or bodies above this feature.</summary>
+	public readonly StringParam Variants = new( "Variants", "" );
+
+	/// <summary>Density falloff at the domain edges, as a fraction of the domain: density fades from 0 at the edge to full at this distance inside. 0 = hard edge, as before.</summary>
+	public readonly FloatParam Falloff = new( "Falloff", 0f, 0f, 1f );
+
+	/// <summary>Particles-performance budget guard (P1): fail before the Clone loop when the
+	/// estimated triangle total exceeds this. 0 = off, so existing documents rebuild identically.
+	/// The estimate is placements x the largest source/variant triangle count, an upper bound.</summary>
+	public readonly IntParam MaxTris = new( "Max tris", 0, 0, 100000000 );
+
+	/// <summary>Particles-performance source LOD (P3): when between 0 and 1, the clone source is
+	/// Decimate.ToRatio(source, this) before placement, so instances stay clean at the reduced
+	/// resolution instead of melting a merged mesh afterwards. 0 = off. The source body itself
+	/// is never changed: Decimate works on its own copy.</summary>
+	public readonly FloatParam SourceLod = new( "Source LOD", 0f, 0f, 1f );
+
+	/// <summary>Particles-performance far variant (P4): when above 0, a second body
+	/// '&lt;name&gt;_Far' is emitted from a strided subset of the same placements (every k-th, so at
+	/// most this many instances), with its source reduced by FarSourceLod. It is an authored
+	/// distant body, not a runtime switch: Geppetto has no runtime LOD switch.</summary>
+	public readonly IntParam FarCount = new( "Far count", 0, 0, 100000 );
+
+	/// <summary>Source reduction ratio for the far variant body. 0 = same source as the near body.</summary>
+	public readonly FloatParam FarSourceLod = new( "Far source LOD", 0.25f, 0f, 1f );
+
+	/// <summary>Per-instance material slots, as comma-separated slot numbers, e.g. 1,2,3. Each instance faces get one slot picked at random from the list, using the seeded rng, so results stay deterministic per seed. Empty = todays behaviour (source material kept), so old documents rebuild identically. Surface modes only; CurveIMM is untouched.</summary>
+	public readonly StringParam TintSlots = new( "Tint slots", "" );
+
+	/// <summary>Clumping for Poisson mode, 0..1: 0 = todays even area-weighted spread; as cluster rises, placements concentrate around a shrinking number of fixed seed centres (1 centre at cluster 1, roughly count/20 centres at cluster 0), so patches form with gaps between them instead of a connected random walk across the whole surface. Grid/StationRing/Curve modes are untouched.</summary>
+	public readonly FloatParam Cluster = new( "Cluster", 0f, 0f, 1f );
+
 	public override IReadOnlyList<IParam> Parameters =>
-		new IParam[] { Source, Target, Mode, Domain, ScaleCurve, Curve, Count, Rings, Spacing, Jitter, AlignToNormal, Tilt, Size, Length, Thickness, Sides, PartAngle, StartCap, Middle, EndCap };
+		new IParam[] { Source, Target, Mode, Domain, ScaleCurve, Curve, Count, Rings, Spacing, Jitter, AlignToNormal, Tilt, Size, Length, Thickness, Sides, PartAngle, StartCap, Middle, EndCap, Seed, RotJitter, ScaleJitter, Variants, Falloff, TintSlots, Cluster, MaxTris, SourceLod, FarCount, FarSourceLod };
 
 	protected override void Execute( FeatureContext ctx )
 	{
@@ -104,22 +152,22 @@ public sealed class ScatterFeature : Feature
 		var domain = ParseDomain( Domain.Value );
 		var scaleCurve = ParseScaleCurve( ScaleCurve.Value );
 		var axis = new SurfaceFrame( target );
-		var rng = new Random( 12345 );
+		var rng = new Random( Seed.Clamped );
 		var placements = new List<Placement>();
 
 		switch ( Mode.Value )
 		{
 			case "Grid":
-				GenerateGrid( axis, target, domain, scaleCurve, Count.Clamped, Rings.Clamped, Spacing.Clamped, Jitter.Clamped, rng, placements );
+				GenerateGrid( axis, target, domain, scaleCurve, Count.Clamped, Rings.Clamped, Spacing.Clamped, Jitter.Clamped, Falloff.Clamped, rng, placements );
 				break;
 			case "StationRing":
-				GenerateGrid( axis, target, domain, scaleCurve, Rings.Clamped, Count.Clamped, Spacing.Clamped, Jitter.Clamped, rng, placements );
+				GenerateGrid( axis, target, domain, scaleCurve, Rings.Clamped, Count.Clamped, Spacing.Clamped, Jitter.Clamped, Falloff.Clamped, rng, placements );
 				break;
 			case "Poisson":
-				GeneratePoisson( axis, target, domain, scaleCurve, Count.Clamped, Spacing.Clamped, rng, placements );
+				GeneratePoisson( axis, target, domain, scaleCurve, Count.Clamped, Spacing.Clamped, Falloff.Clamped, Cluster.Clamped, rng, placements );
 				break;
 			case "Curve":
-				GenerateCurve( ctx, axis, target, domain, scaleCurve, Count.Clamped, placements );
+				GenerateCurve( ctx, axis, target, domain, scaleCurve, Count.Clamped, Falloff.Clamped, rng, placements );
 				break;
 			default:
 				Fail( $"Scatter mode '{Mode.Value}' is not a mode.", "Grid, Poisson, Curve, StationRing and CurveIMM are.",
@@ -127,23 +175,110 @@ public sealed class ScatterFeature : Feature
 				break;
 		}
 
+		if ( Mode.Value == "Poisson" && placements.Count > 0 && placements.Count < Count.Clamped )
+			Warn( $"Scatter placed {placements.Count} of {Count.Clamped} instances.", "Poisson spacing and domain left no room for the rest, or the attempt cap was hit.", "Lower Spacing", "Widen the domain" );
+
 		if ( placements.Count == 0 )
 			Fail( "Scatter placed nothing.",
 				"The domain, spacing or curve left no point on the target surface.",
 				"Widen the domain", "Lower Spacing", "Check the curve runs near the target" );
 
+		var tintSlots = ParseTintSlots( TintSlots.Value );
+		var askedNominal = Mode.Value switch
+		{
+			"Grid" => Count.Clamped * Rings.Clamped,
+			"StationRing" => Rings.Clamped * Count.Clamped,
+			_ => Count.Clamped,
+		};
+		AppendNote( $"Scatter placement: placed {placements.Count} of {askedNominal} asked, mean nearest-neighbour distance {MeanNearestNeighbour( placements ):F2}, domain area {TargetArea( target ):F1}" );
+
+		var variantList = ParseVariants( Variants.Value, ctx );
+
 		var tilt = Tilt.Value * MathF.PI / 180f;
 		var tiltXform = Xform.Rotate( new Vec3( 0, 0, 1 ), tilt.z )
 			* Xform.Rotate( new Vec3( 0, 1, 0 ), tilt.y )
 			* Xform.Rotate( new Vec3( 1, 0, 0 ), tilt.x );
+// P1 budget guard, P2 instance logging, P3 source LOD: all before any Clone, so a
+		// refused scatter costs nothing and the estimate is visible even when it passes.
+		PolyMesh Reduce( PolyMesh mesh, float ratio ) =>
+			ratio > 0f && ratio < 1f ? Decimate.ToRatio( mesh, ratio ) : mesh;
+
+		var sourceTris = Decimate.TriangleCount( source );
+		var maxSourceTris = sourceTris;
+
+		foreach ( var v in variantList )
+			if ( v.Mesh is not null )
+				maxSourceTris = Math.Max( maxSourceTris, Decimate.TriangleCount( v.Mesh ) );
+
+		var estimate = (long)placements.Count * maxSourceTris;
+
+		if ( MaxTris.Clamped > 0 && estimate > MaxTris.Clamped )
+			Fail( $"Scatter would emit about {estimate} triangles, over maxtris={MaxTris.Clamped}.",
+				$"That is {placements.Count} placements of a source up to {maxSourceTris} triangles each, counted before any instance was cloned.",
+				"Lower Count", "Lower Rings", "Use a lower-poly source", "Set sourcelod= to reduce the source", "Set a far variant instead of the full scatter" );
+
+		var modeNote = Mode.Value switch
+		{
+			"Grid" => $" (Grid {Count.Clamped} x {Rings.Clamped})",
+			"StationRing" => $" (StationRing {Rings.Clamped} x {Count.Clamped})",
+			"Poisson" when placements.Count < Count.Clamped => $" (Poisson requested {Count.Clamped})",
+			_ => "",
+		};
+
+		Info( $"Scatter placed {placements.Count} instances of '{Source.Value}' ({sourceTris} tris each{(variantList.Count > 0 ? $", variants up to {maxSourceTris} tris each" : "")}) = about {estimate} tris{modeNote}" );
+
+		var effSource = Reduce( source, SourceLod.Clamped );
+		var lodMap = new Dictionary<PolyMesh, PolyMesh>();
+
+		foreach ( var v in variantList )
+			if ( v.Mesh is not null )
+				lodMap[v.Mesh] = Reduce( v.Mesh, SourceLod.Clamped );
+
 		var result = new PolyMesh();
+		var variantCounts = new int[variantList.Count];
 
 		foreach ( var p in placements )
 		{
-			var instance = source.Clone();
+			var instanceSource = effSource;
 
-			if ( p.Scale != 1f )
-				MeshTransform.Apply( instance, Xform.Scale( new Vec3( p.Scale, p.Scale, p.Scale ) ) );
+			if ( variantList.Count > 0 )
+			{
+				var roll = (float)rng.NextDouble();
+				PolyMesh picked = null;
+
+				for ( var vi = 0; vi < variantList.Count; vi++ )
+				{
+					if ( roll <= variantList[vi].Cumulative )
+					{
+						picked = variantList[vi].Mesh;
+						variantCounts[vi]++;
+						break;
+					}
+				}
+
+				if ( picked is null )
+					continue;
+
+					instanceSource = lodMap.TryGetValue( picked, out var lodMesh ) ? lodMesh : picked;
+			}
+
+			var instance = instanceSource.Clone();
+
+			if ( tintSlots.Count > 0 )
+			{
+				var tint = tintSlots[rng.Next( tintSlots.Count )];
+
+				foreach ( var f in instance.Faces )
+					f.Material = tint;
+			}
+
+			var scale = p.Scale;
+
+			if ( ScaleJitter.Clamped > 0f )
+				scale *= MathF.Max( 0.05f, 1f + (float)(rng.NextDouble() * 2 - 1) * ScaleJitter.Clamped );
+
+			if ( scale != 1f )
+				MeshTransform.Apply( instance, Xform.Scale( new Vec3( scale, scale, scale ) ) );
 
 			var z = AlignToNormal.Value ? p.Normal.Normal : new Vec3( 0, 0, 1 );
 			var helper = MathF.Abs( z.y ) < 0.9f ? new Vec3( 0, 1, 0 ) : new Vec3( 1, 0, 0 );
@@ -153,11 +288,120 @@ public sealed class ScatterFeature : Feature
 			y = tiltXform.TransformDirection( y );
 			z = tiltXform.TransformDirection( z );
 
+			if ( RotJitter.Clamped > 0f )
+			{
+				var jr = Xform.Rotate( new Vec3( 1, 0, 0 ), (float)(rng.NextDouble() * 2 - 1) * RotJitter.Clamped * MathF.PI / 180f )
+					* Xform.Rotate( new Vec3( 0, 1, 0 ), (float)(rng.NextDouble() * 2 - 1) * RotJitter.Clamped * MathF.PI / 180f )
+					* Xform.Rotate( new Vec3( 0, 0, 1 ), (float)(rng.NextDouble() * 2 - 1) * RotJitter.Clamped * MathF.PI / 180f );
+				x = jr.TransformDirection( x );
+				y = jr.TransformDirection( y );
+				z = jr.TransformDirection( z );
+			}
+
 			MeshTransform.Apply( instance, new Xform( x, y, z, p.Point ) );
 			MeshTransform.Append( result, instance );
 		}
 
+		var tris = 0;
+
+		foreach ( var f in result.Faces )
+			tris += Math.Max( 0, f.Count - 2 );
+
+		if ( tris > 200000 && Diagnostic is null )
+			Warn( $"Scatter emitted about {tris} triangles.", "Large scatters get heavy to edit, save and render.", "Lower Count", "Use a lower-poly source" );
+
 		ctx.Bodies.Add( new Body( ctx.NewBodyId(), Name ?? $"Scatter {Source.Value}", result ) );
+
+		if ( variantList.Count > 0 )
+		{
+			// Info, not Warn: counts are information, and Warning already
+			// carries the placement note — Info appends to the feature's
+			// info line instead of overwriting or being suppressed.
+			var parts = new List<string>();
+			for ( var vi = 0; vi < variantList.Count; vi++ )
+				parts.Add( $"{variantList[vi].Name}={variantCounts[vi]}" );
+			Info( $"scatter: {string.Join( ", ", parts )}" );
+		}
+
+		// P4 far variant: strided subset of the SAME placements, reduced source. This loop
+		// mirrors the main loop (variants, tint, jitter, tilt) so the far body cannot drift
+		// from it; the merged-body form is kept (P5): one more merged body, never one per instance.
+		if ( FarCount.Clamped > 0 )
+		{
+			var stride = Math.Max( 1, (int)Math.Ceiling( (double)placements.Count / FarCount.Clamped ) );
+			var farPlacements = placements.Where( ( _, i ) => i % stride == 0 ).ToList();
+			var farSource = Reduce( source, FarSourceLod.Clamped );
+			var farLodMap = new Dictionary<PolyMesh, PolyMesh>();
+
+			foreach ( var v in variantList )
+				if ( v.Mesh is not null )
+					farLodMap[v.Mesh] = Reduce( v.Mesh, FarSourceLod.Clamped );
+
+			var farResult = new PolyMesh();
+
+			foreach ( var fp in farPlacements )
+			{
+				var farInstanceSource = farSource;
+
+				if ( variantList.Count > 0 )
+				{
+					var farRoll = (float)rng.NextDouble();
+					PolyMesh farPicked = null;
+
+					foreach ( var v in variantList )
+						if ( farRoll <= v.Cumulative ) { farPicked = v.Mesh; break; }
+
+					if ( farPicked is null )
+						continue;
+
+					farInstanceSource = farLodMap.TryGetValue( farPicked, out var farLodMesh ) ? farLodMesh : farPicked;
+				}
+
+				var farInstance = farInstanceSource.Clone();
+
+				if ( tintSlots.Count > 0 )
+				{
+					var farTint = tintSlots[rng.Next( tintSlots.Count )];
+
+					foreach ( var f in farInstance.Faces )
+						f.Material = farTint;
+				}
+
+				var farScale = fp.Scale;
+
+				if ( ScaleJitter.Clamped > 0f )
+					farScale *= MathF.Max( 0.05f, 1f + (float)(rng.NextDouble() * 2 - 1) * ScaleJitter.Clamped );
+
+				if ( farScale != 1f )
+					MeshTransform.Apply( farInstance, Xform.Scale( new Vec3( farScale, farScale, farScale ) ) );
+
+				var fz = AlignToNormal.Value ? fp.Normal.Normal : new Vec3( 0, 0, 1 );
+				var fhelper = MathF.Abs( fz.y ) < 0.9f ? new Vec3( 0, 1, 0 ) : new Vec3( 1, 0, 0 );
+				var fx = Vec3.Cross( fhelper, fz ).Normal;
+				var fy = Vec3.Cross( fz, fx );
+				fx = tiltXform.TransformDirection( fx );
+				fy = tiltXform.TransformDirection( fy );
+				fz = tiltXform.TransformDirection( fz );
+
+				if ( RotJitter.Clamped > 0f )
+				{
+					var fjr = Xform.Rotate( new Vec3( 1, 0, 0 ), (float)(rng.NextDouble() * 2 - 1) * RotJitter.Clamped * MathF.PI / 180f )
+						* Xform.Rotate( new Vec3( 0, 1, 0 ), (float)(rng.NextDouble() * 2 - 1) * RotJitter.Clamped * MathF.PI / 180f )
+						* Xform.Rotate( new Vec3( 0, 0, 1 ), (float)(rng.NextDouble() * 2 - 1) * RotJitter.Clamped * MathF.PI / 180f );
+					fx = fjr.TransformDirection( fx );
+					fy = fjr.TransformDirection( fy );
+				fz = fjr.TransformDirection( fz );
+				}
+
+				MeshTransform.Apply( farInstance, new Xform( fx, fy, fz, fp.Point ) );
+				MeshTransform.Append( farResult, farInstance );
+			}
+
+			var farTris = Decimate.TriangleCount( farResult );
+			var scatterName = Name ?? $"Scatter {Source.Value}";
+			Info( $"Scatter far variant '{scatterName}_Far': {farPlacements.Count} instances x {Decimate.TriangleCount( farSource )} tris = about {farTris} tris (strided every {stride})" );
+			ctx.Bodies.Add( new Body( ctx.NewBodyId(), scatterName + "_Far", farResult ) );
+		}
 	}
 
 	PolyMesh ResolveSource( FeatureContext ctx )
@@ -178,6 +422,190 @@ public sealed class ScatterFeature : Feature
 			Fail( $"Scatter's source '{name}' is neither a library part nor a body above it.",
 				"Library parts are Cog, Bolt, Rivet, ToothCone and the rest of PartLibrary.Names; a body source must have run before this one.",
 				"Check the source name", "Put the source body first" );
+
+		return body!.Mesh;
+	}
+
+List<int> ParseTintSlots( string text )
+	{
+		var list = new List<int>();
+
+		if ( string.IsNullOrWhiteSpace( text ) )
+			return list;
+
+		foreach ( var piece in text.Split( ',' ) )
+		{
+			if ( !int.TryParse( piece.Trim(), out var slot ) || slot < 0 )
+				Fail( $"Scatter's tint slots '{text}' do not parse.", "Tint slots want slot numbers, as in 1,2,3.", "Write 1,2,3" );
+
+			list.Add( slot );
+		}
+
+		return list;
+	}
+
+	/// <summary>Append an informational note to the feature's log line (the "(note: ...)" suffix on "added Scatter ..."). Appends, never overwrites, because a Poisson partial-placement warning may already be set.</summary>
+	void AppendNote( string note )
+	{
+		Warning = string.IsNullOrEmpty( Warning ) ? note : Warning + "; " + note;
+	}
+
+	static float TargetArea( PolyMesh target )
+	{
+		var total = 0f;
+
+		foreach ( var f in target.Faces )
+			for ( var k = 1; k + 1 < f.Count; k++ )
+				total += Vec3.Cross( target.Positions[f.Indices[k]] - target.Positions[f.Indices[0]], target.Positions[f.Indices[k + 1]] - target.Positions[f.Indices[0]] ).Length * 0.5f;
+
+		return total;
+	}
+
+	static float MeanNearestNeighbour( List<Placement> placements )
+	{
+		var n = placements.Count;
+
+		if ( n < 2 )
+			return 0f;
+
+		// Exact brute force for the counts a headless test can assert on; a
+		// spatial grid for very large scatters, where O(n^2) would dominate.
+		if ( n <= 2000 )
+		{
+			var sum = 0f;
+
+			for ( var i = 0; i < n; i++ )
+			{
+				var best = float.MaxValue;
+
+				for ( var j = 0; j < n; j++ )
+					if ( j != i )
+						best = MathF.Min( best, (placements[i].Point - placements[j].Point).Length );
+
+				sum += best;
+			}
+
+			return sum / n;
+		}
+
+		var min = new Vec3( float.MaxValue, float.MaxValue, float.MaxValue );
+		var max = new Vec3( float.MinValue, float.MinValue, float.MinValue );
+
+		foreach ( var p in placements )
+		{
+			min = new Vec3( MathF.Min( min.x, p.Point.x ), MathF.Min( min.y, p.Point.y ), MathF.Min( min.z, p.Point.z ) );
+			max = new Vec3( MathF.Max( max.x, p.Point.x ), MathF.Max( max.y, p.Point.y ), MathF.Max( max.z, p.Point.z ) );
+		}
+
+		var cell = MathF.Max( 1e-3f, (max - min).Length / MathF.Sqrt( n ) );
+		var grid = new Dictionary<(int, int, int), List<int>>();
+
+		for ( var i = 0; i < n; i++ )
+		{
+			var key = ((int)MathF.Floor( (placements[i].Point.x - min.x) / cell ), (int)MathF.Floor( (placements[i].Point.y - min.y) / cell ), (int)MathF.Floor( (placements[i].Point.z - min.z) / cell ));
+
+			if ( !grid.TryGetValue( key, out var cellList ) )
+				grid[key] = cellList = new List<int>();
+
+			cellList.Add( i );
+		}
+
+		var total = 0f;
+
+		for ( var i = 0; i < n; i++ )
+		{
+			var cx = (int)MathF.Floor( (placements[i].Point.x - min.x) / cell );
+			var cy = (int)MathF.Floor( (placements[i].Point.y - min.y) / cell );
+			var cz = (int)MathF.Floor( (placements[i].Point.z - min.z) / cell );
+			var best = float.MaxValue;
+
+			for ( var ring = 0; ring <= 10 && best > ring * cell; ring++ )
+				for ( var dx = -ring; dx <= ring; dx++ )
+				for ( var dy = -ring; dy <= ring; dy++ )
+				for ( var dz = -ring; dz <= ring; dz++ )
+				{
+					if ( Math.Max( Math.Abs( dx ), Math.Max( Math.Abs( dy ), Math.Abs( dz ) ) ) != ring )
+						continue;
+
+					if ( !grid.TryGetValue( (cx + dx, cy + dy, cz + dz), out var cellList ) )
+						continue;
+
+					foreach ( var j in cellList )
+						if ( j != i )
+							best = MathF.Min( best, (placements[i].Point - placements[j].Point).Length );
+				}
+
+			total += best == float.MaxValue ? 0f : best;
+		}
+
+		return total / n;
+	}
+
+	readonly struct VariantPick
+	{
+		public readonly float Cumulative;
+		public readonly PolyMesh Mesh;
+		public readonly string Name;
+
+		public VariantPick( float cumulative, PolyMesh mesh, string name )
+		{
+			Cumulative = cumulative;
+			Mesh = mesh;
+			Name = name;
+		}
+	}
+
+	List<VariantPick> ParseVariants( string text, FeatureContext ctx )
+	{
+		var list = new List<VariantPick>();
+
+		if ( string.IsNullOrWhiteSpace( text ) )
+			return list;
+
+		var raw = new List<(string Name, float Weight)>();
+		var total = 0f;
+
+		foreach ( var piece in text.Split( ',' ) )
+		{
+			var kv = piece.Trim().Split( ':' );
+
+			float w = 0f;
+			if ( kv.Length != 2 || !float.TryParse( kv[1], out w ) || w < 0f )
+				Fail( $"Scatter's variants '{text}' do not parse.", "Variants want name:weight pairs, as in Bolt:0.7,LongBolt:0.2,Empty:0.1.", "Write Bolt:0.7,LongBolt:0.2,Empty:0.1" );
+
+			raw.Add( (kv[0].Trim(), w) );
+			total += w;
+		}
+
+		if ( total <= 0f )
+			Fail( $"Scatter's variants '{text}' have no weight.", "At least one variant needs a weight above zero.", "Give one variant a weight, as in Bolt:1" );
+
+		var acc = 0f;
+
+		foreach ( var (name, weight) in raw )
+		{
+			acc += weight / total;
+			PolyMesh mesh = null;
+
+			if ( !string.Equals( name, "Empty", StringComparison.OrdinalIgnoreCase ) )
+				mesh = ResolveVariantSource( ctx, name );
+
+			list.Add( new VariantPick( acc, mesh, name ) );
+		}
+
+		return list;
+	}
+
+	PolyMesh ResolveVariantSource( FeatureContext ctx, string name )
+	{
+		if ( PartLibrary.Names.Contains( name ) )
+			return PartLibrary.Build( name, Size.Clamped, Length.Clamped, Thickness.Clamped, Sides.Clamped, PartAngle.Clamped, 0 );
+
+		var body = ctx.Bodies.FirstOrDefault( b => b.Name == name )
+			?? ctx.Bodies.FirstOrDefault( b => string.Equals( b.Name, name, StringComparison.OrdinalIgnoreCase ) );
+
+		if ( body?.Mesh is null )
+			Fail( $"Scatter's variant '{name}' is neither a library part nor a body above it.", "Library parts are Cog, Bolt, Rivet, ToothCone and the rest of PartLibrary.Names; a body variant must have run before this one.", "Check the variant name", "Put the variant body first" );
 
 		return body!.Mesh;
 	}
@@ -391,7 +819,20 @@ public sealed class ScatterFeature : Feature
 		}
 	}
 
-	void GenerateGrid( SurfaceFrame axis, PolyMesh target, DomainRange domain, List<(float S, float Scale)> scaleCurve, int stations, int around, float spacing, float jitter, Random rng, List<Placement> outPlacements )
+	bool AcceptFalloff( SurfaceFrame axis, DomainRange domain, Vec3 p, float falloff, Random rng )
+	{
+		if ( falloff <= 0f )
+			return true;
+
+		var sRange = domain.SMax - domain.SMin;
+		var aRange = domain.AngleMax - domain.AngleMin;
+		var ds = sRange <= 0f ? 1f : MathF.Min( axis.S( p ) - domain.SMin, domain.SMax - axis.S( p ) ) / sRange;
+		var da = aRange >= 359f || aRange <= 0f ? 1f : MathF.Min( axis.Angle( p ) - domain.AngleMin, domain.AngleMax - axis.Angle( p ) ) / aRange;
+		var t = MathF.Min( ds, da ) / falloff;
+		return (float)rng.NextDouble() <= MathF.Min( 1f, MathF.Max( 0f, t ) );
+	}
+
+	void GenerateGrid( SurfaceFrame axis, PolyMesh target, DomainRange domain, List<(float S, float Scale)> scaleCurve, int stations, int around, float spacing, float jitter, float falloff, Random rng, List<Placement> outPlacements )
 	{
 		var nS = spacing > 0f ? Math.Max( 1, (int)MathF.Floor( axis.Extent / spacing ) + 1 ) : Math.Max( 1, stations );
 		var nA = Math.Max( 1, around );
@@ -411,12 +852,12 @@ public sealed class ScatterFeature : Feature
 					: domain.AngleMin + (domain.AngleMax - domain.AngleMin) * (nA == 1 ? 0.5f : j / (float)(nA - 1));
 				angle += (float)(rng.NextDouble() * 2 - 1) * jitter * pitchA * 0.5f;
 
-				TryPlaceFromAxis( axis, target, domain, scaleCurve, s, angle, outPlacements );
+				TryPlaceFromAxis( axis, target, domain, scaleCurve, s, angle, outPlacements, rng, falloff );
 			}
 		}
 	}
 
-	void TryPlaceFromAxis( SurfaceFrame axis, PolyMesh target, DomainRange domain, List<(float S, float Scale)> scaleCurve, float s, float angle, List<Placement> outPlacements )
+	void TryPlaceFromAxis( SurfaceFrame axis, PolyMesh target, DomainRange domain, List<(float S, float Scale)> scaleCurve, float s, float angle, List<Placement> outPlacements, Random rng, float falloff )
 	{
 		if ( s < domain.SMin || s > domain.SMax || angle < domain.AngleMin || angle > domain.AngleMax )
 			return;
@@ -439,10 +880,13 @@ public sealed class ScatterFeature : Feature
 		if ( !domain.Contains( axis.S( p ), axis.Angle( p ) ) )
 			return;
 
+		if ( !AcceptFalloff( axis, domain, p, falloff, rng ) )
+			return;
+
 		outPlacements.Add( new Placement( p, hit.Value.Normal, ScaleAt( scaleCurve, axis.S( p ) ) ) );
 	}
 
-	void GeneratePoisson( SurfaceFrame axis, PolyMesh target, DomainRange domain, List<(float S, float Scale)> scaleCurve, int count, float spacing, Random rng, List<Placement> outPlacements )
+	void GeneratePoisson( SurfaceFrame axis, PolyMesh target, DomainRange domain, List<(float S, float Scale)> scaleCurve, int count, float spacing, float falloff, float cluster, Random rng, List<Placement> outPlacements )
 	{
 		// Area-weighted fan triangles, so a big flat panel gets proportionally more
 		// points than a small chamfer — uniform over surface area, not over faces.
@@ -472,8 +916,82 @@ public sealed class ScatterFeature : Feature
 			return;
 
 		var placed = new List<Vec3>();
+		var grid = new Dictionary<(int, int, int), List<Vec3>>();
+
+		bool GridClear( Vec3 point )
+		{
+			if ( spacing <= 0f )
+				return true;
+
+			var cx = (int)MathF.Floor( point.x / spacing );
+			var cy = (int)MathF.Floor( point.y / spacing );
+			var cz = (int)MathF.Floor( point.z / spacing );
+
+			for ( var dx = -1; dx <= 1; dx++ )
+			for ( var dy = -1; dy <= 1; dy++ )
+			for ( var dz = -1; dz <= 1; dz++ )
+				if ( grid.TryGetValue( (cx + dx, cy + dy, cz + dz), out var cell ) )
+					foreach ( var q in cell )
+						if ( (q - point).LengthSquared < spacing * spacing )
+							return false;
+
+			return true;
+		}
+
+		void GridAdd( Vec3 point )
+		{
+			if ( spacing <= 0f )
+				return;
+
+			var key = ((int)MathF.Floor( point.x / spacing ), (int)MathF.Floor( point.y / spacing ), (int)MathF.Floor( point.z / spacing ));
+
+			if ( !grid.TryGetValue( key, out var cell ) )
+				grid[key] = cell = new List<Vec3>();
+
+			cell.Add( point );
+		}
+
+		// Cluster centres (fixed seeds, not a chain gate): a gate on "near ANY
+		// existing placement" random-walks across the whole surface, so mean
+		// NN barely moves (measured 1.92 vs 1.94 at cluster 0.9). Fixed
+		// centres actually concentrate: the first seedCount placements are
+		// centres, and later candidates must, with probability = cluster,
+		// land within clusterRadius of a centre. The attempt cap is raised
+		// while clustering, because most random candidates miss the discs.
+		var clusterRadius = cluster <= 0f ? float.MaxValue : axis.Extent * (0.15f + (1f - cluster) * 0.85f);
+		var seedCount = cluster <= 0f ? 0 : Math.Max( 1, (int)Math.Round( (1f - cluster) * count / 20f ) );
+		var centres = new List<Vec3>();
+		var centreGrid = new Dictionary<(int, int, int), List<Vec3>>();
+
+		bool CentreNear( Vec3 point )
+		{
+			var cx = (int)MathF.Floor( point.x / clusterRadius );
+			var cy = (int)MathF.Floor( point.y / clusterRadius );
+			var cz = (int)MathF.Floor( point.z / clusterRadius );
+
+			for ( var dx = -1; dx <= 1; dx++ )
+			for ( var dy = -1; dy <= 1; dy++ )
+			for ( var dz = -1; dz <= 1; dz++ )
+				if ( centreGrid.TryGetValue( (cx + dx, cy + dy, cz + dz), out var cell ) )
+					foreach ( var q in cell )
+						if ( (q - point).Length <= clusterRadius )
+							return true;
+
+			return false;
+		}
+
+		void CentreAdd( Vec3 point )
+		{
+			var key = ((int)MathF.Floor( point.x / clusterRadius ), (int)MathF.Floor( point.y / clusterRadius ), (int)MathF.Floor( point.z / clusterRadius ));
+
+			if ( !centreGrid.TryGetValue( key, out var cell ) )
+				centreGrid[key] = cell = new List<Vec3>();
+
+			cell.Add( point );
+		}
+
 		var attempts = 0;
-		var maxAttempts = Math.Max( count * 40, 400 );
+		var maxAttempts = Math.Max( count * 40, 400 ) * (cluster > 0f ? 5 : 1);
 
 		while ( outPlacements.Count < count && attempts < maxAttempts )
 		{
@@ -505,15 +1023,30 @@ public sealed class ScatterFeature : Feature
 			if ( !domain.Contains( axis.S( point ), axis.Angle( point ) ) )
 				continue;
 
-			if ( spacing > 0f && placed.Any( q => (q - point).LengthSquared < spacing * spacing ) )
+			if ( !AcceptFalloff( axis, domain, point, falloff, rng ) )
 				continue;
 
+			if ( !GridClear( point ) )
+				continue;
+
+			if ( cluster > 0f )
+			{
+				if ( centres.Count < seedCount )
+				{
+					centres.Add( point );
+					CentreAdd( point );
+				}
+				else if ( (float)rng.NextDouble() < cluster && !CentreNear( point ) )
+					continue;
+			}
+
 			placed.Add( point );
+			GridAdd( point );
 			outPlacements.Add( new Placement( point, target.FaceNormal( face ), ScaleAt( scaleCurve, axis.S( point ) ) ) );
 		}
 	}
 
-	void GenerateCurve( FeatureContext ctx, SurfaceFrame axis, PolyMesh target, DomainRange domain, List<(float S, float Scale)> scaleCurve, int count, List<Placement> outPlacements )
+	void GenerateCurve( FeatureContext ctx, SurfaceFrame axis, PolyMesh target, DomainRange domain, List<(float S, float Scale)> scaleCurve, int count, float falloff, Random rng, List<Placement> outPlacements )
 	{
 		if ( string.IsNullOrWhiteSpace( Curve.Value ) )
 			Fail( "Scatter's Curve mode needs a curve.", "Curve is empty, so there is no path to sample.",
@@ -550,19 +1083,33 @@ public sealed class ScatterFeature : Feature
 			if ( !domain.Contains( axis.S( p ), axis.Angle( p ) ) )
 				continue;
 
+			if ( !AcceptFalloff( axis, domain, p, falloff, rng ) )
+				continue;
+
 			outPlacements.Add( new Placement( p, hit.Value.Normal, ScaleAt( scaleCurve, axis.S( p ) ) ) );
 		}
 	}
 
 	/// <summary>
-	/// CurveIMM: one welded chain body along a spline. The first sample is the start
+	/// CurveIMM: one chain body along a spline. The first sample is the start
 	/// cap, the last is the end cap, everything between is the middle link. Each
 	/// instance's +z (a library part's outward axis) runs along the curve tangent,
 	/// the instance is centred on the curve point rather than hung from its base,
 	/// and neighbouring links roll 90 degrees apart, the way real chain links
-	/// interlock. "Welded" here means one merged body, as with every other Scatter
-	/// mode — links interlock geometrically but do not share vertices, so a chain
-	/// that must deform as one piece still wants a weld pass after it.
+		/// interlock. "Merged" here means one body, as with every other Scatter
+	/// mode — links interlock geometrically but do not share vertices.
+	/// NO WELD OPTION SHIPS, and the measurement is why: a MeshWeld pass
+	/// (tolerance 1e-6, exact coincidences only) on the Rivet/Bolt test chain
+	/// merges 24 vertices into shared same-parity shank rings (408 -> 384 verts,
+	/// 6 -> 4 shells, faces unchanged) — but every shared ring edge is then used
+	/// by 4 faces, 2 per link, so the mesh goes from 0 to 24 non-manifold edges
+	/// and fails validation. Merging vertices between overlapping closed solids
+	/// cannot produce a manifold weld; only a boolean union can, by cutting the
+	/// internal faces away — and the exact boolean still fails on overlapping bolts
+	/// and leaves 7 boundary + 1 non-manifold edges on cap-bolt pairs, while voxel
+	/// union explodes faces ~184x (100 -> 18,376).
+	/// A chain that must deform as ONE piece still waits on the boolean lane.
+	/// See CurveImmWeldTests for the pinned numbers.
 	/// </summary>
 	void BuildCurveImm( FeatureContext ctx )
 	{
@@ -607,6 +1154,24 @@ public sealed class ScatterFeature : Feature
 
 			return body!.Mesh;
 		}
+
+		if ( samples.Count >= 2 )
+			{
+				var nnSum = 0f;
+
+				for ( var si = 0; si < samples.Count; si++ )
+				{
+					var best = float.MaxValue;
+
+					for ( var sj = 0; sj < samples.Count; sj++ )
+						if ( sj != si )
+							best = MathF.Min( best, (samples[si] - samples[sj]).Length );
+
+					nnSum += best;
+				}
+
+				Warning = string.IsNullOrEmpty( Warning ) ? $"Scatter placement: placed {samples.Count} of {Count.Clamped} asked, mean nearest-neighbour distance {nnSum / samples.Count:F2}" : Warning + $"; Scatter placement: placed {samples.Count} of {Count.Clamped} asked, mean nearest-neighbour distance {nnSum / samples.Count:F2}";
+			}
 
 		var start = ResolveCap( StartCap.Value );
 		var middle = ResolveCap( Middle.Value );

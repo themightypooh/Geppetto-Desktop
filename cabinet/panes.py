@@ -7,6 +7,7 @@ which pane (Host.autoFollow / Host.showRunIn): a pane showing a live run is neve
 import json
 import mmap
 import os
+import re
 
 from PySide6.QtCore import QObject, QProcess, QTimer, Property, Signal, Slot
 from PySide6.QtGui import QImage
@@ -17,7 +18,7 @@ import part_focus
 from live_runs import TERMINAL, read_state, activity
 
 # who is modelling a script run: the tool that started geppetto-live, found up its process tree
-MODELLERS = (("claude", "Claude"), ("codex", "Codex"), ("mimo", "MiMo"), ("gemini", "Gemini"),
+MODELLERS = (("claude", "Claude"), ("muse", "Muse"), ("codex", "Codex"), ("mimo", "MiMo"), ("gemini", "Gemini"),
              ("opencode", "opencode"), ("cursor", "Cursor"), ("aider", "aider"), ("qwen", "Qwen"),
              ("ollama", "Ollama"))
 _modeller_cache = {}
@@ -31,38 +32,54 @@ def _proc(pid, what):
         return b""
 
 
-def modeller(d):
-    """the model building run `d`: the research run's model, GEPPETTO_MODELLER in the run's
-    environment, or the agent found up the script process's parents; "" when nobody can tell"""
-    if d in _modeller_cache:
-        return _modeller_cache[d]
-    try:
-        meta = json.load(open(d.rstrip("/") + ".json"))
-    except (OSError, ValueError):
-        meta = {}
-    if not isinstance(meta, dict):
-        meta = {}
-    who = str(meta.get("model") or meta.get("modeller") or "")
-    pid = int(meta.get("pid") or 0) if str(meta.get("pid") or "0").isdigit() else 0
-    alive = pid > 0 and os.path.exists("/proc/%d" % pid)
-    if not who and alive:
-        for kv in _proc(pid, "environ").split(b"\0"):
-            if kv.startswith(b"GEPPETTO_MODELLER="):
-                who = kv.split(b"=", 1)[1].decode(errors="replace")[:24]
-        hops = 0
-        while not who and pid > 1 and hops < 12:
-            cmd = _proc(pid, "cmdline").replace(b"\0", b" ").lower()
-            for key, label in MODELLERS:
-                if key.encode() in cmd and b"marionette-desktop" not in cmd:
-                    who = label
-                    break
-            status = _proc(pid, "status").decode(errors="replace")
-            ppid = next((int(x.split()[1]) for x in status.splitlines() if x.startswith("PPid:")), 0)
-            pid, hops = ppid, hops + 1
-    if who or not alive:                    # a dead run's answer won't change: keep it
-        _modeller_cache[d] = who
-    return who
+def _stem_who(d, meta):
+    """last-resort who for a run: its script's name, else its folder's name, cleaned
+    of the run-date suffix; a muse-build script is Muse, whatever started it"""
+    script = str(meta.get("script") or "")
+    if script:
+        stem = os.path.splitext(os.path.basename(script))[0]
+        if stem.startswith("muse-build-") or stem.startswith("muse_") or stem == "muse":
+            return "Muse"
+        stem = re.sub(r"-?\d{8}-\d{6}(-\d+)?$", "", stem)
+        if stem.startswith("script-"):
+            stem = stem[len("script-"):]
+        if stem:
+            return stem[:24]
+    base = os.path.basename(d.rstrip("/"))
+    base = re.sub(r"-?\d{8}-\d{6}(-\d+)?$", "", base)
+    if base.startswith("script-"):
+        base = base[len("script-"):]
+    return base[:24] or "run"
 
+
+def modeller(d):
+    """Only recorded identity or a live process is evidence; filenames are not people."""
+    if not d:
+        return ""
+    meta = live_runs.run_meta(d)
+    who = str(meta.get("modeller") or meta.get("model") or "")
+    # Older hosts persisted the script stem as a guessed identity. Ignore those guesses.
+    if who and (meta.get("identitySource") or who != _stem_who(d, meta)):
+        return who
+    pid = live_runs.run_pid(d) or 0
+    if pid > 0:
+        env = dict(kv.split(b"=", 1) for kv in _proc(pid, "environ").split(b"\0") if b"=" in kv)
+        if env.get(b"GEPPETTO_MODELLER"):
+            return env[b"GEPPETTO_MODELLER"].decode(errors="replace")
+        # T3 can inherit Claude's session variables even when the current agent is Codex.
+        if env.get(b"CODEX_THREAD_ID") or env.get(b"CODEX_SESSION_ID"):
+            return "Codex"
+        for _ in range(12):
+            if pid <= 1:
+                break
+            args = _proc(pid, "cmdline").split(b"\0")
+            names = [os.path.basename(arg.decode(errors="replace")).lower() for arg in args[:2]]
+            for key, label in MODELLERS:
+                if any(name == key or name.startswith(key + ".") for name in names):
+                    return label
+            status = _proc(pid, "status").decode(errors="replace")
+            pid = next((int(x.split()[1]) for x in status.splitlines() if x.startswith("PPid:")), 0)
+    return ""
 
 def script_label(d):
     """the script a run builds, short: its folder and file ("dagger/build.txt"), or the research prompt"""
@@ -72,10 +89,12 @@ def script_label(d):
         meta = {}
     if not isinstance(meta, dict):
         meta = {}
+    if meta.get("subject"):
+        return str(meta["subject"])
     script = meta.get("script") or ""
     if script:
         return os.path.join(os.path.basename(os.path.dirname(script)), os.path.basename(script))
-    return (meta.get("prompt") or os.path.basename(d))[:60]
+    return meta.get("subject") or meta.get("prompt") or os.path.basename(d)
 
 
 class Pane(QObject):
@@ -147,6 +166,15 @@ class Pane(QObject):
         if self._replay or self.model:
             return True
         return bool(self.run) and self.host.run_live(self.run)
+
+    def gate_occupied(self):
+        """Reservation counting (lane C, 2026-10-26): ANY shown content
+        occupies the pane for gate purposes -- a live run, a finished run
+        still on screen, a static model, or a replay. busy() is narrower
+        (live runs only), so a finished run left on screen would look free
+        to auto-follow; the gate must never evict it. An idle viewer (no
+        run, no model, no replay) does NOT occupy the pane."""
+        return bool(self._replay or self.model or self.run)
 
     # ---- the viewer process ------------------------------------------------------------------
     def alive(self):

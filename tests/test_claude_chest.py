@@ -187,10 +187,27 @@ class LinkTests(TempDirs):
         self.procs.append(FakeProc(args, **kw))
         return self.procs[-1]
 
+    def test_missing_build_receipt_never_sends_a_second_turn(self):
+        class NoReceipt:
+            def receipt(self):
+                return None
+
+            def failure(self):
+                return "no verified revision; send again only if you want to retry"
+
+        self.link._execution = NoReceipt()
+        sent = []
+        self.link._send = lambda msg: sent.append(msg) or True
+        self.link.handle({"type": "result", "result": "built it"})
+        self.assertEqual(sent, [])
+        self.assertIsNone(self.link._execution)
+        self.assertTrue(any("no verified revision" in row["text"] for row in self.link.messages))
+
     def test_send_starts_claude_and_shows_the_reply(self):
         self.link.send("make a mug")
         proc = self.procs[0]
         self.assertIn("--permission-prompt-tool", proc.args)
+        self.assertTrue(proc.kw["start_new_session"])
         self.assertNotIn("--resume", proc.args)
         self.assertFalse(any(k.startswith("CLAUDE_CODE_") for k in proc.kw["env"]))
         self.assertEqual(proc.sent[0]["request"]["subtype"], "initialize")
@@ -363,7 +380,7 @@ class CardTests(unittest.TestCase):
         link = self.host.claude
         panel = self.find("claudePanel")
         self.assertFalse(panel.property("visible"))
-        self.root.setProperty("claudeOpen", True)
+        self.root.setProperty("chatOpen", True)
         link.send("make a red mug, short handle")
         link.handle({"type": "system", "subtype": "init", "session_id": "card"})
         link.handle({"type": "assistant", "message": {"content": [
@@ -394,7 +411,7 @@ class CardTests(unittest.TestCase):
         feed_dir = os.path.join(self.tmp.name, "feed")
         self.host.claudeFeed = claude_feed.Feed(feed_dir, os.path.join(self.tmp.name, "runs"), clock=lambda: 0)
         self.host.claude.session = "card"
-        self.root.setProperty("claudeOpen", True)
+        self.root.setProperty("chatOpen", True)
         png = os.path.join(self.tmp.name, "ref.png")
         shutil.copy(os.environ.get("GEPPETTO_PICTURE", str(CABINET / "model" / "appicon" / "ref_flip.png")), png)
         state = os.path.join(self.tmp.name, "claude-chat.json")             # the link saved its session
@@ -413,7 +430,7 @@ class CardTests(unittest.TestCase):
         self.settle(4.9)                                                        # holds ~4 s, then shrinks away
         self.assertFalse(pop.property("visible"))
         self.assertEqual(self.find("claudeStrip").property("count"), 1)
-        self.root.setProperty("claudeOpen", False)
+        self.root.setProperty("chatOpen", False)
         self.settle(0.3)
 
 

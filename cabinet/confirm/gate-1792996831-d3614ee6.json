@@ -1,0 +1,20 @@
+{
+  "cancel_reason": "yes timeout (600s, no claim)",
+  "created_at": 1792996831.2346408,
+  "id": "gate-1792996831-d3614ee6",
+  "pane": "",
+  "preflight": {
+    "errors": [],
+    "first_geom_line": 2,
+    "first_shape": "Cylinder",
+    "lines": 3,
+    "materials_before_first": 1,
+    "ok": true,
+    "rotated_boxes": 0
+  },
+  "script": "/home/poo/gate-test/good.txt",
+  "script_hash": "ddbc7861f22aa2a22bb1ee344d45da7433d304933852caa584da8dfd70891b89",
+  "status": "expired",
+  "subject": "test widget 3",
+  "worker": "test1"
+}

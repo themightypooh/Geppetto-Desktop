@@ -1,0 +1,20 @@
+{
+  "cancel_reason": "register timeout (10s, no run registered)",
+  "created_at": 1792997215.8328564,
+  "id": "gate-1792997215-6f1786a6",
+  "pane": "1",
+  "preflight": {
+    "errors": [],
+    "first_geom_line": 3,
+    "first_shape": "Cylinder",
+    "lines": 22,
+    "materials_before_first": 2,
+    "ok": true,
+    "rotated_boxes": 0
+  },
+  "script": "/home/poo/workspace/peen-hairy/peen-hairy.txt",
+  "script_hash": "c3bdaf0e8a8850c43b9478a2ed7aad40ee2c624667ee7505bb6b0ffb903e263d",
+  "status": "failed",
+  "subject": "peen with hair boll",
+  "worker": "muse-main"
+}

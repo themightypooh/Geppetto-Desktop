@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -200,6 +200,9 @@ public sealed class PolyMesh
 	/// cannot express. Carried by <see cref="Clone"/> like VertexColors; operations that
 	/// rebuild the vertex list start with none, same as VertexColors.</summary>
 	public Vec3[] VertexEmission;
+
+	/// <summary>True for a ParticleFeature body: the soft render pass draws it as blended discs instead of opaque triangles when render particles=soft is set. Copied by Clone like the vertex channels.</summary>
+	public bool IsParticle;
 
 	public bool HasVertexEmission => VertexEmission is not null && VertexEmission.Length == Positions.Count;
 
@@ -462,6 +465,95 @@ public sealed class PolyMesh
 		return normals;
 	}
 
+	/// <summary>Split normals, one per face corner (research P6, wave 3).
+	/// A vertex on a crease gets one normal per side of the crease: the corner
+	/// normal for face f at vertex v averages only the faces incident to v
+	/// that connect to f without crossing a crease edge incident to v. A
+	/// vertex with no crease incident to it gets the same average as
+	/// <see cref="ComputeVertexNormals"/> for every corner, so smooth shading
+	/// is unchanged. Result is indexed [face][corner], matching
+	/// <see cref="Face.Indices"/> order.
+	///
+	/// This is the algorithm, not the wiring: PolyMesh has no per-corner
+	/// normal slot (faces carry per-corner UVs, not normals) and the render
+	/// and export paths still consume per-vertex normals, so a geometrically
+	/// sharp crease still shades soft until a renderer or exporter consumes
+	/// this array and splits the vertex at creases. That wiring is a separate,
+	/// cross-cutting change and is deliberately not smuggled in here.</summary>
+	public Vec3[][] ComputeSplitNormals( IReadOnlyCollection<EdgeKey> creases )
+	{
+		var creaseSet = creases is null ? new HashSet<EdgeKey>() : new HashSet<EdgeKey>( creases );
+		var vertexFaces = BuildVertexFaces();
+		var result = new Vec3[Faces.Count][];
+
+		for ( var fi = 0; fi < Faces.Count; fi++ )
+		{
+			var face = Faces[fi];
+			var corners = new Vec3[face.Count];
+
+			for ( var ci = 0; ci < face.Count; ci++ )
+			{
+				var v = face.Indices[ci];
+				var incident = vertexFaces[v];
+				var sum = Vec3.Zero;
+
+				if ( incident is null || incident.Count == 0 )
+				{
+					corners[ci] = FaceNormal( face );
+					continue;
+				}
+
+				// Faces on this side of the crease: breadth-first over faces
+				// incident to v, stepping only across non-crease edges that
+				// touch v. A face whose every v-edge is a crease is alone on
+				// its side and keeps its own normal.
+				var seen = new HashSet<int> { fi };
+				var queue = new Queue<int>();
+				queue.Enqueue( fi );
+
+				while ( queue.Count > 0 )
+				{
+					var current = queue.Dequeue();
+					var currentFace = Faces[current];
+					var k = Array.IndexOf( currentFace.Indices, v );
+
+					if ( k < 0 )
+						continue;
+
+					foreach ( var w in new[] { currentFace.Indices[(k + 1) % currentFace.Count], currentFace.Indices[(k + currentFace.Count - 1) % currentFace.Count] } )
+					{
+						if ( creaseSet.Contains( new EdgeKey( v, w ) ) )
+							continue;
+
+						foreach ( var other in incident )
+						{
+							if ( seen.Contains( other ) )
+								continue;
+
+							if ( Array.IndexOf( Faces[other].Indices, w ) >= 0 )
+							{
+								seen.Add( other );
+								queue.Enqueue( other );
+							}
+						}
+					}
+				}
+
+				foreach ( var other in seen )
+				{
+					var otherFace = Faces[other];
+					sum += FaceNormal( otherFace ) * FaceArea( otherFace );
+				}
+
+				corners[ci] = sum.LengthSquared > 1e-18f ? sum.Normal : FaceNormal( face );
+			}
+
+			result[fi] = corners;
+		}
+
+		return result;
+	}
+
 	/// <summary>
 	/// Fan triangulation about the centroid, PROJECTED ONTO THE FACE'S OWN NORMAL so the fan's
 	/// backward triangles subtract instead of adding.
@@ -552,7 +644,7 @@ public sealed class PolyMesh
 
 	public PolyMesh Clone()
 	{
-		var m = new PolyMesh { Positions = new List<Vec3>( Positions ), Skin = Skin?.Clone() };
+		var m = new PolyMesh { Positions = new List<Vec3>( Positions ), Skin = Skin?.Clone(), IsParticle = IsParticle };
 
 		if ( VertexColors is not null )
 			m.VertexColors = (Vec4[])VertexColors.Clone();

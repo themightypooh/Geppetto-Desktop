@@ -148,9 +148,12 @@ class CabinetQmlTests(unittest.TestCase):
             self.host.runsChanged.emit()
             self.settle(1.2)
             self.assertIsNotNone(bar.property("run"))          # pane 1 only shows when the chest has a view
-            texts = [t.property("text") for t in bar.findChildren(QQuickItem) if t.property("text")]
-            self.assertTrue(any("WEB SEARCH  2:0" in t and "quiet 1:3" in t for t in texts), texts)
-            self.assertGreater(bar.property("quiet"), 60)
+            panel = self.root.findChild(QObject, "paneHeader1")
+            self.assertIs(bar.parent().parent(), panel)
+            telemetry = panel.property("detailText")
+            self.assertIn("WEB SEARCH", telemetry)
+            self.assertIn("updated 9", telemetry)
+            self.assertIsNone(self.root.findChild(QObject, "modellingNow"))
             for name in ("runBarHold", "runBarStop"):
                 self.assertIsNotNone(self.root.findChild(QObject, name), name)
         finally:
@@ -522,7 +525,7 @@ class CabinetQmlTests(unittest.TestCase):
             "undo": 0, "redo": 0, "dirty": False, "saveable": True, "frames": 30}
         self.host.keysChanged.emit()
         self.root.findChild(QObject, "timeline").setProperty("open", 1.0)
-        floor.setProperty("page", 1)
+        floor.setProperty("page", 2)  # KEYS moved to page 2: 0 BUILD, 1 CLIP, 2 KEYS
         self.settle(0.6)
         page = self.root.findChild(QObject, "keyPage")
         page.setSel({}, "")
@@ -537,7 +540,10 @@ class CabinetQmlTests(unittest.TestCase):
     def _key_point(self, page, lanes, track, frame):
         return self._at(lanes, page.xOf(frame), track * page.property("rowH") + page.property("rowH") / 2 - page.property("scrollY"))
 
-    def test_the_wall_switch_flips_the_drawer_to_the_key_sheet(self):
+    def test_the_wall_switch_flips_the_drawer_to_each_sheet(self):
+        # Three-position switch: top third -> BUILD (page 0), middle third ->
+        # CLIP (page 1), bottom third -> KEYS (page 2). A centre click now
+        # means CLIP, not KEYS, and clicks jump to a detent, not toggle.
         from PySide6.QtTest import QTest
         from PySide6.QtCore import Qt
         _, floor = self._timeline_with_clip(30)
@@ -545,15 +551,28 @@ class CabinetQmlTests(unittest.TestCase):
         floor.setProperty("page", 0)
         self.settle(0.6)
         switch = self.root.findChild(QObject, "pageSwitch")
-        centre = self._at(switch, switch.width() / 2, switch.height() / 2)
-        QTest.mouseClick(self.root, Qt.LeftButton, Qt.NoModifier, centre)
-        self.settle(0.6)
+        build_page = self.root.findChild(QObject, "buildPage")
+        time_page = self.root.findChild(QObject, "timePage")
+        key_page = self.root.findChild(QObject, "keyPage")
+
+        def click_at(yfrac):
+            QTest.mouseClick(self.root, Qt.LeftButton, Qt.NoModifier,
+                             self._at(switch, switch.width() / 2, switch.height() * yfrac))
+            self.settle(0.6)
+        click_at(0.5)
         self.assertEqual(floor.property("page"), 1)
-        self.assertFalse(self.root.findChild(QObject, "timePage").property("visible"), "the time page slid out of sight")
-        self.assertTrue(self.root.findChild(QObject, "keyPage").property("visible"))
-        QTest.mouseClick(self.root, Qt.LeftButton, Qt.NoModifier, centre)
-        self.settle(0.6)
+        self.assertTrue(time_page.property("visible"))
+        self.assertFalse(build_page.property("visible"))
+        self.assertFalse(key_page.property("visible"))
+        click_at(0.85)
+        self.assertEqual(floor.property("page"), 2)
+        self.assertTrue(key_page.property("visible"), "the key sheet slid into sight")
+        self.assertFalse(time_page.property("visible"), "the time page slid out of sight")
+        click_at(0.15)
         self.assertEqual(floor.property("page"), 0)
+        self.assertTrue(build_page.property("visible"))
+        self.assertFalse(time_page.property("visible"))
+        self.assertFalse(key_page.property("visible"))
         self.assertEqual(self.qml_errors(), [])
 
     def test_clicking_a_key_selects_it_and_seeks_there(self):

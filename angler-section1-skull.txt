@@ -1,0 +1,33 @@
+echo "Angler Section 1: skull only"
+add Primitive name=Cranium shape=Sphere radius=7 position=-20,2,0 scale=1.3,0.9,0.35 segments=16 materialslot=0
+add Primitive name=EyeRing1 shape=Cylinder radius=0.4 height=3.44 position=-18.16,4.59,0 rotationaxis=-0.924,-0.383,0 rotation=90 segments=6 materialslot=0
+add Primitive name=EyeRing2 shape=Cylinder radius=0.4 height=3.44 position=-20.41,6.84,0 rotationaxis=-0.383,-0.924,0 rotation=90 segments=6 materialslot=0
+add Primitive name=EyeRing3 shape=Cylinder radius=0.4 height=3.44 position=-23.59,6.84,0 rotationaxis=0.383,-0.924,0 rotation=90 segments=6 materialslot=0
+add Primitive name=EyeRing4 shape=Cylinder radius=0.4 height=3.44 position=-25.84,4.59,0 rotationaxis=0.924,-0.383,0 rotation=90 segments=6 materialslot=0
+add Primitive name=EyeRing5 shape=Cylinder radius=0.4 height=3.44 position=-25.84,1.41,0 rotationaxis=0.924,0.383,0 rotation=90 segments=6 materialslot=0
+add Primitive name=EyeRing6 shape=Cylinder radius=0.4 height=3.44 position=-23.59,-0.84,0 rotationaxis=0.383,0.924,0 rotation=90 segments=6 materialslot=0
+add Primitive name=EyeRing7 shape=Cylinder radius=0.4 height=3.44 position=-20.41,-0.84,0 rotationaxis=-0.383,0.924,0 rotation=90 segments=6 materialslot=0
+add Primitive name=EyeRing8 shape=Cylinder radius=0.4 height=3.44 position=-18.16,1.41,0 rotationaxis=-0.924,0.383,0 rotation=90 segments=6 materialslot=0
+add Primitive name=RearSocket1 shape=Cylinder radius=0.3 height=2.50 position=-11.12,5.08,0 rotationaxis=-0.866,-0.500,0 rotation=90 segments=6 materialslot=0
+add Primitive name=RearSocket2 shape=Cylinder radius=0.3 height=2.50 position=-13.00,6.17,0 rotationaxis=-0.000,-1.000,0 rotation=90 segments=6 materialslot=0
+add Primitive name=RearSocket3 shape=Cylinder radius=0.3 height=2.50 position=-14.88,5.08,0 rotationaxis=0.866,-0.500,0 rotation=90 segments=6 materialslot=0
+add Primitive name=RearSocket4 shape=Cylinder radius=0.3 height=2.50 position=-14.88,2.92,0 rotationaxis=0.866,0.500,0 rotation=90 segments=6 materialslot=0
+add Primitive name=RearSocket5 shape=Cylinder radius=0.3 height=2.50 position=-13.00,1.83,0 rotationaxis=0.000,1.000,0 rotation=90 segments=6 materialslot=0
+add Primitive name=RearSocket6 shape=Cylinder radius=0.3 height=2.50 position=-11.12,2.92,0 rotationaxis=-0.866,0.500,0 rotation=90 segments=6 materialslot=0
+add Primitive name=UpperJaw1 shape=Cylinder radius=0.5 height=8.06 position=-32.00,-1.50,0 rotationaxis=0.124,-0.992,0 rotation=90 segments=6 materialslot=0
+add Primitive name=UpperJaw2 shape=Cylinder radius=0.5 height=8.06 position=-40.00,-2.50,0 rotationaxis=0.124,-0.992,0 rotation=90 segments=6 materialslot=0
+add Primitive name=LowerJawPlate shape=Wedge width=20 depth=0.5 height=3.5 position=-32,-8,0 materialslot=0
+add Primitive name=LowerJaw1 shape=Cylinder radius=0.4 height=8.25 position=-22.00,-6.00,0 rotationaxis=0.243,-0.970,0 rotation=90 segments=6 materialslot=0
+add Primitive name=LowerJaw2 shape=Cylinder radius=0.4 height=8.06 position=-30.00,-7.50,0 rotationaxis=0.124,-0.992,0 rotation=90 segments=6 materialslot=0
+add Primitive name=Tooth1 shape=Cylinder radius=0.3 height=1.4 position=-40,-3.5,0 rotationaxis=1,0,0 rotation=90 segments=4 materialslot=0
+add Primitive name=Tooth2 shape=Cylinder radius=0.3 height=1.4 position=-36,-3.5,0 rotationaxis=1,0,0 rotation=90 segments=4 materialslot=0
+add Primitive name=Tooth3 shape=Cylinder radius=0.3 height=1.4 position=-32,-3.5,0 rotationaxis=1,0,0 rotation=90 segments=4 materialslot=0
+add Primitive name=Tooth4 shape=Cylinder radius=0.3 height=1.4 position=-28,-3.5,0 rotationaxis=1,0,0 rotation=90 segments=4 materialslot=0
+add Primitive name=SnoutSpike1 shape=Cylinder radius=0.35 height=6.32 position=-39.00,6.00,0 rotationaxis=-0.316,-0.949,0 rotation=90 segments=6 materialslot=0
+add Primitive name=SnoutSpike2 shape=Cylinder radius=0.35 height=6.08 position=-37.00,4.50,0 rotationaxis=-0.164,-0.986,0 rotation=90 segments=6 materialslot=0
+add Primitive name=SnoutSpike3 shape=Cylinder radius=0.35 height=5.39 position=-32.50,7.00,0 rotationaxis=-0.371,-0.928,0 rotation=90 segments=6 materialslot=0
+add Primitive name=Operculum shape=Box width=5 depth=0.4 height=7 position=-11,-1,0 materialslot=0
+add Primitive name=CheekPlate shape=Box width=4 depth=0.4 height=5 position=-16,-3,0 materialslot=0
+material 0 color=#e9e0c8 rough=0.7 metal=0
+save angler_section1_skull.effigy
+render angler_section1_skull.png shade=clay views=4 size=512

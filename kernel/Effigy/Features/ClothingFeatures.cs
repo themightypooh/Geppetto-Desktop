@@ -86,9 +86,15 @@ public sealed class GarmentFeature : Feature
 	/// <summary>What the cloth is made of. See GarmentFit.Options.Fabric — it is the first thing
 	/// both Marvelous Designer and Simply Cloth ask, and for good reason.</summary>
 	public readonly ChoiceParam Fabric = new( "Fabric",
-		new[] { "Cotton", "Denim", "Leather", "Stretch" } );
+		new[] { "Cotton", "Denim", "Leather", "Stretch", "Knit", "Silk", "Wool", "Canvas", "Pile" } );
 
 	public readonly FloatParam Stiffness = new( "Stiffness", 0.8f, 0f, 1f );
+
+	/// <summary>Friction for the drape solver, 0 slick to 1 gripping. -1 keeps the
+	/// fabric preset own friction (cotton default 0.6, denim 0.4, leather 0.3,
+	/// stretch 0.7, and the new presets values). Friction is what keeps a garment
+	/// from sliding off a shoulder; it was previously only a preset constant.</summary>
+	public readonly FloatParam Friction = new( "Friction", -1f, -1f, 1f );
 
 	/// <summary>
 	/// Which layer of an outfit it is: Base next to the skin, then Shirt, Jacket, Outer.
@@ -123,6 +129,11 @@ public sealed class GarmentFeature : Feature
 		1 => Effigy.Fabric.Denim,
 		2 => Effigy.Fabric.Leather,
 		3 => Effigy.Fabric.Stretch,
+		4 => Effigy.Fabric.Knit,
+		5 => Effigy.Fabric.Silk,
+		6 => Effigy.Fabric.Wool,
+		7 => Effigy.Fabric.Canvas,
+		8 => Effigy.Fabric.Pile,
 		_ => Effigy.Fabric.Cotton,
 	};
 
@@ -131,7 +142,7 @@ public sealed class GarmentFeature : Feature
 	/// held everywhere - they are fitted, and have nothing to swing.</summary>
 	public float LivePinFraction => BuildRecipe().Name switch
 	{
-		"Trousers" or "Shorts" => 0.1f,
+		"Trousers" or "Shorts" or "Skirt" => 0.1f,
 		"Beanie" or "Gloves" or "Socks" or "Belt" or "Boots" => 1f,
 		_ => 0.14f,
 	};
@@ -184,7 +195,7 @@ public sealed class GarmentFeature : Feature
 			var list = new List<IParam>
 			{
 				Recipe, Bodies, Fit, FitTo, Length, Neckline, Sleeve, Sleeves, Flare, Puff, Cinch, Wrinkles,
-				Thickness, Drape, Fabric, Stiffness, Layer, Weights,
+				Thickness, Drape, Fabric, Stiffness, Friction, Layer, Weights,
 			};
 
 			var recipe = BuildRecipe();
@@ -302,7 +313,7 @@ public sealed class GarmentFeature : Feature
 				RemedyAction.OpenWorkspace( "Open Rig", "Rig" ),
 				"A garment needs a rig",
 				"Garments find the torso, arms and legs from the bones, and this part has none.",
-				"Place bones in the Rig workspace",
+				"Place bones in the Rig workspace — any rig works, the garment matches bone names like spine, arm_upper and thigh, a template is not required",
 				"Or use Make Player, which fits Citizen's skeleton" );
 		}
 
@@ -350,7 +361,7 @@ public sealed class GarmentFeature : Feature
 
 		var pin = PinTop.Value >= 0f
 			? PinTop.Value
-			: recipe.Name is "Trousers" or "Shorts" ? 0.06f : 0f;
+			: recipe.Name is "Trousers" or "Shorts" or "Skirt" ? 0.06f : 0f;
 
 		// Boots tuck the trousers in BEFORE they are fitted, so the shaft goes on over a flat leg.
 		var bootTops = recipe.Name == "Boots" ? GarmentBoots.TopHeights( map, Length.Clamped ) : null;
@@ -399,6 +410,7 @@ public sealed class GarmentFeature : Feature
 			Drape = Drape.Value && !preview && !recipe.Rigid,
 			Fabric = FabricValue,
 			DrapeSteps = DrapeSteps.Clamped,
+			Friction = Friction.Clamped,
 			Passes = preview ? 2 : 4,
 			Stiffness = Stiffness.Clamped,
 			Puff = Puff.Clamped,
@@ -435,6 +447,7 @@ public sealed class GarmentFeature : Feature
 			Fail(
 				$"The {recipe.Name.ToLowerInvariant()} covers nothing",
 				"No face of the body sits nearest the bones this garment covers.",
+				GarmentFit.LastCoverReport ?? "No face counts were recorded for this fit.",
 				"Check the bones sit inside the body they belong to",
 				"Or raise Length / Sleeve" );
 		}
@@ -681,12 +694,13 @@ public sealed class FurFeature : Feature
 	public readonly FloatParam DarkRoots = new( "Dark roots", 0.5f, 0f, 1f );
 	public readonly StringParam RimColour = new( "Rim colour", "#3a342e" );
 	public readonly FloatParam Wind = new( "Wind", 0f, 0f, 5f );
+	public readonly BoolParam Fins = new( "Fins", false );
 
 	public readonly IntParam MaterialSlot = new( "Material slot", -1, -1, 63 ) { Slider = false };
 
 	public override IReadOnlyList<IParam> Parameters => new IParam[]
 	{
-		Bodies, Coverage, TrimWidth, Length, Layers, Droop, Colour, Density, Clump, DarkRoots, RimColour, Wind, MaterialSlot,
+		Bodies, Coverage, TrimWidth, Length, Layers, Droop, Colour, Density, Clump, DarkRoots, RimColour, Wind, Fins, MaterialSlot,
 	};
 
 	public override IReadOnlyList<IParam> AdvancedParameters => new IParam[] { Clump, DarkRoots, RimColour, MaterialSlot };
@@ -700,6 +714,9 @@ public sealed class FurFeature : Feature
 	{
 		ResolvedSlot = -1;
 		ShellFaces = 0;
+
+		// P7: shells grow in place, so the triangle delta is measured against this snapshot.
+		var trisBefore = ctx.Bodies.Where( b => b.Mesh is not null ).Sum( b => Decimate.TriangleCount( b.Mesh ) );
 
 		var slot = MaterialSlot.Value >= 0
 			? MaterialSlot.Value
@@ -737,12 +754,21 @@ public sealed class FurFeature : Feature
 			}
 
 			foreach ( var (body, list) in picked )
+			{
 				ShellFaces += FurShells.Grow( body.Mesh, list, options );
+				if ( Fins.Value ) ShellFaces += FurShells.GrowFins( body.Mesh, list, Length.Clamped, Droop.Clamped, slot );
+			}
 
 			ResolvedSlot = slot;
 
 			if ( slot >= 0 )
 				ctx.ShellSlots.Add( slot );
+
+			var pickedAddedTris = ctx.Bodies.Where( b => b.Mesh is not null ).Sum( b => Decimate.TriangleCount( b.Mesh ) ) - trisBefore;
+			Info( $"Fur emitted {ShellFaces} shell faces = about {pickedAddedTris} tris over {Layers.Clamped} layers" );
+
+			if ( pickedAddedTris > 200000 && Diagnostic is null )
+				Warn( $"Fur emitted about {pickedAddedTris} triangles.", "Large fur gets heavy to edit, save and render.", "Lower Layers", "Trim the openings" );
 
 			return;
 		}
@@ -777,12 +803,19 @@ public sealed class FurFeature : Feature
 
 			faces = faces.Where( fi => !ctx.ShellSlots.Contains( mesh.Faces[fi].Material ) ).ToList();
 			ShellFaces += FurShells.Grow( mesh, faces, options );
+			if ( Fins.Value ) ShellFaces += FurShells.GrowFins( mesh, faces, Length.Clamped, Droop.Clamped, slot );
 		}
 
 		ResolvedSlot = slot;
 
 		if ( slot >= 0 )
 			ctx.ShellSlots.Add( slot );
+
+		var addedTris = ctx.Bodies.Where( b => b.Mesh is not null ).Sum( b => Decimate.TriangleCount( b.Mesh ) ) - trisBefore;
+		Info( $"Fur emitted {ShellFaces} shell faces = about {addedTris} tris over {Layers.Clamped} layers" );
+
+		if ( addedTris > 200000 && Diagnostic is null )
+			Warn( $"Fur emitted about {addedTris} triangles.", "Large fur gets heavy to edit, save and render.", "Lower Layers", "Trim the openings" );
 
 		if ( ShellFaces > 60000 )
 		{
@@ -848,7 +881,12 @@ public sealed class WearerFeature : ImportFeature
 	/// </summary>
 	public override IReadOnlyList<IParam> Parameters => new IParam[] { Model };
 
-	public override IReadOnlyList<IParam> AdvancedParameters => Array.Empty<IParam>();
+	/// <summary>Source is NOT in the main dialog on purpose (see the note above:
+	/// a wearer pointed at an arbitrary OBJ would no longer match the rig
+	/// installed from its model), but it IS listed here so scripts and
+	/// `api Wearer` show it: source= takes the .obj/.fbx file, while
+	/// wearing= is only the provenance label, never a file path.</summary>
+	public override IReadOnlyList<IParam> AdvancedParameters => new IParam[] { Source };
 }
 
 /// <summary>

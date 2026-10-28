@@ -1,0 +1,236 @@
+#nullable enable
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+using Effigy;
+
+namespace Marionette.Desktop;
+
+/// <summary>
+/// Lineworks API for AI - provides programmatic access to 2D drawing features
+/// without requiring the UI. AI can create, modify, and use linework profiles.
+/// </summary>
+public static class LineworkApi
+{
+    public static string DefaultLineworkDirectory =>
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            "Geppetto", "lineworks");
+
+    /// <summary>Create new linework document</summary>
+    public static string CreateLinework(string name, List<LineworkStroke> strokes, string? outputPath = null)
+    {
+        var doc = LineworkWriter.CreateDocument(name, strokes);
+        string path = outputPath ?? Path.Combine(DefaultLineworkDirectory, $"{name}.linework");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        LineworkWriter.Write(doc, path);
+        return path;
+    }
+
+    /// <summary>Load existing linework file</summary>
+    public static LineworkDocument LoadLinework(string path)
+    {
+        if (!File.Exists(path)) throw new FileNotFoundException($"File not found: {path}");
+        if (!LineworkReader.TryLoad(path, out var doc, out _, out var error))
+            throw new InvalidOperationException($"Load failed: {error}");
+        return doc;
+    }
+
+    /// <summary>List all available lineworks</summary>
+    public static List<string> GetAvailableLineworks(string? directory = null)
+    {
+        var dir = directory ?? DefaultLineworkDirectory;
+        return Directory.Exists(dir) ? Directory.GetFiles(dir, "*.linework").ToList() : new();
+    }
+
+    /// <summary>Get linework info</summary>
+    public static LineworkInfo GetLineworkInfo(string path)
+    {
+        var doc = LoadLinework(path);
+        return new LineworkInfo
+        {
+            Path = path,
+            Name = doc.Name,
+            StrokeCount = doc.Layers.Sum(l => l.Strokes.Count),
+            IsClosed = doc.Layers.All(l => l.Strokes.All(s => s.Closed))
+        };
+    }
+
+    /// <summary>Create shape from description</summary>
+    public static string CreateShape(string name, string shapeType, double size = 10.0, int sides = 5, string? outputPath = null)
+    {
+        var strokes = shapeType.ToLower() switch
+        {
+            "circle" or "ellipse" => CreateCircleStrokes(size),
+            "square" or "rectangle" => CreateRectangleStrokes(size),
+            "triangle" => CreatePolygonStrokes(3, size),
+            "pentagon" => CreatePolygonStrokes(5, size),
+            "hexagon" => CreatePolygonStrokes(6, size),
+            "star" or "star5" => CreateStarStrokes(5, size),
+            _ => throw new ArgumentException($"Unknown shape: {shapeType}")
+        };
+        return CreateLinework(name, strokes, outputPath);
+    }
+
+    /// <summary>Convert linework to 3D mesh using Inflate2DFeature</summary>
+    public static async Task<string> InflateToMeshAsync(
+        string lineworkPath,
+        double thickness = 1.0,
+        string profile = "Cushion",
+        string symmetry = "None",
+        double scale = 1.0,
+        string? outputName = null)
+    {
+        var feature = new Inflate2DFeature
+        {
+            Linework = lineworkPath,
+            Thickness = new FloatParam(thickness),
+            Profile = new ChoiceParam(profile),
+            Symmetry = new ChoiceParam(symmetry),
+            Scale = new FloatParam(scale),
+            Name = outputName ?? Path.GetFileNameWithoutExtension(lineworkPath)
+        };
+
+        var result = await feature.BuildAsync(default);
+        string outputPath = outputName ?? Path.ChangeExtension(lineworkPath, ".effigy");
+        DocumentLoader.SaveMesh(result.ToMesh(), outputPath);
+        return outputPath;
+    }
+
+    /// <summary>Create from AI description</summary>
+    public static string CreateFromDescription(string description, string? name = null)
+    {
+        name ??= $"ai_linework_{Guid.NewGuid():N[..8]}";
+        var strokes = ParseDescription(description);
+        return CreateLinework(name, strokes);
+    }
+
+    /// <summary>Delete a linework file</summary>
+    public static void DeleteLinework(string path)
+    {
+        if (File.Exists(path)) File.Delete(path);
+    }
+
+    // Helper methods
+    private static List<LineworkStroke> CreateCircleStrokes(double diameter)
+    {
+        var stroke = new LineworkStroke 
+        {
+            Id = Guid.NewGuid().ToString(),
+            Closed = true,
+            Tool = "pen",
+            Size = 1.0f,
+            Color = "#ecebe6"
+        };
+        int segments = 32;
+        for (int i = 0; i < segments; i++)
+        {
+            double angle = i * (2 * Math.PI / segments);
+            double x = (diameter / 2) * Math.Cos(angle);
+            double y = (diameter / 2) * Math.Sin(angle);
+            stroke.Points.Add(new Vec2((float)x, (float)y));
+            stroke.Pressures.Add(0.5f);
+        }
+        return new List<LineworkStroke> { stroke };
+    }
+
+    private static List<LineworkStroke> CreateRectangleStrokes(double size)
+    {
+        var stroke = new LineworkStroke
+        {
+            Id = Guid.NewGuid().ToString(),
+            Closed = true,
+            Tool = "pen",
+            Size = 1.0f,
+            Color = "#ecebe6"
+        };
+        float h = (float)(size / 2);
+        var points = new[] { new Vec2(-h, -h), new Vec2(h, -h), new Vec2(h, h), new Vec2(-h, h) };
+        foreach (var p in points) stroke.Points.Add(p);
+        foreach (var _ in points) stroke.Pressures.Add(0.5f);
+        return new List<LineworkStroke> { stroke };
+    }
+
+    private static List<LineworkStroke> CreatePolygonStrokes(int sides, double radius)
+    {
+        var stroke = new LineworkStroke
+        {
+            Id = Guid.NewGuid().ToString(),
+            Closed = true,
+            Tool = "pen",
+            Size = 1.0f,
+            Color = "#ecebe6"
+        };
+        for (int i = 0; i < sides; i++)
+        {
+            double angle = i * (2 * Math.PI / sides);
+            float x = (float)(radius * Math.Cos(angle));
+            float y = (float)(radius * Math.Sin(angle));
+            stroke.Points.Add(new Vec2(x, y));
+            stroke.Pressures.Add(0.5f);
+        }
+        // Close the polygon
+        if (sides > 0)
+        {
+            stroke.Points.Add(stroke.Points[0]);
+            stroke.Pressures.Add(0.5f);
+        }
+        return new List<LineworkStroke> { stroke };
+    }
+
+    private static List<LineworkStroke> CreateStarStrokes(int points, double size)
+    {
+        var stroke = new LineworkStroke
+        {
+            Id = Guid.NewGuid().ToString(),
+            Closed = true,
+            Tool = "pen",
+            Size = 1.0f,
+            Color = "#ecebe6"
+        };
+        double outerRadius = size / 2;
+        double innerRadius = outerRadius * 0.4;
+
+        for (int i = 0; i < points * 2; i++)
+        {
+            double angle = i * (Math.PI / points);
+            double r = (i % 2 == 0) ? outerRadius : innerRadius;
+            float x = (float)(r * Math.Cos(angle));
+            float y = (float)(r * Math.Sin(angle));
+            stroke.Points.Add(new Vec2(x, y));
+            stroke.Pressures.Add(0.5f);
+        }
+        // Close the star
+        if (points > 0)
+        {
+            stroke.Points.Add(stroke.Points[0]);
+            stroke.Pressures.Add(0.5f);
+        }
+        return new List<LineworkStroke> { stroke };
+    }
+
+    private static List<LineworkStroke> ParseDescription(string description)
+    {
+        var strokes = new List<LineworkStroke>();
+        var parts = description.ToLower().Split(' ');
+        string shape = parts.Length > 0 ? parts[0] : "circle";
+        double size = 10.0;
+
+        for (int i = 0; i < parts.Length; i++)
+        {
+            if (parts[i] == "size" || parts[i] == "radius" || parts[i] == "diameter")
+            {
+                if (i + 1 < parts.Length && double.TryParse(parts[i + 1], out var val))
+                    size = val;
+            }
+        }
+
+        strokes.AddRange(CreateShape($"ai_{shape}", shape, size));
+        return strokes;
+    }
+}
+
+/// <summary>Simple info about a linework document</summary>
+public sealed record LineworkInfo(string Path, string Name, int StrokeCount, bool IsClosed);

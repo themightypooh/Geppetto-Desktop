@@ -26,10 +26,10 @@ from pathlib import Path
 import roundtable_catalog
 import chat_workspace
 import build_execution
-from chat_phase import PHASE_PROMPT
+from chat_phase import PHASE_PROMPT, BUILD_PREP_PROMPT
 
 CONFIG = os.path.expanduser('~/.config/geppetto/chat-models.json')
-SYSTEM_PLAN = "You are Geppetto's helpful chat assistant in Plan mode. Discuss plans and research clearly and concretely. You are in read-only planning mode."
+SYSTEM_PLAN = "You are Geppetto's helpful chat assistant in Plan mode. Discuss plans and research clearly and concretely. You are in read-only planning mode. Do not file a Geppetto model intent or claim build permission."
 SYSTEM_BUILD = "You are Geppetto's helpful chat assistant in Build mode. You have active modeling and build tools enabled. Answer clearly and concisely."
 SYSTEM = SYSTEM_PLAN
 OLLAMA = os.environ.get('OLLAMA_HOST', 'http://127.0.0.1:11434').rstrip('/')
@@ -45,15 +45,15 @@ DEFAULT_MODELS = []
 # Claude through the user's CLI login; installation does not prove a subscription tier.
 CLAUDE = shutil.which('claude') or os.path.expanduser('~/.local/bin/claude')
 CLAUDE_MODELS = [
-    dict(id='claude/opus', label='Claude Opus · CLI login', kind='claude-cli', model='opus', endpoint='cli', research=False),
-    dict(id='claude/sonnet', label='Claude Sonnet · CLI login', kind='claude-cli', model='sonnet', endpoint='cli', research=False),
-    dict(id='claude/haiku', label='Claude Haiku · CLI login', kind='claude-cli', model='haiku', endpoint='cli', research=False),
+    dict(id='claude/opus', label='Claude Opus · CLI login', kind='claude-cli', model='opus', endpoint='cli', research=False, capabilities=['tools']),
+    dict(id='claude/sonnet', label='Claude Sonnet · CLI login', kind='claude-cli', model='sonnet', endpoint='cli', research=False, capabilities=['tools']),
+    dict(id='claude/haiku', label='Claude Haiku · CLI login', kind='claude-cli', model='haiku', endpoint='cli', research=False, capabilities=['tools']),
 ]
 
 ZOOPA_FILE = os.path.expanduser('~/.config/geppetto/zoopa.md')
 ZOOPA_MODELS = [
     dict(id='zoopa/opus', label='Zoopa · Claude Opus · CLI login', kind='claude-cli', model='opus', endpoint='cli', research=False,
-         system_file=ZOOPA_FILE),
+         system_file=ZOOPA_FILE, capabilities=['tools']),
 ]
 
 # --- Endpoint safety (audit C1): the terminal AI mode's rules (AiCli.Connection), ported. ---
@@ -193,6 +193,7 @@ def models(discover=True):
                                 kind='ollama', endpoint=OLLAMA + '/', model=name,
                                 research='tools' in m.get('capabilities', []),
                                 vision='vision' in m.get('capabilities', []),
+                                capabilities=m.get('capabilities', []),
                                 extra_body={'reasoning_effort': 'none'} if m.get('details', {}).get('family') == 'qwen35' else {}))
         except (OSError, ValueError, KeyError):
             pass
@@ -230,6 +231,7 @@ def models(discover=True):
         m['available'] = m.get('available', True) and (not m.get('key_env') or bool(key(m)))
         m.setdefault('group', {'claude-cli': 'Claude', 'grok-cli': 'Grok', 'ollama': 'Local · Ollama'}.get(m['kind'], 'API / configured'))
         m.setdefault('vision', False)
+        m.setdefault('capabilities', [])
         if m.get('key_env') and not key(m):
             m['label'] += ' (key missing)'
     return sorted(out, key=lambda m: (m['group'].lower(), m['label'].lower()))
@@ -456,21 +458,21 @@ CLAUDE_HOME = os.path.expanduser('~/.local/share/geppetto/chat')
 CLAUDE_TOOLS = ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Skill', 'WebSearch', 'WebFetch',
                 'Bash(geppetto-live *)', 'Bash(python3 */cabinet/host.py *)', 'Bash(ls *)', 'Bash(mkdir *)', 'Bash(cat *)']
 CLAUDE_CHAT = ("You are the chat in Geppetto's cabinet, talking to the user. You can model:"
-               " use the geppetto skill, write Effigy build scripts in this folder and run them with"
+               " write Effigy build scripts in this folder and run them with"
                " `geppetto-live build.txt - outdir` so the user watches each step in a viewport pane; the run stays open"
                " with the model loaded: change it with `geppetto-live more RUN edit.txt` (a few lines), never a"
                " new run or a rebuild; a bad line holds the run, send the fix with `more`; `geppetto-live close RUN`"
                " when the user accepts it. The user flags steps with notes in the chest; use the exact-run notes monitor to receive them; `geppetto-live rewind RUN N` puts the model back to revision N. Never restart, quit or"
-               " take over the Geppetto chest. The chat window is small: keep replies short.") + PHASE_PROMPT
+               " take over the Geppetto chest. The chat window is small: keep replies short.") + PHASE_PROMPT + BUILD_PREP_PROMPT
 _claude_sessions = set()      # chat sessions the CLI has already started; later turns --resume them
 
 # Grok through the grok CLI, on its own grok.com login, never an API key.
 GROK = shutil.which('grok') or os.path.expanduser('~/.local/bin/grok')
 GROK_MODELS = [
-    dict(id='grok/grok-4.7', label='Grok 4.7', kind='grok-cli', model='grok-4.7', endpoint='cli', research=False),
-    dict(id='grok/grok-4.7-build-fast', label='Grok 4.7 fast', kind='grok-cli', model='grok-4.7-build-fast', endpoint='cli', research=False),
-    dict(id='grok/grok-4.6', label='Grok 4.6', kind='grok-cli', model='grok-4.6', endpoint='cli', research=False),
-    dict(id='grok/grok-4.5', label='Grok 4.5', kind='grok-cli', model='grok-4.5', endpoint='cli', research=False),
+    dict(id='grok/grok-4.7', label='Grok 4.7', kind='grok-cli', model='grok-4.7', endpoint='cli', research=False, capabilities=['tools']),
+    dict(id='grok/grok-4.7-build-fast', label='Grok 4.7 fast', kind='grok-cli', model='grok-4.7-build-fast', endpoint='cli', research=False, capabilities=['tools']),
+    dict(id='grok/grok-4.6', label='Grok 4.6', kind='grok-cli', model='grok-4.6', endpoint='cli', research=False, capabilities=['tools']),
+    dict(id='grok/grok-4.5', label='Grok 4.5', kind='grok-cli', model='grok-4.5', endpoint='cli', research=False, capabilities=['tools']),
 ]
 GROK_CHAT = CLAUDE_CHAT
 _grok_sessions = set()
@@ -491,9 +493,50 @@ def _extra_system(model):
     return extra.strip()
 
 
-def _chat_system(model, mode="build"):
+def _chat_system(model, mode="plan"):  # fail closed: ordinary chat must not get build prep by default
     extra = _extra_system(model)
     return (CLAUDE_CHAT if mode == "build" else SYSTEM_PLAN + PHASE_PROMPT) + ('\n\n' + extra if extra else '')
+
+def _kill_owned_group(proc):
+    """End only this provider turn and its tool children, never the caller's group."""
+    if proc.poll() is not None:
+        return
+    try:
+        if os.getpgid(proc.pid) == proc.pid:
+            os.killpg(proc.pid, signal.SIGKILL)
+        else:
+            proc.kill()
+    except ProcessLookupError:
+        pass
+
+
+_owned_cli_turns = set()
+_owned_cli_lock = threading.Lock()
+
+
+def cancel_owned_cli_turns():
+    """Cabinet shutdown: kill direct CLI turns before its guard threads disappear."""
+    with _owned_cli_lock:
+        turns = tuple(_owned_cli_turns)
+    for proc in turns:
+        _kill_owned_group(proc)
+
+
+def _turn_guard(proc, cancel, timeout):
+    done = threading.Event()
+
+    def watch():
+        deadline = time.monotonic() + max(timeout, 3600)
+        while not done.wait(.05) and proc.poll() is None:
+            if (cancel is not None and cancel.is_set()) or time.monotonic() > deadline:
+                _kill_owned_group(proc)
+                return
+
+    with _owned_cli_lock:
+        _owned_cli_turns.add(proc)
+    threading.Thread(target=watch, daemon=True).start()
+    return done
+
 
 def _claude_cli(model, history, cancel, timeout, session='', mode="build"):
     """Claude via `claude -p` on its own login (the Max plan), with modelling tools, one CLI session per chat."""
@@ -518,9 +561,8 @@ def _claude_cli(model, history, cancel, timeout, session='', mode="build"):
         args.append('--no-session-persistence')
     os.makedirs(CLAUDE_HOME, mode=0o700, exist_ok=True)   # audit G6: chat home holds CLI sessions
     p = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
-                         cwd=CLAUDE_HOME, text=True)
-    timer = threading.Timer(max(timeout, 3600), p.kill)     # a build can take a while
-    timer.start()
+                          cwd=CLAUDE_HOME, text=True, start_new_session=True)
+    done = _turn_guard(p, cancel, timeout)
     said = False
     try:
         p.stdin.write(prompt)
@@ -548,9 +590,10 @@ def _claude_cli(model, history, cancel, timeout, session='', mode="build"):
         if p.wait() != 0:
             raise RuntimeError('claude CLI failed: ' + (p.stderr.read().strip()[-300:] or 'exit %d' % p.returncode))
     finally:
-        timer.cancel()
-        if p.poll() is None:
-            p.kill()
+        done.set()
+        _kill_owned_group(p)
+        with _owned_cli_lock:
+            _owned_cli_turns.discard(p)
 
 
 def _grok_cli(model, history, cancel, timeout, session='', mode="build"):
@@ -579,9 +622,8 @@ def _grok_cli(model, history, cancel, timeout, session='', mode="build"):
     if session:
         args += ['--resume', session] if resume else ['--session-id', session]
     p = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
-                         cwd=CLAUDE_HOME, text=True)
-    timer = threading.Timer(max(timeout, 3600), p.kill)
-    timer.start()
+                          cwd=CLAUDE_HOME, text=True, start_new_session=True)
+    done = _turn_guard(p, cancel, timeout)
     said = False
     try:
         for line in p.stdout:
@@ -607,25 +649,51 @@ def _grok_cli(model, history, cancel, timeout, session='', mode="build"):
         if p.wait() != 0:
             raise RuntimeError('grok CLI failed: ' + (p.stderr.read().strip()[-300:] or 'exit %d' % p.returncode))
     finally:
-        timer.cancel()
-        if p.poll() is None:
-            p.kill()
+        done.set()
+        _kill_owned_group(p)
+        with _owned_cli_lock:
+            _owned_cli_turns.discard(p)
         try:
             os.unlink(prompt_path)
         except OSError:
             pass
 
 
-def _roundtable_cli(model, history, cancel, timeout, mode="build"):
+def _roundtable_cli(model, history, cancel, timeout, mode="build", turn_callback=None):
     """Reuse Roundtable's provider adapter, with private history and no seat/session mutation."""
     base_sys = (CLAUDE_CHAT + '\n' + SYSTEM_BUILD) if mode == "build" else SYSTEM_PLAN
+    # Token guard 2026-10-25: this path used to resend the last 16 turns with
+    # no size limit at all, while the API path in this same file caps history
+    # at 16,000 chars. A long modelling chat can otherwise resend a huge
+    # previous model reply (a full build script) on every single turn, and
+    # Codex --ephemeral cannot resume, so it pays that full history again.
+    # Keep the panel's own window (last 8 turns, as _other_send sends), then
+    # cap total history text at 24,000 chars by dropping the oldest turns
+    # first, never the latest user turn. The model can still read the actual
+    # model file from its workspace instead of re-reading old chat text.
+    turns = [h for h in history if h["role"] in ("you", "model")][-8:]
+    while len(turns) > 1 and sum(len(_said(h)) for h in turns) > 24000:
+        turns = turns[1:]
+    if turns and len(_said(turns[-1])) > 24000:
+        # A single over-long turn is a model reply (panel user text is
+        # capped at 8000); drop any image refs with it so _said() cannot
+        # re-append them on top of the truncated text.
+        trimmed = {k: v for k, v in turns[-1].items() if k != "images"}
+        trimmed["text"] = _said(turns[-1])[:24000] + "\n[earlier text in this turn truncated to save tokens]"
+        turns[-1] = trimmed
     prompt = (base_sys + chr(10) + chr(10) + _extra_system(model) + chr(10) + chr(10) +
               (chr(10) + chr(10)).join(("User: " if h["role"] == "you" else "Assistant: ") + _said(h)
-                               for h in history[-16:] if h["role"] in ("you", "model")))
+                               for h in turns))
     os.makedirs(CLAUDE_HOME, mode=0o700, exist_ok=True)
     workspace = chat_workspace.workspace()
     os.makedirs(workspace, mode=0o700, exist_ok=True)
-    p = subprocess.Popen(roundtable_catalog.command(model, act=(mode == "build")), stdin=subprocess.PIPE,
+    # Plan/chat turns do not need Build-level reasoning: pin Codex to low
+    # effort there (the research-backed default is medium; high/xhigh are
+    # only for genuinely hard tasks). Build turns pass no effort and inherit
+    # the user's own Codex setting, so modelling quality is untouched.
+    p = subprocess.Popen(roundtable_catalog.command(model, act=(mode == "build"),
+                                                   effort=None if mode == "build" else "low"),
+                         stdin=subprocess.PIPE,
                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                           cwd=workspace, env=child_env(), start_new_session=True)
     errors = []
@@ -660,6 +728,13 @@ def _roundtable_cli(model, history, cancel, timeout, mode="build"):
                 data = json.loads(line)
             except ValueError:
                 continue
+            if data.get('type') == 'system':
+                if turn_callback is not None:
+                    try:
+                        turn_callback(data.get('turn_id') or '', data.get('session_id') or '')
+                    except Exception:
+                        pass
+                continue
             event = data.get('event') or {}
             delta = event.get('delta') or {}
             if delta.get('type') == 'text_delta':
@@ -682,23 +757,23 @@ def _roundtable_cli(model, history, cancel, timeout, mode="build"):
         p.stderr.close()
 
 
-def stream(model, history, cancel=None, timeout=120, notes="", api="", session="", mode="plan"):
+def stream(model, history, cancel=None, timeout=120, notes="", api="", session="", mode="plan", turn_callback=None):
     """Plan can discuss; Build completes only after a real live-tool receipt."""
     def invoke(messages):
-        return _stream_once(model, messages, cancel, timeout, notes, api, session, mode)
+        return _stream_once(model, messages, cancel, timeout, notes, api, session, mode, turn_callback)
     if mode == "build":
-        yield from build_execution.checked_stream(model, history, invoke, cancel)
+        yield from build_execution.checked_stream(model, history, invoke, cancel, mode=mode)
     else:
         yield from invoke(history)
 
 
-def _stream_once(model, history, cancel=None, timeout=120, notes="", api="", session="", mode="plan"):
+def _stream_once(model, history, cancel=None, timeout=120, notes="", api="", session="", mode="plan", turn_callback=None):
     """Yield answer text; native Ollama NDJSON and OpenAI SSE stream immediately."""
     if cancel is not None and cancel.is_set():
         return
     kind = model['kind']
     if kind == 'roundtable-cli':
-        yield from _roundtable_cli(model, history, cancel, timeout, mode=mode)
+        yield from _roundtable_cli(model, history, cancel, timeout, mode=mode, turn_callback=turn_callback)
         return
     if kind == 'claude-cli':
         yield from _claude_cli(model, history, cancel, timeout, session, mode=mode)

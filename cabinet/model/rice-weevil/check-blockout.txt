@@ -1,0 +1,3 @@
+echo "Blockout inspection: a four-view sheet tests pronotum, paired covers and the descending rostrum before appendages."
+render rice-weevil-blockout.png shade=material views=4 size=512
+describe

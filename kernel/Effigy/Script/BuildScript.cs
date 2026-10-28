@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -25,6 +26,7 @@ namespace Effigy;
 ///   add Stroke bodies=Sac … inkey=sac_swell   (sculpt into a finished shape key)
 ///   render out/torso.png view=sheet [clip=y>0]   (clip= keeps one side of a plane, to see inside)
 ///   describe
+///   uvcheck [Body] size=1024 resolution=256 strict=1   (grade a UV layout: islands, stretch, flips, overlaps, density, bake coverage)
 ///   clearance Button Shell min=0.02      (gap, or overlap volume and depth; no names = every pair)
 ///   match front reference.png out/match.png
 ///   bake Cage Sculpt out/bake size=2048 maps=normal,ao,curvature,cavity,height ss=2 vmat=1
@@ -71,10 +73,18 @@ public static partial class BuildScript
 	/// `match` or `save` writes go under <paramref name="baseDir"/> when their path is relative.</summary>
 	public static Result Run( PartStudio studio, string text, string baseDir = null ) => Run( studio, text, baseDir, null, null );
 
-	/// <summary>Lane P carry-up from the desktop mirror: the verbs that change the
-	/// document. A live run publishes a revision after each of these, and only these.</summary>
-	public static bool Mutates( string verb ) =>
-		verb?.ToLowerInvariant() is "add" or "edit" or "set" or "remove" or "remedy" or "material" or "facematerial" or "refimage";
+	/// <summary>Whether a command must consume the live player's mutation/STEP allowance.
+	/// Only known captions, reports and output-only commands bypass it. New verbs are
+	/// gated by default so an omitted rig/sculpt/paint command cannot run past STEP.
+	/// This controls pacing, not whether the caller records a revision.</summary>
+	public static bool Mutates( string verb ) => verb?.ToLowerInvariant() switch
+	{
+		null or "" or "echo" => false,
+		"describe" or "measure" or "at" or "measurebody" or "fitreport" or "distance"
+			or "symmetry" or "clearance" or "topology" or "section" or "validate"
+			or "render" or "turnaround" or "uvcheck" or "match" or "save" or "export" or "exportvalidate" => false,
+		_ => true
+	};
 
 	/// <summary>Lane P carry-up from the desktop mirror: the first word of a script
 	/// line, lower case; null for a blank line or a comment.</summary>
@@ -194,7 +204,14 @@ public static partial class BuildScript
 						r.Log.Add( rigMessage );
 				}
 
-				return RebuildAndCheck( studio, feature, r, $"added {feature.TypeName} '{feature.Name ?? feature.Id}'" + (intoKey is null ? "" : $" into shape key {intoKey}") );
+				var addedOk = RebuildAndCheck( studio, feature, r, $"added {feature.TypeName} '{feature.Name ?? feature.Id}'" + (intoKey is null ? "" : $" into shape key {intoKey}") );
+				// The unwrap report rides here, not on a warning: a good unwrap is not a
+				// problem to yellow in the dialog, but a script user still needs its numbers.
+				if ( feature is UVProjectFeature uvf && uvf.LastReport is not null )
+					r.Log.Add( uvf.LastReport );
+				if ( feature is ParticleBakeFeature pbf && pbf.LastReport is not null )
+					r.Log.Add( pbf.LastReport );
+				return addedOk;
 			}
 
 			case "edit":
@@ -332,7 +349,7 @@ public static partial class BuildScript
 			case "fix":
 			{
 				if ( args.Count < 2 )
-					return Fail( r, "fix needs a body (or all) and the fixes: fix Torso loose holes normals" );
+					return Fail( r, "fix needs a body (or all) and the fixes: fix Torso loose doubles degenerate holes uvs normals [manifold] [fan=1] [voxel=0.25]" );
 
 				var targets = args[0].Equals( "all", StringComparison.OrdinalIgnoreCase )
 					? studio.Bodies.ToList()
@@ -341,10 +358,97 @@ public static partial class BuildScript
 				if ( targets.Count == 0 || targets[0] is null )
 					return Fail( r, $"No body called '{args[0]}'. Bodies: {string.Join( ", ", studio.Bodies.Select( b => b.Name ?? b.Id ) )}." );
 
+				var fixOpts = Pairs( args.Skip( 1 ).Where( a => a.Contains( '=' ) ) );
+				var fixNames = args.Skip( 1 ).Where( a => !a.Contains( '=' ) );
+				var fan = Truthy( fixOpts.GetValueOrDefault( "fan", "0" ) );
+				var voxel = fixOpts.TryGetValue( "voxel", out var voxelText ) ? Number( voxelText ) : 0.25f;
+
 				foreach ( var body in targets )
-					foreach ( var line in MeshFix.Apply( body.Mesh, args.Skip( 1 ) ) )
+					foreach ( var line in MeshFix.Apply( body.Mesh, fixNames, 0.001f, fan, voxel ) )
 						r.Log.Add( $"{body.Name ?? body.Id} {line}" );
 
+				return true;
+			}
+
+			case "validate":
+			{
+				// validate [Body|all] [target=game|character|print] [shells=N] [genus=N] [minwall=X]
+				// Repair proposal P1: one PASS/FAIL/WARN line per check from the
+				// gate table, plus a verdict. Fails the script on any hard fail,
+				// so it works as a gate as well as a report.
+				if ( args.Count < 1 )
+					return Fail( r, "validate needs a body (or all): validate [Body|all] [target=game|character|print] [shells=N] [genus=N] [minwall=X]" );
+
+				var named = args.Where( a => !a.Contains( '=' ) ).ToList();
+				var opts = Pairs( args.Where( a => a.Contains( '=' ) ) );
+
+				foreach ( var key in opts.Keys )
+					if ( key is not ("target" or "shells" or "genus" or "minwall") )
+						return Fail( r, $"validate has no option '{key}'. Options: target, shells, genus, minwall." );
+
+				if ( !Targets( studio, named.FirstOrDefault(), out var bodies, out var why ) )
+					return Fail( r, why );
+
+				var target = MeshRepair.ParseTarget( opts.GetValueOrDefault( "target", "game" ) );
+				var shells = opts.TryGetValue( "shells", out var shellsText ) ? (int)Number( shellsText ) : 1;
+				var genus = opts.TryGetValue( "genus", out var genusText ) ? (int)Number( genusText ) : -1;
+				var minwall = opts.TryGetValue( "minwall", out var minwallText ) ? Number( minwallText ) : 0f;
+				var failed = new List<string>();
+
+				foreach ( var body in bodies )
+				{
+					var report = MeshRepair.Validate( body.Mesh, body.Name ?? body.Id, target, shells, genus, minwall, studio.Rig );
+					report.Describe( r.Log );
+					if ( !report.Passed ) failed.Add( $"{body.Name ?? body.Id}: {string.Join( ", ", report.HardFails )}" );
+				}
+
+				if ( failed.Count > 0 )
+					return Fail( r, $"validate: hard fail(s) — {string.Join( "; ", failed )}" );
+
+				return true;
+			}
+
+			case "load":
+			{
+				// load file.effigy — bring bodies from a saved document into
+				// this script session, so imported (possibly broken) meshes
+				// can be validated and repaired in a script.
+				if ( args.Count < 1 )
+					return Fail( r, "load needs a path: load file.effigy" );
+
+				var path = Resolve( baseDir, args[0] );
+
+				if ( !File.Exists( path ) )
+					return Fail( r, $"No file at {path}." );
+
+				var loaded = StudioDocument.ReadFile( path );
+				// ReadFile restores features, not bodies: rebuild so the
+				// loaded document publishes its bodies before copying them.
+				loaded.Rebuild();
+				var added = 0;
+
+				// Document-level particle cues travel with a load, the same
+				// way the bodies do: a cue names no body, so copying it is
+				// safe, and without this a loaded document silently loses
+				// every cue it saved. Replaced by frame+cue, as the verb does.
+				foreach ( var loadedCue in loaded.ParticleCues )
+				{
+					studio.ParticleCues.RemoveAll( c => c.Frame == loadedCue.Frame && string.Equals( c.Cue, loadedCue.Cue, StringComparison.OrdinalIgnoreCase ) );
+					studio.ParticleCues.Add( loadedCue );
+				}
+				studio.ParticleCues.Sort( (a, b) => a.Frame != b.Frame ? a.Frame.CompareTo( b.Frame ) : string.Compare( a.Cue, b.Cue, StringComparison.OrdinalIgnoreCase ) );
+				foreach ( var lb in loaded.Bodies )
+				{
+					if ( lb.Mesh is null ) continue;
+					var name = lb.Name ?? lb.Id;
+					var id = lb.Id;
+					while ( studio.Bodies.Any( b => (b.Name ?? b.Id) == name ) ) name += "2";
+					while ( studio.Bodies.Any( b => b.Id == id ) ) id += "2";
+					studio.Bodies.Add( new Body( id, name, lb.Mesh ) );
+					added++;
+				}
+
+				r.Log.Add( $"loaded {added} bodies from {path}" );
 				return true;
 			}
 
@@ -357,7 +461,18 @@ public static partial class BuildScript
 				var opts = Pairs( args.Skip( 1 ) );
 
 				if ( opts.TryGetValue( "shade", out var shade ) )
-					return RenderShaded( studio, path, opts, shade, r );
+					return RenderShaded( studio, path, opts, shade, r, baseDir );
+
+				if ( Truthy( opts.GetValueOrDefault( "refimage", "0" ) ) )
+				{
+					var refView = opts.GetValueOrDefault( "view", "" );
+					if ( refView is not ("front" or "side" or "top" or "right") )
+						return Fail( r, "render refimage=1 needs view=front|side|top (the picture's view), not a sheet." );
+					var refTag = opts.GetValueOrDefault( "tag", "" );
+					var refImage = FindImage( studio, refView, refTag, r, out var refWhy );
+					if ( refImage is null ) return Fail( r, refWhy );
+					return RenderOverlay( studio, refImage, path, baseDir, r );
+				}
 
 				var viewName = opts.GetValueOrDefault( "view", "sheet" );
 				var size = (int)Number( opts.GetValueOrDefault( "size", "512" ) );
@@ -399,20 +514,30 @@ public static partial class BuildScript
 				var opts = Pairs( args.Skip( 1 ) );
 
 				foreach ( var key in opts.Keys )
-					if ( key is not ("shade" or "size" or "views" or "name" or "focus" or "elevation" or "ss" or "aa" or "preset" or "clip" or "backdrop") )
-						return Fail( r, $"turnaround has no option '{key}'. Options: shade, size, views, name, focus, elevation, ss, aa, preset, clip, backdrop." );
+					if ( key is not ("shade" or "size" or "views" or "name" or "focus" or "elevation" or "ss" or "aa" or "preset" or "clip" or "backdrop" or "portfolio" or "lights" or "env" or "envyaw" or "exposure" or "tonemap" or "pass" or "detail" or "silhouette" or "reference") )
+						return Fail( r, $"turnaround has no option '{key}'. Options: shade, size, views, name, focus, elevation, ss, aa, preset, clip, backdrop, portfolio, lights, env, envyaw, exposure, tonemap, pass, detail, silhouette, reference." );
 
 				var look = opts.GetValueOrDefault( "shade", "clay" ).ToLowerInvariant();
-				if ( look is not ("clay" or "material") )
-					return Fail( r, $"shade={look}: use shade=clay (form only) or shade=material (what the materials make it look like)." );
+				if ( look is not ("clay" or "material" or "both") )
+					return Fail( r, $"shade={look}: use shade=clay (form only), shade=material (what the materials make it look like), or shade=both (clay + material rows in one sheet)." );
 
 				var options = new TurnaroundOptions
 				{
+					BaseDir = baseDir,
 					Clay = look == "clay",
 					Size = (int)Number( opts.GetValueOrDefault( "size", "512" ) ),
 					Elevation = Number( opts.GetValueOrDefault( "elevation", "12" ) ),
 					Supersample = (int)Number( opts.GetValueOrDefault( "ss", "1" ) ),
 					Coverage = (int)Number( opts.GetValueOrDefault( "aa", "16" ) ),
+					Portfolio = Truthy( opts.GetValueOrDefault( "portfolio", "1" ) ),
+					Lights = opts.GetValueOrDefault( "lights", "camera" ),
+					Env = opts.GetValueOrDefault( "env", null ),
+					EnvYaw = Number( opts.GetValueOrDefault( "envyaw", "0" ) ),
+					Exposure = Number( opts.GetValueOrDefault( "exposure", "1" ) ),
+					Tonemap = opts.GetValueOrDefault( "tonemap", null ),
+					Pass = opts.GetValueOrDefault( "pass", "shaded" ),
+					Silhouette = Truthy( opts.GetValueOrDefault( "silhouette", "0" ) ),
+					Reference = Truthy( opts.GetValueOrDefault( "reference", "0" ) ),
 				};
 
 				if ( opts.TryGetValue( "views", out var viewList ) )
@@ -443,16 +568,56 @@ public static partial class BuildScript
 					options.Clip = plane;
 				}
 
+				if ( opts.TryGetValue( "detail", out var detailSpec ) )
+				{
+					var bits = detailSpec.Split( ',' );
+					if ( bits.Length != 4 || !bits.All( x => float.TryParse( x, NumberStyles.Float, CultureInfo.InvariantCulture, out _ ) ) || float.Parse( bits[3], CultureInfo.InvariantCulture ) <= 0f )
+						return Fail( r, $"detail={detailSpec}: use detail=x,y,z,r (the centre and radius of the closeup region)." );
+					options.DetailCentre = new Vec3( float.Parse( bits[0], CultureInfo.InvariantCulture ), float.Parse( bits[1], CultureInfo.InvariantCulture ), float.Parse( bits[2], CultureInfo.InvariantCulture ) );
+					options.DetailRadius = float.Parse( bits[3], CultureInfo.InvariantCulture );
+				}
+
 				if ( opts.TryGetValue( "preset", out var preset ) && (options.Fallback = FleshMaterial.Preset( preset )) is null )
 					return Fail( r, $"No material preset '{preset}'. Presets: {string.Join( ", ", FleshMaterial.Presets )}." );
 
-				var turned = Turnaround.Write( studio, folder, opts.GetValueOrDefault( "name", "model" ), options );
+				var turned = look == "both"
+					? Turnaround.WriteBoth( studio, folder, opts.GetValueOrDefault( "name", "model" ), options )
+					: Turnaround.Write( studio, folder, opts.GetValueOrDefault( "name", "model" ), options );
 				r.Log.AddRange( turned.Log );
 
 				if ( !turned.Ok )
 					return Fail( r, turned.Error );
 
 				r.Written.AddRange( turned.Written );
+				return true;
+			}
+
+			case "uvcheck":
+			{
+				// Grade the current UV layout without rebuilding it: islands, stretch,
+				// flips, outside faces, wrap faces, n-gons, density spread, bake
+				// coverage. Logs the grade and passes, unless strict=1, in which case a
+				// FAIL grade stops the script — the check-then-fix workflow.
+				var opts = Pairs( args );
+				var bodyName = args.FirstOrDefault( a => !a.Contains( "=" ) );
+				var size = opts.TryGetValue( "size", out var sizeText ) && int.TryParse( sizeText, out var parsedSize ) ? parsedSize : 1024;
+				var resolution = opts.TryGetValue( "resolution", out var resText ) && int.TryParse( resText, out var parsedRes ) ? parsedRes : 256;
+				var strict = opts.TryGetValue( "strict", out var strictText ) && (strictText == "1" || strictText.Equals( "on", StringComparison.OrdinalIgnoreCase ));
+				var bodies = bodyName is null
+					? studio.Bodies.ToArray()
+					: new[] { ModelMeasure.FindBody( studio, bodyName ) };
+				if ( bodies.Length == 0 || bodies[0] is null )
+					return Fail( r, $"uvcheck: no body named '{bodyName}'" );
+				var failed = false;
+				foreach ( var body in bodies )
+				{
+					if ( body?.Mesh is null ) continue;
+					var grade = UVLayoutCheck.Check( body.Mesh, size, resolution );
+					r.Log.Add( $"{body.Name ?? body.Id}: {grade}" );
+					if ( strict && grade.Verdict == "FAIL" ) failed = true;
+				}
+				if ( failed )
+					return Fail( r, "uvcheck: FAIL grade with strict=1 — fix flips, overlaps or outside faces before baking" );
 				return true;
 			}
 
@@ -470,6 +635,76 @@ public static partial class BuildScript
 					return Fail( r, why );
 
 				r.Log.Add( ModelMeasure.At( studio, p ) );
+				return true;
+			}
+
+
+			case "measurebody":
+			{
+				if ( args.Count < 1 )
+					return Fail( r, "measurebody needs a body: measurebody Body [z=10,30] (default: chest, waist, hip landmark heights)" );
+				var mb = ModelMeasure.FindBody( studio, args[0] );
+				if ( mb?.Mesh is null )
+					return Fail( r, $"measurebody found no body '{args[0]}'." );
+				var mopts = Pairs( args.Where( a => a.Contains( '=' ) ) );
+				var mzs = new List<(string Label, float Z)>();
+				if ( mopts.TryGetValue( "z", out var zText ) )
+				{
+					foreach ( var part in zText.Split( ',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries ) )
+						if ( float.TryParse( part, NumberStyles.Float, CultureInfo.InvariantCulture, out var zv ) )
+							mzs.Add( ($"z={zv:0.##}", zv) );
+				}
+				else
+				{
+					foreach ( var kv in BodyMeasure.LandmarkHeights( mb.Mesh ) )
+						mzs.Add( (kv.Key, kv.Value) );
+				}
+				foreach ( var (label, z) in mzs )
+				{
+					var rd = BodyMeasure.Circumference( mb.Mesh, z );
+					r.Log.Add( rd.Circumference > 0f
+						? $"{mb.Name ?? mb.Id} {label} at z={z:0.##}: {rd.Circumference:0.##} in round{(rd.Closed ? "" : " (OPEN chain, not a closed circumference)")}, {rd.Loops} outline(s)"
+						: $"{mb.Name ?? mb.Id} {label} at z={z:0.##}: no outline" );
+				}
+				return true;
+			}
+
+			case "fitreport":
+			{
+				if ( args.Count < 2 )
+					return Fail( r, "fitreport needs a garment and a body: fitreport Garment Body [z=10,30]" );
+				var gb = ModelMeasure.FindBody( studio, args[0] );
+				var bb = ModelMeasure.FindBody( studio, args[1] );
+				if ( gb?.Mesh is null )
+					return Fail( r, $"fitreport found no garment '{args[0]}'." );
+				if ( bb?.Mesh is null )
+					return Fail( r, $"fitreport found no body '{args[1]}'." );
+				var fopts = Pairs( args.Where( a => a.Contains( '=' ) ) );
+				var fzs = new List<(string Label, float Z)>();
+				if ( fopts.TryGetValue( "z", out var fzText ) )
+				{
+					foreach ( var part in fzText.Split( ',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries ) )
+						if ( float.TryParse( part, NumberStyles.Float, CultureInfo.InvariantCulture, out var zv ) )
+							fzs.Add( ($"z={zv:0.##}", zv) );
+				}
+				else
+				{
+					foreach ( var kv in BodyMeasure.LandmarkHeights( bb.Mesh ) )
+						fzs.Add( (kv.Key, kv.Value) );
+				}
+				foreach ( var (label, z) in fzs )
+				{
+					var brd = BodyMeasure.Circumference( bb.Mesh, z );
+					var grd = BodyMeasure.Circumference( gb.Mesh, z );
+					if ( brd.Circumference <= 0f || grd.Circumference <= 0f )
+					{
+						r.Log.Add( $"{label} at z={z:0.##}: body {brd.Circumference:0.##} in, garment {grd.Circumference:0.##} in (one side has no outline there)" );
+						continue;
+					}
+					var ease = grd.Circumference - brd.Circumference;
+					var flag = ease < 0f ? " (NEGATIVE ease: the garment is tighter than the body)" : ease > 8f ? " (LOOSE: over 8 in of ease)" : "";
+					r.Log.Add( $"{label} at z={z:0.##}: body {brd.Circumference:0.##} in, garment {grd.Circumference:0.##} in, ease {ease:0.##} in{flag}" );
+				}
 				return true;
 			}
 
@@ -500,6 +735,8 @@ public static partial class BuildScript
 
 			case "clearance":
 				return ClearanceReport( studio, args, r );
+			case "noclip":
+				return NoClip( studio, args, r );
 
 			case "topology":
 				return Topology( studio, args, r );
@@ -513,18 +750,42 @@ public static partial class BuildScript
 			case "match":
 			{
 				// match front=ref_front.png side=ref_side.png [out=dir]: several views, one combined score.
+				// match Body front=ref.png side=ref.png [out=dir]: one body, several views (folded into body=).
+				// match Body front ref.png [out.png]: one body, one view.
+				// A body name that collides with a view name (front, side, …) cannot use the
+				// positional form — it reads as the view — so use body= for those.
+				if ( args.Count > 1 && !args[0].Contains( '=' ) && args.Skip( 1 ).Any( a => a.Contains( '=' ) ) )
+				{
+					var folded = new List<string> { "body=" + args[0] };
+					folded.AddRange( args.Skip( 1 ) );
+					return MatchViews( studio, folded, baseDir, r );
+				}
+
 				if ( args.Count > 0 && args[0].Contains( '=' ) )
 					return MatchViews( studio, args, baseDir, r );
 
-				if ( args.Count < 2 )
+				var bodies = studio.Bodies;
+				string bodyName = null;
+				var rest = args;
+
+				if ( args.Count >= 3 && RenderView.Named( args[0] ) is null )
+				{
+					if ( !Targets( studio, args[0], out var targeted, out var why ) )
+						return Fail( r, why );
+					bodies = targeted;
+					bodyName = args[0];
+					rest = args.Skip( 1 ).ToList();
+				}
+
+				if ( rest.Count < 2 )
 					return Fail( r, "match needs a view and a reference PNG: match front ref.png [out.png]" );
 
-				var view = RenderView.Named( args[0] );
+				var view = RenderView.Named( rest[0] );
 
 				if ( view is null )
 					return Fail( r, $"No view called '{args[0]}'." );
 
-				var refPath = Resolve( baseDir, args[1] );
+				var refPath = Resolve( baseDir, rest[1] );
 
 				if ( !File.Exists( refPath ) )
 					return Fail( r, $"No reference image at {refPath}." );
@@ -532,13 +793,16 @@ public static partial class BuildScript
 				const int size = 256;
 				var (w, h, rgb, alpha) = Raster.LoadPng( refPath );
 				var reference = ReferenceMatch.ReferenceSilhouette( w, h, rgb, alpha, size, out var aspect );
-				var match = ReferenceMatch.Compare( studio.Bodies, view, reference, aspect, size );
+				var match = ReferenceMatch.Compare( bodies, view, reference, aspect, size );
+
+				if ( bodyName is not null )
+					r.Log.Add( $"match: body '{bodyName}' vs {view.Name} {rest[1]}" );
 
 				r.Log.Add( match.Report );
 
-				if ( args.Count > 2 )
+				if ( rest.Count > 2 )
 				{
-					var outPath = Resolve( baseDir, args[2] );
+					var outPath = Resolve( baseDir, rest[2] );
 					Directory.CreateDirectory( Path.GetDirectoryName( Path.GetFullPath( outPath ) ) ?? "." );
 					match.Diff.SavePng( outPath );
 					r.Written.Add( outPath );
@@ -553,6 +817,25 @@ public static partial class BuildScript
 					return Fail( r, "save needs a path." );
 
 				var path = Resolve( baseDir, args[0] );
+				var saveOpts = Pairs( args.Skip( 1 ) );
+
+				// Opt-in strict gate (repair proposal P1): refuse to write
+				// when a body hard-fails validation. Default stays permissive.
+				if ( Truthy( saveOpts.GetValueOrDefault( "strict", "0" ) ) )
+				{
+					var saveTarget = MeshRepair.ParseTarget( saveOpts.GetValueOrDefault( "target", "game" ) );
+					var saveShells = saveOpts.TryGetValue( "shells", out var saveShellsText ) ? (int)Number( saveShellsText ) : 1;
+					var saveGenus = saveOpts.TryGetValue( "genus", out var saveGenusText ) ? (int)Number( saveGenusText ) : -1;
+					var saveMinwall = saveOpts.TryGetValue( "minwall", out var saveMinwallText ) ? Number( saveMinwallText ) : 0f;
+
+					foreach ( var b in studio.Bodies.Where( b => b?.Mesh is { FaceCount: > 0 } && !b.IsReference ) )
+					{
+						var report = MeshRepair.Validate( b.Mesh, b.Name ?? b.Id, saveTarget, saveShells, saveGenus, saveMinwall, studio.Rig );
+						if ( !report.Passed )
+							return Fail( r, $"save strict=1 refused: {b.Name ?? b.Id} hard fail(s): {string.Join( ", ", report.HardFails )}. Fix the mesh or save without strict=1." );
+					}
+				}
+
 				Directory.CreateDirectory( Path.GetDirectoryName( Path.GetFullPath( path ) ) ?? "." );
 				StudioDocument.WriteFile( studio, path );
 				r.Written.Add( path );
@@ -562,6 +845,27 @@ public static partial class BuildScript
 
 			case "refimage":
 				return RefImage( studio, args, baseDir, r );
+
+			case "refmark":
+				return RefMarkVerb( studio, args, baseDir, r );
+
+			case "proportion":
+				return ProportionVerb( studio, args, baseDir, r );
+
+			case "refcheck":
+				return RefCheckVerb( studio, args, r );
+
+			case "refoverlay":
+				return RefOverlayVerb( studio, args, baseDir, r );
+
+			case "trace":
+				return TraceVerb( studio, args, baseDir, r );
+
+			case "refsection":
+				return RefSectionVerb( studio, args, baseDir, r );
+
+			case "refstep":
+				return RefStepVerb( studio, args, r );
 
 			case "echo":
 				r.Log.Add( string.Join( " ", args ) );
@@ -595,7 +899,7 @@ public static partial class BuildScript
 				// material 1 materials/alley/brass.vmat — what slot 1 is exported as.
 				// material 2 [materials/pad/grip.vmat] preset=soft_rubber color=#202024 rough=0.8 metal=0 emit=#ff2010
 				// — and what it looks like: the renderers and the viewer shade with it, export writes it as the .vmat.
-				const string usage = "material SLOT [path.vmat] [preset=name] [color=#rrggbb] [rough=0..1] [metal=0..1] [emit=#rrggbb|none]";
+				const string usage = "material SLOT [path.vmat] [preset=name] [color=#rrggbb] [rough=0..1] [metal=0..1] [emit=#rrggbb|none] [albedo=path.png] [roughmap=path.png] [metalmap=path.png] [normal=path.png] [ao=path.png] [normalstrength=0..8] [mapscale=x,y] [mapoffset=x,y] [clampmaps=on|off] [aniso=0..1] [anisorot=deg] [anisomap=path.png|noise:s,o,seed] [sheen=0..1] [sheencolor=#rrggbb] [sheenrough=0..1] [sheenmap=path.png] [layercolor=#rrggbb] [layerrough=0..1|none] [layermetal=0..1|none] [layermask=uniform|ao|min,max] [layeramount=0..1] [layerblend=normal|multiply|overlay] [transmissionmap=path.png] [scatterdist=r,g,b] [specular=0..1] [speculartint=0..1] [ior=1..3] [emitmap=path.png] [emitstrength=0..10] [heightmap=path.png] [heightstrength=0..8] [detailnormal=path.png] [detailscale=0..2] [implicitcoat=on|off] [burleydiffuse=on|off] [roughmap=noise:scale,octaves,seed for any map]. Traps: a smooth dielectric (rough<0.25, metal<0.5) gets an implicit 0.4 clearcoat unless implicitcoat=off; opacity<1 is Bayer dither headless but real translucency in-game; fields listed as headless-only in the exported .vmat header have no complex.vfx equivalent.";
 
 				if ( args.Count < 2 || !int.TryParse( args[0], out var slot ) )
 					return Fail( r, $"material needs a slot number and a .vmat path or a look: {usage}" );
@@ -658,6 +962,9 @@ public static partial class BuildScript
 			case "export":
 				return Export( studio, args, baseDir, r );
 
+			case "exportvalidate":
+				return ExportValidate( studio, args, baseDir, r );
+
 			case "corrective":
 				return Corrective( studio, args, r );
 
@@ -694,6 +1001,53 @@ public static partial class BuildScript
 				return true;
 			}
 
+			case "genmaps":
+			{
+				// genmaps out/tex [name=x] [preset=skin] [size=1024] [seed=7] [scale=2] [direction=0] [bump=2] [tileable=1]
+				// A generated map SET, not one map: albedo + rough + metal + normal (from height,
+				// never noise straight into the normal slot) + AO (from height concavity) +
+				// detail normal. First arg may be a body name, in which case the
+				// second arg is the folder; the body itself is not sampled — the
+				// maps are world/tile-space and are applied via the material line
+				// in <name>_slot.txt. A verb, not a feature: a later rebuild does
+				// not regenerate the files.
+				if ( args.Count < 1 )
+					return Fail( r, "genmaps needs a folder: genmaps out/tex [name=x] [preset=skin] [size=1024] [seed=7] [scale=2] [direction=0] [bump=2] [tileable=1]" );
+				var folderArg = args[0];
+				var rest = args.Skip( 1 ).ToList();
+				if ( ModelMeasure.FindBody( studio, folderArg ) is not null && rest.Count >= 1 )
+				{
+					folderArg = rest[0];
+					rest = rest.Skip( 1 ).ToList();
+				}
+				var gopts = Pairs( rest );
+				var dir = Resolve( baseDir, folderArg );
+				var preset = gopts.GetValueOrDefault( "preset", "skin" );
+				var size = (int)Number( gopts.GetValueOrDefault( "size", "1024" ) );
+				var seed = (int)Number( gopts.GetValueOrDefault( "seed", "7" ) );
+				var gscale = Number( gopts.GetValueOrDefault( "scale", "2" ) );
+				var direction = Number( gopts.GetValueOrDefault( "direction", "0" ) );
+				var bump = Number( gopts.GetValueOrDefault( "bump", "2" ) );
+				var tileable = Truthy( gopts.GetValueOrDefault( "tileable", "1" ) );
+				var name = Safe( gopts.GetValueOrDefault( "name", preset ) );
+				try
+				{
+					var gen = GenMaps.Generate( dir, name, preset, size, seed, gscale, direction, bump, tileable );
+					foreach ( var path in gen.Written )
+					{
+						r.Written.Add( path );
+						r.Log.Add( $"wrote {path}" );
+					}
+					foreach ( var line in gen.Log )
+						r.Log.Add( line );
+				}
+				catch ( System.Exception e )
+				{
+					return Fail( r, e.Message );
+				}
+				return true;
+			}
+
 			case "checkpoint":
 				return CheckpointVerb( studio, args, r );
 
@@ -727,6 +1081,12 @@ public static partial class BuildScript
 			case "spritesheet":
 				return SpritesheetVerb( studio, args, baseDir, r );
 
+			case "alphatex":
+				return AlphatexVerb( args, baseDir, r );
+
+			case "flipbook":
+				return FlipbookVerb( args, baseDir, r );
+
 			case "attachment":
 				return AttachmentVerb( studio, args, r );
 
@@ -739,11 +1099,34 @@ public static partial class BuildScript
 			case "ragdoll":
 				return RagdollVerb( studio, args, r );
 
+			case "ragdoll_limit":
+				return RagdollLimitVerb( studio, args, r );
+
+			case "breakpieces":
+				return BreakpiecesVerb( studio, args, r );
+
+			case "gameready":
+				return GamereadyVerb( studio, args, r );
+
+			case "viewmodel_check":
+				return ViewmodelCheckVerb( studio, args, r );
+			case "particlecue":
+				return ParticleCueVerb( studio, args, baseDir, r );
+
+			case "particleframes":
+				return ParticleFramesVerb( studio, args, baseDir, r );
+
 			case "lod_chain":
 				return LodChainVerb( studio, args, r );
 
 			case "lint":
 				return LintVerb( studio, args, baseDir, r );
+
+			case "texpaint":
+				return TexPaintVerb( studio, args, r );
+
+			case "particles":
+				return ParticlesVerb( studio, args, baseDir, r );
 
 			default:
 				// Rig verbs (bone, chain, rig, bind, skin, twist, mirror bones, subdivide) - BuildScriptRig.cs.
@@ -755,7 +1138,7 @@ public static partial class BuildScript
 	}
 
 	const string ExportUsage = "export folder [split=1] [assets=root] [name=x] [lods=0|1|0.5,0.25] [loddistance=a,b] "
-		+ "[collision=none|auto|hulls|render] [surface=default] [skin=auto|0|1] [fbx=0|1] [wrinkles=0|1]";
+		+ "[collision=auto|none|hulls|render] [surface=default] [skin=auto|0|1] [fbx=0|1] [wrinkles=0|1] [wrinklesbits=8|16] [lodmerge=0|1] [budget=n]";
 
 	/// <summary>
 	/// `export`: the .vmdl and the mesh files it loads, the same set the editor's Compile writes.
@@ -765,7 +1148,8 @@ public static partial class BuildScript
 	///              6, 15, 30… times the model's diagonal. Static levels are triangulated .obj files;
 	///              a skinned model gets skinned .dmx/.smd levels on the same skeleton, shape keys kept.
 	///              Every level holds UV seams and material borders.
-	///   collision= none (default, what export always wrote); auto = the editor's choice (exact shapes
+	///   collision= auto (default since wave 3; a model exported without a collision flag used to
+///              ship with none); none = explicitly no collision; auto = the editor's choice (exact shapes
 	///              from the history, else a hull per body; on a skinned model a hull per body on the
 	///              bone that drives it); hulls = one hull per body; render = physics from the render mesh.
 	///   skin=      auto (default): skinned when the studio has bones and the export is not split.
@@ -773,9 +1157,18 @@ public static partial class BuildScript
 	///   wrinkles=1 wrinkle maps (skinned only): each shape key's squash/stretch per vertex in the .dmx,
 	///              the squish normal/AO maps as {name}_squish_normal.png/_squish_ao.png, and F_WRINKLE on
 	///              each Effigy .vmat the model uses (found under the assets root).
+///   wrinklesbits=16  the squish normal/AO maps as true 16-bit PNGs (default 8-bit, what
+///              every DCC reads; 16-bit keeps the fine squash gradient).
 	///   fbx=1      also a binary .fbx of each model, skinned when the model is, for Blender and other DCCs.
 	///              The .vmdl still loads the .obj/.dmx, whose import ModelDoc has been measured on.
-	/// </summary>
+///   lodmerge=1 LOD1+ levels use slot 0 only (one draw-call material at distance). Textures
+///              are NOT atlased: distant levels shade with slot 0's material, so this is for
+///              single-material models or for distance where that is acceptable.
+///   exportvalidate: the same export, but pre-flight checks run first (missing map textures,
+///              UV2 on a static path, morphs on a static path, period-truncated slot names),
+///              then the export runs, then every file the .vmdl and .vmats name is checked
+///              to exist. A failure names the problem instead of shipping a broken set.
+/// </summary>
 	static bool Export( PartStudio studio, List<string> args, string baseDir, Result r )
 	{
 		// export models/civic_art/orrery split=1 assets=C:/proj/Assets name=orrery
@@ -783,18 +1176,27 @@ public static partial class BuildScript
 			return Fail( r, $"export needs a folder under the assets root: {ExportUsage}" );
 
 		var folder = args[0].Replace( '\\', '/' ).Trim( '/' );
+
+		// `export particles <folder>`: the s&box particle export (PNG + .sprite + Fx.cs),
+		// not a model export — the .vmdl stays particle-free by design.
+		if ( folder.Equals( "particles", StringComparison.OrdinalIgnoreCase ) )
+			return ParticlesExport( studio, args.Skip( 1 ).ToList(), baseDir, r );
 		var opts = Pairs( args.Skip( 1 ) );
 
 		foreach ( var key in opts.Keys )
-			if ( key is not ("split" or "assets" or "name" or "lods" or "loddistance" or "collision" or "surface" or "skin" or "fbx" or "wrinkles") )
+			if ( key is not ("split" or "assets" or "name" or "lods" or "loddistance" or "collision" or "surface" or "skin" or "fbx" or "wrinkles" or "wrinklesbits" or "lodmerge" or "strict" or "target" or "shells" or "genus" or "minwall" or "budget") )
 				return Fail( r, $"export has no option '{key}'. {ExportUsage}" );
 
 		var root = opts.TryGetValue( "assets", out var assets ) ? assets : baseDir;
 		var split = Truthy( opts.GetValueOrDefault( "split", "0" ) );
 		var name = opts.GetValueOrDefault( "name", folder.Contains( '/' ) ? folder[(folder.LastIndexOf( '/' ) + 1)..] : folder );
-		var collision = opts.GetValueOrDefault( "collision", "none" ).ToLowerInvariant();
+		var collision = opts.GetValueOrDefault( "collision", "auto" ).ToLowerInvariant();
 		var surface = opts.GetValueOrDefault( "surface", "default" );
 		var fbx = Truthy( opts.GetValueOrDefault( "fbx", "0" ) );
+		var lodMerge = Truthy( opts.GetValueOrDefault( "lodmerge", "0" ) );
+
+		if ( lodMerge )
+			r.Log.Add( "export: lodmerge=1: LOD levels use slot 0 only; textures are NOT atlased, so distant levels shade with slot 0's material" );
 		var hasRig = studio.Rig is { Count: > 0 };
 
 		if ( collision is not ("none" or "auto" or "hulls" or "render") )
@@ -817,6 +1219,10 @@ public static partial class BuildScript
 			return Fail( r, "skin=1 with split=1: a skinned model is one mesh on one skeleton. Export it whole, or split it as static parts (skin=0)." );
 
 		var wrinkles = Truthy( opts.GetValueOrDefault( "wrinkles", "0" ) );
+		var wrinklesBits = (int)Number( opts.GetValueOrDefault( "wrinklesbits", "8" ) );
+
+		if ( wrinklesBits is not (8 or 16) )
+			return Fail( r, $"wrinklesbits={wrinklesBits}: wrinkle squish maps are written at 8 or 16 bits." );
 
 		if ( wrinkles && !skin )
 			return Fail( r, "wrinkles=1 needs a skinned export: shape keys, and the wrinkle data that rides on them, only go out in the skinned .dmx. Build a rig (or pass skin=1), and do not split." );
@@ -828,6 +1234,41 @@ public static partial class BuildScript
 
 		if ( bodies.Count == 0 )
 			return Fail( r, "Nothing to export: no visible bodies." );
+
+		if ( ratios.Count == 0 )
+			r.Log.Add( "export warning: no lods= given — this ships with LOD0 only. Run lod_chain and export with lods=0.5,0.25 to ship LODs." );
+		foreach ( var line in GamereadyLines( studio, "prop" ) )
+			r.Log.Add( "export gameready: " + line );
+
+		// Opt-in strict gate (repair proposal P1), before anything is written.
+		if ( Truthy( opts.GetValueOrDefault( "strict", "0" ) ) )
+		{
+			var expTarget = MeshRepair.ParseTarget( opts.GetValueOrDefault( "target", "game" ) );
+			var expShells = opts.TryGetValue( "shells", out var expShellsText ) ? (int)Number( expShellsText ) : 1;
+			var expGenus = opts.TryGetValue( "genus", out var expGenusText ) ? (int)Number( expGenusText ) : -1;
+			var expMinwall = opts.TryGetValue( "minwall", out var expMinwallText ) ? Number( expMinwallText ) : 0f;
+
+			foreach ( var b in bodies )
+			{
+				var report = MeshRepair.Validate( b.Mesh, b.Name ?? b.Id, expTarget, expShells, expGenus, expMinwall, studio.Rig );
+				if ( !report.Passed )
+					return Fail( r, $"export strict=1 refused: {b.Name ?? b.Id} hard fail(s): {string.Join( ", ", report.HardFails )}." );
+			}
+		}
+
+		// Particles-performance budget gate (P6): LOD0 triangle total, before anything is written.
+		if ( opts.TryGetValue( "budget", out var budgetText ) )
+		{
+			if ( !int.TryParse( budgetText, out var budget ) || budget < 0 )
+				return Fail( r, $"budget={budgetText}: use a triangle count, e.g. budget=200000." );
+
+			var lod0Tris = bodies.Sum( x => Decimate.TriangleCount( x.Mesh ) );
+
+			if ( lod0Tris > budget )
+				return Fail( r, $"export budget={budget} refused: LOD0 is {lod0Tris} triangles, over the {budget} budget. Add lods=, cut the scatter count, or use sourcelod= on the scatter." );
+
+			r.Log.Add( $"export: budget={budget}: LOD0 {lod0Tris} triangles within budget" );
+		}
 
 		var dir = Path.Combine( root, folder );
 		Directory.CreateDirectory( dir );
@@ -856,7 +1297,7 @@ public static partial class BuildScript
 
 				MeshTransform.Apply( mesh, Xform.Translate( -pivot ) );
 				var physics = StaticPhysics( studio, collision, surface, pivot, b => b.Id == body.Id, r, partName );
-				WriteStatic( studio, mesh, dir, folder, partName, physics, ratios, lodDistances, fbx, r );
+				WriteStatic( studio, mesh, dir, folder, partName, physics, ratios, lodDistances, fbx, r, lodMerge );
 				layout.AppendLine( $"{body.Name ?? body.Id}\t{folder}/{partName}.vmdl\t{N( pivot.x )}\t{N( pivot.y )}\t{N( pivot.z )}\t{N( max.x - min.x )}\t{N( max.y - min.y )}\t{N( max.z - min.z )}" );
 			}
 		}
@@ -933,11 +1374,11 @@ public static partial class BuildScript
 				{
 					var material = studio.NameForSlot( slot );
 					return material.EndsWith( ".vmat", StringComparison.OrdinalIgnoreCase ) ? Path.Combine( root, material ) : null;
-				} );
+				}, new WrinkleMaps.Settings { SixteenBit = wrinklesBits == 16 } );
 
 				wrinkleValues = made.Values.Count > 0 ? made.Values : null;
 				r.Written.AddRange( made.Written );
-				r.Log.Add( $"export: wrinkle maps for {made.Values.Count} shape key(s), on {made.MaterialsOn.Count} material(s)" );
+				r.Log.Add( $"export: wrinkle maps for {made.Values.Count} shape key(s), on {made.MaterialsOn.Count} material(s){(wrinklesBits == 16 ? ", 16-bit squish maps" : "")}" );
 				r.Log.AddRange( made.Notes.Select( n => $"export: wrinkle maps: {n}" ) );
 
 				if ( made.Values.Count == 0 )
@@ -953,16 +1394,27 @@ public static partial class BuildScript
 			if ( MorphDriver.WriteRigFile( Path.Combine( dir, safe + ".ctrlrig" ), drivers, $"{folder}/{safe}.vmdl" ) )
 				r.Log.Add( $"export: {drivers.Count} morph driver(s) written to {safe}.ctrlrig" );
 			var vmdlPath = Path.Combine( dir, safe + ".vmdl" );
-			var skinMaterials = VmdlMaterials.GroupList( studio, mesh );
+			var skinSidecars = WriteSidecars( studio, mesh, dir, folder, safe, r );
+			var skinBindings = new Dictionary<int, string>( studio.MaterialBindings );
+			foreach ( var sidecar in skinSidecars )
+				if ( !skinBindings.TryGetValue( sidecar.Slot, out var bound ) || string.IsNullOrWhiteSpace( bound ) )
+					skinBindings[sidecar.Slot] = sidecar.AssetPath;
+			var skinMaterials = VmdlMaterials.GroupList( mesh, studio.NameForSlot, skinBindings, VmdlMaterials.FallbackFor( studio ) );
+			// Hitboxes + attachments for the skinned .vmdl: user specs from the document win
+			// over auto-derived for their bone; every other bone gets a capsule measured
+			// from the skin (skeleton fallback where the skin never weights it). Specs whose
+			// bone is gone from the skeleton are skipped with a log line, never written blind.
+			var hitboxNode = HitboxNode( studio, skeleton, mesh, r );
+			var attachmentNode = AttachmentNode( studio, skeleton, r );
 			r.Written.AddRange( new[] { dmxPath, smdPath } );
 
 			if ( ratios.Count > 0 )
 			{
 				// Skinned levels: each decimated with its weights and shape keys carried, on the
 				// same pivoted skeleton as the full mesh.
-				var levels = LodExport.WriteSkinned( mesh, skeleton, dir, folder, safe, studio.NameForSlot, ratios, lodDistances, wrinkles: wrinkles );
+				var levels = LodExport.WriteSkinned( mesh, skeleton, dir, folder, safe, studio.NameForSlot, ratios, lodDistances, wrinkles: wrinkles, mergeMaterials: lodMerge );
 				var (files, switchAt) = LodExport.VmdlLists( $"{folder}/{safe}.dmx", levels );
-				File.WriteAllText( vmdlPath, VmdlDocument.SkinnedWithLods( files, switchAt, skeleton, physics, skinMaterials ) );
+				File.WriteAllText( vmdlPath, VmdlDocument.SkinnedWithLods( files, switchAt, skeleton, physics, skinMaterials, hitboxes: hitboxNode, attachments: attachmentNode ) );
 				levels.ForEach( l => r.Written.AddRange( l.Files ) );
 				r.Log.Add( $"export: {safe} skinned LODs: {Decimate.TriangleCount( mesh )} tris, then {LodExport.Describe( levels )}" );
 
@@ -970,7 +1422,7 @@ public static partial class BuildScript
 					r.Log.Add( $"export: note: {safe} is only {Decimate.TriangleCount( mesh )} triangles, so its LODs save next to nothing" );
 			}
 			else
-				File.WriteAllText( vmdlPath, VmdlDocument.Skinned( $"{folder}/{safe}.dmx", skeleton, physics, skinMaterials ) );
+				File.WriteAllText( vmdlPath, VmdlDocument.SkinnedWithLists( $"{folder}/{safe}.dmx", skeleton, physics, skinMaterials, attachments: attachmentNode, hitboxes: hitboxNode ) );
 
 			r.Written.Add( vmdlPath );
 
@@ -994,6 +1446,20 @@ public static partial class BuildScript
 				r.Written.Add( fbxPath );
 			}
 
+			// A skinned export merges bodies, and the merged mesh carries no paint — but
+			// each body's own canvas still exists, so each painted body gets its own set
+			// beside the model rather than the whole export going out bare.
+			foreach ( var painted in bodies.Where( b => b.Mesh?.Paint is not null ) )
+			{
+				var partName = Safe( painted.Name ?? painted.Id );
+
+				foreach ( var path in PaintTextureSet.Write( painted.Mesh.Paint, dir, partName + "_paint",
+					p => $"{folder}/{Path.GetFileName( p )}" ) )
+					r.Written.Add( path );
+
+				r.Log.Add( $"export: paint maps for {partName} beside the model ({partName}_paint.png + channels)." );
+			}
+
 			r.Log.Add( $"export: {safe} skinned to {skeleton.Count} bone(s), {mesh.VertexCount} vertices; collision {Said( collision, physics )}{(fbx ? "; .fbx too" : "")}" );
 			layout.AppendLine( $"{name}\t{folder}/{safe}.vmdl\t{N( pivot.x )}\t{N( pivot.y )}\t{N( pivot.z )}\t{N( max.x - min.x )}\t{N( max.y - min.y )}\t{N( max.z - min.z )}" );
 		}
@@ -1007,7 +1473,7 @@ public static partial class BuildScript
 			var pivot = r.Pivots.TryGetValue( name, out var p ) ? p : ModelPivot( studio, min, max );
 			MeshTransform.Apply( mesh, Xform.Translate( -pivot ) );
 			var physics = StaticPhysics( studio, collision, surface, pivot, b => bodies.Contains( b ), r, Safe( name ) );
-			WriteStatic( studio, mesh, dir, folder, Safe( name ), physics, ratios, lodDistances, fbx, r );
+			WriteStatic( studio, mesh, dir, folder, Safe( name ), physics, ratios, lodDistances, fbx, r, lodMerge );
 			layout.AppendLine( $"{name}\t{folder}/{Safe( name )}.vmdl\t{N( pivot.x )}\t{N( pivot.y )}\t{N( pivot.z )}\t{N( max.x - min.x )}\t{N( max.y - min.y )}\t{N( max.z - min.z )}" );
 		}
 
@@ -1016,6 +1482,209 @@ public static partial class BuildScript
 		r.Written.Add( layoutPath );
 		r.Log.Add( $"exported {(split ? bodies.Count : 1)} model(s) to {dir}; layout in layout.txt" );
 		return true;
+	}
+
+	/// <summary>
+	/// Wave 3: `exportvalidate folder [same options as export]` — the export
+	/// checklist from the export research as a verb. Pre-flight checks fail
+	/// before anything is written; then the export itself runs; then every
+	/// file the written .vmdl files and .vmat files name is checked to exist
+	/// (case-insensitively, component by component, because .vmdl material
+	/// paths are normalized to lowercase while the disk on Linux is
+	/// case-sensitive). A failure names the problem; files already written
+	/// are reported as written, not hidden. Engine-provided defaults
+	/// (materials/default.vmat) are not required to exist under the root.
+	/// </summary>
+	static bool ExportValidate( PartStudio studio, List<string> args, string baseDir, Result r )
+	{
+		if ( args.Count < 1 )
+			return Fail( r, "exportvalidate needs a folder: exportvalidate folder [same options as export]" );
+
+		var folder = args[0].Replace( '\\', '/' ).Trim( '/' );
+		var opts = Pairs( args.Skip( 1 ) );
+
+		foreach ( var key in opts.Keys )
+			if ( key is not ("split" or "assets" or "name" or "lods" or "loddistance" or "collision" or "surface" or "skin" or "fbx" or "wrinkles" or "wrinklesbits" or "lodmerge" or "budget") )
+				return Fail( r, $"exportvalidate has no option '{key}'. {ExportUsage}" );
+
+		var root = opts.TryGetValue( "assets", out var assets ) ? assets : baseDir;
+		var split = Truthy( opts.GetValueOrDefault( "split", "0" ) );
+		var hasRig = studio.Rig is { Count: > 0 };
+		var skinText = opts.GetValueOrDefault( "skin", "auto" ).ToLowerInvariant();
+		var skin = skinText == "auto" ? hasRig && !split : Truthy( skinText );
+		var fbx = Truthy( opts.GetValueOrDefault( "fbx", "0" ) );
+		var collision = opts.GetValueOrDefault( "collision", "auto" ).ToLowerInvariant();
+
+		if ( !TryLods( opts, out _, out _, out var whyLods ) )
+			return Fail( r, whyLods );
+
+		var bodies = studio.Bodies.Where( b => b?.Mesh is not null && b.Mesh.Faces.Count > 0 && b.Visible && !b.IsReference ).ToList();
+
+		if ( bodies.Count == 0 )
+			return Fail( r, "exportvalidate: nothing to export: no visible bodies." );
+
+		var errors = new List<string>();
+
+		var slots = new HashSet<int>();
+		foreach ( var body in bodies )
+			foreach ( var face in body.Mesh.Faces )
+				slots.Add( face.Material );
+
+		foreach ( var slot in slots )
+		{
+			var slotName = studio.NameForSlot( slot );
+			var stem = System.IO.Path.GetFileNameWithoutExtension( slotName ?? "" );
+			if ( stem.Contains( '.' ) )
+				errors.Add( $"slot {slot} name '{slotName}' has a period in '{stem}', which ModelDoc truncates on import; rename the slot" );
+		}
+
+		foreach ( var (slot, look) in studio.MaterialLooks )
+		{
+			if ( look is null ) continue;
+			foreach ( var (kind, src) in new[] { ("albedo", look.AlbedoMap), ("normal", look.NormalMap), ("roughness", look.RoughnessMap), ("metalness", look.MetalnessMap), ("ao", look.AoMap) } )
+			{
+				if ( string.IsNullOrWhiteSpace( src ) ) continue;
+				var srcPath = System.IO.Path.IsPathRooted( src ) ? src : System.IO.Path.Combine( root ?? ".", src );
+				if ( !System.IO.File.Exists( srcPath ) )
+					errors.Add( $"slot {slot} {kind} map missing: {src}" );
+			}
+		}
+
+		var anyUV2 = bodies.Any( b => b.Mesh.HasUV2 );
+		var anyMorphs = bodies.Any( b => b.Mesh.HasMorphs );
+
+		if ( anyUV2 && !skin )
+			errors.Add( "UV2 data exists but a static OBJ export cannot carry a second UV channel; export skinned (DMX carries texcoord$1) or strip UV2" );
+
+		if ( anyMorphs && !skin )
+			errors.Add( "shape keys exist but a static OBJ export drops them; export skinned (DMX carries morphs) or bake them first" );
+
+		if ( skin && !hasRig )
+			errors.Add( "skin requested but the studio has no bones to skin to" );
+
+		if ( anyUV2 && fbx )
+			r.Log.Add( "exportvalidate: note: the .fbx carries no second UV channel; the .dmx the .vmdl loads does" );
+
+		if ( anyMorphs && fbx )
+			r.Log.Add( "exportvalidate: note: the .fbx carries no shape keys; the .dmx the .vmdl loads does" );
+
+		if ( collision == "none" )
+			r.Log.Add( "exportvalidate: note: collision=none: this model will have no collision" );
+
+		if ( errors.Count > 0 )
+		{
+			foreach ( var e in errors )
+				r.Log.Add( "exportvalidate: FAIL: " + e );
+			return Fail( r, $"exportvalidate: pre-flight failed ({errors.Count} problem(s)): {errors[0]}" );
+		}
+
+		r.Log.Add( "exportvalidate: pre-flight PASS" );
+
+		if ( !Export( studio, args, baseDir, r ) )
+			return false;
+
+		var missing = new List<string>();
+
+		foreach ( var written in r.Written.Where( w => w.EndsWith( ".vmdl", StringComparison.OrdinalIgnoreCase ) ).ToList() )
+		{
+			if ( !System.IO.File.Exists( written ) ) { missing.Add( written + " (written .vmdl missing)" ); continue; }
+			var text = System.IO.File.ReadAllText( written );
+			// Only asset paths are files to check: remap `to` targets, and
+			// quoted values containing a slash (mesh/vmat asset paths). A
+			// `from` alias like "coin.vmat" is a material name as the mesh
+			// carries it, not a file.
+			var toValues = new HashSet<string>( StringComparer.OrdinalIgnoreCase );
+			foreach ( var line in text.Split( '\n' ) )
+			{
+				var t = line.Trim();
+				if ( !t.StartsWith( "to ", StringComparison.Ordinal ) && !t.StartsWith( "to=", StringComparison.Ordinal ) ) continue;
+				var q1 = t.IndexOf( '"' ); var q2 = q1 >= 0 ? t.IndexOf( '"', q1 + 1 ) : -1;
+				if ( q1 >= 0 && q2 > q1 ) toValues.Add( t.Substring( q1 + 1, q2 - q1 - 1 ) );
+			}
+			foreach ( System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches( text, "\"([^\"]+)\"" ) )
+			{
+				var value = m.Groups[1].Value;
+				if ( string.Equals( value, VmdlMaterials.DefaultMaterial, StringComparison.OrdinalIgnoreCase ) || string.Equals( value, VmdlMaterials.ReplaceMaterial, StringComparison.OrdinalIgnoreCase ) )
+					continue;
+				if ( !value.EndsWith( ".obj", StringComparison.OrdinalIgnoreCase ) && !value.EndsWith( ".dmx", StringComparison.OrdinalIgnoreCase ) && !value.EndsWith( ".smd", StringComparison.OrdinalIgnoreCase ) && !value.EndsWith( ".vmat", StringComparison.OrdinalIgnoreCase ) && !value.EndsWith( ".png", StringComparison.OrdinalIgnoreCase ) && !value.EndsWith( ".fbx", StringComparison.OrdinalIgnoreCase ) )
+					continue;
+				if ( !toValues.Contains( value ) && !value.Contains( '/' ) )
+					continue;
+				var resolved = System.IO.Path.IsPathRooted( value ) ? value : System.IO.Path.Combine( root ?? ".", value.Replace( '/', System.IO.Path.DirectorySeparatorChar ) );
+				if ( !ExistsCaseInsensitive( resolved ) )
+					missing.Add( value + $" (named by {System.IO.Path.GetFileName( written )})" );
+			}
+		}
+
+		foreach ( var written in r.Written.Where( w => w.EndsWith( ".vmat", StringComparison.OrdinalIgnoreCase ) ).ToList() )
+		{
+			if ( !System.IO.File.Exists( written ) ) continue;
+			var text = System.IO.File.ReadAllText( written );
+			foreach ( System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches( text, "Texture\\w+\\s+\"([^\"]+)\"" ) )
+			{
+				var value = m.Groups[1].Value;
+				var resolved = System.IO.Path.IsPathRooted( value ) ? value : System.IO.Path.Combine( root ?? ".", value.Replace( '/', System.IO.Path.DirectorySeparatorChar ) );
+				if ( !ExistsCaseInsensitive( resolved ) )
+					missing.Add( value + $" (texture named by {System.IO.Path.GetFileName( written )})" );
+			}
+		}
+
+		if ( missing.Count > 0 )
+		{
+			foreach ( var m in missing )
+				r.Log.Add( "exportvalidate: FAIL: missing file: " + m );
+			return Fail( r, $"exportvalidate: post-flight failed ({missing.Count} missing file(s), export files already written): {missing[0]}" );
+		}
+
+		r.Log.Add( "exportvalidate: post-flight PASS: every file the .vmdl and .vmats name exists" );
+		return true;
+	}
+
+	static bool ExistsCaseInsensitive( string path )
+	{
+		if ( System.IO.File.Exists( path ) )
+			return true;
+		// Walk components case-insensitively from the root: .vmdl paths are
+		// normalized to lowercase while the disk may hold capital directories
+		// (Materials/Caps/Coin.vmat vs materials/caps/coin.vmat). Backtracking:
+		// the root may hold BOTH case variants (a lowercase materials/ from
+		// one slot and a capital Materials/ from another), so an exact-case
+		// directory that leads nowhere must not stop the search — every
+		// case-matching sibling is tried before giving up.
+		var full = System.IO.Path.GetFullPath( path );
+		var root = System.IO.Path.GetPathRoot( full );
+		var rest = full.Substring( root.Length ).Split( System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar );
+		return WalkCaseInsensitive( root, rest, 0 );
+	}
+
+	static bool WalkCaseInsensitive( string current, string[] rest, int i )
+	{
+		while ( i < rest.Length && string.IsNullOrEmpty( rest[i] ) ) i++;
+		if ( i >= rest.Length )
+			return System.IO.File.Exists( current );
+
+		var part = rest[i];
+		var last = i == rest.Length - 1;
+		var joined = System.IO.Path.Combine( current, part );
+
+		if ( last )
+		{
+			if ( System.IO.File.Exists( joined ) ) return true;
+		}
+		else if ( System.IO.Directory.Exists( joined ) )
+		{
+			if ( WalkCaseInsensitive( joined, rest, i + 1 ) ) return true;
+		}
+
+		if ( !System.IO.Directory.Exists( current ) ) return false;
+		foreach ( var entry in System.IO.Directory.GetFileSystemEntries( current ) )
+		{
+			if ( !string.Equals( System.IO.Path.GetFileName( entry ), part, StringComparison.OrdinalIgnoreCase ) ) continue;
+			if ( string.Equals( entry, joined, StringComparison.Ordinal ) ) continue;
+			if ( last ) { if ( System.IO.File.Exists( entry ) ) return true; }
+			else if ( System.IO.Directory.Exists( entry ) && WalkCaseInsensitive( entry, rest, i + 1 ) ) return true;
+		}
+		return false;
 	}
 
 	/// <summary>`lods=1` is the editor's pair; `lods=0.5,0.25` names the ratios; `loddistance=` the
@@ -1080,10 +1749,102 @@ public static partial class BuildScript
 		return true;
 	}
 
+	/// and colour the .mtl with them. Bound slots are never overridden.</summary>
+	static List<VmdlMaterials.Sidecar> WriteSidecars( PartStudio studio, PolyMesh mesh, string dir, string folder, string name, Result r )
+	{
+		var details = studio.Features.OfType<IDetailMaterials>()
+			.SelectMany( f => f.DetailMaterials ?? Enumerable.Empty<DetailMaterial>() ).ToList();
+		var sidecars = VmdlMaterials.SidecarsFor( mesh, details,
+			slot => studio.MaterialLooks.TryGetValue( slot, out var look ) ? look : null,
+			studio.MaterialBindings, folder, name );
+		if ( sidecars.Count == 0 )
+			return sidecars;
+		Directory.CreateDirectory( Path.Combine( dir, "materials" ) );
+		foreach ( var sidecar in sidecars )
+		{
+			var path = Path.Combine( dir, "materials", Path.GetFileName( sidecar.AssetPath ) );
+			File.WriteAllText( path, sidecar.VmatText );
+			r.Written.Add( path );
+			r.Log.Add( $"export: sidecar .vmat for slot {sidecar.Slot} beside the model ({sidecar.AssetPath})." );
+		}
+		return sidecars;
+	}
+
+	/// this — the MTL exists so a DCC importing the OBJ does not land on bare white.</summary>
+	static void WriteMtl( PartStudio studio, PolyMesh mesh, List<VmdlMaterials.Sidecar> sidecars, string path, Result r )
+	{
+		var bySlot = new Dictionary<int, Vec3>();
+		foreach ( var face in mesh.Faces )
+		{
+			if ( face is null || bySlot.ContainsKey( face.Material ) )
+				continue;
+			Vec3 colour = new( 1f, 1f, 1f );
+			if ( studio.MaterialLooks.TryGetValue( face.Material, out var look ) && look is not null )
+				colour = look.Color;
+			else if ( sidecars.FirstOrDefault( s => s.Slot == face.Material ) is { } sidecar )
+				colour = sidecar.Colour;
+			bySlot[face.Material] = colour;
+		}
+		var entries = bySlot.OrderBy( kv => kv.Key )
+			.Select( kv => (studio.NameForSlot( kv.Key ), kv.Value) ).ToList();
+		ObjWriter.WriteMtl( path, entries );
+		r.Written.Add( path );
+	}
+
+	/// naming a bone the skeleton does not have are skipped with a log line.</summary>
+	static string HitboxNode( PartStudio studio, Skeleton skeleton, PolyMesh mesh, Result r )
+	{
+		var auto = mesh?.Skin is not null
+			? VmdlDocument.HitboxesFromSkin( mesh, skeleton )
+			: VmdlDocument.HitboxesFromSkeleton( skeleton );
+		var byBone = new Dictionary<string, VmdlDocument.Hitbox>( StringComparer.Ordinal );
+		foreach ( var h in auto )
+			if ( h is not null && !string.IsNullOrWhiteSpace( h.Bone ) )
+				byBone[h.Bone] = h;
+		var user = 0;
+		foreach ( var h in studio.Hitboxes )
+		{
+			if ( h is null || string.IsNullOrWhiteSpace( h.Bone ) )
+				continue;
+			if ( skeleton.IndexOf( h.Bone ) < 0 )
+			{
+				r.Log.Add( $"export: hitbox on '{h.Bone}' skipped: no such bone in the skeleton." );
+				continue;
+			}
+			byBone[h.Bone] = h;
+			user++;
+		}
+		var node = VmdlDocument.HitboxSetList( byBone.Values.ToList() );
+		if ( node.Length > 0 )
+			r.Log.Add( $"export: {byBone.Count} hitbox(es) ({user} user-specified, rest auto-derived)." );
+		return node;
+	}
+
+	/// Specs naming a bone the skeleton does not have are skipped with a log line.</summary>
+	static string AttachmentNode( PartStudio studio, Skeleton skeleton, Result r )
+	{
+		var kept = new List<VmdlDocument.Attachment>();
+		foreach ( var a in studio.Attachments )
+		{
+			if ( a is null || string.IsNullOrWhiteSpace( a.Name ) )
+				continue;
+			if ( skeleton.IndexOf( a.ParentBone ) < 0 )
+			{
+				r.Log.Add( $"export: attachment '{a.Name}' skipped: no bone '{a.ParentBone}' in the skeleton." );
+				continue;
+			}
+			kept.Add( a );
+		}
+		var node = VmdlDocument.AttachmentList( kept );
+		if ( kept.Count > 0 )
+			r.Log.Add( $"export: {kept.Count} attachment(s)." );
+		return node;
+	}
+
 	/// <summary>One static model: its mesh, any LOD meshes, the .vmdl that loads them, and an .fbx
 	/// when asked. Materials bound from the studio's slots.</summary>
 	static void WriteStatic( PartStudio studio, PolyMesh mesh, string dir, string folder, string name, string physics,
-		List<float> ratios, List<float> distances, bool fbx, Result r )
+		List<float> ratios, List<float> distances, bool fbx, Result r, bool lodMerge = false )
 	{
 		// Triangulated the bake's way (NormalBake.FaceTriangles), as the editor's static compile is.
 		var objPath = Path.Combine( dir, name + ".obj" );
@@ -1093,16 +1854,26 @@ public static partial class BuildScript
 			r.Log.Add( $"export: warning: {mesh.ValidMorphs.Count()} shape key(s) on {name} were left out: a static model exports as OBJ, which has no morphs. "
 				+ "Export it skinned (add a bone, and no skin=0 or split=1) to keep them in the .dmx." );
 
-		ObjWriter.WriteFile( mesh, objPath, name, materialName: studio.NameForSlot, triangulate: true );
-		r.Written.Add( objPath );
+		// Sidecar .vmats for unbound detail slots (Wear rust/algae, garment worn/dirt):
+		// without them GroupList remaps every such slot to materials/default.vmat.
+		// Written beside the model so they resolve wherever the export folder lands.
+		var sidecars = WriteSidecars( studio, mesh, dir, folder, name, r );
+		var bindings = new Dictionary<int, string>( studio.MaterialBindings );
+		foreach ( var sidecar in sidecars )
+			if ( !bindings.TryGetValue( sidecar.Slot, out var bound ) || string.IsNullOrWhiteSpace( bound ) )
+				bindings[sidecar.Slot] = sidecar.AssetPath;
 
-		var materials = VmdlMaterials.GroupList( studio, mesh );
+		ObjWriter.WriteFile( mesh, objPath, name, materialName: studio.NameForSlot, triangulate: true, materialLibrary: name + ".mtl" );
+		r.Written.Add( objPath );
+		WriteMtl( studio, mesh, sidecars, Path.Combine( dir, name + ".mtl" ), r );
+
+		var materials = VmdlMaterials.GroupList( mesh, studio.NameForSlot, bindings, VmdlMaterials.FallbackFor( studio ) );
 		var vmdlPath = Path.Combine( dir, name + ".vmdl" );
 
 		if ( ratios.Count > 0 )
 		{
 			var full = Decimate.TriangleCount( mesh );
-			var levels = LodExport.WriteStatic( mesh, dir, folder, name, studio.NameForSlot, ratios, distances );
+			var levels = LodExport.WriteStatic( mesh, dir, folder, name, studio.NameForSlot, ratios, distances, materialLibrary: name + ".mtl", mergeMaterials: lodMerge );
 			var (files, switchAt) = LodExport.VmdlLists( $"{folder}/{name}.obj", levels );
 			levels.ForEach( l => r.Written.AddRange( l.Files ) );
 
@@ -1122,6 +1893,20 @@ public static partial class BuildScript
 			var fbxPath = Path.Combine( dir, name + ".fbx" );
 			FbxWriter.WriteBinaryFile( mesh, fbxPath, materialName: studio.NameForSlot, modelName: name );
 			r.Written.Add( fbxPath );
+		}
+
+		// Paint is per-body, and this mesh's paint is the body's own (Clone carries it):
+		// the exported texture set goes beside the model, so a painted model no longer
+		// exports bare. Bare FBX used to write no paint PNGs at all; the .fbx itself still
+		// carries no textures (FbxWriter writes geometry + UVs), so these PNGs + the
+		// paint .vmat beside them are what a DCC actually imports as the paint.
+		if ( mesh.Paint is not null )
+		{
+			foreach ( var path in PaintTextureSet.Write( mesh.Paint, dir, name + "_paint",
+				p => $"{folder}/{Path.GetFileName( p )}" ) )
+				r.Written.Add( path );
+
+			r.Log.Add( $"export: paint maps for {name} beside the model ({name}_paint.png + channels)." );
 		}
 	}
 
@@ -1296,7 +2081,7 @@ public static partial class BuildScript
 			return Fail( r, sb.ToString() );
 		}
 
-		r.Log.Add( did + (feature.Warning is not null ? $" (note: {feature.Warning})" : "" ) );
+		r.Log.Add( did + (feature.Warning is not null ? $" (note: {feature.Warning})" : "" ) + (feature.Note is not null ? $" (info: {feature.Note})" : "" ) );
 		return true;
 	}
 
@@ -1844,6 +2629,20 @@ public static partial class BuildScript
 				continue;
 			}
 
+			// A viewport face pick sends a FaceRef token (Body:x,y,z:nx,ny,nz); accept it directly.
+			if ( spec.Count( c => c == ':' ) == 2 )
+			{
+				var bits = spec.Split( ':' );
+				var body = ModelMeasure.FindBody( studio, bits[0].Trim() );
+				if ( body?.Mesh is null ) { why = $"No body called '{bits[0].Trim()}'."; return false; }
+				if ( !Point( studio, bits[1].Trim(), out var p, out why ) ) return false;
+				if ( !ModelMeasure.TryParseVec3( bits[2].Trim(), out var n ) || n.LengthSquared < 1e-12f ) { why = $"'{bits[2]}' is not a normal nx,ny,nz."; return false; }
+				if ( !FacePlane.TryResolveFace( new[] { body }, new FaceRef( body.Id, p, n ), out var hitBody, out var faceIndex ) )
+				{ why = $"No face of {body.Name ?? body.Id} faces {bits[2].Trim()} near {bits[1].Trim()}."; return false; }
+				Add( hitBody, faceIndex, refs );
+				continue;
+			}
+
 			if ( !MeshSelector.TryParse( TranslateSelectorRule( spec ), out var bare, out why ) ) return false;
 			foreach ( var body in SelectionTargets( studio, feature ) )
 				foreach ( var i in bare.Faces( body.Mesh ) ) Add( body, i, refs );
@@ -1902,6 +2701,20 @@ public static partial class BuildScript
 				}
 				if ( !MeshSelector.TryParse( TranslateSelectorRule( rest ), out var selector, out why ) ) return false;
 				foreach ( var pair in selector.Edges( body.Mesh ) ) AddEdge( body, pair.Key, refs );
+				continue;
+			}
+
+			// A viewport edge pick sends an EdgeRef token (Body:x,y,z:nx,ny,nz); accept it directly.
+			if ( spec.Count( c => c == ':' ) == 2 )
+			{
+				var bits = spec.Split( ':' );
+				var body = ModelMeasure.FindBody( studio, bits[0].Trim() );
+				if ( body?.Mesh is null ) { why = $"No body called '{bits[0].Trim()}'."; return false; }
+				if ( !ModelMeasure.TryParseVec3( bits[1].Trim(), out var p ) ) { why = $"'{bits[1]}' is not a point x,y,z."; return false; }
+				if ( !ModelMeasure.TryParseVec3( bits[2].Trim(), out var d ) || d.LengthSquared < 1e-12f ) { why = $"'{bits[2]}' is not a direction x,y,z."; return false; }
+				var edgeRef = new EdgeRef( body.Id, p, d );
+				var key = $"{edgeRef.BodyId}|{edgeRef.Point.x:0.###},{edgeRef.Point.y:0.###},{edgeRef.Point.z:0.###}";
+				if ( seen.Add( key ) ) refs.Add( edgeRef );
 				continue;
 			}
 
@@ -2304,12 +3117,28 @@ public static partial class BuildScript
 
 	static List<string> Tokenise( string line )
 	{
+		// Escape-aware: a \" inside a value is a literal quote, not a quoting toggle, so
+		// a JSON graph can be written in a script as graph="{\"nodes\":...}" (the spelling
+		// GeoNodesFeature documents) and arrive intact. Without this, Tokenise stripped
+		// every quote and kept the backslashes, so NO JSON graph could survive a script
+		// line — pipe DSL worked only because it contains no double quotes. \\ is a
+		// literal backslash; a backslash before any other character is kept verbatim
+		// (paths and existing spellings are unchanged).
 		var tokens = new List<string>();
 		var sb = new StringBuilder();
 		var quoted = false;
 
-		foreach ( var c in line )
+		for ( var i = 0; i < line.Length; i++ )
 		{
+			var c = line[i];
+
+			if ( c == '\\' && i + 1 < line.Length && ( line[i + 1] == '"' || line[i + 1] == '\\' ) )
+			{
+				sb.Append( line[i + 1] );
+				i++;
+				continue;
+			}
+
 			if ( c == '"' ) { quoted = !quoted; continue; }
 
 			if ( char.IsWhiteSpace( c ) && !quoted )
@@ -2328,17 +3157,17 @@ public static partial class BuildScript
 	}
 
 	/// <summary>
-	/// `render out.png shade=material|clay [views=4] [size=512] [elevation=12] [preset=Wet gore] [focus=Body] [label=OURS] [clip=y>0]`:
+	/// `render out.png shade=material|clay|both [views=4] [size=512] [elevation=12] [preset=Wet gore] [focus=Body] [label=model] [clip=y>0] [backdrop=#rrggbb|key] [portfolio=1] [lights=camera|fixed|game] [env=studio|outdoor|neutral|zebra|none|file.hdr] [envyaw=0] [exposure=1] [tonemap=legacy|aces|agx|agxpunchy] [pass=shaded|normal|ao|wireframe]`:
 	/// a lit turnaround through ShadedRender, for judging how a thing LOOKS (wet, glossy, translucent)
 	/// rather than measuring it. shade=material shows each body as its Flesh Material feature baked it
 	/// (maps or per-vertex); a body with none shows its paint layers if it has any, else takes
 	/// `preset=` evaluated per vertex, else its vertex colours, else clay.
 	/// </summary>
-	static bool RenderShaded( PartStudio studio, string path, Dictionary<string, string> opts, string shade, Result r )
+	static bool RenderShaded( PartStudio studio, string path, Dictionary<string, string> opts, string shade, Result r, string baseDir = null )
 	{
 		var mode = shade.Trim().ToLowerInvariant();
-		if ( mode is not ("clay" or "material" or "flesh" or "wet") )
-			return Fail( r, $"shade={shade}: use shade=material (what the materials make it look like) or shade=clay (form only)." );
+		if ( mode is not ("clay" or "material" or "both" or "flesh" or "wet") )
+			return Fail( r, $"shade={shade}: use shade=material (what the materials make it look like), shade=clay (form only), or shade=both (clay + material rows in one sheet)." );
 
 		var views = (int)Number( opts.GetValueOrDefault( "views", "4" ) );
 		var size = (int)Number( opts.GetValueOrDefault( "size", "512" ) );
@@ -2349,7 +3178,30 @@ public static partial class BuildScript
 			return Fail( r, $"No material preset '{presetName}'. Presets: {string.Join( ", ", FleshMaterial.Presets )}." );
 
 		// The scene Render Turnaround draws, so the script's sheet and the editor's match.
-		var scene = Turnaround.Scene( studio, mode == "clay", focus?.Id, fallback, r.Log );
+		var scene = Turnaround.Scene( studio, mode == "clay", focus?.Id, fallback, r.Log, baseDir );
+
+		if ( opts.TryGetValue( "particles", out var particlesOpt ) )
+		{
+			if ( particlesOpt.Equals( "soft", StringComparison.OrdinalIgnoreCase ) ) scene.SoftParticles = true;
+			else if ( particlesOpt.Equals( "off", StringComparison.OrdinalIgnoreCase ) || particlesOpt == "0" ) scene.SoftParticles = false;
+			else return Fail( r, $"particles={particlesOpt}: use particles=soft (particle bodies as soft blended discs) or particles=off (ordinary mesh)." );
+		}
+
+		if ( opts.TryGetValue( "softdepth", out var softDepthOpt ) )
+		{
+			var softDepth = Number( softDepthOpt );
+			if ( softDepth < 0f ) return Fail( r, $"softdepth={softDepthOpt}: a distance in model units, 0 or more; leave it out for 5% of the scene radius." );
+			scene.SoftDepth = (float)softDepth;
+		}
+
+		if ( opts.TryGetValue( "bloom", out var bloomOpt ) )
+		{
+			var bloom = Number( bloomOpt );
+			if ( bloom < 0f || bloom > 2f ) return Fail( r, $"bloom={bloomOpt}: 0 off to 2 strong; 0.6 is a soft halo." );
+			scene.Bloom = (float)bloom;
+		}
+
+		if ( scene.SoftParticles ) r.Log.Add( "soft particles: particle bodies drawn as blended discs, not opaque triangles" );
 
 		if ( opts.TryGetValue( "clip", out var clipSpec ) )
 		{
@@ -2361,11 +3213,63 @@ public static partial class BuildScript
 		if ( scene.Items.Count == 0 )
 			return Fail( r, focus is null ? "Nothing to render: no visible body has faces." : $"{focus.Name ?? focus.Id} has no faces to render." );
 
+		foreach ( var bad in new[] { "detail", "silhouette", "reference" } )
+			if ( opts.ContainsKey( bad ) )
+				return Fail( r, $"detail, silhouette and reference are turnaround options; use `turnaround` for those views." );
+
+		if ( opts.TryGetValue( "backdrop", out var flat ) )
+		{
+			var hex = flat.Equals( "key", StringComparison.OrdinalIgnoreCase ) ? "ff00ff" : flat.TrimStart( '#' );
+			if ( hex.Length != 6 || !int.TryParse( hex, System.Globalization.NumberStyles.HexNumber, null, out var rgb ) )
+				return Fail( r, $"backdrop={flat}: use backdrop=key (magenta) or backdrop=#rrggbb." );
+			float Lin( int c ) => MathF.Pow( c / 255f, 2.2f );
+			scene.BackgroundBottom = scene.BackgroundTop = new Vec3( Lin( rgb >> 16 & 255 ), Lin( rgb >> 8 & 255 ), Lin( rgb & 255 ) );
+			scene.Floor = false;
+		}
+
+		var pass = opts.GetValueOrDefault( "pass", "shaded" );
+		var sheetOpts = new TurnaroundOptions
+		{
+			BaseDir = baseDir,
+			Portfolio = Truthy( opts.GetValueOrDefault( "portfolio", "1" ) ),
+			Lights = opts.GetValueOrDefault( "lights", "camera" ),
+			Env = opts.GetValueOrDefault( "env", null ),
+			EnvYaw = (float)Number( opts.GetValueOrDefault( "envyaw", "0" ) ),
+			Exposure = (float)Number( opts.GetValueOrDefault( "exposure", "1" ) ),
+			Tonemap = opts.GetValueOrDefault( "tonemap", null ),
+			Pass = pass,
+		};
+		var lighting = Turnaround.ApplyLighting( scene, sheetOpts, out var lightError, forSheet: true );
+		if ( lightError is not null )
+			return Fail( r, lightError );
+		scene.DebugPass = pass;
+
 		Directory.CreateDirectory( Path.GetDirectoryName( Path.GetFullPath( path ) ) ?? "." );
 		scene.Coverage = (int)Number( opts.GetValueOrDefault( "aa", "16" ) );
-		ShadedRender.Sheet( scene, views, size, elevation, (int)Number( opts.GetValueOrDefault( "ss", "1" ) ), opts.GetValueOrDefault( "label", "OURS" ) ).SavePng( path );
+		var label = opts.GetValueOrDefault( "label", Path.GetFileNameWithoutExtension( path ) );
+		if ( pass != "shaded" ) label += " " + pass;
+		if ( mode == "both" )
+		{
+			var clayScene = Turnaround.Scene( studio, true, focus?.Id, fallback, r.Log, baseDir );
+			clayScene.Clip = scene.Clip;
+			clayScene.Coverage = scene.Coverage;
+			clayScene.BackgroundBottom = scene.BackgroundBottom; clayScene.BackgroundTop = scene.BackgroundTop; clayScene.Floor = scene.Floor;
+			clayScene.SoftParticles = scene.SoftParticles; clayScene.SoftDepth = scene.SoftDepth; clayScene.Bloom = scene.Bloom;
+			var clayLighting = Turnaround.ApplyLighting( clayScene, sheetOpts, out var clayLightError, forSheet: true );
+			if ( clayLightError is not null )
+				return Fail( r, clayLightError );
+			clayScene.DebugPass = pass;
+			var claySheet = ShadedRender.Sheet( clayScene, views, size, elevation, (int)Number( opts.GetValueOrDefault( "ss", "1" ) ), label );
+			var matSheet = ShadedRender.Sheet( scene, views, size, elevation, (int)Number( opts.GetValueOrDefault( "ss", "1" ) ), label );
+			Turnaround.StackSheets( claySheet, matSheet, "clay", "material" ).SavePng( path );
+		}
+		else
+		{
+			ShadedRender.Sheet( scene, views, size, elevation, (int)Number( opts.GetValueOrDefault( "ss", "1" ) ), label ).SavePng( path );
+		}
 		r.Written.Add( path );
 		r.Log.Add( $"rendered shade={mode}, {Math.Clamp( views, 1, 12 )} views, to {path}" );
+		r.Log.Add( lighting );
 		return true;
 	}
 
@@ -2538,20 +3442,23 @@ public static partial class BuildScript
 	// command error prints it. A verb added to Command's switch but not here is a
 	// docs bug — keep the two together.
 	public static readonly string[] VerbNames = {
-		"add", "edit", "set", "remove", "remedy", "remedy all", "var", "rebuild", "fix",
-		"render", "turnaround", "describe", "measure", "at", "distance", "symmetry",
-		"clearance", "topology", "section", "flex", "match", "save", "echo", "refimage", "material", "facematerial",
-		"pivot", "export", "corrective", "corrective auto", "bake", "paintmaps",
+		"add", "edit", "set", "remove", "remedy", "remedy all", "var", "rebuild", "fix", "validate", "load",
+		"render", "turnaround", "describe", "uvcheck", "measure", "measurebody", "fitreport", "at", "distance", "symmetry",
+		"clearance", "noclip", "topology", "section", "flex", "match", "texpaint", "save", "echo", "refimage", "material", "facematerial",
+		"refmark", "proportion", "refcheck", "refoverlay", "trace", "refsection", "refstep",
+		"pivot", "export", "exportvalidate", "corrective", "corrective auto", "bake", "paintmaps", "genmaps",
 		"checkpoint", "fit_profile", "reproject", "retopo", "transfer", "weight", "sculpt",
-		"facerig", "playermodel", "export_cloth", "spritesheet", "attachment",
-		"hitbox", "bodygroup", "ragdoll", "lod_chain", "lint",
+		"facerig", "playermodel", "export_cloth", "spritesheet", "alphatex", "flipbook", "attachment",
+		"hitbox", "bodygroup", "ragdoll", "ragdoll_limit", "breakpieces", "gameready", "viewmodel_check", "lod_chain", "lint", "particlecue", "particleframes", "particles",
 		"bone", "chain", "subdivide", "twist", "mirror bones", "rig", "bind", "skin",
-		"play", "cables",
+		"play", "cables", "rigcheck", "bendy", "dqs", "ikfk", "twiststations", "fan", "bulge",
+		"posecheck", "deltamush",
 	};
 
 	public static readonly string[] RigVerbNames = {
 		"bone", "chain", "subdivide", "twist", "mirror bones", "rig", "bind", "skin",
 		"play", "cables", "weight", "corrective auto", "facerig", "playermodel",
+		"rigcheck", "bendy", "dqs", "ikfk", "twiststations", "fan", "bulge", "posecheck", "deltamush",
 	};
 
 	// --- Lane P: new script verbs -----------------------------------------------------------
@@ -2671,7 +3578,25 @@ public static partial class BuildScript
 	static bool RetopoVerb( PartStudio studio, List<string> args, Result r )
 	{
 		if ( args.Count < 1 )
-			return Fail( r, "retopo needs a body: retopo Body [targets=4000,1500,500] or [target=4000]" );
+			return Fail( r, "retopo needs a body: retopo Body [targets=4000,1500,500] or [target=4000]; retopo report Body [source=OtherBody]" );
+		// Retopo wave 3 (Gap 7): `retopo report Body` is the quality report, not a remesh.
+		if ( args[0].Equals( "report", StringComparison.OrdinalIgnoreCase ) )
+		{
+			if ( args.Count < 2 ) return Fail( r, "retopo report needs a body: retopo report Body [source=OtherBody]" );
+			var reportBody = ModelMeasure.FindBody( studio, args[1] );
+			if ( reportBody?.Mesh is null ) return Fail( r, $"No body called '{args[1]}'." );
+			var reportOpts = Pairs( args.Skip( 2 ) );
+			PolyMesh sourceMesh = null;
+			if ( reportOpts.TryGetValue( "source", out var sourceName ) )
+			{
+				var sourceBody = ModelMeasure.FindBody( studio, sourceName );
+				if ( sourceBody?.Mesh is null ) return Fail( r, $"No body called '{sourceName}'." );
+				sourceMesh = sourceBody.Mesh;
+			}
+			var report = RetopoReport.Measure( reportBody.Mesh, sourceMesh, null, reportBody.Name ?? reportBody.Id );
+			r.Log.Add( $"retopo report: {reportBody.Name ?? reportBody.Id}:\n{report}" );
+			return true;
+		}
 		var body = ModelMeasure.FindBody( studio, args[0] );
 		if ( body?.Mesh is null ) return Fail( r, $"No body called '{args[0]}'." );
 		var opts = Pairs( args.Skip( 1 ) );
@@ -2680,18 +3605,47 @@ public static partial class BuildScript
 		if ( !int.TryParse( first, out var target ) || target <= 0 )
 			return Fail( r, $"targets={targetText}: the first value is the retopo target face count." );
 		var options = new QuadRemesh.Options { TargetFaces = target };
+		// Retopo wave 3 (Gap 2): every QuadRemesh option is reachable from the verb now.
+		if ( opts.TryGetValue( "curvature", out var curvatureText )
+			&& float.TryParse( curvatureText, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var curvature ) )
+			options.CurvatureAlign = curvature;
+		if ( opts.TryGetValue( "align", out var alignText ) && bool.TryParse( alignText, out var align ) )
+			options.AlignToCurvature = align;
+		if ( opts.TryGetValue( "relax", out var relaxText ) && int.TryParse( relaxText, out var relax ) )
+			options.RelaxPasses = relax;
+		if ( opts.TryGetValue( "symmetry", out var symmetryText ) && bool.TryParse( symmetryText, out var symmetry ) )
+			options.SymmetryX = symmetry;
+		if ( opts.TryGetValue( "guides", out var guidesText ) )
+			options.Guides = QuadRemesh.ParseGuides( guidesText );
+		var transferOn = true;
+		if ( opts.TryGetValue( "transfer", out var transferText ) )
+		{
+			var t = transferText.Trim().ToLowerInvariant();
+			if ( t is "off" or "no" or "0" or "false" ) transferOn = false;
+			else if ( t is "on" or "yes" or "1" or "true" ) transferOn = true;
+			// Any other spelling keeps the default (on) rather than failing the turn.
+		}
+		var phases = new List<string>();
+		options.Progress = phase => phases.Add( phase );
+		var source = body.Mesh;
 		QuadRemesh.Result result;
-		try { result = QuadRemesh.Run( body.Mesh, options ); }
+		try { result = QuadRemesh.Run( source, options ); }
 		catch ( Exception e ) { return Fail( r, $"retopo failed: {e.Message}" ); }
+		var transferNote = "";
+		if ( transferOn && result.Mesh.FaceCount > 0 )
+		{
+			var transfer = AttributeTransfer.Transfer( source, result.Mesh );
+			transferNote = $" transfer: {transfer}";
+		}
 		body.Mesh = result.Mesh;
-		r.Log.Add( $"retopo: {body.Name ?? body.Id} -> {result} (run-time mesh operation, like fix: a later rebuild from features does not keep it; export lods= covers the LOD targets {targetText})" );
+		r.Log.Add( $"retopo: {body.Name ?? body.Id} -> {result}{transferNote} (phases: {string.Join( ", ", phases )}; run-time mesh operation, like fix: a later rebuild from features does not keep it — use the Remesh feature in Quad mode for the durable path; export lods= covers the LOD targets {targetText})" );
 		return true;
 	}
 
 	static bool TransferVerb( PartStudio studio, List<string> args, Result r )
 	{
 		if ( args.Count < 2 )
-			return Fail( r, "transfer needs two bodies: transfer SourceBody TargetBody [channels=weights,uvs,morphs]" );
+			return Fail( r, "transfer needs two bodies: transfer SourceBody TargetBody [channels=weights,uvs,morphs,colours,materials,uv2,all]" );
 		var source = ModelMeasure.FindBody( studio, args[0] );
 		var target = ModelMeasure.FindBody( studio, args[1] );
 		if ( source?.Mesh is null ) return Fail( r, $"No body called '{args[0]}'." );
@@ -2705,27 +3659,57 @@ public static partial class BuildScript
 			try { notes.Add( $"weights: {SkinBinder.TransferFrom( target.Mesh, source.Mesh )} vertices reached" ); }
 			catch ( Exception e ) { return Fail( r, $"transfer weights failed: {e.Message}" ); }
 		}
-		if ( channels.Contains( "uvs" ) )
+		if ( channels.Contains( "uvs" ) || channels.Contains( "all" ) )
 		{
-			// Lane P fix: UVs live per Face, not on PolyMesh — a direct copy only
-			// works when the face counts match, and copies each face's UVs in order.
-			if ( source.Mesh.Faces.Count != target.Mesh.Faces.Count )
-				return Fail( r, "transfer uvs: source and target face counts must match for a direct UV copy (nearest-surface UV transfer is follow-up)." );
-			for ( var i = 0; i < target.Mesh.Faces.Count; i++ )
-				target.Mesh.Faces[i].UVs = source.Mesh.Faces[i].UVs is { } uv ? (Vec2[])uv.Clone() : null;
-			notes.Add( $"uvs: {target.Mesh.Faces.Count} faces copied" );
-		}
-		if ( channels.Contains( "morphs" ) )
-		{
-			var copied = 0;
-			foreach ( var morph in source.Mesh.ValidMorphs )
+			// Direct copy is exact and stays the path when face counts match; on a
+			// mismatch (the whole point of a remesh) project through the surface
+			// instead of failing — Retopo wave 3 (Gap 1).
+			if ( source.Mesh.Faces.Count == target.Mesh.Faces.Count )
 			{
-				if ( morph.Deltas.Length != target.Mesh.Positions.Count ) continue;
-				target.Mesh.Morphs.RemoveAll( m => m?.Name == morph.Name );
-				target.Mesh.Morphs.Add( morph.Clone() );
-				copied++;
+				for ( var i = 0; i < target.Mesh.Faces.Count; i++ )
+					target.Mesh.Faces[i].UVs = source.Mesh.Faces[i].UVs is { } uv ? (Vec2[])uv.Clone() : null;
+				notes.Add( $"uvs: {target.Mesh.Faces.Count} faces copied" );
 			}
-			notes.Add( $"morphs: {copied} copied (others skipped: vertex count mismatch)" );
+			else
+			{
+				var projected = AttributeTransfer.Transfer( source.Mesh, target.Mesh, new AttributeTransfer.Options { Weights = false, Uvs = true, Morphs = false, Colours = false, Emission = false, Materials = false, Uv2 = false } );
+				notes.Add( $"uvs: projected ({projected})" );
+			}
+		}
+		if ( channels.Contains( "morphs" ) || channels.Contains( "all" ) )
+		{
+			if ( source.Mesh.Positions.Count == target.Mesh.Positions.Count )
+			{
+				var copied = 0;
+				foreach ( var morph in source.Mesh.ValidMorphs )
+				{
+					if ( morph.Deltas.Length != target.Mesh.Positions.Count ) continue;
+					target.Mesh.Morphs.RemoveAll( m => m?.Name == morph.Name );
+					target.Mesh.Morphs.Add( morph.Clone() );
+					copied++;
+				}
+				notes.Add( $"morphs: {copied} copied" );
+			}
+			else
+			{
+				var projected = AttributeTransfer.Transfer( source.Mesh, target.Mesh, new AttributeTransfer.Options { Weights = false, Uvs = false, Morphs = true, Colours = false, Emission = false, Materials = false, Uv2 = false } );
+				notes.Add( $"morphs: projected ({projected})" );
+			}
+		}
+		if ( channels.Contains( "colours" ) || channels.Contains( "colors" ) || channels.Contains( "all" ) )
+		{
+			var projected = AttributeTransfer.Transfer( source.Mesh, target.Mesh, new AttributeTransfer.Options { Weights = false, Uvs = false, Morphs = false, Colours = true, Emission = true, Materials = false, Uv2 = false } );
+			notes.Add( $"colours: projected ({projected})" );
+		}
+		if ( channels.Contains( "materials" ) || channels.Contains( "all" ) )
+		{
+			var projected = AttributeTransfer.Transfer( source.Mesh, target.Mesh, new AttributeTransfer.Options { Weights = false, Uvs = false, Morphs = false, Colours = false, Emission = false, Materials = true, Uv2 = false } );
+			notes.Add( $"materials: projected ({projected})" );
+		}
+		if ( channels.Contains( "uv2" ) || channels.Contains( "all" ) )
+		{
+			var projected = AttributeTransfer.Transfer( source.Mesh, target.Mesh, new AttributeTransfer.Options { Weights = false, Uvs = false, Morphs = false, Colours = false, Emission = false, Materials = false, Uv2 = true } );
+			notes.Add( $"uv2: projected ({projected})" );
 		}
 		r.Log.Add( $"transfer: {source.Name ?? source.Id} -> {target.Name ?? target.Id}: {string.Join( "; ", notes )} (run-time mesh operation, like fix)" );
 		return true;
@@ -3005,7 +3989,11 @@ public static partial class BuildScript
 		{
 			var path = Resolve( baseDir, args[0] );
 			var meshFile = Path.GetFileNameWithoutExtension( path ) + ".dmx";
-			File.WriteAllText( path, Playermodel.Vmdl( meshFile, built.Skeleton ) );
+			var customHitboxes = studio.Hitboxes.Where( h => built.Skeleton.IndexOf( h.Bone ) >= 0 ).ToList();
+			var customAttachments = studio.Attachments.Where( a => built.Skeleton.IndexOf( a.ParentBone ) >= 0 ).ToList();
+			File.WriteAllText( path, Playermodel.VmdlWithGameData( meshFile, built.Skeleton, customHitboxes, customAttachments, studio.BodyGroups ) );
+			if ( customHitboxes.Count > 0 || customAttachments.Count > 0 || studio.BodyGroups.Count > 0 )
+				r.Log.Add( $"playermodel: custom game data replaces citizen prefabs — {customHitboxes.Count} hitbox(es), {customAttachments.Count} attachment(s), {studio.BodyGroups.Count} bodygroup(s); citizen physics/joint prefabs are still used (no custom physics shapes are stored yet)." );
 			r.Written.Add( path );
 			r.Log.Add( $"playermodel: vmdl written to {path}" );
 		}
@@ -3057,8 +4045,535 @@ public static partial class BuildScript
 		return true;
 	}
 
-	static bool AttachmentVerb( PartStudio studio, List<string> args, Result r )
+
+	// --- Particles-textures: alphatex + flipbook --------------------------------
+	// Geppetto is a modeller/baker, not a runtime particle engine: these verbs
+	// bake the sprite/flipbook textures a runtime emitter consumes. Every
+	// texture is generated from kernel code (BrushAlpha stamps + value noise),
+	// so output is deterministic and licence-clean. Soft edges live in the
+	// texture's alpha channel, never in material opacity (headless opacity is
+	// Bayer dither, not a soft edge).
+
+	const string ParticleStampNames =
+		"scales, gill_slit, pores, wrinkles, stitches, veins, rivets, cracks, softdisc, smoke, spark, ember, droplet, ring, streak";
+
+	static float ParticleSmooth( float t ) => t < 0f ? 0f : t > 1f ? 1f : t * t * ( 3f - 2f * t );
+
+	static float ParticleHash( int x, int y, int seed )
 	{
+		var h = x * 374761393 + y * 668265263 + seed * 974634211;
+		h = ( h ^ ( h >> 13 ) ) * 1274126177;
+		return ( ( h ^ ( h >> 16 ) ) & 0xffffff ) / 16777216f;
+	}
+
+	static float ParticleValueNoise( float x, float y, int seed )
+	{
+		var xi = (int)MathF.Floor( x );
+		var yi = (int)MathF.Floor( y );
+		var fx = x - xi;
+		var fy = y - yi;
+		var sx = ParticleSmooth( fx );
+		var sy = ParticleSmooth( fy );
+		var a = ParticleHash( xi, yi, seed );
+		var b = ParticleHash( xi + 1, yi, seed );
+		var c = ParticleHash( xi, yi + 1, seed );
+		var d = ParticleHash( xi + 1, yi + 1, seed );
+		return ( a * ( 1f - sx ) + b * sx ) * ( 1f - sy ) + ( c * ( 1f - sx ) + d * sx ) * sy;
+	}
+
+	static float ParticleFbm( float u, float v, float scale, int octaves, int seed )
+	{
+		float amp = 1f, tot = 0f, sum = 0f, freq = Math.Max( 1f, scale );
+		for ( var o = 0; o < Math.Clamp( octaves, 1, 8 ); o++ )
+		{
+			sum += ParticleValueNoise( u * freq, v * freq, seed ) * amp;
+			tot += amp;
+			amp *= 0.5f;
+			freq *= 2f;
+		}
+		return tot > 0f ? sum / tot : 0f;
+	}
+
+	readonly struct ParticleErode
+	{
+		public readonly float Scale;
+		public readonly int Octaves;
+		public readonly int Seed;
+		public readonly float Threshold;
+		public ParticleErode( float scale, int octaves, int seed, float threshold )
+		{
+			Scale = scale; Octaves = octaves; Seed = seed; Threshold = threshold;
+		}
+	}
+
+	static bool TryParseErode( string text, out ParticleErode erode, out string why )
+	{
+		erode = default;
+		why = "";
+		var t = ( text ?? "" ).Trim();
+		if ( t.StartsWith( "noise:", StringComparison.OrdinalIgnoreCase ) )
+			t = t[6..];
+		var parts = t.Split( ',', StringSplitOptions.RemoveEmptyEntries );
+		float scale = 4f;
+		int octaves = 4, seed = 0;
+		float threshold = 0.35f;
+		if ( parts.Length > 0 && ( !float.TryParse( parts[0], out scale ) || scale <= 0f ) ) { why = $"erode scale '{parts[0]}' is not a positive number."; return false; }
+		if ( parts.Length > 1 && !int.TryParse( parts[1], out octaves ) ) { why = $"erode octaves '{parts[1]}' is not an integer."; return false; }
+		if ( parts.Length > 2 && !int.TryParse( parts[2], out seed ) ) { why = $"erode seed '{parts[2]}' is not an integer."; return false; }
+		if ( parts.Length > 3 && ( !float.TryParse( parts[3], out threshold ) || threshold < 0f || threshold > 1f ) ) { why = $"erode threshold '{parts[3]}' is not 0..1."; return false; }
+		erode = new ParticleErode( scale, octaves, seed, threshold );
+		return true;
+	}
+
+	/// <summary>Render a procedural stamp into a float sheet, applying
+	/// stretch/angle, then soft falloff, then noise erosion, in that order.</summary>
+	static float[] RenderParticleStamp( BrushAlpha stamp, int size, float soft, float stretchX, float stretchY, float angleDeg, ParticleErode? erode, float sizeFactor = 1f )
+	{
+		var values = new float[size * size];
+		var rad = angleDeg * MathF.PI / 180f;
+		var cos = MathF.Cos( rad );
+		var sin = MathF.Sin( rad );
+		// Aspect-preserving stretch: the largest axis fits the frame, so a
+		// stretched disc reads as a streak instead of clipping off-frame.
+		// (Uniform stretch is therefore a no-op here; sizeFactor scales.)
+		var fit = Math.Max( stretchX, stretchY );
+		for ( var y = 0; y < size; y++ )
+		for ( var x = 0; x < size; x++ )
+		{
+			var u0 = size > 1 ? x / (float)( size - 1 ) : 0.5f;
+			var v0 = size > 1 ? y / (float)( size - 1 ) : 0.5f;
+			var dx = u0 - 0.5f;
+			var dy = v0 - 0.5f;
+			var su = 0.5f + ( dx * cos + dy * sin ) * fit / stretchX * sizeFactor;
+			var sv = 0.5f + ( -dx * sin + dy * cos ) * fit / stretchY * sizeFactor;
+			var a = stamp.Sample( su, sv );
+			if ( soft > 0f )
+			{
+				var d = MathF.Sqrt( dx * dx + dy * dy ) * 2f;
+				a *= 1f - ParticleSmooth( ( d - ( 1f - soft ) ) / soft );
+			}
+			if ( erode is { } e )
+			{
+				// Remapped to [0.5, 1]: raw FBM (mean ~0.5) darkened the whole
+				// stamp and erased the disc centre at some seeds; the threshold
+				// below still tears texels where stamp * noise falls below it.
+				a *= 0.5f + 0.5f * ParticleFbm( u0, v0, e.Scale, e.Octaves, e.Seed );
+				if ( a < e.Threshold )
+					a = 0f;
+			}
+			values[y * size + x] = Math.Clamp( a, 0f, 1f );
+		}
+		return values;
+	}
+
+	/// <summary>Write a float sheet as a white RGBA PNG (alpha = stamp).
+	/// With normal=1 also writes the stamp-as-height normal sheet via
+	/// PaintTextureSet.HeightToNormal, the same function paint export uses.</summary>
+	static void WriteParticlePng( string path, int size, float[] values, bool normal, out string normalPath )
+	{
+		normalPath = null;
+		Directory.CreateDirectory( Path.GetDirectoryName( Path.GetFullPath( path ) ) ?? "." );
+		var raster = new Raster( size, size, 0xFFFFFF );
+		var alpha = new byte[size * size];
+		for ( var i = 0; i < values.Length; i++ )
+		{
+			raster.Pixels[i] = 0xFFFFFF;
+			alpha[i] = (byte)Math.Clamp( values[i] * 255f, 0f, 255f );
+		}
+		File.WriteAllBytes( path, SpriteSheetBaker.EncodeRgbaPng( raster, alpha ) );
+		if ( !normal )
+			return;
+		var canvas = new PaintCanvas( size, size );
+		for ( var i = 0; i < values.Length; i++ )
+		{
+			var g = (byte)Math.Clamp( values[i] * 255f, 0f, 255f );
+			canvas.Rgba[i * 4] = g;
+			canvas.Rgba[i * 4 + 1] = g;
+			canvas.Rgba[i * 4 + 2] = g;
+			canvas.Rgba[i * 4 + 3] = 255;
+		}
+		var n = PaintTextureSet.HeightToNormal( canvas, 2f );
+		var nraster = new Raster( size, size, 0 );
+		var nalpha = new byte[size * size];
+		for ( var i = 0; i < values.Length; i++ )
+		{
+			nraster.Pixels[i] = ( n[i * 4] << 16 ) | ( n[i * 4 + 1] << 8 ) | n[i * 4 + 2];
+			nalpha[i] = n[i * 4 + 3];
+		}
+		normalPath = SpriteSheetBaker.Suffixed( path, "_n" );
+		File.WriteAllBytes( normalPath, SpriteSheetBaker.EncodeRgbaPng( nraster, nalpha ) );
+	}
+
+	static bool AlphatexVerb( List<string> args, string baseDir, Result r )
+	{
+		if ( args.Count < 2 )
+			return Fail( r, "alphatex needs a stamp and a path: alphatex softdisc out.png [size=256] [soft=0..1] [stretch=x,y] [angle=deg] [erode=noise:scale,octaves,seed,threshold] [normal=0|1]" );
+		var stamp = BrushAlpha.FromProcedural( args[0] );
+		if ( stamp is null )
+			return Fail( r, $"'{args[0]}' is not a procedural stamp. Valid names: {ParticleStampNames}." );
+		var opts = Pairs( args.Skip( 2 ) );
+		var size = opts.TryGetValue( "size", out var sz ) && int.TryParse( sz, out var sn ) ? sn : 256;
+		if ( size < 16 || size > 1024 ) return Fail( r, $"size={size}: 16..1024." );
+		var soft = opts.TryGetValue( "soft", out var sf ) && float.TryParse( sf, out var sv ) ? sv : 0f;
+		if ( soft < 0f || soft > 1f ) return Fail( r, $"soft={soft}: 0..1." );
+		float stretchX = 1f, stretchY = 1f;
+		if ( opts.TryGetValue( "stretch", out var st ) )
+		{
+			var sp = st.Split( ',' );
+			if ( sp.Length != 2 || !float.TryParse( sp[0], out stretchX ) || !float.TryParse( sp[1], out stretchY ) || stretchX <= 0f || stretchY <= 0f )
+				return Fail( r, $"stretch='{st}': want x,y, both positive, as in stretch=4,1." );
+		}
+		var angle = opts.TryGetValue( "angle", out var an ) && float.TryParse( an, out var av ) ? av : 0f;
+		ParticleErode? erode = null;
+		if ( opts.TryGetValue( "erode", out var er ) )
+		{
+			if ( !TryParseErode( er, out var e, out var why ) )
+				return Fail( r, why );
+			erode = e;
+		}
+		var normal = opts.TryGetValue( "normal", out var nm ) && ( nm == "1" || nm.Equals( "true", StringComparison.OrdinalIgnoreCase ) );
+		var path = Resolve( baseDir, args[1] );
+		var values = RenderParticleStamp( stamp, size, soft, stretchX, stretchY, angle, erode );
+		WriteParticlePng( path, size, values, normal, out var normalPath );
+		r.Written.Add( path );
+		if ( normalPath is not null )
+			r.Written.Add( normalPath );
+		r.Log.Add( $"alphatex: {args[0]} to {path} ({size}px, soft={soft}, stretch={stretchX},{stretchY}, angle={angle}, erode={( erode is null ? "off" : "on" )}, normal={( normal ? "on" : "off" )})" );
+		return true;
+	}
+
+	static bool FlipbookVerb( List<string> args, string baseDir, Result r )
+	{
+		if ( args.Count < 2 )
+			return Fail( r, "flipbook needs a stamp and a path: flipbook smoke out.png [tiles=16] [cols=4] [size=128] [seed=0] [vary=rotation|erosion|scale] [normal=0|1]" );
+		var stamp = BrushAlpha.FromProcedural( args[0] );
+		if ( stamp is null )
+			return Fail( r, $"'{args[0]}' is not a procedural stamp. Valid names: {ParticleStampNames}." );
+		var opts = Pairs( args.Skip( 2 ) );
+		var tiles = opts.TryGetValue( "tiles", out var ti ) && int.TryParse( ti, out var tn ) ? tn : 16;
+		var cols = opts.TryGetValue( "cols", out var co ) && int.TryParse( co, out var cn ) ? cn : 4;
+		var size = opts.TryGetValue( "size", out var sz ) && int.TryParse( sz, out var sn ) ? sn : 128;
+		var seed = opts.TryGetValue( "seed", out var sd ) && int.TryParse( sd, out var sdn ) ? sdn : 0;
+		var vary = opts.TryGetValue( "vary", out var vy ) ? vy.ToLowerInvariant() : "rotation";
+		if ( tiles < 1 || tiles > 64 ) return Fail( r, $"tiles={tiles}: 1..64." );
+		if ( cols < 1 || cols > 16 ) return Fail( r, $"cols={cols}: 1..16." );
+		if ( size < 16 || size > 512 ) return Fail( r, $"size={size}: 16..512." );
+		if ( tiles > cols * cols ) return Fail( r, $"tiles={tiles} does not fit a square {cols}x{cols} sheet; raise cols or lower tiles." );
+		if ( vary is not ( "rotation" or "erosion" or "scale" ) ) return Fail( r, $"vary='{vary}': rotation, erosion or scale." );
+		var normal = opts.TryGetValue( "normal", out var nm ) && ( nm == "1" || nm.Equals( "true", StringComparison.OrdinalIgnoreCase ) );
+		var path = Resolve( baseDir, args[1] );
+		var sheetSize = cols * size;
+		var sheet = new float[sheetSize * sheetSize];
+		for ( var i = 0; i < tiles; i++ )
+		{
+			float angle = 0f, sx = 1f, sy = 1f, scaleFactor = 1f;
+			ParticleErode? erode = null;
+			switch ( vary )
+			{
+				case "rotation":
+					angle = i * 360f / tiles;
+					break;
+				case "erosion":
+					erode = new ParticleErode( 4f, 4, seed + i, 0.35f );
+					break;
+				case "scale":
+					// Linear size ramp (a sine pulse was symmetric and duplicated
+					// tiles; a ramp gives every tile a different size).
+					scaleFactor = 0.7f + 0.3f * ( tiles > 1 ? i / (float)( tiles - 1 ) : 1f );
+					break;
+			}
+			var tile = RenderParticleStamp( stamp, size, 0f, sx, sy, angle, erode, sizeFactor: scaleFactor );
+			var row = i / cols;
+			var col = i % cols;
+			for ( var y = 0; y < size; y++ )
+			for ( var x = 0; x < size; x++ )
+				sheet[( row * size + y ) * sheetSize + ( col * size + x )] = tile[y * size + x];
+		}
+		WriteParticlePng( path, sheetSize, sheet, normal, out var normalPath );
+		r.Written.Add( path );
+		if ( normalPath is not null )
+			r.Written.Add( normalPath );
+		var atlas = new SpriteSheet { Width = sheetSize, Height = sheetSize, ImagePath = Path.GetFileName( path ) };
+		for ( var i = 0; i < tiles; i++ )
+			atlas.Frames.Add( new SpriteFrame( $"frame_{i}", ( i % cols ) * size, ( i / cols ) * size, size, size ) );
+		var jsonPath = Path.ChangeExtension( path, ".json" );
+		File.WriteAllText( jsonPath, atlas.ToJsonAtlas() );
+		r.Written.Add( jsonPath );
+		r.Log.Add( $"flipbook: {args[0]} to {path} ({tiles} tiles, {cols} cols, {size}px, vary={vary}, seed={seed}, atlas {jsonPath})" );
+		return true;
+	}
+
+	/// <summary>
+	///   particlecue frame=12 cue=muzzle_flash count=40 speed=30,60 life=0.4 size=0.2,0.6
+	///   particlecue list
+	///   particlecue export out/cues.json
+	/// Authored particle cues (see ParticleCue): the numbers a runtime
+	/// effect needs, stored on the document and replaced by frame+cue.
+	/// Geppetto simulates nothing here — the runtime owns the sim, as
+	/// Anim2D's Particle event already declares. A model document has no
+	/// clip, so there is no clip frame count to check a frame against;
+	/// the verb validates frame >= 0 and every number, and names the bad
+	/// value when one fails. The clip-side frame check belongs in the
+	/// anim script, which has no particlecue verb yet.
+	/// </summary>
+	static bool ParticleCueVerb( PartStudio studio, List<string> args, string baseDir, Result r )
+	{
+		if ( args.Count == 0 || args[0].Equals( "list", StringComparison.OrdinalIgnoreCase ) )
+		{
+			if ( studio.ParticleCues.Count == 0 )
+			{
+				r.Log.Add( "no particle cues" );
+				return true;
+			}
+			foreach ( var cue in studio.ParticleCues.OrderBy( c => c.Frame ).ThenBy( c => c.Cue, StringComparer.OrdinalIgnoreCase ) )
+				r.Log.Add( cue.Describe() );
+			return true;
+		}
+
+		if ( args[0].Equals( "export", StringComparison.OrdinalIgnoreCase ) )
+		{
+			if ( args.Count < 2 )
+				return Fail( r, "particlecue export needs a path: particlecue export out/cues.json" );
+			var jsonPath = Resolve( baseDir, args[1] );
+			var sb = new StringBuilder();
+			sb.Append( "{\n  \"cues\": [" );
+			var first = true;
+			foreach ( var cue in studio.ParticleCues.OrderBy( c => c.Frame ).ThenBy( c => c.Cue, StringComparer.OrdinalIgnoreCase ) )
+			{
+				if ( !first ) sb.Append( ',' );
+				first = false;
+				sb.Append( "\n    {" )
+					.Append( $"\"frame\": {cue.Frame}, \"cue\": \"{JsonEscape( cue.Cue )}\", \"count\": {cue.Count}, " )
+					.Append( $"\"speedMin\": {cue.SpeedMin.ToString( CultureInfo.InvariantCulture)}, \"speedMax\": {cue.SpeedMax.ToString( CultureInfo.InvariantCulture)}, " )
+					.Append( $"\"life\": {cue.Life.ToString( CultureInfo.InvariantCulture)}, " )
+					.Append( $"\"sizeMin\": {cue.SizeMin.ToString( CultureInfo.InvariantCulture)}, \"sizeMax\": {cue.SizeMax.ToString( CultureInfo.InvariantCulture)}" )
+					.Append( " }" );
+			}
+			sb.Append( studio.ParticleCues.Count > 0 ? "\n  ]\n}\n" : "]\n}\n" );
+			Directory.CreateDirectory( Path.GetDirectoryName( Path.GetFullPath( jsonPath ) ) ?? "." );
+			File.WriteAllText( jsonPath, sb.ToString() );
+			r.Written.Add( jsonPath );
+			r.Log.Add( $"particlecue: {studio.ParticleCues.Count} cue(s) exported to {jsonPath}" );
+			return true;
+		}
+
+		var opts = Pairs( args );
+		var cueName = opts.TryGetValue( "cue", out var cued ) && !string.IsNullOrWhiteSpace( cued )
+			? cued
+			: (args.Count > 0 && !args[0].Contains( '=' ) ? args[0] : "");
+		if ( string.IsNullOrWhiteSpace( cueName ) || cueName.Any( char.IsWhiteSpace ) )
+			return Fail( r, "particlecue needs cue=Name, one token: particlecue frame=12 cue=muzzle_flash count=40 speed=30,60 life=0.4 size=0.2,0.6" );
+		if ( !opts.TryGetValue( "frame", out var frameText ) || !int.TryParse( frameText, out var frame ) || frame < 0 )
+			return Fail( r, $"particlecue frame={frameText ?? ""}: a frame number, 0 or more." );
+
+		var count = opts.TryGetValue( "count", out var countText ) && int.TryParse( countText, out var parsedCount ) ? parsedCount : 40;
+		if ( count < 0 )
+			return Fail( r, $"particlecue count={countText}: 0 or more." );
+		if ( !ParseRange( opts.GetValueOrDefault( "speed", "0,0" ), out var speedMin, out var speedMax ) )
+			return Fail( r, $"particlecue speed={opts.GetValueOrDefault( "speed", "0,0")}: one number, or a min,max pair, as in 30,60." );
+		if ( !ParseRange( opts.GetValueOrDefault( "size", "1,1" ), out var sizeMin, out var sizeMax ) )
+			return Fail( r, $"particlecue size={opts.GetValueOrDefault( "size", "1,1")}: one number, or a min,max pair, as in 0.2,0.6." );
+		var life = opts.TryGetValue( "life", out var lifeText ) ? Number( lifeText ) : 1f;
+		if ( life <= 0f )
+			return Fail( r, $"particlecue life={lifeText}: above 0." );
+
+		studio.ParticleCues.RemoveAll( c => c.Frame == frame && string.Equals( c.Cue, cueName, StringComparison.OrdinalIgnoreCase ) );
+		var made = new ParticleCue { Frame = frame, Cue = cueName, Count = count, SpeedMin = speedMin, SpeedMax = speedMax, Life = life, SizeMin = sizeMin, SizeMax = sizeMax };
+		studio.ParticleCues.Add( made );
+		studio.ParticleCues.Sort( (a, b) => a.Frame != b.Frame ? a.Frame.CompareTo( b.Frame ) : string.Compare( a.Cue, b.Cue, StringComparison.OrdinalIgnoreCase ) );
+		r.Log.Add( made.Describe() + " (persisted to the document)" );
+		return true;
+	}
+
+	static bool ParseRange( string text, out float min, out float max )
+	{
+		min = max = 0f;
+		if ( string.IsNullOrWhiteSpace( text ) )
+			return false;
+		var parts = text.Split( ',' );
+		if ( parts.Length > 2 )
+			return false;
+		if ( !float.TryParse( parts[0].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out min ) || min < 0f )
+			return false;
+		max = min;
+		if ( parts.Length == 2 && (!float.TryParse( parts[1].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out max ) || max < min) )
+			return false;
+		return true;
+	}
+
+	static string JsonEscape( string text ) => text.Replace( "\\", "\\\\" ).Replace( "\"", "\\\"" );
+
+	/// <summary>
+	///   particleframes out/loop.png burst=Sparks frames=8 seedstep=1 [size=256] [shade=material|clay]
+	/// Baked particle frames as a flipbook sheet, from a seeded burst
+	/// feature (Emitter, ParticlePreset, ParticleBake, ParticleSim, or
+	/// any feature with a Seed parameter): frame i re-bakes the feature
+	/// with seed = baseSeed + i * seedstep and renders one tile, so the
+	/// sheet is N static frames, playable by the existing flipbook
+	/// reader — the only honest "animated particles" without a sim loop.
+	/// The feature's seed is restored and the studio rebuilt after the
+	/// last frame, so the document is left exactly as it was. A frame
+	/// identical to the previous one fails the verb naming the frame,
+	/// which is how a seedstep that had no effect shows up instead of
+	/// silently shipping a frozen loop.
+	/// </summary>
+	static bool ParticleFramesVerb( PartStudio studio, List<string> args, string baseDir, Result r )
+	{
+		if ( args.Count < 1 )
+			return Fail( r, "particleframes needs a path: particleframes out/loop.png burst=Sparks frames=8 seedstep=1" );
+		var opts = Pairs( args.Skip( 1 ) );
+		if ( !opts.TryGetValue( "burst", out var burstName ) || string.IsNullOrWhiteSpace( burstName ) )
+			return Fail( r, "particleframes needs burst=FeatureName, the seeded burst feature to re-bake per frame." );
+		var feature = FindFeature( studio, burstName );
+		if ( feature is null )
+			return Fail( r, $"particleframes: no feature called '{burstName}'. Features: {string.Join( ", ", studio.Features.Select( f => f.Name ?? f.TypeName ) )}." );
+		var seedParam = feature.Parameters.Concat( feature.AdvancedParameters )
+			.FirstOrDefault( p => Normalise( p.Label ) == "seed" ) as IntParam;
+		if ( seedParam is null )
+			return Fail( r, $"particleframes: feature '{feature.Name ?? feature.TypeName}' ({feature.TypeName}) has no Seed parameter, so re-baking it per frame would render the same frame {opts.GetValueOrDefault( "frames", "8" )} times." );
+		var frames = opts.TryGetValue( "frames", out var framesText ) && int.TryParse( framesText, out var parsedFrames ) ? parsedFrames : 8;
+		if ( frames < 1 || frames > 64 )
+			return Fail( r, $"particleframes frames={framesText ?? ""}: 1..64." );
+		var seedStep = opts.TryGetValue( "seedstep", out var stepText ) && int.TryParse( stepText, out var parsedStep ) ? parsedStep : 1;
+		if ( seedStep == 0 )
+			return Fail( r, "particleframes seedstep=0: every frame would re-bake with the same seed." );
+		var size = opts.TryGetValue( "size", out var sizeText ) && int.TryParse( sizeText, out var parsedSize ) ? parsedSize : 256;
+		if ( size < 16 || size > 1024 )
+			return Fail( r, $"particleframes size={sizeText ?? ""}: 16..1024." );
+		var shade = opts.GetValueOrDefault( "shade", "material" ).Trim().ToLowerInvariant();
+		if ( shade is not ("material" or "clay") )
+			return Fail( r, $"particleframes shade={shade}: material or clay." );
+
+		var path = Resolve( baseDir, args[0] );
+		var originalSeed = seedParam.Value;
+		var sheet = new Raster( size * frames, size, 0 );
+		int[] prev = null;
+		try
+		{
+			for ( var i = 0; i < frames; i++ )
+			{
+				seedParam.Value = originalSeed + i * seedStep;
+				studio.MarkDirty( feature );
+				studio.Rebuild();
+				if ( feature.Error is not null )
+					return Fail( r, $"particleframes frame {i} (seed {seedParam.Value}): {feature.TypeName} '{feature.Name}' failed: {feature.Error}" );
+				var scene = Turnaround.Scene( studio, shade == "clay", null, null, r.Log, baseDir );
+				if ( scene.Items.Count == 0 )
+					return Fail( r, $"particleframes frame {i}: nothing to render." );
+				var frame = ShadedRender.Sheet( scene, 1, size, 12f, 1, null );
+				for ( var row = 0; row < size; row++ )
+					Array.Copy( frame.Pixels, row * size, sheet.Pixels, row * size * frames + i * size, size );
+				if ( prev is not null && prev.SequenceEqual( frame.Pixels ) )
+					return Fail( r, $"particleframes frame {i} is identical to frame {i - 1}: seedstep={seedStep} had no effect on '{burstName}'." );
+				prev = frame.Pixels.ToArray();
+			}
+		}
+		finally
+		{
+			seedParam.Value = originalSeed;
+			studio.MarkDirty( feature );
+			studio.Rebuild();
+		}
+		Directory.CreateDirectory( Path.GetDirectoryName( Path.GetFullPath( path ) ) ?? "." );
+		sheet.SavePng( path );
+		r.Written.Add( path );
+		r.Log.Add( $"particleframes: {frames} frames from '{burstName}' (seeds {originalSeed}..{originalSeed + (frames - 1) * seedStep}) to {path}" );
+		return true;
+	}
+
+
+	/// </summary>
+	static bool TexPaintVerb( PartStudio studio, List<string> args, Result r )
+	{
+		if ( args.Count < 1 )
+			return Fail( r, "texpaint needs a body and a path: texpaint Body path=10,20;30,20 [channel=color] [color=1,0,0] [radius=12] [strength=1] [erase=0|1]" );
+
+		var body = ModelMeasure.FindBody( studio, args[0] );
+
+		if ( body?.Mesh is null )
+			return Fail( r, $"No body called '{args[0]}'." );
+
+		var opts = Pairs( args.Skip( 1 ) );
+
+		if ( !opts.TryGetValue( "path", out var pathText ) || string.IsNullOrWhiteSpace( pathText ) )
+			return Fail( r, "texpaint needs path=: texpaint Body path=10,20;30,20 — texel coordinates in the layer's canvas, row 0 at the top." );
+
+		var feature = studio.Features.OfType<PaintFeature>()
+			.LastOrDefault( f => f.Bodies.BodyIds.Contains( body.Id ) );
+
+		if ( feature is null )
+			return Fail( r, $"{body.Name ?? body.Id} has no Paint layer naming it. Add one first: add Paint bodies={body.Name ?? body.Id} — then texpaint commits strokes to it." );
+
+		var channelText = opts.GetValueOrDefault( "channel", "color" ).ToLowerInvariant();
+		var channel = channelText switch
+		{
+			"color" or "colour" or "base" => PaintChannel.Color,
+			"rough" or "roughness" => PaintChannel.Roughness,
+			"metal" or "metalness" or "metallic" => PaintChannel.Metalness,
+			"height" => PaintChannel.Height,
+			"mask" => PaintChannel.Mask,
+			_ => (PaintChannel)(-1),
+		};
+
+		if ( (int)channel < 0 )
+			return Fail( r, $"channel={channelText}: use color, rough, metal, height or mask." );
+
+		var color = opts.GetValueOrDefault( "color", "1,0,0" ).Split( ',' );
+		if ( color.Length < 3 || !float.TryParse( color[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var cr )
+			|| !float.TryParse( color[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var cg )
+			|| !float.TryParse( color[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var cb ) )
+			return Fail( r, $"color={opts.GetValueOrDefault( "color", "" )}: three numbers 0..1, e.g. color=1,0,0." );
+
+		if ( !float.TryParse( opts.GetValueOrDefault( "radius", "12" ), NumberStyles.Float, CultureInfo.InvariantCulture, out var radius ) || radius <= 0 )
+			return Fail( r, $"radius={opts.GetValueOrDefault( "radius", "" )}: a positive texel radius." );
+
+		if ( !float.TryParse( opts.GetValueOrDefault( "strength", "1" ), NumberStyles.Float, CultureInfo.InvariantCulture, out var strength ) || strength <= 0 || strength > 1 )
+			return Fail( r, $"strength={opts.GetValueOrDefault( "strength", "" )}: 0..1." );
+
+		var falloff = opts.GetValueOrDefault( "falloff", "smooth" ).ToLowerInvariant() switch
+		{
+			"smooth" => BrushFalloff.Smooth,
+			"linear" => BrushFalloff.Linear,
+			"sharp" => BrushFalloff.Sharp,
+			"constant" => BrushFalloff.Constant,
+			_ => (BrushFalloff)(-1),
+		};
+
+		if ( (int)falloff < 0 )
+			return Fail( r, $"falloff={opts.GetValueOrDefault( "falloff", "" )}: smooth, linear, sharp or constant." );
+
+		if ( !float.TryParse( opts.GetValueOrDefault( "spacing", "0.5" ), NumberStyles.Float, CultureInfo.InvariantCulture, out var spacing ) || spacing <= 0 )
+			return Fail( r, $"spacing={opts.GetValueOrDefault( "spacing", "" )}: a positive fraction of the radius." );
+
+		var stroke = new TexelStroke
+		{
+			Channel = channel,
+			R = cr, G = cg, B = cb, A = 1f,
+			Radius = radius, Strength = strength, Falloff = falloff, Spacing = spacing,
+			Erase = Truthy( opts.GetValueOrDefault( "erase", "0" ) ),
+		};
+
+		foreach ( var point in pathText.Split( ';', StringSplitOptions.RemoveEmptyEntries ) )
+		{
+			var xy = point.Split( ',' );
+
+			if ( xy.Length < 2 || !float.TryParse( xy[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var x )
+				|| !float.TryParse( xy[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var y ) )
+				return Fail( r, $"path={pathText}: points are x,y pairs separated by ';', e.g. path=10,20;30,20." );
+
+			stroke.Path.Add( new TexelStrokePoint( x, y ) );
+		}
+
+		if ( stroke.Path.Count == 0 )
+			return Fail( r, "texpaint needs at least one path point: path=10,20." );
+
+		feature.AddTexelStroke( stroke );
+
+		return RebuildAndCheck( studio, feature, r,
+			$"texpaint: {stroke.Path.Count} point(s) on {body.Name ?? body.Id} channel {channel} radius {radius} texels (durable: in the layer's log, revision {feature.Revision})" );
+	}
+
+	static bool AttachmentVerb( PartStudio studio, List<string> args, Result r )	{
 		if ( args.Count < 1 )
 			return Fail( r, "attachment needs a name: attachment Muzzle bone=Barrel origin=0,0,10 angles=0,0,0" );
 		var opts = Pairs( args.Skip( 1 ) );
@@ -3075,8 +4590,11 @@ public static partial class BuildScript
 				return Fail( r, $"angles={at}: a direction x,y,z." );
 			angles = new Vec3( float.Parse( c[0], System.Globalization.CultureInfo.InvariantCulture ), float.Parse( c[1], System.Globalization.CultureInfo.InvariantCulture ), float.Parse( c[2], System.Globalization.CultureInfo.InvariantCulture ) );
 		}
-		var node = VmdlDocument.AttachmentList( new[] { new VmdlDocument.Attachment { Name = args[0], ParentBone = bone, Origin = origin, Angles = angles } } );
-		r.Log.Add( $"attachment '{args[0]}' on {bone} — VMDL node (spec, not yet persisted to the document; export does not yet take an attachment spec):\n{node}" );
+		var attachment = new VmdlDocument.Attachment { Name = args[0], ParentBone = bone, Origin = origin, Angles = angles };
+		var node = VmdlDocument.AttachmentList( new[] { attachment } );
+		studio.Attachments.RemoveAll( a => a is not null && a.Name == args[0] );
+		studio.Attachments.Add( attachment );
+		r.Log.Add( $"attachment '{args[0]}' on {bone} — stored on the document, emitted on skinned export:\n{node}" );
 		return true;
 	}
 
@@ -3094,10 +4612,14 @@ public static partial class BuildScript
 		var hitbox = new VmdlDocument.Hitbox { Bone = bone, Kind = kind, Point0 = p0, Point1 = p1,
 			Radius = opts.TryGetValue( "radius", out var rad ) ? Number( rad ) : 0f,
 			Size = opts.TryGetValue( "size", out var sz ) && Point( studio, sz, out var sizeVec, out _ ) ? sizeVec : new Vec3() };
+		studio.Hitboxes.RemoveAll( h => h.Bone == bone );
+		studio.Hitboxes.Add( hitbox );
 		string node;
 		try { node = VmdlDocument.HitboxSetList( new[] { hitbox } ); }
 		catch ( Exception e ) { return Fail( r, e.Message ); }
-		r.Log.Add( $"hitbox on {bone} — VMDL node (spec, not yet persisted to the document):\n{node}" );
+		studio.Hitboxes.RemoveAll( h => h is not null && h.Bone == bone );
+		studio.Hitboxes.Add( hitbox );
+		r.Log.Add( $"hitbox on {bone} — stored on the document, emitted on skinned export (user specs win over auto-derived for their bone):\n{node}" );
 		return true;
 	}
 
@@ -3107,8 +4629,11 @@ public static partial class BuildScript
 			return Fail( r, "bodygroup needs a name: bodygroup Head meshes=Head,Helmet" );
 		var opts = Pairs( args.Skip( 1 ) );
 		var meshes = ( opts.GetValueOrDefault( "meshes", "" ) ).Split( ',', StringSplitOptions.RemoveEmptyEntries ).Select( m => m.Trim() ).ToList();
-		var node = VmdlDocument.BodyGroupList( new[] { new VmdlDocument.BodyGroup { Name = args[0], Meshes = meshes } } );
-		r.Log.Add( $"bodygroup '{args[0]}' — VMDL node (spec, not yet persisted to the document):\n{node}" );
+		var group = new VmdlDocument.BodyGroup { Name = args[0], Meshes = meshes };
+		studio.BodyGroups.RemoveAll( g => g.Name == args[0] );
+		studio.BodyGroups.Add( group );
+		var node = VmdlDocument.BodyGroupList( new[] { group } );
+		r.Log.Add( $"bodygroup '{args[0]}' — persisted to the document ({studio.BodyGroups.Count} group(s)); VMDL node:\n{node}" );
 		return true;
 	}
 
@@ -3117,10 +4642,196 @@ public static partial class BuildScript
 		if ( studio.Rig.Bones.Count == 0 )
 			return Fail( r, "ragdoll needs a rig: build one first (rig … / bind …)." );
 		var hitboxes = VmdlDocument.HitboxesFromSkeleton( studio.Rig );
-		var joints = VmdlPhysics.JointsFromLimits( studio.Rig, Array.Empty<RigLimit>() );
-		r.Log.Add( $"ragdoll: {hitboxes.Count} hitboxes from the skeleton, {joints.Count} joints from limits"
+		var joints = VmdlPhysics.JointsFromLimits( studio.Rig, studio.RagdollLimits );
+		var capsules = VmdlPhysics.CapsulesFromSkeleton( studio.Rig );
+		var masses = capsules.Select( c => ( c.Bone, Mass: MathF.PI * c.Radius * c.Radius * ( c.Point1 - c.Point0 ).Length ) ).ToList();
+		var overlaps = new List<string>();
+		for ( var i = 0; i < capsules.Count; i++ )
+		for ( var j = i + 1; j < capsules.Count; j++ )
+		{
+			var bi = studio.Rig.IndexOf( capsules[i].Bone ); var bj = studio.Rig.IndexOf( capsules[j].Bone );
+			if ( bi >= 0 && bj >= 0 && ( studio.Rig.Bones[bi].Parent == bj || studio.Rig.Bones[bj].Parent == bi ) ) continue;
+			if ( SegSegDist( capsules[i].Point0, capsules[i].Point1, capsules[j].Point0, capsules[j].Point1 ) < capsules[i].Radius + capsules[j].Radius - 0.5f )
+				overlaps.Add( $"{capsules[i].Bone} x {capsules[j].Bone}" );
+		}
+		r.Log.Add( $"ragdoll: {hitboxes.Count} hitboxes from the skeleton, {joints.Count} joints from {studio.RagdollLimits.Count} stored limit(s), {capsules.Count} capsules"
 			+ $"\n{VmdlDocument.HitboxSetList( hitboxes )}\n{VmdlPhysics.JointList( joints )}"
-			+ "\n(spec, not yet persisted to the document; ragdoll limits are not stored on the skeleton yet, so joints come from an empty limit set)" );
+			+ "\nragdoll masses (capsule volume units, density 1): " + string.Join( ", ", masses.Select( m => $"{m.Bone}={m.Mass:0.##}" ) )
+			+ ( overlaps.Count == 0 ? "\nragdoll bind-pose overlap: none between non-adjacent bones (parent-child pairs share a joint and are skipped)." : $"\nragdoll bind-pose overlap: {string.Join( ", ", overlaps )} — capsules overlap beyond 0.5 tolerance; check those bones before shipping." )
+			+ ( studio.RagdollLimits.Count == 0 ? "\nragdoll note: no ragdoll_limit lines stored, so joints come from an empty set — add ragdoll_limit lines first." : "" ) );
+		return true;
+	}
+
+
+	static bool RagdollLimitVerb( PartStudio studio, List<string> args, Result r )
+	{
+		if ( args.Count < 1 )
+			return Fail( r, "ragdoll_limit needs a bone: ragdoll_limit Bone min=-45,-45,-45 max=45,45,45 weight=1 enabled=1" );
+		var bone = args[0];
+		if ( studio.Rig.IndexOf( bone ) < 0 )
+			return Fail( r, $"No bone '{bone}' for ragdoll_limit." );
+		var opts = Pairs( args.Skip( 1 ) );
+		if ( !Point( studio, opts.GetValueOrDefault( "min", "-45,-45,-45" ), out var min, out var whyMin ) ) return Fail( r, whyMin );
+		if ( !Point( studio, opts.GetValueOrDefault( "max", "45,45,45" ), out var max, out var whyMax ) ) return Fail( r, whyMax );
+		var weight = opts.TryGetValue( "weight", out var w ) ? Number( w ) : 1f;
+		var enabled = !opts.TryGetValue( "enabled", out var en ) || Truthy( en );
+		studio.RagdollLimits.RemoveAll( l => l.Bone == bone );
+		studio.RagdollLimits.Add( new RigLimit { Bone = bone, Min = min, Max = max, Weight = weight, Enabled = enabled } );
+		r.Log.Add( $"ragdoll_limit: {bone} min={min} max={max} weight={weight} enabled={enabled} — persisted to the document ({studio.RagdollLimits.Count} limit(s))." );
+		return true;
+	}
+
+	static float SegSegDist( Vec3 p1, Vec3 q1, Vec3 p2, Vec3 q2 )
+	{
+		// Closest points between two segments (Ericson, Real-Time Collision Detection).
+		var d1 = q1 - p1; var d2 = q2 - p2; var r = p1 - p2;
+		var a = Vec3.Dot( d1, d1 ); var e = Vec3.Dot( d2, d2 ); var f = Vec3.Dot( d2, r );
+		float s, t;
+		if ( a <= 1e-12f && e <= 1e-12f ) return r.Length;
+		if ( a <= 1e-12f ) { s = 0f; t = Math.Clamp( f / e, 0f, 1f ); }
+		else
+		{
+			var c = Vec3.Dot( d1, r );
+			if ( e <= 1e-12f ) { t = 0f; s = Math.Clamp( -c / a, 0f, 1f ); }
+			else
+			{
+				var b = Vec3.Dot( d1, d2 ); var denom = a * e - b * b;
+				s = denom > 1e-12f ? Math.Clamp( (b * f - c * e) / denom, 0f, 1f ) : 0f;
+				t = (b * s + f) / e;
+				if ( t < 0f ) { t = 0f; s = Math.Clamp( -c / a, 0f, 1f ); }
+				else if ( t > 1f ) { t = 1f; s = Math.Clamp( (b - c) / a, 0f, 1f ); }
+			}
+		}
+		return (p1 + d1 * s - (p2 + d2 * t)).Length;
+	}
+
+	static bool BreakpiecesVerb( PartStudio studio, List<string> args, Result r )
+	{
+		var opts = Pairs( args );
+		var bodyName = opts.GetValueOrDefault( "body", "" );
+		if ( string.IsNullOrWhiteSpace( bodyName ) )
+			return Fail( r, "breakpieces needs a body: breakpieces body=Base [density=1]" );
+		var density = opts.TryGetValue( "density", out var d ) ? Number( d ) : 1f;
+		var prefix = bodyName + "_shard_";
+		var shards = studio.Bodies.Where( b => b?.Mesh is not null && (b.Name ?? "").StartsWith( prefix, StringComparison.Ordinal ) ).ToList();
+		if ( shards.Count == 0 )
+			return Fail( r, $"No Fracture shards for '{bodyName}' (looking for bodies named '{prefix}*'). Run Fracture on '{bodyName}' first, with KeepOriginal if the original must survive." );
+		studio.BreakPieces.RemoveAll( bp => bp.Name.StartsWith( prefix, StringComparison.Ordinal ) );
+		foreach ( var shard in shards )
+		{
+			var vol = MathF.Abs( shard.Mesh.SignedVolume() );
+			var approx = false;
+			if ( vol <= 1e-9f )
+			{
+				var (mn, mx) = ModelMeasure.Bounds( shard.Mesh );
+				vol = MathF.Abs( (mx.x - mn.x) * (mx.y - mn.y) * (mx.z - mn.z) );
+				approx = true;
+			}
+			studio.BreakPieces.Add( new VmdlDocument.BreakPiece
+			{
+				Name = shard.Name ?? shard.Id,
+				MeshFilename = (shard.Name ?? shard.Id) + ".dmx",
+				Mass = vol * density,
+			} );
+			r.Log.Add( $"breakpiece: {shard.Name} mass={vol * density:0.##}{( approx ? " (bounds-volume approximation — shard mesh has no signed volume)" : "" )}." );
+		}
+		r.Log.Add( $"breakpieces: {shards.Count} piece(s) for '{bodyName}' — persisted to the document.\n{VmdlDocument.BreakPieceList( studio.BreakPieces )}" );
+		return true;
+	}
+
+	static List<string> GamereadyLines( PartStudio studio, string cls )
+	{
+		var lines = new List<string>();
+		var fails = 0;
+		void Add( string level, string item, string detail ) { if ( level == "FAIL" ) fails++; lines.Add( $"{level}: {item} — {detail}" ); }
+		var bodies = studio.Bodies.Where( b => b?.Mesh is not null ).ToList();
+		if ( bodies.Count == 0 ) Add( "FAIL", "bodies", "no bodies with a mesh" );
+		else Add( "PASS", "bodies", $"{bodies.Count} bod(ies) with a mesh" );
+		if ( bodies.Any( b => b.Mesh.Faces.Count == 0 ) ) Add( "FAIL", "degenerate bodies", "a body has a mesh with no faces" );
+		var rig = studio.Rig;
+		if ( rig is null || rig.Count == 0 )
+		{
+			Add( "WARN", "skeleton", "no rig — hitbox coverage, ragdoll and weight checks do not apply; a static prop is fine, a character is not" );
+		}
+		else
+		{
+			var problems = RigDiagnostics.Check( rig );
+			var errors = problems.Where( p => p.Severity == RigSeverity.Error ).ToList();
+			if ( errors.Count > 0 ) Add( "FAIL", "rig diagnostics", string.Join( "; ", errors.Select( e => e.Problem ) ) );
+			else Add( "PASS", "rig diagnostics", $"{rig.Count} bone(s), no errors" );
+			// Hitbox coverage over the major groups that are actually present.
+			var groups = new (string Name, string[] Keys)[]
+			{
+				( "head", new[] { "head" } ),
+				( "torso", new[] { "spine", "torso", "pelvis", "chest" } ),
+				( "upper arm", new[] { "upperarm", "arm_upper" } ),
+				( "lower arm", new[] { "forearm", "arm_lower" } ),
+				( "upper leg", new[] { "thigh", "leg_upper" } ),
+				( "lower leg", new[] { "shin", "leg_lower", "calf" } ),
+			};
+			foreach ( var (gname, keys) in groups )
+			{
+				var bonesInGroup = rig.Bones.Where( b => keys.Any( k => b.Name.ToLowerInvariant().Contains( k ) ) ).Select( b => b.Name ).ToList();
+				if ( bonesInGroup.Count == 0 ) continue;
+				var covered = studio.Hitboxes.Any( h => bonesInGroup.Contains( h.Bone ) );
+				if ( covered ) Add( "PASS", $"hitbox coverage ({gname})", string.Join( ", ", bonesInGroup ) );
+				else Add( cls is "playermodel" or "creature" ? "FAIL" : "WARN", $"hitbox coverage ({gname})", $"no hitbox on {string.Join( ", ", bonesInGroup )} — add one with the hitbox verb" );
+			}
+			foreach ( var h in studio.Hitboxes )
+				if ( rig.IndexOf( h.Bone ) < 0 )
+					Add( "FAIL", "hitbox bone", $"hitbox on '{h.Bone}' names a bone that is not in the rig" );
+			// Feet / origin, only meaningful for a character-sized rig.
+			if ( cls is "playermodel" or "creature" && bodies.Count > 0 )
+			{
+				var (mn, mx) = ModelMeasure.Bounds( bodies );
+				if ( MathF.Abs( mn.z ) > 1f ) Add( "WARN", "feet at z=0", $"lowest point is z={mn.z:0.##}, not 0 — a playermodel walks through the floor or floats" );
+				else Add( "PASS", "feet at z=0", $"lowest point z={mn.z:0.##}" );
+				if ( mx.z - mn.z < 10f || mx.z - mn.z > 200f ) Add( "WARN", "scale", $"height {mx.z - mn.z:0.##} units — citizen is ~72; a far-off size animates wrong" );
+			}
+		}
+		if ( studio.Attachments.Count == 0 ) Add( "WARN", "attachments", "none stored — add muzzle/hold/eyes as the class needs" );
+		else Add( "PASS", "attachments", string.Join( ", ", studio.Attachments.Select( a => a.Name ) ) );
+		if ( cls == "weapon" && !studio.Attachments.Any( a => a.Name.ToLowerInvariant().Contains( "muzzle" ) ) )
+			Add( "FAIL", "weapon attachments", "no muzzle attachment — a weapon needs one" );
+		if ( cls is "playermodel" or "creature" && !studio.Attachments.Any( a => a.Name.ToLowerInvariant().Contains( "eye" ) ) )
+			Add( "WARN", "head attachments", "no eye attachment" );
+		Add( "INFO", "bodygroups", studio.BodyGroups.Count == 0 ? "none stored" : string.Join( ", ", studio.BodyGroups.Select( g => g.Name ) ) );
+		Add( "INFO", "break pieces", studio.BreakPieces.Count == 0 ? "none stored" : $"{studio.BreakPieces.Count} piece(s)" );
+		Add( "INFO", "ragdoll limits", studio.RagdollLimits.Count == 0 ? "none stored — ragdoll joints come from an empty set" : $"{studio.RagdollLimits.Count} limit(s)" );
+		Add( "WARN", "LODs", "LOD levels are not stored on the document — run lod_chain and export with lods= to ship them; this gate cannot confirm them" );
+		if ( studio.BodyCollision.Count == 0 ) Add( "WARN", "physics", "no body collision entries — export with collision=hulls or auto for anything larger than a small prop" );
+		else Add( "PASS", "physics", $"{studio.BodyCollision.Count} body collision entr(ies)" );
+		Add( "INFO", "face/cloth/jiggle", "engine-side behaviour is unproven in s&box (facerig sidecar, cloth JSON, spring solvers exist clip-side) — an in-game test is still owed, this gate does not claim them" );
+		lines.Add( fails == 0 ? "gameready: READY" : $"gameready: NOT READY ({fails} fail(s))" );
+		return lines;
+	}
+
+	static bool GamereadyVerb( PartStudio studio, List<string> args, Result r )
+	{
+		var opts = Pairs( args );
+		var cls = opts.GetValueOrDefault( "class", "prop" ).ToLowerInvariant();
+		if ( cls is not ("playermodel" or "weapon" or "prop" or "creature" or "vehicle") )
+			return Fail( r, $"gameready class={cls}: use playermodel, weapon, prop, creature or vehicle." );
+		foreach ( var line in GamereadyLines( studio, cls ) )
+			r.Log.Add( "gameready: " + line );
+		return true;
+	}
+
+	static bool ViewmodelCheckVerb( PartStudio studio, List<string> args, Result r )
+	{
+		var opts = Pairs( args );
+		var bodyName = opts.GetValueOrDefault( "body", "" );
+		if ( string.IsNullOrWhiteSpace( bodyName ) )
+			return Fail( r, "viewmodel_check needs a body: viewmodel_check body=WeaponVM" );
+		var body = ModelMeasure.FindBody( studio, bodyName );
+		if ( body?.Mesh is null ) return Fail( r, $"No body called '{bodyName}'." );
+		var (mn, mx) = ModelMeasure.Bounds( body.Mesh );
+		r.Log.Add( $"viewmodel_check: '{bodyName}' bounds x {mn.x:0.##}..{mx.x:0.##}, y {mn.y:0.##}..{mx.y:0.##}, z {mn.z:0.##}..{mx.z:0.##} (view axis Y by default; depth is compressed by DepthScale in the Viewmodel feature, it is not re-checked here)." );
+		var hasMuzzle = studio.Attachments.Any( a => a.Name.ToLowerInvariant().Contains( "muzzle" ) );
+		var hasHold = studio.Attachments.Any( a => a.Name.ToLowerInvariant().Contains( "hold" ) || a.Name.ToLowerInvariant().Contains( "grip" ) );
+		r.Log.Add( hasMuzzle ? "viewmodel_check: PASS muzzle attachment present." : "viewmodel_check: FAIL no muzzle attachment — a weapon viewmodel needs one." );
+		r.Log.Add( hasHold ? "viewmodel_check: PASS hold/grip attachment present." : "viewmodel_check: WARN no hold/grip attachment — hands have nothing to grip." );
+		r.Log.Add( "viewmodel_check: camera-space posing is NOT verified by this check — FOV is carried, not applied (see ViewmodelFeature header), and hand IK/detach during reload are engine animation work. Pose it in first-person camera space before calling it done." );
 		return true;
 	}
 
@@ -3141,8 +4852,17 @@ public static partial class BuildScript
 		var body = args.Count > 0 && !args[0].Contains( '=' ) ? ModelMeasure.FindBody( studio, args[0] ) : null;
 		if ( body?.Mesh is not null )
 		{
-			var levels = LodExport.Build( body.Mesh, ratios );
-			r.Log.Add( $"lod_chain: {body.Name ?? body.Id}: {LodExport.Describe( levels )} (built levels; use export lods= to write them with the model)" );
+			// Retopo wave 3 (Gap 6): mode=quad builds quad LODs instead of decimated ones.
+			var mode = opts.GetValueOrDefault( "mode", "decimate" );
+			List<LodExport.Level> levels;
+			try
+			{
+				levels = mode.Equals( "quad", StringComparison.OrdinalIgnoreCase )
+					? LodExport.BuildQuadLevels( body.Mesh, ratios.Count )
+					: LodExport.Build( body.Mesh, ratios );
+			}
+			catch ( Exception e ) { return Fail( r, $"lod_chain failed: {e.Message}" ); }
+			r.Log.Add( $"lod_chain: {body.Name ?? body.Id} (mode={mode}): {LodExport.Describe( levels )} (built levels; use export lods= to write them with the model)" );
 		}
 		else
 		{

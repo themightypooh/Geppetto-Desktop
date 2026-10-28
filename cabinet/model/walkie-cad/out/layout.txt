@@ -1,0 +1,2 @@
+# part	model	pivot x	y	z	size x	y	z
+walkie_cad	out/walkie_cad.vmdl	-0.005	0.03	0	1.89	0.82	5.04

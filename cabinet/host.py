@@ -28,15 +28,16 @@ import threading
 import uuid
 import research_consent
 import subprocess
+import signal
 import tempfile
 
 from live_runs import TERMINAL, read_state, preview_path, activity, request_cancel, send_command, next_pace, control_state, continue_checkpoint
 import live_runs
-from viewport_correction import ViewportCorrections
 from drawing_tools import (drawings as drawing_gallery, program as drawing_program,
                            resolve as drawing_resolve, socket_key as drawing_socket_key,
                            DRAWINGS as DRAWING_DIR)
 import chat as chatlib
+import gate as gate_registry
 import build_execution
 import claude_gate
 import claude_link
@@ -45,6 +46,7 @@ import claude_feed
 import model_sheet
 import panes as paneslib
 import pane_owner
+import agent_activity
 import part_focus
 import ai_notice as noticelib
 import sticker as stickerlib
@@ -92,7 +94,7 @@ NO_KEYS = {"tracks": [], "undo": 0, "redo": 0, "dirty": False, "saveable": False
 
 from PySide6.QtCore import (Q_ARG, QMetaObject, QObject, QProcess, QProcessEnvironment, QRect,  # noqa: E402
                             QTimer, QUrl, Qt, QCoreApplication, Property, Signal, Slot)
-from PySide6.QtGui import QDesktopServices, QGuiApplication, QIcon, QImage, QRegion  # noqa: E402
+from PySide6.QtGui import QColor, QDesktopServices, QGuiApplication, QIcon, QImage, QPen, QRegion  # noqa: E402
 from PySide6.QtNetwork import QLocalServer, QLocalSocket  # noqa: E402
 from PySide6.QtQuick import QQuickPaintedItem  # noqa: E402
 from PySide6.QtQml import qmlRegisterType  # noqa: E402
@@ -127,6 +129,36 @@ def kwin_raise():
     threading.Thread(target=go, daemon=True).start()
 
 
+# Explicit open only (2026-10-25): when the user themselves launches Geppetto
+# or opens a model, the chest MUST come to the front and take focus — the
+# old flash-only raise left it hidden behind Brave, so it looked closed
+# and had no taskbar icon to click. Automatic run placement still uses
+# kwin_raise() above, so a background run never steals the keyboard.
+RAISE_ACTIVATE_JS = """
+for (const w of workspace.windowList()) {
+    if (w.resourceClass === "geppetto" && w.caption === "Geppetto") { w.minimized = false; workspace.activeWindow = w; w.demandsAttention = true; }
+}
+"""
+
+
+def kwin_activate():
+    """Bring the main Geppetto window to the front and activate it (explicit open only)."""
+    def go():
+        try:
+            path = os.path.join(tempfile.gettempdir(), "geppetto-activate-%d.js" % os.getuid())
+            with open(path, "w") as f:
+                f.write(RAISE_ACTIVATE_JS)
+            q = ["qdbus6", "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting."]
+            subprocess.run(q[:3] + [q[3] + "unloadScript", "geppetto-activate"], capture_output=True, timeout=3)
+            subprocess.run(q[:3] + [q[3] + "loadScript", path, "geppetto-activate"], capture_output=True, timeout=3)
+            subprocess.run(q[:3] + [q[3] + "start"], capture_output=True, timeout=3)
+            time.sleep(0.5)
+            subprocess.run(q[:3] + [q[3] + "unloadScript", "geppetto-activate"], capture_output=True, timeout=3)
+        except (OSError, subprocess.SubprocessError):
+            pass
+    threading.Thread(target=go, daemon=True).start()
+
+
 def any_script_running():
     """some marionette-desktop is running a live script (for older runs that recorded no pid)"""
     for pid in os.listdir("/proc"):
@@ -140,6 +172,202 @@ def any_script_running():
                 return True
     return False
 
+
+def _proc_table():
+    """One /proc scan: pid -> (ppid, cmdline, zombie, pgid). The host itself is excluded."""
+    table = {}
+    for name in os.listdir("/proc"):
+        if not name.isdigit():
+            continue
+        pid = int(name)
+        if pid == os.getpid():
+            continue
+        try:
+            with open("/proc/%d/cmdline" % pid, "rb") as f:
+                cmd = f.read()
+            ppid, zombie = 0, False
+            with open("/proc/%d/status" % pid) as f:
+                for line in f:
+                    if line.startswith("PPid:"):
+                        ppid = int(line.split()[1])
+                    elif line.startswith("State:"):
+                        zombie = "Z" in line.split(":", 1)[1]
+            try:
+                pgid = os.getpgid(pid)
+            except OSError:
+                pgid = 0
+        except (OSError, ValueError):
+            continue
+        table[pid] = (ppid, cmd, zombie, pgid)
+    return table
+
+
+def _run_tree_pids(d, pid):
+    """All PIDs belonging to run `d`: the recorded pid's descendants, its process
+    group (only when it is a session leader, i.e. a setsid geppetto-live open run or
+    a start_new_session research run -- never a --once run sharing its agent's group),
+    plus any modeller process whose cmdline names the run dir or the run's script.
+    The last leg covers siblings outside the run's tree: --serve --watch-run viewers,
+    geppetto-live more/wait wrappers, live_runs.py --take/--wait, and --follow with a
+    matching script. The recorded pid is trusted only if its cmdline still names a
+    modeller, so a stale/reused pid kills nothing. Returns (pids, pgids)."""
+    markers = (b"marionette-desktop", b"geppetto-live", b"live_runs.py")
+    table = _proc_table()
+    if pid > 0:
+        seed_cmd = table.get(pid, (0, b"", False, 0))[1]
+        if not seed_cmd:
+            try:
+                with open("/proc/%d/cmdline" % pid, "rb") as f:
+                    seed_cmd = f.read()
+            except OSError:
+                seed_cmd = b""
+        if not any(m in seed_cmd for m in markers):
+            pid = 0
+    pids, pgids = set(), set()
+    if pid > 0:
+        try:
+            if os.getpgid(pid) == pid and pid != os.getpgid(0):
+                pgids.add(pid)
+        except OSError:
+            pass
+        children = {}
+        for p, (ppid, _cmd, _z, _g) in table.items():
+            children.setdefault(ppid, set()).add(p)
+        stack = [pid]
+        while stack:
+            p = stack.pop()
+            if p in pids or p == os.getpid():
+                continue
+            pids.add(p)
+            stack.extend(children.get(p, ()))
+        for p, (_pp, cmd, _z, pgid) in table.items():
+            if pgid in pgids and any(m in cmd for m in markers):
+                pids.add(p)
+    d_b = os.path.abspath(d).encode()
+    try:
+        script_b = (live_runs.run_meta(d).get("script") or "").encode()
+    except Exception:
+        script_b = b""
+    for p, (_pp, cmd, _z, _g) in table.items():
+        if p in pids:
+            continue
+        if not any(m in cmd for m in markers):
+            continue
+        if d_b in cmd or (script_b and script_b in cmd):
+            pids.add(p)
+    return pids, pgids
+
+
+def _kill_pids(pids, pgids, term_grace=3.0, kill_grace=2.0):
+    """SIGTERM everything, wait term_grace, SIGKILL survivors, wait kill_grace.
+    Returns survivors (zombies count as dead). Never raises; survivors go to stderr."""
+    def alive(ps):
+        out = []
+        for p in ps:
+            try:
+                with open("/proc/%d/status" % p) as f:
+                    zombie = any(l.startswith("State:") and "Z" in l.split(":", 1)[1] for l in f)
+            except OSError:
+                continue
+            if not zombie:
+                out.append(p)
+        return out
+    remaining = alive(pids)
+    for p in remaining:
+        try:
+            os.kill(p, signal.SIGTERM)
+        except OSError:
+            pass
+    for pgid in pgids:
+        try:
+            os.killpg(pgid, signal.SIGTERM)
+        except OSError:
+            pass
+    deadline = time.monotonic() + term_grace
+    while remaining and time.monotonic() < deadline:
+        time.sleep(0.05)
+        remaining = alive(remaining)
+    if remaining:
+        for p in remaining:
+            try:
+                os.kill(p, signal.SIGKILL)
+            except OSError:
+                pass
+        for pgid in pgids:
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except OSError:
+                pass
+        deadline = time.monotonic() + kill_grace
+        while remaining and time.monotonic() < deadline:
+            time.sleep(0.05)
+            remaining = alive(remaining)
+    if remaining:
+        print("geppetto quit: still alive after SIGKILL: %s" % sorted(remaining), file=sys.stderr, flush=True)
+    return remaining
+
+
+
+def _system_modeller_pids():
+    """2026-10-25 quit-all sweep: every geppetto-live / marionette-desktop process
+    in /proc, whether or not any run dir knows about it -- externally started,
+    unrecorded, or orphaned (parent dead). A process matches only if its cmdline
+    names one of those two binaries (as a path or bare name), never on generic
+    words like live or model. Pane viewers serving a static model
+    (marionette-desktop --serve --model ...) are EXCLUDED: they die via the
+    panes' normal shut path after quit_all, and pane 1's Pip viewer is one of
+    them. Run viewers (--serve --watch-run) and script runs (--script) are
+    modelling and ARE swept. Wrappers are caught too: a `timeout` or shell
+    wrapper's cmdline still names the geppetto-live path it wraps. Returns
+    (pids, pgids); pgids only for session leaders outside the host's own
+    group, so a killpg can never hit the GUI's group. Zombies are skipped
+    (already dead; reaping is the parent's job). The host itself is excluded
+    by _proc_table and again here."""
+    out_pids, out_pgids = set(), set()
+    try:
+        host_pgid = os.getpgid(0)
+    except OSError:
+        host_pgid = 0
+    for pid, (_pp, cmd, zombie, pgid) in _proc_table().items():
+        if zombie or pid == os.getpid():
+            continue
+        if b"geppetto-live" not in cmd and b"marionette-desktop" not in cmd:
+            continue
+        if (b"marionette-desktop" in cmd and b"--model" in cmd
+                and b"--watch-run" not in cmd and b"--script" not in cmd):
+            continue
+        out_pids.add(pid)
+        if pgid and pgid == pid and pgid != host_pgid:
+            out_pgids.add(pgid)
+    return out_pids, out_pgids
+
+def _system_provider_shim_pgids():
+    """Token guard 2026-10-25: process groups of Geppetto's provider shims.
+
+    chat.py starts a roundtable shim with start_new_session=True, so a
+    Geppetto-spawned provider_cli.py / hub_seat.py IS its own session
+    leader (pgid == pid) and its CLI child (codex, cursor-agent, agy) sits
+    in that same group. A shim started by another app (Roundtable itself,
+    a terminal) is not a session leader, so it is deliberately skipped
+    here: killing it would kill someone else's model turn. Only the
+    session-leader groups are returned, and only those groups are ever
+    killpg'd, never the host's own group. Used by quit_all and by the
+    fast close path, so closing Geppetto cannot orphan a GPT turn that
+    keeps burning usage with no host guard left to stop it.
+    """
+    out = set()
+    try:
+        host_pgid = os.getpgid(0)
+    except OSError:
+        host_pgid = 0
+    for pid, (_pp, cmd, zombie, pgid) in _proc_table().items():
+        if zombie or pid == os.getpid():
+            continue
+        if b"provider_cli.py" not in cmd and b"hub_seat.py" not in cmd:
+            continue
+        if pgid and pgid == pid and pgid != host_pgid:
+            out.add(pgid)
+    return out
 
 def run_is_live(d, state):
     """a run still building: not finished, and its journal moved in the last 10 minutes (a crashed run goes quiet)"""
@@ -223,18 +451,33 @@ def folder_entry(sticker):
 
 
 def run_name(d):
-    """what a run made, in a word or two: its prompt, or for a build script the folder it lives in"""
+    """what a run made, in a word or two, unique per run: a real prompt, else the
+    script's own stem — never its parent folder (every script in one folder used
+    to collapse to that folder's name: five "geppetto-desktop" rows). A script run
+    also gets its date/time from its dir tail, so two runs of one script (calib-turn
+    twice tonight) never share a label"""
     try:
         meta = json.load(open(d + ".json"))
-        name = meta.get("prompt", "")
-        if meta.get("script") and name.startswith("script:"):
-            name = os.path.basename(os.path.dirname(meta["script"]))
-            if name.lower() in ("run", "runs", "scratchpad", "tmp", "build", "scripts", "out", ""):
-                name = os.path.splitext(os.path.basename(meta["script"]))[0]   # a throwaway folder: the script's own name
+        prompt = meta.get("prompt", "") or ""
+        script = meta.get("script", "") or ""
     except (OSError, ValueError, AttributeError):
-        name = ""
-    if not name or name.startswith("script:"):
-        name = re.sub(r"-?\d{8}-\d{6}", "", os.path.basename(d)) or os.path.basename(d)
+        prompt, script = "", ""
+    name = ""
+    if script and prompt.startswith("script:"):
+        name = os.path.splitext(os.path.basename(script))[0]
+    elif prompt and not prompt.startswith("script:"):
+        name = prompt
+    if not name:
+        base = os.path.basename(d.rstrip("/"))
+        name = re.sub(r"-?\d{8}-\d{6}(-\d+)?$", "", base)
+        if name.startswith("script-"):
+            name = name[len("script-"):]
+        name = name or base
+    if script:
+        # script-run dirs end <stem>-YYYYMMDD-HHMMSS[-pid]: date/time disambiguates repeats
+        m = re.search(r"(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})\d{2}(-\d+)?$", os.path.basename(d.rstrip("/")))
+        if m:
+            name = "%s %s-%s %s:%s" % (name, m.group(2), m.group(3), m.group(4), m.group(5))
     return name[:60]
 
 
@@ -319,7 +562,30 @@ class Viewport(QQuickPaintedItem):
     def paint(self, p):
         img = HOST.image if self._pane == 1 else HOST.panes[self._pane - 2].image
         if img is None:
-            p.fillRect(0, 0, int(self.width()), int(self.height()), Qt.black)
+            # 2026-10-25: no frame yet is an empty scene, not a broken black screen.
+            # Fill with the serve process's own empty clear colour (.14/.145/.16),
+            # so the pane looks the same before the first frame as it does on an
+            # empty scene, instead of flashing pure black at startup.
+            p.fillRect(0, 0, int(self.width()), int(self.height()), QColor("#242529"))
+            # 2026-10-26: a pane waiting on a live run must not look dead. If this
+            # pane is watching a live run that has produced no frame yet (viewer
+            # still starting, or the run is still in its invisible setup lines),
+            # say so in the pane itself. An empty scene with no run keeps the
+            # plain grey fill, unchanged.
+            try:
+                run_dir = ""
+                if HOST is not None:
+                    if self._pane == 1:
+                        run_dir = HOST.watching or ""
+                    else:
+                        pane_obj = HOST.panes[self._pane - 2]
+                        run_dir = getattr(pane_obj, "run", "") or ""
+                if run_dir and HOST is not None and HOST.run_live(run_dir):
+                    name = run_dir.rstrip("/").split("/")[-1][:48]
+                    p.setPen(QPen(QColor("#e8e8e8")))
+                    p.drawText(QRect(0, 0, int(self.width()), int(self.height())), Qt.AlignCenter, "building " + name)
+            except Exception:
+                pass
             return
         p.drawImage(QRect(0, 0, int(self.width()), int(self.height())), img)
 
@@ -327,17 +593,21 @@ class Viewport(QQuickPaintedItem):
 class Host(QObject):
     """what cabinet.qml can ask of Python"""
     frameReady = Signal()
+    emptyViewerChanged = Signal()
     infoChanged = Signal()
     schemeChanged = Signal()
     playheadChanged = Signal()
     keysChanged = Signal()
     listsChanged = Signal()
     runsChanged = Signal()
-    runLanded = Signal(str, int)        # the chest put a live run in a pane by itself: (run dir, pane)
     statusChanged = Signal()
+    clearNoteChanged = Signal()
     toolsChanged = Signal()
     chatChanged = Signal()
     claudeChanged = Signal()
+    museTrackerChanged = Signal()
+    confirmModelChanged = Signal()
+    joinGateChanged = Signal()
     otherChunk = Signal(int, str)               # a non-Claude model's reply streaming into the CLAUDE card
     otherAnswer = Signal(int, str, str)
     claudePicturesChanged = Signal()
@@ -371,13 +641,21 @@ class Host(QObject):
             self._model_preferences = {}
         if not isinstance(self._model_preferences, dict):
             self._model_preferences = {}
-        self._claude_model = self._model_preferences.get("claude", "")
+        # Chat opens at provider choice on every app launch. Favorites still persist.
+        self._claude_model = ""
         self._chat_model = self._model_preferences.get("chat", "")
         self.ai_model = self._model_preferences.get("research", "")
+        # Favorites (2026-10-25): per-user, in the same file as the other
+        # picks, so Fred's favorites are his, not poo's. Order = order starred.
+        _fav = self._model_preferences.get("favorites", [])
+        self._favorites = [f for f in _fav if isinstance(f, str)] if isinstance(_fav, list) else []
 
     def __init__(self):
         super().__init__()
         self.window = None
+        self._engine = None             # QQmlApplicationEngine, set by main(): reloadUi() needs it
+        self._qml_path = ""             # cabinet.qml on disk, set by main()
+        self._reload_timer = None       # debounce for the QML file watcher
         self.image = None
         self.proc = None
         self.buf = b""
@@ -388,7 +666,8 @@ class Host(QObject):
         self._sel = {"bone": -1, "body": -1}
         self._playhead = {"time": 0, "frame": 0, "playing": False, "loop": True}
         self._keys = NO_KEYS
-        self._status = "starting"
+        self._status = ""  # 2026-10-24: no characters up top at startup / model load for now
+        self._clear_note = ""
         self._models = []
         self._clips = []
         self._runs = []
@@ -405,22 +684,26 @@ class Host(QObject):
         self._chat_request = 0
         self._chat_cancel = threading.Event()
         self._catalogue_busy = False
+        self._provider_auth = None
+        self._provider_auth_message = ""
         self._model_preferences = {}
         self._preferences_path = os.path.expanduser("~/.config/geppetto/model-selection.json")
         self.drawing_key = drawing_socket_key()    # the socket the drawing tool listens on
         self.drawing_program = drawing_program      # what to run to start it
         self.model = ""
+        self._empty = False             # pane 1 is showing the empty grid scene (no model, no run)
         self.ai_model = self._model_preferences.get("research", "")
         self.jobs = {}                  # run dir -> QProcess
         self.watching = ""
-        self._draw_over = None     # a draw-over stroke waiting on serve drop replies, or None
         self.live_states = {}
         self.displayed_revision = 0
         self.stop_requests = {}
-        self._corrections = ViewportCorrections(self)
         self.seen_runs = None           # run dirs present at the last scan (None until the first one)
         self.saw_building = set()       # runs seen mid-build in the viewport, so finishing them sends the model off
         self.auto_pending = set()       # new runs to follow as soon as they publish a live identity
+        self._fresh_start = True        # 2026-10-24: a fresh start never auto-places runs already going; only runs that start after this start get a pane
+        self._startup_runs = set()      # 2026-10-25 fix cluster 2 (startup): run dirs present at the first scan; never auto-followed this session, even if they drop out of a later scan and reappear. Cards still list them; only an explicit place (card drag, showRunIn, paneVerb) puts one in a pane. Never killed or deleted by startup code.
+        self._quitting = False          # set once by quit_all(); save_panes() is a no-op from then on, so PANES_SAVED stays deleted
         self._filed = filed_stickers()         # stickers in the MODELING folder, newest first
         self._keep_to = ""              # a KEEP in flight: the folder its sticker goes in
         self.collapsed = {}             # run dir -> folded by hand (unset: fold finished runs nobody is watching)
@@ -456,6 +739,8 @@ class Host(QObject):
         self.runTimer = QTimer(self)
         self.runTimer.setInterval(500)
         self.runTimer.timeout.connect(self.scanRuns)
+        self.runTimer.timeout.connect(self._gate_place_ready)
+        self.runTimer.timeout.connect(self._gate_launch_watch)  # LANE C/B: dispatched-launch watch
         self.runTimer.start()
         self.chatAnswer.connect(self._chat_done)
         # the CLAUDE card: a Claude Code session of its own (claude_link.py); its reader thread only
@@ -464,10 +749,24 @@ class Host(QObject):
                                              build_guard_factory=build_execution.BuildTurn)
         self._claude_log = ChatLogModel(self.claude, self)
         self.claudeChanged.connect(self._claude_log.schedule)
+        # Slot guard (2026-10-24 Send regression): if a future edit stacks or moves
+        # claudeSend's @Slot, QML sees no function and Send silently dies. Catch it
+        # at startup, in the panel log, instead of on the user's first send.
+        if self.metaObject().indexOfMethod("claudeSend(QString)") < 0:
+            self.claude._add("note", "Send is broken: claudeSend is not exposed to the panel (missing @Slot) - sending will not work until host.py is fixed")
+            self.set_status("Send is broken: claudeSend is not exposed to the panel")
         self._other_session = str(uuid.uuid4())   # the CLI session (Grok) for a non-Claude model on the card
         self._other_cancel = threading.Event()
         self._other_request = 0
         self._claude_research = None
+        self._muse_tracker = {}
+        self._muse_turn_id = ""  # current Muse bridge turn; set by seat-system callback, never by refreshMuseTracker
+        self._confirm_model = ""
+        self._confirm_turn = ""
+        self._muse_pending_lock = threading.Lock()
+        self._muse_current_turn = ""  # turn_id of the live _other turn, set only by the seat-system callback
+        self._muse_current_session = ""  # session_id reported by that seat (NOT _other_session)
+        self._muse_pending_fields = {}
         self._claude_research_prompt = False
         self.otherChunk.connect(self._other_chunk)
         self.otherAnswer.connect(self._other_done)
@@ -485,11 +784,32 @@ class Host(QObject):
         self.panes = [paneslib.Pane(self, n, EXE, self.env) for n in (2, 3, 4)]
         for pane in self.panes:
             pane.changed.connect(self.panesChanged)
+            # LANE C: a rendered frame in this pane closes the gate run's
+            # first-frame wait (pane 1's frames arrive on host.frameReady).
+            pane.frameReady.connect(lambda p=pane: self._gate_frame(p.number))
+        self.frameReady.connect(lambda: self._gate_frame(1))
         self.waiting = []               # live runs that found every pane busy, oldest first
+        self._gate_slots = {}            # intent -> reserved pane; no queue of idle workers
+        # LANE C (2026-10-26): placement bookkeeping. _gate_placements maps a run dir to
+        # {iid, pane, placed_at} (monotonic) until showRunIn puts it in its pane; _gate_shown
+        # maps a shown run to {iid, pane, shown_at} until its first frame lands (or times out).
+        # _gate_frames keeps the last first-frame record per run for inspection; _gate_failures
+        # keeps the last visible failure per intent; _gate_denied holds runs whose intent died
+        # after placement was filed, so autoFollow never lands them in a wrong pane.
+        self._gate_placements = {}       # run -> {iid, pane, placed_at}
+        self._gate_shown = {}            # run -> {iid, pane, shown_at}
+        self._gate_frames = {}           # run -> {iid, pane, shown_at, first_frame_at}
+        self._gate_failures = {}         # intent -> {reason, at}
+        self._gate_denied = set()        # run dirs that must never be auto-followed into a pane
+        self._gate_dispatched = {}       # LANE C/B: intent -> {pane, dispatched_at} for a host-
+                                         # dispatched gate launch (yes -> launcher Popen) not yet
+                                         # placed; _gate_launch_watch (runTimer) surfaces a visible
+                                         # failure + frees the slot if it never registers/places.
+        self._new_waiting = set()         # bookkeeping only, no exception: waiting runs close, period
         self._layout, self._link = 1, False
         self._auto = True               # AUTO: one pane per live run, the split grows and shrinks on its own
         self._shrink_at = 0.0           # AUTO: when fewer panes started to be enough (it waits before shrinking)
-        self._p1_owner, self._p1_since = {}, 0.0    # pane 1's run: who started it, are they still there
+        self._p1_owner, self._p1_since = {}, 0.0
         self._parked = {}               # pane number -> what it showed when a smaller layout hid it
         self._mine = False              # pane 1 is po's own scene (a model po opened): runs never take it.
                                         # Off, pane 1 is an empty pane like the others, any run can join it
@@ -504,6 +824,13 @@ class Host(QObject):
             self._scheme = str(prefs.get("scheme", "red"))
         except (OSError, ValueError, AttributeError):
             pass
+        # Startup 2026-10-24: Geppetto always opens with one panel only (pane 1).
+        # Saved panes 2-4 are not cleared: restore_panes() parks them (n > layout)
+        # and growing the layout later gives them back. Manual split / AUTO in this
+        # session still works via setViewLayout / _apply_layout, but the next startup
+        # forces 1 again, so a manual split does not persist across restarts.
+        # _auto is off at startup so autoFollow cannot grow the layout back on startup.
+        self._layout, self._solo, self._auto = 1, 0, False
         # the BYO-AI notices (ai_notice.py): per-provider consent, file-tolerant; the card
         # starts hidden and only the send paths below raise it, before anything is sent.
         self._notice_path = NOTICE_STATE
@@ -529,12 +856,14 @@ class Host(QObject):
     playhead = Property("QVariantMap", _get_playhead, notify=playheadChanged)
     keys = Property("QVariantMap", lambda self: self._keys, notify=keysChanged)
     status = Property(str, _get_status, notify=statusChanged)
+    clearNote = Property(str, lambda self: self._clear_note, notify=clearNoteChanged)
     models = Property("QVariantList", _get_models, notify=listsChanged)
     clips = Property("QVariantList", _get_clips, notify=listsChanged)
     runs = Property("QVariantList", _get_runs, notify=runsChanged)
-    corrections = Property(QObject, lambda self: self._corrections, constant=True)
     aiModel = Property(str, _get_ai_model, notify=runsChanged)
     watchedRun = Property(str, lambda self: self.watching, notify=runsChanged)
+    emptyViewer = Property(bool, lambda self: self._empty, notify=emptyViewerChanged)
+    p1ModelPath = Property(str, lambda self: self.model, notify=runsChanged)
     p1Owner = Property("QVariantMap", lambda self: self._p1_owner, notify=p1OwnerChanged)
     drawings = Property("QVariantList", lambda self: self._drawings, notify=toolsChanged)
     filed = Property("QVariantList", lambda self: self._filed, notify=filedChanged)
@@ -544,6 +873,11 @@ class Host(QObject):
     chatImages = Property("QVariantList", lambda self: self._chat_pending, notify=chatChanged)
     claudeMessages = Property(QObject, lambda self: self._claude_log, constant=True)
     claudeStatus = Property(str, lambda self: self.claude.status, notify=claudeChanged)
+    museTracker = Property("QVariantMap", lambda self: self._muse_tracker, notify=museTrackerChanged)
+    confirmModel = Property(str, lambda self: self._confirm_model, notify=confirmModelChanged)
+    def _get_join_gate(self):
+        return getattr(self, "_join_gate", {})
+    joinGate = Property("QVariantMap", _get_join_gate, notify=joinGateChanged)
     claudePictures = Property("QVariantList", lambda self: [p["path"] for p in self.claudeFeed.pictures],
                               notify=claudePicturesChanged)
     claudeAsk = Property(str, lambda self: self.claude.ask["text"] if self.claude.ask else "", notify=claudeChanged)
@@ -581,7 +915,9 @@ class Host(QObject):
     autoLayout = Property(bool, lambda self: self._auto, notify=panesChanged)
     soloPane = Property(int, lambda self: self._solo, notify=panesChanged)
     scheme = Property(str, lambda self: self._scheme, notify=schemeChanged)    # the enamel colour scheme
-    myScene = Property(bool, lambda self: self._mine, notify=panesChanged)
+    # OPEN dialog start folder: the MODELING folder, as a file:// url. Creates it
+    # on first use if it is missing, so the dialog never starts in a dead folder.
+    modelingFolder = Property(str, lambda self: (makedirs_private(MODELING), QUrl.fromLocalFile(MODELING).toString())[1], constant=True)
 
     # ---- the Face Poser: GMod-style flex sliders over one pane's model -----------------------
     def _viewer(self, n):
@@ -631,6 +967,106 @@ class Host(QObject):
                 reg = reg.united(QRegion(QRect(x, y, w, h)))
         self.window.setMask(reg)
 
+    @Slot(result=bool)
+    def reloadUi(self):
+        """Hot-reload the QML UI, 2026-10-25: the Python host, the serve process and
+        any building run keep going; only the QML root window is recreated.
+        The new root is only swapped in once it loads cleanly — a QML syntax
+        error leaves the old window exactly as it was, it never blanks the UI.
+        QML-only state is carried over (active pane, open windows, drawer opens,
+        bones/grid/wire/spin/frame settings, which are then re-sent to the viewer).
+        What this does NOT reload: host.py itself (Python is loaded once, a host
+        change still needs a restart), the C# viewer binary, or text typed into a
+        QML input that host.py does not hold (that text lives in the old root)."""
+        # A reused QQmlApplicationEngine keeps its old root alive (verified
+        # 2026-10-25: deleteLater on a QML Window root does not drop it from
+        # rootObjects while the engine lives), so each reload uses a fresh
+        # engine and discards the old one. The old window is hidden first,
+        # so there is never a moment with two chest windows up.
+        if not self._qml_path:
+            self.set_status("reload: no QML path to reload from")
+            return False
+        old = self.window
+        if old is None and self._engine is None:
+            self.set_status("reload: no QML engine to reload from")
+            return False
+        if old is None:
+            from PySide6.QtQml import QQmlApplicationEngine
+            eng = QQmlApplicationEngine()
+            eng.rootContext().setContextProperty("host", self)
+            eng.load(QUrl.fromLocalFile(self._qml_path))
+            if not eng.rootObjects():
+                return False
+            self._engine = eng
+            self.window = eng.rootObjects()[0]
+            return True
+        # QML-only state, saved before the old root is touched.
+        saved = {}
+        for name in ("activePane", "chatOpen", "chatOut", "paperOpen", "researchOut",
+                     "sheetDir", "showBones", "showGrid", "wire", "spinning", "followFrame", "refsOpen"):
+            try:
+                saved[name] = old.property(name)
+            except Exception:
+                pass
+        drawer_open = {}
+        for name in ("research", "tools", "timeline"):
+            try:
+                d = old.findChild(QObject, name)
+                if d is not None:
+                    drawer_open[name] = bool(d.property("isOpen"))
+            except Exception:
+                pass
+        from PySide6.QtQml import QQmlApplicationEngine
+        new_eng = QQmlApplicationEngine()
+        new_eng.rootContext().setContextProperty("host", self)
+        new_eng.load(QUrl.fromLocalFile(self._qml_path))
+        if not new_eng.rootObjects():
+            self.set_status("reload failed: QML did not load, keeping the old window")
+            return False
+        new = new_eng.rootObjects()[0]
+        for name, value in saved.items():
+            if value is not None:
+                try:
+                    new.setProperty(name, value)
+                except Exception:
+                    pass
+        for name, is_open in drawer_open.items():
+            if not is_open:
+                continue
+            try:
+                d = new.findChild(QObject, name)
+                if d is not None:
+                    QMetaObject.invokeMethod(d, "setOpen", Q_ARG("QVariant", True))
+            except Exception:
+                pass
+        self.window = new
+        try:
+            new.show()
+        except Exception:
+            pass
+        # The new root's onReadyChanged may not fire (info.shm is already set),
+        # so re-send the viewer settings explicitly. cmd() is a no-op with no viewer.
+        if saved.get("showBones") is not None:
+            self.cmd("bones " + ("1" if saved["showBones"] else "0"))
+        if saved.get("showGrid") is not None:
+            self.cmd("grid " + ("1" if saved["showGrid"] else "0"))
+        if saved.get("wire") is not None:
+            self.cmd("wire " + str(saved["wire"]))
+        if saved.get("spinning") is not None:
+            self.cmd("spin " + ("30" if saved["spinning"] else "0"))
+        if saved.get("followFrame") is not None:
+            self.cmd("autoframe " + ("1" if saved["followFrame"] else "0"))
+        old_eng = self._engine
+        self._engine = new_eng
+        try:
+            old.hide()
+        except Exception:
+            pass
+        if old_eng is not None:
+            old_eng.deleteLater()
+        self.set_status("UI reloaded")
+        return True
+
     def snap(self, path):
         # not grabWindow: it blocks this thread on the render thread, which needs Python (Viewport.paint) -> deadlock
         QMetaObject.invokeMethod(self.window, "snapTo", Q_ARG("QVariant", path))
@@ -639,6 +1075,11 @@ class Host(QObject):
     # ---- the viewport process --------------------------------------------------------------
     @Slot(str)
     def openModel(self, path, clip=""):
+        # FileDialog hands back a file:// url; every other caller hands back a plain
+        # path. Accept both, so the OPEN dialog does not need a QML-side url strip
+        # that would break on spaces and % escapes.
+        if path.startswith("file://"):
+            path = QUrl(path).toLocalFile()
         path = os.path.abspath(os.path.expanduser(path))
         if not os.path.isfile(path):
             self.set_status("no such model: " + path)
@@ -658,7 +1099,7 @@ class Host(QObject):
         self._keys = NO_KEYS
         self.infoChanged.emit()
         self.keysChanged.emit()
-        self.set_status("loading " + os.path.basename(path))
+        # 2026-10-24: model load says nothing up top for now (user request)
         self.listFiles()
         p = QProcess(self)
         p.setProcessEnvironment(self.env)
@@ -672,8 +1113,46 @@ class Host(QObject):
         self.proc = p
         p.start()
 
+    def _set_empty(self, value):
+        if self._empty != value:
+            self._empty = value
+            self.emptyViewerChanged.emit()
+
+    def startEmptyViewer(self):
+        # Opening with a grid, not a label: the empty viewer is pane 1's
+        # viewer, so orbit, pan, left+right drag and fly all work on it
+        # exactly as on a model viewer. It sets no model and no _mine,
+        # so a run can still land in pane 1 (watchRun sends it follow).
+        if self.proc is not None:
+            return
+        self._end_replay()
+        self.watching = ""
+        self.displayed_revision = 0
+        self.runsChanged.emit()
+        self.stop()
+        self.model = ""
+        self._info, self._clip, self._sel = {"model": ""}, {}, {"bone": -1, "body": -1}
+        self._sub_reset()
+        self._keys = NO_KEYS
+        self.infoChanged.emit()
+        self.keysChanged.emit()
+        p = QProcess(self)
+        p.setProcessEnvironment(self.env)
+        p.setProgram(EXE)
+        p.setArguments(["--serve", "--size", "%dx%d" % self.view_size, "--empty"])
+        p.setProcessChannelMode(QProcess.SeparateChannels)
+        p.readyReadStandardOutput.connect(lambda p=p: self.onOutput(p))
+        p.readyReadStandardError.connect(lambda p=p: self._viewer_stderr(p))
+        p.finished.connect(lambda code, _st, p=p: self.onFinished(p, code))
+        self.buf = b""
+        self.proc = p
+        self._set_empty(True)
+        p.start()
+
     def stop(self):
         p, self.proc = self.proc, None
+        if self._empty:
+            self._set_empty(False)
         if p is not None and p.state() != QProcess.NotRunning:
             p.write(b"quit\n")
             if not p.waitForFinished(1500):
@@ -685,6 +1164,243 @@ class Host(QObject):
         if self.shm is not None:
             self.shm.close()
         self.shm, self.shm_path = None, ""
+
+    def quit_all(self):
+        """Closing the chest ends everything: live runs in panes, in the waiting queue,
+        and in the last scan are cancelled/closed and their modeller processes are killed,
+        the waiting queue is cleared, and saved panes are deleted so a fresh start is clean.
+        Force-kill is the whole process tree per run (SIGTERM, 3 s, then SIGKILL).
+        Finally, a system-wide /proc sweep adds any geppetto-live / marionette-desktop
+        process no run knew about (externally started, unrecorded, orphaned) to the
+        same kill pass; pane model viewers (--serve --model) are excluded and die
+        via the panes' normal shut path.
+        Pane 1's default Pip model is not a run, so it still loads on the next start."""
+        self._quitting = True           # first: no later save_panes() (via tidy_panes/scanRuns) may recreate PANES_SAVED
+        self._other_cancel.set()
+        gate_registry.cancel_waiters()
+        chatlib.cancel_owned_cli_turns()
+        # Worker 2 (cooperative wait): one shared deadline for every dir, so
+        # N runs cannot multiply the quit delay. Poll 0.25s, total 10.0s.
+        quit_deadline = time.monotonic() + 10.0
+        failures = []
+        unresolved = []
+        last_state = {}
+        dirs = set()
+        if self.watching:
+            dirs.add(self.watching)
+        for pane in self.panes:
+            if pane.run:
+                dirs.add(pane.run)
+        dirs.update(self.waiting)
+        dirs.update(self.auto_pending)
+        dirs.update(self.jobs.keys())
+        if self._bench.get("dir"):
+            dirs.add(self._bench["dir"])
+        for r in getattr(self, "_runs", []) or []:
+            if isinstance(r, dict) and r.get("dir"):
+                dirs.add(r["dir"])
+        for e in list(getattr(self, "_parked", {}).values()):
+            if isinstance(e, dict) and e.get("run"):
+                dirs.add(e["run"])
+        # fresh quit-time sweep: a run whose dir appeared under RUNS after the
+        # last scanRuns tick (runTimer, 500 ms) is not in _runs / seen_runs yet.
+        # This is a bare directory listing, NOT scanRuns(): scanRuns() would
+        # tidy panes, save panes, emit runsChanged and autoFollow new runs
+        # into panes during teardown. Bench-flagged dirs stay with _bench.
+        if os.path.isdir(RUNS):
+            for name in os.listdir(RUNS):
+                if name.startswith("."):
+                    continue
+                d = os.path.join(RUNS, name)
+                if not os.path.isdir(d):
+                    continue
+                try:
+                    if json.load(open(os.path.join(RUNS, name + ".json"))).get("bench"):
+                        continue
+                except (OSError, ValueError, AttributeError):
+                    pass
+                dirs.add(d)
+        kill_pids, kill_pgids = set(), set()
+        for d in list(dirs):
+            if not d or not os.path.isdir(d):
+                continue
+            state = {}
+            try:
+                state = read_state(d)
+            except Exception as e:
+                failures.append("%s: read_state failed: %r" % (d, e))
+            if not state or not state.get("state"):
+                # No state to wait on: do not claim terminal, do not drop it;
+                # fall through to the process-kill path below.
+                unresolved.append(d)
+            elif state.get("state") in TERMINAL:
+                pass
+            else:
+                last_state[d] = state.get("state")
+                try:
+                    if state.get("state") in live_runs.OPEN:
+                        live_runs.close_open(d)
+                    else:
+                        # Paused is not in OPEN and not terminal: cancel, never
+                        # resume or step it. AiLiveControl.WatchAsync polls
+                        # commands every 50ms independently of the pause gate
+                        # (AiLiveControl.cs:135-172), so a paused run still sees
+                        # this cancel; resuming it would let it model again.
+                        request_cancel(d)
+                except Exception as e:
+                    failures.append("%s: %s failed: %r" % (d, "close_open" if state.get("state") in live_runs.OPEN else "request_cancel", e))
+                # Cooperative wait: poll for a terminal state instead of
+                # exiting on the request alone. A run already in "cancelling"
+                # is pending, not failed: a re-sent cancel is a no-op there
+                # (WatchAsync already holds the legacy-cancel id), the poll
+                # is what matters. Overshoot past the deadline is at most
+                # one 0.25s sleep.
+                terminal = False
+                while time.monotonic() < quit_deadline:
+                    try:
+                        now = read_state(d)
+                    except Exception:
+                        break
+                    if not now:
+                        break
+                    last_state[d] = now.get("state")
+                    if last_state[d] in TERMINAL:
+                        terminal = True
+                        break
+                    time.sleep(0.25)
+                if not terminal:
+                    unresolved.append(d)
+            # the modeller process tree, not just the recorded pid (collected here,
+            # killed once below so the wait is bounded for all runs together)
+            try:
+                pid = int(json.load(open(d.rstrip("/") + ".json")).get("pid", 0))
+            except Exception:
+                pid = 0
+            pids, pgids = _run_tree_pids(d, pid)
+            kill_pids.update(pids)
+            kill_pgids.update(pgids)
+        # 2026-10-25 quit-all sweep: processes no run dir knows about --
+        # externally started, unrecorded, or orphaned geppetto-live /
+        # marionette-desktop processes (e.g. a --once run started by an
+        # agent after the last scan, or one whose parent died). They join
+        # the SAME single bounded TERM/KILL pass below, so the whole quit
+        # path stays ~15 s instead of adding a second kill pass. Pane model
+        # viewers are excluded by _system_modeller_pids and die via the
+        # panes' normal shut path after quit_all.
+        _sys_pids, _sys_pgids = _system_modeller_pids()
+        _extra = _sys_pids - kill_pids
+        if _extra:
+            print("geppetto quit: system sweep found %d modeller process(es) no run knew about: %s"
+                  % (len(_extra), sorted(_extra)), file=sys.stderr, flush=True)
+        kill_pids.update(_sys_pids)
+        kill_pgids.update(_sys_pgids)
+        # Provider shims (GPT/Codex etc.): session-leader groups only, so a
+        # turn Geppetto started dies with Geppetto instead of orphaning.
+        kill_pgids.update(_system_provider_shim_pgids())
+        _kill_pids(kill_pids, kill_pgids)   # one bounded TERM/KILL pass for all runs
+        for proc in list(self.jobs.values()):
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+        self.waiting = []
+        self._new_waiting = set()
+        self.auto_pending.clear()
+        self._parked = {}
+        try:
+            os.unlink(PANES_SAVED)
+        except OSError:
+            pass
+        if unresolved or failures:
+            # Surfaced, not swallowed. Wording is exact: "not confirmed
+            # terminal after cooperative wait" - the kill block above has
+            # already run, so this does NOT by itself mean a process survived;
+            # Worker 1's verification is what establishes survival.
+            print("geppetto quit: run(s) not confirmed terminal after cooperative wait (process-kill path above still ran): %s; failures: %s"
+                  % (", ".join("%s (%s)" % (d, last_state.get(d, "?")) for d in unresolved) or "none",
+                     "; ".join(failures) or "none"),
+                  file=sys.stderr, flush=True)
+
+    @Slot()
+    def closeAndKill(self):
+        """Top close button: close Geppetto AND kill its process, FAST.
+        The old version ran quit_all() on the GUI thread first, and
+        quit_all waits cooperatively (up to ~10s deadline, 0.25s polls)
+        for runs to reach a terminal state — so the window sat frozen
+        for seconds before it died. A close button must not freeze.
+        This version does the fast, destructive path only: mark
+        quitting, cancel the current turns, SIGKILL every
+        marionette-desktop / geppetto-live process immediately, then
+        os._exit the host. No cooperative wait, no sleep, no graceful
+        run shutdown — the user pressed close to kill it, not to wait
+        for it to finish nicely."""
+        try:
+            self._quitting = True
+        except Exception:
+            pass
+        try:
+            self._other_cancel.set()
+        except Exception:
+            pass
+        try:
+            gate_registry.cancel_waiters()
+        except Exception:
+            pass
+        try:
+            chatlib.cancel_owned_cli_turns()
+        except Exception:
+            pass
+        try:
+            if getattr(self, "_muse_current_turn", ""):
+                self._muse_cancel_turn(self._muse_current_turn)
+        except Exception:
+            pass
+        try:
+            self.claude.close()  # before os._exit: no aboutToQuit callback runs
+        except Exception:
+            pass
+        try:
+            self.waiting = []
+            self.auto_pending.clear()
+            self._parked = {}
+        except Exception:
+            pass
+        try:
+            import os as _os, signal as _signal
+            from pathlib import Path as _Path
+            me = _os.getpid()
+            for _p in _Path("/proc").iterdir():
+                if not _p.name.isdigit() or int(_p.name) == me:
+                    continue
+                try:
+                    _cmd = (_p / "cmdline").read_bytes().replace(b"\x00", b" ").decode("utf-8", "ignore")
+                except Exception:
+                    continue
+                if "marionette-desktop" in _cmd or "geppetto-live" in _cmd:
+                    try:
+                        _os.kill(int(_p.name), _signal.SIGKILL)
+                    except Exception:
+                        pass
+            # Provider shims: kill their whole session-leader groups, so a
+            # GPT turn (codex/cursor/agy child of the shim) cannot survive
+            # the close and keep burning usage with no host left to stop it.
+            # Bare codex/cursor/agy processes are NOT killed here: the user
+            # may run those elsewhere, and only a Geppetto shim group is
+            # unambiguously Geppetto's.
+            for _pgid in _system_provider_shim_pgids():
+                try:
+                    _os.killpg(_pgid, _signal.SIGKILL)
+                except Exception:
+                    pass
+            for proc in list(getattr(self, "jobs", {}).values()):
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        import os as _os2
+        _os2._exit(0)
 
     @Slot(str)
     def cmd(self, line):
@@ -868,96 +1584,6 @@ class Host(QObject):
             return
         self.benchApply("facematerial slot=%d faces=%s" % (int(slot), faces))
 
-    # ---- draw-over strokes: a freehand stroke over pane 1 becomes a note with 3D hits ----
-    @Slot(str)
-    def drawOverStroke(self, payload):
-        """A draw-over stroke from pane 1 (Lane O ray slot): pixel points [{x, y}, ...] in
-        the pane's coordinates — the same coordinates subPick already sends the serve viewer,
-        so no new camera math lives here. The viewer owns the camera and the mesh, so each
-        point goes to it as a `drop` probe: ServeMode answers a drop with the face under
-        that pixel (body, point, normal) without changing the selection, unlike `pick`
-        which clicks. The drop replies come back async through onOutput and are collected
-        below; once every point has answered, the stroke is written as a note on the
-        watched run, one entry per point (None on a miss). A stroke with no hits at all
-        leaves no note, so a miss-stroke is not mistaken for a placed one."""
-        try:
-            points = json.loads(payload)
-        except ValueError:
-            self.set_status("draw-over: bad stroke payload")
-            return
-        if not isinstance(points, list) or not points:
-            self.set_status("draw-over: empty stroke")
-            return
-        pixels = []
-        for pt in points:
-            try:
-                if "x" in pt and "y" in pt:
-                    pixels.append((round(float(pt["x"])), round(float(pt["y"]))))
-                elif "fx" in pt and "fy" in pt:
-                    # fractions of the pane: fall back to the last frame's size
-                    pixels.append((round(float(pt["fx"]) * self.view_size[0]),
-                                   round(float(pt["fy"]) * self.view_size[1])))
-                else:
-                    raise ValueError("a stroke point needs x/y (or fx/fy)")
-            except (TypeError, ValueError, KeyError):
-                self.set_status("draw-over: bad stroke point")
-                return
-        if self.proc is None or self.proc.state() == QProcess.NotRunning:
-            self.set_status("draw-over: open a model first")
-            return
-        if not self.watching:
-            self.set_status("draw-over: watch a run first, so the stroke has a run to note on")
-            return
-        token = id(pixels)
-        self._draw_over = {"token": token, "expected": len(pixels), "hits": [],
-                           "root": self.watching, "rev": self.displayed_revision}
-        for (x, y) in pixels:
-            self.cmd("drop %d %d" % (x, y))
-        # a viewer that dies mid-stroke must not swallow a later real drop forever
-        QTimer.singleShot(5000, lambda t=token: self._draw_over_expire(t))
-        self.set_status("draw-over stroke sent (%d points)…" % len(pixels))
-
-    def _draw_over_expire(self, token):
-        if self._draw_over is not None and self._draw_over.get("token") == token:
-            self._draw_over = None
-            self.set_status("draw-over: the viewer did not answer every point; stroke dropped")
-
-    def _draw_over_drop(self, ev):
-        """One serve `drop` reply while a draw-over stroke is pending: turn its face token
-        (Body:x,y,z:nx,ny,nz) into a stroke hit. Drop replies with no stroke pending keep
-        today's behaviour — they are ignored, exactly as before this slot landed."""
-        pending = self._draw_over
-        if pending is None:
-            return
-        if ev.get("ok") and ev.get("faces"):
-            try:
-                body, point, normal = str(ev["faces"]).split(":")
-                xyz = [float(v) for v in point.split(",")]
-                nrm = [float(v) for v in normal.split(",")]
-                if len(xyz) != 3 or len(nrm) != 3:
-                    raise ValueError("face token is not a point and a normal")
-                pending["hits"].append({"body": body, "station_s": None,
-                                        "world_pos": xyz, "normal": nrm})
-            except ValueError:
-                pending["hits"].append(None)
-        else:
-            pending["hits"].append(None)
-        if len(pending["hits"]) < pending["expected"]:
-            return
-        self._draw_over = None
-        root, rev, hits = pending["root"], pending["rev"], pending["hits"]
-        made = sum(1 for h in hits if h is not None)
-        if made == 0:
-            self.set_status("draw-over: every point missed the model; no note written")
-            return
-        try:
-            note = live_runs.add_note(root, rev, "draw-over",
-                                      "draw-over stroke: %d points, %d hit" % (len(hits), made))
-            live_runs.record_note_stroke(root, note, hits)
-            self.set_status("draw-over note: %d of %d points hit the model" % (made, len(hits)))
-        except (OSError, ValueError) as e:
-            self.set_status("draw-over: note failed (%s)" % e)
-
     def _viewer_stderr(self, p):
         text = bytes(p.readAllStandardError()).decode(errors="replace")
         lines = [x for x in text.splitlines() if x.strip()]
@@ -967,6 +1593,7 @@ class Host(QObject):
     def onFinished(self, p, code):
         if p is self.proc:
             self.proc = None
+            self._set_empty(False)
             self.unmap()
             if not self._status.startswith("error"):
                 self.set_status("viewer exited (%d)" % code + (": " + self.viewer_err if code and getattr(self, "viewer_err", "") else ""))
@@ -992,14 +1619,12 @@ class Host(QObject):
                 self._info = ev
                 self._clip = ev.get("clip") or {}
                 self.infoChanged.emit()
-                self.set_status("%s  %d tris  %.1fs" % (os.path.basename(ev["model"]), ev.get("tris", 0), ev.get("load_s", 0)))
+                # 2026-10-24: do not show model name / tris / load time in the top status bar
                 # a new viewer starts in body mode; a face tool still on the card wants the face under the cursor lit
                 if self._tool_open and self._tool_mode and self._sub_mode != self._tool_mode:
                     self.setSelMode(self._tool_mode)
             elif kind == "place":
                 self._place_landed(ev)
-            elif kind == "drop":
-                self._draw_over_drop(ev)
             elif kind == "ai-activity":
                 if self.watching:
                     self.live_states[self.watching] = ev
@@ -1168,6 +1793,7 @@ class Host(QObject):
             self.panesChanged.emit()
         self.watching = directory
         self.displayed_revision = 0
+        self._set_empty(False)
         self.live_states[directory] = state
         if self.proc is None or self.proc.state() == QProcess.NotRunning:
             # Boot the existing headless server directly into its blank/follow mode.
@@ -1542,8 +2168,10 @@ class Host(QObject):
             vision=bool(model.get("vision")))
 
     def _notice_gate(self, model, surface, research=False):
-        """True when this send must stop at the notice card. Raises the card and
-        returns True; the caller stashes its pending send and returns unsent."""
+        """Removed 2026-10-25 at user order: no UI when a model joins to start
+        modeling. This gate used to stop a send at the BEFORE THE FIRST SEND
+        notice card. It now never blocks; sends and research go straight through."""
+        return False
         cfg = self._notice_cfg_for(model, surface, research=research)
         if surface == "chat":
             cfg["surface"] = "chat"
@@ -1560,7 +2188,7 @@ class Host(QObject):
     @Slot(bool, bool)
     def noticeStart(self, every_time, never_show=False):
         """[ Start the build ] on the notice card: record the ack (never sends by
-        itself), hide the card, then resume the send that was waiting on it. Check DO NOT SHOW THIS AGAIN and the card never comes back, for any provider."""
+        itself), hide the card, then resume the send that was waiting on it. Check DO NOT SHOW THIS AGAIN and the card never comes back for that provider; another provider still gets its own first-send card."""
         pending, self._pending_notice = self._pending_notice, None
         if self._notice_cfg is not None:
             noticelib.ack_notice(self._notice_state, self._notice_cfg,
@@ -1710,6 +2338,25 @@ class Host(QObject):
                     r["prompt"] = j.get("prompt", "")
                     r["bench"] = bool(j.get("bench"))
                     r["started"] = float(j.get("started", 0) or 0)
+                    r["agentModel"] = str(j.get("agentModel") or "")
+                    # 2026-10-25 who-fix: first scan records who in the run's meta,
+                    # so a later header never shows a blank modeller for a run whose
+                    # starter left no model field. One field only, only when neither
+                    # field is there, never for bench runs; the runner owns the rest.
+                    if not j.get("modeller") and not j.get("model") and not j.get("bench"):
+                        who0 = paneslib.modeller(d)
+                        if who0:
+                            try:
+                                fresh = json.load(open(meta))
+                                if isinstance(fresh, dict) and not fresh.get("modeller") and not fresh.get("model"):
+                                    fresh["modeller"] = who0
+                                    fresh["identitySource"] = "process"
+                                    tmp = meta + ".tmp-who"
+                                    with open(tmp, "w") as fh:
+                                        json.dump(fresh, fh)
+                                    os.replace(tmp, meta)
+                            except (OSError, ValueError):
+                                pass
                 except (OSError, ValueError, AttributeError):
                     pass
                 r["title"] = run_name(d)                  # a word or two for its book's spine
@@ -1782,8 +2429,20 @@ class Host(QObject):
                              paused=False, pace=0, pendingDirections=0, openState="", outcome="", watch={})
                 r["pane"] = self.pane_of(d)             # the viewport pane showing it, 0 for none
                 # who is building it: the session's title (its Claude Code transcript), else the model named in its meta
-                r["modeller"] = paneslib.modeller(d) if r["status"] == "running" else ""
-                r["who"] = (pane_owner.owner(run=d, live=True)["title"] if r["status"] == "running" else "") or r["modeller"]
+                r["modeller"] = paneslib.modeller(d)
+                r["script"] = paneslib.script_label(d)
+                r["phase"] = live.get("state", "")
+                r["who"] = r["modeller"]
+                if r["pane"] or r["status"] == "running":
+                    r["telemetry"] = agent_activity.telemetry(d, live, r)
+                    observed_phase = r["telemetry"]["buildPhase"]
+                    if r["status"] == "running" and observed_phase:
+                        r["openState"] = observed_phase if observed_phase in live_runs.OPEN else ""
+                        effective = dict(live, state=observed_phase, operation=r["telemetry"]["operation"],
+                                         outcome=r["telemetry"]["outcome"])
+                        r["watch"] = live_runs.watch(d, effective)
+                else:
+                    r["telemetry"] = {}
                 r["waiting"] = d in self.waiting and r["pane"] == 0   # live, but every pane is busy
                 r["collapsed"] = self.collapsed.get(d, r["status"] != "running" and r["pane"] == 0)
                 log = os.path.join(RUNS, name + ".log")
@@ -1799,11 +2458,15 @@ class Host(QObject):
                     out.append(r)
         out.sort(key=lambda r: r["status"] != "running")    # live runs on top
         dirs = {r["dir"] for r in out}
-        if self.seen_runs is not None:
-            self.auto_pending |= dirs - self.seen_runs
+        if self.seen_runs is None:
+            # 2026-10-25 fix cluster 2 (startup): snapshot the pre-start runs and
+            # never auto-follow them this session. The old branch added every
+            # running pre-start run to auto_pending and relied on the first
+            # autoFollow() to clear it; that left the set itself unguarded for
+            # any later scan that re-adds a dir. Cards still list these runs.
+            self._startup_runs = set(dirs)
         else:
-            # the chest just opened: pick up whatever is still building, as if it had been open all along
-            self.auto_pending |= {r["dir"] for r in out if r["status"] == "running"}
+            self.auto_pending |= (dirs - self.seen_runs) - self._startup_runs
         self.seen_runs = dirs
         if out != self._runs:
             self._runs = out
@@ -1824,13 +2487,18 @@ class Host(QObject):
     def tidy_panes(self, now=None):
         """who is in each pane; a pane whose owner is long gone and whose run is over is freed, so AUTO can shrink"""
         now = time.time() if now is None else now
+        for pn in self.panes[:self._layout - 1]:
+            pn.refresh_owner(now)
+        if self.watching or self.model:
+            pane_owner.owner("", self.watching, self._p1_since, live=bool(self._replay) or self.run_live(self.watching), now=now)
         for p in self.panes[:self._layout - 1]:
             info = p.refresh_owner(now)
             if not self.owner_gone(info, now) or p._replay or (p.run and self.run_live(p.run)):
                 continue
             if p.model and not p.owner_session and now - p.since < self.MODEL_LEAVE:
                 continue
-            self.set_status("pane %d freed: %s left" % (p.number, info.get("title") or paneslib.modeller(p.run) or "its owner"))
+            freed_what = paneslib.script_label(p.run) if p.run else (p.model.split("/")[-1] if p.model else "")
+            self.set_status("pane %d freed: %s left%s" % (p.number, info.get("title") or paneslib.modeller(p.run) or "its owner", " \u2014 " + freed_what if freed_what else ""))
             p.clear()
             p.refresh_owner(now)
         info = {}
@@ -1841,12 +2509,15 @@ class Host(QObject):
             self.p1OwnerChanged.emit()
         if (self.owner_gone(info, now) and self._layout > 1 and not self._replay
                 and not self.run_live(self.watching)):
-            self.set_status("pane 1 freed: %s left" % (info.get("title") or "its owner"))
+            freed1_what = paneslib.script_label(self.watching) if self.watching else (self.model.split("/")[-1] if self.model else "")
+            self.set_status("pane 1 freed: %s left%s" % (info.get("title") or "its owner", " \u2014 " + freed1_what if freed1_what else ""))
             self.stopWatching()
         self.save_panes()
 
     def save_panes(self):
         """what panes 2-4 show and who put it there, so a restarted chest puts it all back"""
+        if getattr(self, "_quitting", False):
+            return                          # quitting: quit_all() already deleted PANES_SAVED; never recreate it
         if not getattr(self, "_panes_restored", False):
             return                          # startup: don't overwrite what restore_panes hasn't read yet
         now = [{"n": p.number, "run": p.run, "model": p.model, "session": p.owner_session, "since": p.since}
@@ -1870,7 +2541,12 @@ class Host(QObject):
             saved = json.load(open(PANES_SAVED))
         except (OSError, ValueError):
             return
-        self.put_back(saved if isinstance(saved, list) else [])
+        # 2026-10-24: a fresh start never brings back a run session (live, paused, or
+        # finished) - that is what looked like people already modelling. Static models
+        # still restore as before; finished runs stay on their cards to open by hand.
+        entries = saved if isinstance(saved, list) else []
+        entries = [e for e in entries if not (isinstance(e, dict) and e.get("run"))]
+        self.put_back(entries)
 
     def put_back(self, entries):
         """give empty shown panes back what they showed: [{n, run, model, session, since}]"""
@@ -1885,6 +2561,11 @@ class Host(QObject):
             p = self.panes[n - 2]
             if p.run or p.model:
                 continue                    # a live run already took it
+            if n in self._gate_slots.values():
+                # LANE C: a reserved pane is never filled by a restore; the
+                # parked entry stays parked so it is not lost or evicted.
+                self._parked[n] = e
+                continue
             run, model = e.get("run") or "", e.get("model") or ""
             if run and os.path.isdir(run) and not self.pane_of(run):
                 if p.show(run):
@@ -1896,9 +2577,26 @@ class Host(QObject):
                 p.clear()                   # nobody left to want it
 
     def autoFollow(self):
+        if getattr(self, "_fresh_start", False):
+            # 2026-10-24: runs already going when the chest opened are not placed in
+            # panes; only runs that appear after this start (seen_runs already set)
+            # will be followed. Their cards still list them.
+            self._fresh_start = False
+            self.auto_pending.clear()
+            self.waiting = []
+            self._new_waiting = set()
+            return
+        # 2026-10-25 fix cluster 2 (startup): defence in depth at the placement
+        # gate. A pre-start run that reached auto_pending by any other path
+        # (a later caller, a merged worker's sweep re-adding it) is dropped
+        # here, never placed. Waiting is NOT filtered here on purpose: a run
+        # in waiting got there by an in-session move (_apply_layout) or by
+        # autoFollow itself, i.e. after an explicit placement, so dropping it
+        # would break a user's own pane move.
+        self.auto_pending -= getattr(self, "_startup_runs", set())
         """a run that started after the chest did: put it in an EMPTY pane and bring the chest to the front.
-        A pane showing a live run (or a replay, or your bench) is never taken: with every pane busy the run
-        waits on its card ("waiting for a pane") until one frees up or po drags it into one."""
+        A pane showing a live run (or a replay, or your bench) is never taken: with every pane busy a
+        run does NOT wait — it is closed and stopped, not queued. No exceptions."""
         for d in sorted(self.auto_pending):
             state = read_state(d)
             if not os.path.isdir(d) or (state and not state.get("runId") and not run_is_live(d, state)):
@@ -1908,9 +2606,16 @@ class Host(QObject):
                 self.collapsed.pop(d, None)
                 if d != self._bench.get("dir") and not self.pane_of(d) and d not in self.waiting:
                     self.waiting.append(d)
+                    self._new_waiting.add(d)
         placed = False
         for d in list(self.waiting):
             if not os.path.isdir(d) or self.pane_of(d):
+                self.waiting.remove(d)
+                continue
+            if d in self._gate_placements or d in self._gate_denied:
+                # LANE C: a gate run is placed only by _gate_place_ready into
+                # its reserved pane, never by auto-follow into whatever is
+                # free; a denied run is never placed or closed by auto-follow.
                 self.waiting.remove(d)
                 continue
             live = self.run_live(d)
@@ -1926,13 +2631,20 @@ class Host(QObject):
                 self.waiting.remove(d)      # a finished run doesn't queue for a pane: its card has it
                 continue
             if not n:
-                self.set_status("%s waits for a pane: every pane shows a live run" % os.path.basename(d))
-                break
+                # 1 MEANS 1, 2026-10-25: 4 viewports tried, no pane free, no
+                # waiting, no exceptions. The run gets out, period.
+                self.waiting.remove(d)
+                self._new_waiting.discard(d)
+                try:
+                    live_runs.close_open(d)
+                except Exception:
+                    pass
+                self.set_status("no pane free: %s stopped, not queued — free a pane and send again" % os.path.basename(d))
+                continue
             self.waiting.remove(d)
+            self._new_waiting.discard(d)
             self.showRunIn(d, n)
             placed = True
-            if self.pane_of(d) == n:        # it stuck: the chest asks po before touching the pane they are in
-                self.runLanded.emit(d, n)
         if placed:
             kwin_raise()
 
@@ -2026,10 +2738,421 @@ class Host(QObject):
         """the run pane n shows (finished or not), "" for none"""
         return self.watching if n == 1 else self.panes[n - 2].run
 
+    # ---- gate panes (lane C, 2026-10-26): reservation, placement, first frame ----
+    # Socket contract (frozen by the coordinator; lane A owns gate.py):
+    #   gate-reserve IID PREFERRED -> "1"|"2"|"3"|"4"|"FULL"
+    #   gate-check IID -> slot or "0"
+    #   gate-release IID -> "ok"
+    #   gate-place IID RUN -> "ok"|"no reservation" (RUN must be the run lane A
+    #     registered for this intent's token; anything else is refused, and the
+    #     launcher cancels its run on a non-ok reply)
+    GATE_PLACE_TIMEOUT_S = 30.0    # gate-place -> .live/latest.json must appear
+    # Contract v1 §8: register -> first frame deadline is 30 s (registry).
+    # The 5 s figure is the fixture acceptance target only: at 5 s past
+    # showRunIn the host shows a visible "still starting" state, but does
+    # NOT fail or kill -- killing a legitimate real build at 5 s would be
+    # a worse failure than reporting a slow fixture.
+    GATE_FIRST_FRAME_TIMEOUT_S = 30.0  # register -> first frame, registry deadline
+    GATE_FIRST_FRAME_SLOW_S = 5.0      # showRunIn -> visible slow-start state (no kill)
+
+    def _gate_pane_content_occupied(self, n):
+        """True if pane n itself shows content (live run, finished run still
+        on screen, static model, replay, bench) -- parked content excluded,
+        so a pane holding only a parked entry reads as empty here."""
+        if n == 1:
+            return bool(self.watching or self.model or self._replay or self.bench_alive())
+        return bool(self.panes[n - 2].gate_occupied())
+
+    def _gate_pane_occupied_by_other(self, n):
+        """True if pane n holds content other than a gate reservation: a live
+        run, a finished run still on screen, a static model, a replay, the
+        bench, or a parked/hidden pane's content. Occupancy is over all four
+        panes regardless of the current layout or solo pane: a pane hidden by
+        solo still holds its content, and a parked pane's content still
+        belongs to that pane number."""
+        if n == 1:
+            return self._gate_pane_content_occupied(n)
+        parked = self._parked.get(n) or {}
+        return bool(self._gate_pane_content_occupied(n)
+                    or parked.get("run") or parked.get("model"))
+
+    def _gate_pane_occupied(self, n):
+        """True if pane n is taken by content or by another intent's reservation.
+        A pane whose viewer is merely alive (no run, no model, no replay) is
+        NOT occupied."""
+        return n in self._gate_slots.values() or self._gate_pane_occupied_by_other(n)
+
+    def rehydrate_gate_slots(self):
+        """Startup (contract v1 §6): repopulate host reservations from the
+        durable registry BEFORE accepting new reservations or restoring
+        panes, so a restart cannot double-book a pane held by a surviving
+        active intent. Placed intents (reserving False) are NOT re-reserved
+        -- their runs own their panes via occupancy counting. Returns how
+        many slots were repopulated. Callers: main() only, right after
+        Host() creation; never __init__ (tests must not read the real
+        registry on construction)."""
+        try:
+            entries = gate_registry.reservations_list()
+        except Exception:
+            return 0
+        count = 0
+        for e in entries:
+            if not isinstance(e, dict) or not e.get("reserving"):
+                continue
+            iid, pane = e.get("id"), e.get("pane")
+            try:
+                pane = int(pane)
+            except (TypeError, ValueError):
+                continue
+            if not 1 <= pane <= 4:
+                continue
+            try:
+                if not gate_registry.is_safe_id(iid):
+                    continue
+            except Exception:
+                pass
+            if iid not in self._gate_slots and pane not in self._gate_slots.values():
+                self._gate_slots[iid] = pane
+                count += 1
+        return count
+
+    def gate_reserve(self, iid, preferred):
+        """Try requested pane, then wrap through the other three without eviction."""
+        if iid in self._gate_slots:
+            return self._gate_slots[iid]
+        try:
+            start = int(preferred)
+        except (TypeError, ValueError):
+            return 0
+        if not 1 <= start <= 4:
+            return 0
+        for n in list(range(start, 5)) + list(range(1, start)):
+            if not self._gate_pane_occupied(n):
+                self._gate_slots[iid] = n
+                return n
+        return 0
+
+    def _gate_fail(self, iid, reason):
+        """Record a visible gate failure: status line + per-intent record."""
+        self._gate_failures[iid] = {"reason": reason, "at": time.time()}
+        self.set_status("gate %s: %s" % (iid, reason))
+
+    def _gate_note_dispatched(self, iid):
+        """Record a host-dispatched gate launch (yes -> launcher Popen).
+
+        Only the slot matters: if the host holds no slot for the intent
+        (restart between filing and yes), launch_intent already refused
+        via gate-check, so nothing is recorded.
+        """
+        n = self._gate_slots.get(iid, 0)
+        if n:
+            self._gate_dispatched[iid] = {"pane": n, "dispatched_at": time.time()}
+
+    def _gate_launch_watch(self):
+        """Watch host-dispatched gate launches that never reach gate-place.
+
+        Lane B gap: after answer_intent(launch=True) Popen succeeds, the
+        card is cleared and nothing polls the launcher child. If that
+        child then fails claim/register/place, the registry intent goes
+        terminal (or sits past its deadlines) while the user sees nothing
+        and the host slot stays held -- _gate_place_ready only watches
+        runs that already passed gate-place. This watch, on the 500 ms
+        runTimer, reads the registry (intent_status only: no lock, no
+        mutation, no subprocess client) and, for each dispatched launch,
+        either clears it silently (placed, or already owned by
+        _gate_place_ready), keeps waiting (live launch inside its
+        deadlines), or fails visibly: status line + _gate_failures
+        record, the run denied to autoFollow, and the slot freed. It
+        never kills a run and never moves one to another pane: a dead
+        pid needs no kill, and a live-but-stuck run is the launcher's
+        to cancel once its gate-place is refused or its registry
+        deadline is observed. Registry marking itself is NOT done here
+        (read-only by design; marking stays with the registry's
+        deadline callers) -- the watch surfaces + frees the host slot
+        independently of whether the registry has marked it yet.
+        """
+        for iid, entry in list(self._gate_dispatched.items()):
+            pane = entry.get("pane") or self._gate_slots.get(iid, 0)
+            if iid not in self._gate_slots:
+                self._gate_dispatched.pop(iid, None)
+                continue
+            try:
+                st = gate_registry.intent_status(iid)
+            except Exception:
+                st = None
+            if not isinstance(st, dict):
+                continue  # corrupt/missing read: retry next tick; intent files are never deleted
+            status = st.get("status")
+            tok = st.get("token") if isinstance(st.get("token"), dict) else {}
+            run = tok.get("run")
+            if status == "placed":
+                self._gate_dispatched.pop(iid, None)
+                self._gate_free_slot(iid)  # stale slot only; the run owns its pane
+                continue
+            if status in ("failed", "expired", "cancelled", "closed"):
+                reason = st.get("cancel_reason") or status
+                self._gate_fail(iid, "launch for pane %s never registered: %s" % (pane, reason))
+                self._gate_dispatched.pop(iid, None)
+                if run:
+                    self._gate_denied.add(os.path.abspath(run))
+                self._gate_free_slot(iid)
+                continue
+            if status not in ("yes", "launched"):
+                continue  # pending or unknown: not a dispatched launch's state; leave it
+            if run and (run in self._gate_shown or run in self._gate_placements):
+                # Already handed to _gate_place_ready: it owns the deadline now.
+                self._gate_dispatched.pop(iid, None)
+                continue
+            now = time.time()
+            def _f(v):
+                try:
+                    return float(v or 0)
+                except (TypeError, ValueError):
+                    return 0
+            yes_at = _f(tok.get("yes_at"))
+            used_at = _f(tok.get("used_at"))
+            registered_at = _f(tok.get("registered_at"))
+            start_timeout = getattr(gate_registry, "START_TIMEOUT_S", 600)
+            register_timeout = getattr(gate_registry, "REGISTER_TIMEOUT_S", 10)
+            first_frame_timeout = getattr(gate_registry, "FIRST_FRAME_TIMEOUT_S", 30)
+            reason = ""
+            if run and tok.get("pid") is not None and not st.get("first_frame_at"):
+                try:
+                    alive = gate_registry._pid_alive(tok.get("pid"))
+                except Exception:
+                    alive = False
+                if not alive:
+                    reason = "registered launcher died before any first frame"
+            if not reason and run and registered_at and not st.get("first_frame_at") \
+                    and now - registered_at > first_frame_timeout:
+                reason = "registered but never placed by the first-frame deadline"
+            if not reason and used_at and not run and now - used_at > register_timeout:
+                reason = "launch claimed but never registered a run"
+            if not reason and not used_at and yes_at and now - yes_at > start_timeout:
+                reason = "approval never claimed"
+            if not reason:
+                continue  # live launch, inside its deadlines: keep waiting
+            self._gate_fail(iid, "launch for pane %s failed: %s" % (pane, reason))
+            self._gate_dispatched.pop(iid, None)
+            if run:
+                self._gate_denied.add(os.path.abspath(run))
+            self._gate_free_slot(iid)
+
+    def _gate_free_slot(self, iid):
+        """Free an intent's reserved pane. If that pane is now empty and still
+        holds parked content, give the parked content back (a No/timeout after
+        a layout shrink must not strand it). Returns the freed pane or 0."""
+        # A freed slot ends launch tracking for that intent too.
+        self._gate_dispatched.pop(iid, None)
+        n = self._gate_slots.pop(iid, None)
+        if n is None:
+            return 0
+        entry = self._parked.get(n)
+        # Content-only check: the parked entry itself must not make the pane
+        # read as occupied, or the restore below could never fire.
+        if entry and n <= self._layout and not self._gate_pane_content_occupied(n):
+            self._parked.pop(n, None)
+            self.put_back([entry])
+        return n
+
+    def gate_place(self, iid, run):
+        n = self._gate_slots.get(iid, 0)
+        if not n:
+            return False
+        run = os.path.abspath(run)
+        if run in self._gate_denied:
+            return False
+        # Contract v1 §7b: validate against the registry BEFORE showRunIn --
+        # run must equal the token's registered run, intent must be launched,
+        # and the register->first-frame deadline must not already be missed.
+        # A slot alone never authorises a run.
+        try:
+            ok, reason = gate_registry.validate_placement(iid, run)
+        except Exception:
+            ok, reason = False, "registry validation unavailable"
+        if not ok:
+            self._gate_fail(iid, "gate-place refused: " + reason)
+            return False
+        # validate_placement does not check pid liveness (contract §7c calls
+        # pid_alive advisory): a launcher pid that died after register must
+        # not place. A dead pid is proof of death; a live pid is advisory
+        # only (pid reuse), and the registry deadline above is the backstop.
+        try:
+            tok = gate_registry._load_token(iid)
+        except Exception:
+            tok = None
+        pid = tok.get("pid") if isinstance(tok, dict) else None
+        try:
+            alive = gate_registry._pid_alive(pid) if pid is not None else False
+        except Exception:
+            alive = False
+        if not alive:
+            self._gate_fail(iid, "gate-place refused: registered launcher pid is dead")
+            return False
+        # The pane must still be the intent's assigned pane (never reassigned).
+        try:
+            intent = gate_registry.load_intent(iid)
+            assigned = int(intent.get("pane")) if intent else 0
+        except Exception:
+            assigned = 0
+        if assigned != n:
+            self._gate_fail(iid, "gate-place refused: assigned pane changed")
+            return False
+        self._gate_placements[run] = {"iid": iid, "pane": n, "placed_at": time.monotonic()}
+        self._gate_place_ready()
+        if run not in self._gate_placements and run not in self._gate_shown:
+            # _gate_place_ready already failed it (slot gone, pane taken, or
+            # showRunIn refused): tell the launcher so it cancels its run.
+            return False
+        return True
+
+    def _gate_frame(self, n):
+        """A rendered frame landed in pane n: close out the first-frame wait
+        for the gate run shown there, if any, and report it to the registry
+        (contract v1 §1: first_frame_at is host-reported)."""
+        try:
+            run = self.watching if n == 1 else self.panes[n - 2].run
+        except (IndexError, AttributeError):
+            return
+        entry = self._gate_shown.get(run) if run else None
+        if not entry or entry["pane"] != n:
+            return
+        self._gate_shown.pop(run, None)
+        try:
+            recorded = gate_registry.record_first_frame(entry["iid"], run)
+        except Exception:
+            recorded = False
+        if not recorded:
+            self.set_status("gate %s: first frame seen in pane %d but registry did not record it"
+                            % (entry["iid"], n))
+        self._gate_frames[run] = {"iid": entry["iid"], "pane": n,
+                                  "shown_at": entry["shown_at"],
+                                  "first_frame_at": time.monotonic(),
+                                  "registry_recorded": recorded}
+
+    def _gate_place_ready(self):
+        now = time.monotonic()
+        # Shown runs: first-frame deadline. Never wait indefinitely, never
+        # reassign a started run, never move it to another pane.
+        for run, entry in list(self._gate_shown.items()):
+            iid, n = entry["iid"], entry["pane"]
+            state = read_state(run)
+            if (state or {}).get("state") in TERMINAL:
+                # Finished before a frame was recorded: the run owns its
+                # pane; a completed run is not a failed startup.
+                self._gate_shown.pop(run, None)
+                continue
+            if self.pane_of(run) != n:
+                # Somebody moved it (user drag, explicit place): not a gate
+                # failure, and never kill a run no longer in its pane.
+                self._gate_shown.pop(run, None)
+                continue
+            deadline = entry.get("first_frame_deadline_at")
+            if deadline is not None:
+                past_deadline = time.time() > deadline
+            else:
+                past_deadline = now - entry["shown_at"] > self.GATE_FIRST_FRAME_TIMEOUT_S
+            if not past_deadline:
+                if now - entry["shown_at"] > self.GATE_FIRST_FRAME_SLOW_S                         and not entry.get("slow_noted"):
+                    entry["slow_noted"] = True
+                    self.set_status("gate %s: pane %d still starting -- first frame slower "
+                                    "than the 5s fixture target" % (iid, n))
+                continue
+            self._gate_fail(iid, "pane %d: no first frame by the registry deadline -- only this run stopped" % n)
+            self._gate_shown.pop(run, None)
+            try:
+                live_runs.close_open(run)
+            except Exception:
+                pass
+        # Pending placements: ready-file deadline, then placement.
+        for run, entry in list(self._gate_placements.items()):
+            iid, n = entry["iid"], entry["pane"]
+            if run in self._gate_denied:
+                self._gate_placements.pop(run, None)
+                continue
+            if self._gate_slots.get(iid) != n:
+                self._gate_fail(iid, "reservation released before placement")
+                self._gate_placements.pop(run, None)
+                continue
+            if not os.path.isfile(os.path.join(run, ".live", "latest.json")):
+                if now - entry["placed_at"] > self.GATE_PLACE_TIMEOUT_S:
+                    self._gate_fail(iid, "run never published live state -- reservation freed")
+                    self._gate_placements.pop(run, None)
+                    self._gate_free_slot(iid)
+                continue
+            # Re-check occupancy at placement time: never evict what arrived
+            # after reservation (a restore, a user place, another run).
+            if self._gate_pane_occupied_by_other(n):
+                self._gate_fail(iid, "pane %d taken before placement -- nothing evicted" % n)
+                self._gate_placements.pop(run, None)
+                self._gate_denied.add(run)
+                self._gate_free_slot(iid)
+                continue
+            if n > self._layout:
+                # Growing the layout restores parked panes, but put_back
+                # never fills a reserved pane (see put_back), so the
+                # reserved pane stays empty for this run.
+                self._apply_layout(2 if n == 2 else 4)
+            if self._layout < n:
+                self._gate_fail(iid, "viewport layout could not grow to pane %d" % n)
+                self._gate_placements.pop(run, None)
+                self._gate_denied.add(run)
+                self._gate_free_slot(iid)
+                continue
+            if getattr(self, "_solo", 0) and self._solo != n:
+                # Solo hides every pane but one: a run approved for pane n
+                # must be visible, so clear solo (no work moves, no pane
+                # content changes -- only the view filter lifts).
+                self._solo = 0
+                try:
+                    self._save_view_prefs()
+                except Exception:
+                    pass
+                self.panesChanged.emit()
+            self.showRunIn(run, n)
+            if self.pane_of(run) != n:
+                # showRunIn refused (e.g. bench in pane 1): fail visibly,
+                # do not land the run in a different pane.
+                self._gate_fail(iid, "pane %d refused the run -- nothing placed elsewhere" % n)
+                self._gate_placements.pop(run, None)
+                self._gate_denied.add(run)
+                self._gate_free_slot(iid)
+                continue
+            # Contract v1 §7b: record placement in the registry AFTER a
+            # successful showRunIn. If recording fails, the run stays shown
+            # (evicting it would be worse) but the failure is visible, the
+            # host slot is freed, and the registry still holds its
+            # reservation -- the first frame may still heal it to placed.
+            try:
+                recorded = gate_registry.record_placement(iid, run)
+            except Exception:
+                recorded = False
+            if not recorded:
+                self._gate_fail(iid, "run shown in pane %d but registry placement not recorded "
+                                "-- reservation still held" % n)
+            try:
+                tok = gate_registry._load_token(iid)
+                registered_at = tok.get("registered_at") if isinstance(tok, dict) else None
+            except Exception:
+                registered_at = None
+            timeout = getattr(gate_registry, "FIRST_FRAME_TIMEOUT_S", 30)
+            deadline = (registered_at + timeout) if registered_at else (time.time() + timeout)
+            self._gate_placements.pop(run, None)
+            self._gate_shown[run] = {"iid": iid, "pane": n, "shown_at": now,
+                                     "first_frame_deadline_at": deadline,
+                                     "slow_noted": False}
+            self._gate_free_slot(iid)   # the run itself now owns the pane
+
     def free_pane(self, d=""):
         """a shown pane with nothing live in it, 0 when all are busy. For run d: the pane showing the last run
         of the same modeller first (a session keeps its pane), then an empty one, then one showing an old result"""
-        free = [n for n in range(1, self._layout + 1) if not self.pane_busy(n)]
+        if d and (d in self._gate_placements or d in self._gate_denied):
+            # LANE C: a gate/denied run never takes a free pane via free_pane
+            # (autoFollow already skips such runs before calling this; this
+            # is defence in depth for any other caller).
+            return 0
+        free = [n for n in range(1, self._layout + 1)
+                if not self.pane_busy(n) and n not in self._gate_slots.values()]
         who = paneslib.modeller(d) if d else ""
         if who:
             mine = [n for n in free if self.pane_shows(n) and paneslib.modeller(self.pane_shows(n)) == who]
@@ -2039,8 +3162,10 @@ class Host(QObject):
         return (empty or free or [0])[0]
 
     def pane_setup(self):
-        """what a fresh pane viewer is told: pane 1's camera when they are linked"""
-        return ["autoframe 1"] + (["view %g %g" % self.cam] if self._link and self.cam else [])
+        """what a fresh pane viewer is told: pane 1's camera when they are linked.
+        autoframe 0: ServeMode still frames the first model once, then the camera
+        stays across revisions until the user turns TRACK on."""
+        return ["autoframe 0"] + (["view %g %g" % self.cam] if self._link and self.cam else [])
 
     @Slot(str, result=str)
     def runWho(self, d):
@@ -2054,9 +3179,19 @@ class Host(QObject):
 
     @Slot(str, int)
     def showRunIn(self, d, n):
-        """put run d in pane n (1-4), live; it leaves whichever pane had it"""
+        """put run d in pane n (1-4), live; it leaves whichever pane had it.
+        Returns True on placement, False on refusal. A refusal is loud: n
+        outside 1-4 or above the shown layout is NOT silently clamped to
+        another pane, and a bench in pane 1 refuses instead of dropping the
+        run. Gate callers verify pane_of() afterwards and fail loudly too."""
         d = os.path.abspath(d)
-        n = max(1, min(self._layout, n))
+        if not 1 <= n <= 4:
+            self.set_status("pane %d does not exist" % n)
+            return False
+        if n > self._layout:
+            self.set_status("pane %d is not shown (layout %d) -- grow the layout first"
+                            % (n, self._layout))
+            return False
         if d in self.waiting:
             self.waiting.remove(d)
         for p in self.panes:
@@ -2065,7 +3200,7 @@ class Host(QObject):
         if n == 1:
             if self.bench_alive():
                 self.set_status("pane 1 has your edit: KEEP or close it first, or put the run in another pane")
-                return
+                return False
             self.watchRun(d)
         else:
             if self.watching == d:
@@ -2074,6 +3209,7 @@ class Host(QObject):
                 self.set_status("pane %d: %s" % (n, os.path.basename(d)))
         self.collapsed.pop(d, None)
         self.scanRuns()
+        return True
 
     @Slot(str, int)
     def replayIn(self, d, n):
@@ -2087,7 +3223,21 @@ class Host(QObject):
     @Slot(int)
     def clearPane(self, n):
         if n == 1:
+            if self._bench.get("dir") and self.bench_alive():
+                self._clear_note = "pane 1 has your edit: KEEP or close it first"
+                self.clearNoteChanged.emit()
+                self.set_status("pane 1 has your edit: KEEP or close it first")
+                return
             self.stopWatching()
+            self.stop()
+            self.model = ""
+            self._info = {}
+            self.infoChanged.emit()
+            self.panesChanged.emit()
+            self._clear_note = ""
+            self.clearNoteChanged.emit()
+            self.set_status("pane 1 cleared")
+            self.startEmptyViewer()
         elif 2 <= n <= 4:
             self.panes[n - 2].clear()
             self.scanRuns()
@@ -2153,28 +3303,6 @@ class Host(QObject):
         self.scanRuns()
         if self.waiting:
             self.autoFollow()
-
-    @Slot(bool)
-    def setMyScene(self, on):
-        """MY SCENE: pane 1 opens po's last model and runs leave it alone. Off: pane 1 empties for any run"""
-        if on:
-            last = last_open()
-            self.openModel(last["model"] if last else DEFAULT_MODEL, last.get("clip", "") if last else "")
-            self.set_status("pane 1 is your scene: runs go to the other panes")
-            return
-        if self._bench.get("dir") and self.bench_alive():
-            self.set_status("pane 1 has your edit: KEEP or close it first")
-            return
-        self._mine = False
-        if not self.watching:
-            self.stop()
-            self.model = ""
-            self._info = {}
-            self.infoChanged.emit()
-        self.panesChanged.emit()
-        self.set_status("pane 1 is open: any run can land in it")
-        self.scanRuns()
-        self.autoFollow()
 
     @Slot(int)
     def setSolo(self, n):
@@ -2249,7 +3377,7 @@ class Host(QObject):
         self.set_status("note kept on step %d%s" % (r["rev"], sent))
 
     def _save_model_preferences(self):
-        self._model_preferences = {"chat": self._chat_model, "research": self.ai_model, "claude": self._claude_model}
+        self._model_preferences = {"chat": self._chat_model, "research": self.ai_model, "claude": "", "favorites": list(getattr(self, "_favorites", []))}
         try:
             makedirs_private(os.path.dirname(self._preferences_path))
             temporary = self._preferences_path + ".tmp"
@@ -2397,6 +3525,8 @@ class Host(QObject):
 
     @Slot(str)
     def stopResearch(self, d):
+        if not d:
+            return
         p = self.jobs.get(d)
         live = read_state(d)
         if live.get("state") in live_runs.OPEN and run_is_live(d, live):
@@ -2423,34 +3553,39 @@ class Host(QObject):
         return True
 
     @Slot(str)
-    def togglePause(self, d):
-        control = control_state(read_state(d))
-        session = claude_gate.session_for_run(d)
-        if control.get("paused") or control.get("pauseRequested"):
-            if live_runs.run_meta(d).get("script"):
-                # Resume alone must not skip a queued edit. A continue line is the
-                # inbox item that lets the preserved tail run after that edit.
-                directory = os.path.join(d, ".live", "inbox")
-                live_runs.makedirs_private(directory)
-                name = "%019d%s.txt" % (time.time_ns() // 100 + 621355968000000000, uuid.uuid4().hex[:6])
-                path = os.path.join(directory, name)
-                with open(path + ".tmp", "x") as stream:
-                    stream.write("# continue after pause\n")
-                os.replace(path + ".tmp", path)
-            if self.live_command(d, "resume", "resume requested") and claude_gate.gate(session).get("state") == "paused":
-                claude_gate.clear_gate(session)
-        elif self.live_command(d, "pause", "pausing after the current operation") and session:
-            claude_gate.set_gate(session, "paused", "run " + os.path.basename(d))   # Claude waits at its next tool call
-
-    @Slot(str)
     def stepRun(self, d):
         """while paused: let the run make its next change, then hold again"""
         self.live_command(d, "step", "one step")
 
     @Slot(str)
+    def pauseRun(self, d):
+        """BUILD drawer: hold a run after its current operation, that run only."""
+        self.live_command(d, "pause", "paused after current operation")
+
+    @Slot(str)
+    def resumeRun(self, d):
+        """BUILD drawer: resume a held run, only on an explicit user action."""
+        self.live_command(d, "resume", "resumed")
+
+    @Slot(str, result="QVariantList")
+    def buildSteps(self, d):
+        """BUILD drawer ruler: the saved steps live_runs kept for run d, [] if none."""
+        if not d:
+            return []
+        try:
+            return live_runs.steps(d)
+        except (OSError, ValueError):
+            return []
+
+    @Slot(str)
     def cyclePace(self, d):
         seconds = next_pace(control_state(read_state(d)).get("paceSeconds", 0))
         self.live_command(d, "pace", "build pace: " + ("normal" if seconds == 0 else "%gs between operations" % seconds), seconds=seconds)
+
+    @Slot(str, float)
+    def setPace(self, d, seconds):
+        """Set the viewport's exact step delay through the existing run protocol."""
+        self.live_command(d, "pace", "build pace: " + ("full speed" if seconds == 0 else "%gs between operations" % seconds), seconds=seconds)
 
     @Slot(str, str)
     def sendDirection(self, d, text):
@@ -2473,25 +3608,49 @@ class Host(QObject):
     # session (tools, ALLOW/DENY, PAUSE); any other model in the catalogue (Grok, a local Ollama
     # model, an API model) is asked through chat.py and answers in the same log.
     claudeModel = Property(str, lambda self: self._claude_model, notify=claudeChanged)
+    favoriteModels = Property("QVariantList", lambda self: list(getattr(self, "_favorites", [])), notify=claudeChanged)
     claudeMode = Property(str, lambda self: self._chat_mode, notify=chatChanged)
+
+    @Slot(str)
+    def toggleFavorite(self, model_id):
+        """Star / unstar a model. No busy gate: starring never sends, and
+        never changes the current model — it only reorders the picker."""
+        if not model_id:
+            return
+        favs = list(getattr(self, "_favorites", []))
+        if model_id in favs:
+            favs.remove(model_id)
+        else:
+            favs.append(model_id)
+        self._favorites = favs
+        self._save_model_preferences()
+        self.claudeChanged.emit()
 
     def _claude_mode_supported(self):
         return build_execution.capabilities(self._claude_model_record())["plan"]
 
     claudeModeSupported = Property(bool, _claude_mode_supported, notify=claudeChanged)
     claudeBuildSupported = Property(bool, lambda self: build_execution.capabilities(self._claude_model_record())["build"], notify=claudeChanged)
+    claudePlanSupported = Property(bool, lambda self: build_execution.capabilities(self._claude_model_record())["plan"], notify=claudeChanged)
     claudeResearch = Property("QVariantMap", lambda self: self._claude_research or {}, notify=claudeChanged)
     claudeResearchPrompt = Property(bool, lambda self: self._claude_research_prompt, notify=claudeChanged)
 
     @Slot()
     def requestClaudeResearch(self):
-        if self.claude.status not in ("working", "starting", "paused"):
-            self._claude_research_prompt = True
+        if self.claude.status in ("working", "starting", "paused"):
+            self.set_status("cannot pick research while busy — try again after the current turn finishes")
+            self.claude._add("note", "cannot pick research while busy — try again after the current turn finishes")
             self.claudeChanged.emit()
+            return
+        self._claude_research_prompt = True
+        self.claudeChanged.emit()
 
     @Slot(bool, bool, bool)
     def setClaudeResearch(self, papers, photos, models):
         if self.claude.status in ("working", "starting", "paused"):
+            self.set_status("research choice not saved: still busy — pick again after the current turn finishes")
+            self.claude._add("note", "research choice not saved: still busy — pick again after the current turn finishes")
+            self.claudeChanged.emit()
             return
         self._claude_research = dict(papers=bool(papers), photos=bool(photos), models=bool(models))
         self._claude_research_prompt = False
@@ -2512,6 +3671,60 @@ class Host(QObject):
     def _claude_model_record(self):
         return chatlib.find(self._claude_model, self._chat_models)
 
+    providerAuthBusy = Property(bool, lambda self: self._provider_auth is not None, notify=chatChanged)
+    providerAuthMessage = Property(str, lambda self: self._provider_auth_message, notify=chatChanged)
+
+    @Slot(str, result="QVariantMap")
+    def providerAccountInfo(self, model_id):
+        import provider_auth
+        return provider_auth.account_info(chatlib.find(model_id, self._chat_models))
+
+    @Slot(str)
+    def signInProvider(self, model_id):
+        import provider_auth
+        if (self._provider_auth is not None or self._chat_busy
+                or self.claude.status in ("working", "starting", "paused")):
+            self._provider_auth_message = "Finish the current turn or account action first."
+            self.chatChanged.emit()
+            return
+        info = self.providerAccountInfo(model_id)
+        try:
+            command = provider_auth.terminal_command(info['family'], info.get('target', ''))
+        except RuntimeError as error:
+            self._provider_auth_message = str(error)
+            self.chatChanged.emit()
+            return
+        process = QProcess(self)
+        self._provider_auth = process
+        self._provider_auth_message = "Confirm sign-in in the terminal. Your chat stays here."
+        env = QProcessEnvironment()
+        for key, value in chatlib.child_env().items():
+            env.insert(key, value)
+        process.setProcessEnvironment(env)
+        process.setWorkingDirectory(os.path.expanduser("~"))
+        # Terminal/provider output stays in the terminal, not our logs or transcript.
+        process.setStandardOutputFile(QProcess.nullDevice())
+        process.setStandardErrorFile(QProcess.nullDevice())
+        process.finished.connect(self._provider_auth_finished)
+        process.errorOccurred.connect(self._provider_auth_error)
+        self.chatChanged.emit()
+        process.start(command[0], command[1:])
+
+    def _provider_auth_error(self, error):
+        if error == QProcess.FailedToStart:
+            self._provider_auth_finished(1)
+
+    def _provider_auth_finished(self, code, *_):
+        process = self._provider_auth
+        if process is None:
+            return
+        self._provider_auth = None
+        self._provider_auth_message = ("Sign-in terminal closed. Providers refreshed; your next message uses the CLI's current account."
+                                       if code == 0 else "Sign-in cancelled or failed. Check your provider login before sending.")
+        process.deleteLater()
+        self.chatChanged.emit()
+        self.refreshChat()
+
     def _apply_claude_persona(self, record):
         """The picked Claude model's persona (its chat.py system/system_file), or '' for a plain model.
         Without this the card talks to ClaudeLink, which never sees chat.py's system prompts."""
@@ -2526,7 +3739,15 @@ class Host(QObject):
     @Slot(str)
     def setClaudeModel(self, model_id):
         model = chatlib.find(model_id, self._chat_models)
-        if model is None or not model.get("available", True) or self.claude.status in ("working", "starting", "paused"):
+        if model is None or not model.get("available", True):
+            # Picker rejection, named: previously this returned silently,
+            # so a picked model that was unknown or unavailable simply
+            # never took effect with no trace of which id was expected.
+            self.set_status("cannot pick model: %s is not available" % model_id)
+            self.claude._add("note", "Model not picked: %s was not found or is not available; the previous model is still selected." % model_id)
+            self.claudeChanged.emit()
+            return
+        if self.claude.status in ("working", "starting", "paused"):
             return
         self._claude_model = model_id
         if not build_execution.capabilities(model)["build"]:
@@ -2537,15 +3758,350 @@ class Host(QObject):
         self._save_model_preferences()
         self.claudeChanged.emit()
 
+    @Slot()
+    def refreshMuseTracker(self):
+        """Re-read the Muse bridge tracker status (local files only).
+
+        Primary source is the per-turn file for the current turn
+        (self._muse_turn_id, set by the turn-id persistence work);
+        latest.json is used only when no current turn is tracked. This
+        function never assigns self._muse_turn_id itself.
+        """
+        # This is the cabinet's always-on timer, not a Muse-only timer. Poll
+        # shared intents before the Muse-specific early returns so an outside
+        # modeller can request approval even when no Muse turn exists.
+        self._gate_poll_shared_intents()
+        import time as _time
+        from datetime import datetime as _datetime
+
+        def _epoch(value):
+            if isinstance(value, bool):
+                return 0.0
+            if isinstance(value, (int, float)):
+                return float(value) if value == value and abs(value) != float("inf") else 0.0
+            if isinstance(value, str):
+                text = value.strip()
+                if not text:
+                    return 0.0
+                try:
+                    return float(text)
+                except ValueError:
+                    pass
+                try:
+                    return _datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+                except ValueError:
+                    return 0.0
+            return 0.0
+
+        try:
+            seat_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "muse-seat")
+            status_dir = os.path.join(seat_dir, "status")
+            current = getattr(self, "_muse_turn_id", "") or ""
+            if current:
+                path = os.path.join(status_dir, current + ".json")
+                try:
+                    with open(path, encoding="utf-8") as f:
+                        data = json.load(f)
+                    if not isinstance(data, dict) or (data.get("turn_id") and data.get("turn_id") != current):
+                        data = None
+                except (OSError, ValueError):
+                    data = None
+                if data is None:
+                    # Do not fall back to latest.json for a known turn: that
+                    # is how a previous turn's stage/timestamps were shown.
+                    if self._muse_tracker and self._muse_tracker.get("turn_id") != current:
+                        self._muse_tracker = {}
+                        self.museTrackerChanged.emit()
+                    return
+            else:
+                path = os.path.join(status_dir, "latest.json")
+                try:
+                    with open(path, encoding="utf-8") as f:
+                        data = json.load(f)
+                    if not isinstance(data, dict):
+                        data = {}
+                except (OSError, ValueError):
+                    data = {}
+        except OSError:
+            data = {}
+        if not data:
+            if self._muse_tracker:
+                self._muse_tracker = {}
+                self.museTrackerChanged.emit()
+            return
+        turn = data.get("turn_id") or ""
+        stage = data.get("stage") or ""
+        # A response file means the reply is written, even if the worker did not update status.
+        # Scoped to this turn's file only, never to latest.json's turn.
+        try:
+            res_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "muse-seat", "responses", turn + ".json")
+            if turn and os.path.isfile(res_path):
+                stage = "Reply written"
+        except OSError:
+            pass
+        # STAGE RULE 2026-10-25: never infer Building. Building means a live
+        # run actually exists in the viewport, not "a build-mode turn has been
+        # picked up for 10 seconds". A single message must never show Building
+        # before any modeling started. Only Thinking is inferred here; Building
+        # comes only from a worker stage or a live run in the marker.
+        now = _time.time()
+        picked = _epoch(data.get("picked_up_at"))
+        if stage == "Picked up" and picked and now - picked >= 10:
+            stage = "Getting familiar with Geppetto"
+        sent = _epoch(data.get("sent_at"))
+        elapsed = int(max(0, now - sent)) if sent else 0
+        elapsed_text = ("%dm %02ds" % (elapsed // 60, elapsed % 60)) if elapsed >= 60 else ("%ds" % elapsed)
+        last = _epoch(data.get("last_check"))
+        last_text = _time.strftime("%H:%M:%S", _time.localtime(last)) if last else ""
+        # 2026-10-26 tracker detail: show literally what is being done, not just the stage.
+        # Detail comes from the worker (status detail/detail_at, via in_progress heartbeat/detail).
+        # Live run step comes from the host's own shownOp when a run is being watched.
+        # Worker silence comes from the in-progress marker: a claimed turn with no heartbeat
+        # must not keep showing a generic stage as if work were progressing.
+        detail = str(data.get("detail") or "")[:200]
+        detail_at = _epoch(data.get("detail_at"))
+        detail_age = int(max(0, now - detail_at)) if detail_at else 0
+        live_op = ""
+        try:
+            live_op = str(self.shownOp or "")[:160]
+        except Exception:
+            live_op = ""
+        marker_stage = ""
+        marker_last = 0.0
+        marker_live = ""
+        try:
+            import json as _json2
+            _mp = os.path.join(seat_dir, "in-progress", turn + ".json") if turn else ""
+            if _mp and os.path.isfile(_mp):
+                _md = _json2.load(open(_mp, encoding="utf-8"))
+                if isinstance(_md, dict):
+                    marker_stage = str(_md.get("stage") or "")
+                    marker_last = _epoch(_md.get("last_activity_at"))
+                    marker_live = str(_md.get("live_run") or "")
+        except Exception:
+            pass
+        worker_silent = int(max(0, now - marker_last)) if marker_last else 0
+        if not detail and worker_silent >= 60 and marker_stage:
+            detail = "claimed, no worker update for %dm %02ds" % (worker_silent // 60, worker_silent % 60)
+            detail_at = marker_last
+            detail_age = worker_silent
+        out = {"turn_id": turn, "session_id": data.get("session_id") or "", "mode": data.get("mode") or "",
+               "stage": stage, "elapsed": elapsed, "elapsed_text": elapsed_text,
+               "last_check": last, "last_check_text": last_text,
+               "picked_up_at": picked, "replied_at": _epoch(data.get("replied_at")),
+               "detail": detail, "detail_at": detail_at, "detail_age": detail_age,
+               "live_op": live_op, "marker_stage": marker_stage,
+               "marker_last_activity": marker_last, "worker_silent": worker_silent,
+               "marker_live_run": marker_live}
+        self._muse_tracker = out
+        self.museTrackerChanged.emit()
+        # Modeling-start confirmation 2026-10-25: a worker about to join the
+        # viewport writes muse-seat/confirm/<turn>.json BEFORE any geppetto-live
+        # run. Show it, and do not start modeling until the user answers.
+        # This is NOT a send-time gate: the user already sent, the model
+        # prepared, and this pops right before it joins the viewport.
+        try:
+            _c_dir = os.path.join(seat_dir, "confirm")
+            _c_path = os.path.join(_c_dir, turn + ".json") if turn else ""
+            _a_path = os.path.join(_c_dir, turn + ".answer.json") if turn else ""
+            _new_confirm = ""
+            if _c_path and os.path.isfile(_c_path) and not os.path.isfile(_a_path):
+                try:
+                    with open(_c_path, encoding="utf-8") as _f:
+                        _c_data = json.load(_f)
+                    if isinstance(_c_data, dict):
+                        _new_confirm = str(_c_data.get("model") or _c_data.get("prompt") or "")[:120]
+                except (OSError, ValueError):
+                    _new_confirm = ""
+            # Triple-check fix 2026-10-25: a turn that is already Reply written
+            # (including a worker that timed out and wrote a cancelled response
+            # with no answer file) must never keep the card up. Force clear,
+            # regardless of a leftover confirm file.
+            if stage == "Reply written":
+                _new_confirm = ""
+            elif turn:
+                try:
+                    _r_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "muse-seat", "responses", turn + ".json")
+                    if os.path.isfile(_r_path):
+                        _new_confirm = ""
+                except OSError:
+                    pass
+            # The shared intent has priority over a stale/parallel Muse
+            # confirmation; Muse tracker updates must not erase its card.
+            if self._confirm_turn.startswith("gate-"):
+                pass
+            elif _new_confirm != self._confirm_model or (turn and turn != self._confirm_turn and _new_confirm):
+                self._confirm_model = _new_confirm
+                self._confirm_turn = turn if _new_confirm else ""
+                self.confirmModelChanged.emit()
+            elif not _new_confirm and self._confirm_model:
+                self._confirm_model = ""
+                self._confirm_turn = ""
+                self.confirmModelChanged.emit()
+        except OSError:
+            pass
+
+    # ACCEPT GATE 2026-10-26: shared intent registry, all seats/providers.
+    # The host polls cabinet/confirm/*.json (pending, unexpired) and shows
+    # the oldest pending intent as the accept card, plus the FIXED
+    # geppetto-notify toast (notify-send alone is invisible on this
+    # machine — wavegoo renders its card off-window). Yes/No are handled
+    # in _confirm_write_answer, which writes the token for a gate intent.
+    def _gate_poll_shared_intents(self):
+        try:
+            import importlib.util, subprocess
+            _spec = importlib.util.spec_from_file_location(
+                "geppetto_gate", os.path.join(os.path.dirname(os.path.abspath(__file__)), "gate.py"))
+            _gate = importlib.util.module_from_spec(_spec)
+            _spec.loader.exec_module(_gate)
+            _gate.expire_pending()
+            _pending = _gate.list_pending()
+            _toasted = getattr(self, "_gate_toasted_ids", set())
+            if _pending:
+                _first = _pending[0]
+                _subj = str(_first.get("subject") or "")[:120]
+                _pf = _first.get("preflight") or {}
+                _join = {"id": _first["id"],
+                         "who": str(_first.get("worker") or "someone"),
+                         "subject": _subj,
+                         "pane": str(_first.get("pane") or "pane 1"),
+                         "firstShape": str(_pf.get("first_shape") or ""),
+                         "lines": int(_pf.get("lines") or 0),
+                         "preflightOk": bool(_pf.get("ok"))}
+                if _join != getattr(self, "_join_gate", {}):
+                    self._join_gate = _join
+                    self.joinGateChanged.emit()
+                if _subj != self._confirm_model or _first["id"] != self._confirm_turn:
+                    self._confirm_model = _subj
+                    self._confirm_turn = _first["id"]
+                    self.confirmModelChanged.emit()
+                if _first["id"] not in _toasted:
+                    _toasted.add(_first["id"])
+                    self._gate_toasted_ids = _toasted
+                    # Bell history only: notify-send (the wavegoo bell counts
+                    # it; the visible card is A in the pane + B below, not
+                    # the old plain 15 s zenity box).
+                    try:
+                        subprocess.Popen(
+                            ["notify-send", "--app-name=Geppetto", "--urgency=critical",
+                             "Geppetto — someone is about to join",
+                             "Look at %s: %s is about to model %s" % (_join["pane"], _join["who"], _subj)],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            stdin=subprocess.DEVNULL, start_new_session=True)
+                    except Exception:
+                        pass
+                    # B: desktop gate card, same words as A, persistent
+                    # until answered. Launched once per intent; it polls
+                    # the intent and closes when A answers, and vice versa.
+                    try:
+                        _gate_card = os.path.expanduser("~/.local/bin/geppetto-join-gate")
+                        if os.path.isfile(_gate_card):
+                            subprocess.Popen(
+                                [_gate_card, "--id", _first["id"], "--who", _join["who"],
+                                 "--subject", _subj, "--pane", _join["pane"],
+                                 "--first-shape", _join["firstShape"],
+                                 "--lines", str(_join["lines"])],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                stdin=subprocess.DEVNULL, start_new_session=True)
+                    except Exception:
+                        pass
+            elif getattr(self, "_confirm_turn", "").startswith("gate-"):
+                self._confirm_model = ""
+                self._confirm_turn = ""
+                self.confirmModelChanged.emit()
+                if getattr(self, "_join_gate", {}):
+                    self._join_gate = {}
+                    self.joinGateChanged.emit()
+        except Exception:
+            pass
+
+    def _confirm_write_answer(self, answer):
+        turn = self._confirm_turn or getattr(self, "_muse_turn_id", "") or ""
+        # ACCEPT GATE 2026-10-26: a gate intent's yes writes its token,
+        # its no cancels it. Token is what geppetto-live checks.
+        if turn.startswith("gate-"):
+            try:
+                import importlib.util
+                _spec = importlib.util.spec_from_file_location(
+                    "geppetto_gate", os.path.join(os.path.dirname(os.path.abspath(__file__)), "gate.py"))
+                _gate = importlib.util.module_from_spec(_spec)
+                _spec.loader.exec_module(_gate)
+                _token, _error = _gate.answer_intent(turn, answer, launch=True)
+                if _error and answer == "yes":
+                    self.set_status("Model launch failed: " + _error)
+                if answer == "yes" and not _error and _token:
+                    # LANE C/B: Popen success is dispatch only. If the
+                    # launcher child then fails claim/register/place,
+                    # _gate_launch_watch is what tells the user.
+                    self._gate_note_dispatched(turn)
+                self._join_gate = {}
+                self.joinGateChanged.emit()
+            except Exception:
+                pass
+            self._confirm_model = ""
+            self._confirm_turn = ""
+            self.confirmModelChanged.emit()
+            return  # A shared intent is not a Muse turn; never write its answer in muse-seat.
+        if not turn:
+            self._confirm_model = ""
+            self._confirm_turn = ""
+            self.confirmModelChanged.emit()
+            return
+        try:
+            seat_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "muse-seat", "confirm")
+            self._muse_write_json_atomic(os.path.join(seat_dir, turn + ".answer.json"), {"answer": answer, "turn_id": turn})
+        except OSError:
+            pass
+        self._confirm_model = ""
+        self._confirm_turn = ""
+        self.confirmModelChanged.emit()
+
+    @Slot()
+    def confirmModelYes(self):
+        self._confirm_write_answer("yes")
+
+    @Slot()
+    def confirmModelNo(self):
+        self._confirm_write_answer("no")
+        # No modeling: tell the panel log, so the cancelled turn is visible.
+        try:
+            self.claude._add("note", "cancelled: not modeled")
+            self.claudeChanged.emit()
+        except Exception:
+            pass
+
+    @Slot()
+    def checkMuseReply(self):
+        """CHECK hook: refresh tracker, then deliver an already-written orphan reply if one exists. No-op while a turn is live/busy (redeliver guards that)."""
+        self.refreshMuseTracker()
+        self.redeliver_orphaned_muse_turn()
+
     @Slot(str, result=bool)
     def claudeSend(self, text):
-        if not (text or "").strip() or self.claude.status in ("working", "starting", "paused"):
+        if not (text or "").strip():
             return False
-        if self._claude_research is None:
-            self.requestClaudeResearch()
+        if self._provider_auth is not None:
+            self.set_status("Finish provider sign-in in the terminal before sending.")
             return False
+        if self.claude.status in ("working", "starting", "paused"):
+            if self._claude_research is None:
+                self.set_status("cannot send: still working — tap Stop to cancel, then send again")
+                self.claude._add("note", "cannot send: still working — tap Stop to cancel, then send again")
+            else:
+                self.set_status("cannot send: still working — tap Stop to cancel, then send again")
+                self.claude._add("note", "cannot send: still working — tap Stop to cancel, then send again")
+            self.claudeChanged.emit()
+            return False
+        if self._claude_research is None or not any(self._claude_research.values()):
+            # Automatic research 2026-10-25 at user order: no research popup,
+            # no user pick, no Plan gate. When a subject is given, the model
+            # goes and gets its own research (papers, photos, models) itself,
+            # then builds. Old Skip defaults (all False) are migrated here.
+            self._claude_research = dict(papers=True, photos=True, models=True)
+            self.claude.set_research_policy(research_consent.policy(self._claude_research))
         model = self._claude_model_record()
         if model is None or not model.get("available", True):
+            self.set_status("cannot send: no available model — pick one first")
             self.claude._add("note", "Choose an available model before sending. No provider was contacted.")
             self.claudeChanged.emit()
             return False
@@ -2553,18 +4109,116 @@ class Host(QObject):
             self.claude.set_mode(self._chat_mode)
             self.claude.send(text)
         else:
-            self._other_send(model, text)
+            return self._other_send(model, text)
         return True
+
+    def _muse_seat_base(self):
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), "muse-seat")
+
+    def _muse_write_json_atomic(self, path, data):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(data, ensure_ascii=False))
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+
+    def _muse_pending_path(self):
+        return os.path.join(self._muse_seat_base(), "host-pending.json")
+
+    def _muse_pending_file(self, turn):
+        return os.path.join(self._muse_seat_base(), "host-pending", turn + ".json")
+
+    def _muse_delivered_path(self, turn):
+        return os.path.join(self._muse_seat_base(), "delivered", turn + ".json")
+
+    def _muse_has_delivered(self, turn):
+        return bool(turn) and os.path.isfile(self._muse_delivered_path(turn))
+
+    def _muse_write_delivered(self, turn, session_id, outcome):
+        if not turn:
+            return
+        path = self._muse_delivered_path(turn)
+        if os.path.isfile(path):
+            return
+        self._muse_write_json_atomic(path, {"turn_id": turn, "session_id": session_id, "outcome": outcome, "delivered_at": time.time()})
+
+    def _muse_delete_pending(self, turn):
+        if not turn:
+            return
+        try:
+            os.unlink(self._muse_pending_file(turn))
+        except OSError:
+            pass
+        staging = self._muse_pending_path()
+        try:
+            if os.path.isfile(staging):
+                with open(staging, encoding="utf-8") as f:
+                    data = json.load(f)
+                if not isinstance(data, dict) or data.get("turn_id") in ("", turn):
+                    os.unlink(staging)
+        except (OSError, ValueError):
+            pass
+
+    def _muse_on_seat_system(self, turn_id, session_id, request_id):
+        if not turn_id:
+            return
+        if request_id != self._other_request:
+            return
+        with self._muse_pending_lock:
+            old = getattr(self, "_muse_current_turn", "") or ""
+            if old and old != turn_id and not self._muse_has_delivered(old):
+                self._muse_delete_pending(old)
+            self._muse_current_turn = turn_id
+            self._muse_current_session = session_id
+            self._muse_turn_id = turn_id
+            staging = self._muse_pending_path()
+            fields = None
+            try:
+                if os.path.isfile(staging):
+                    with open(staging, encoding="utf-8") as f:
+                        fields = json.load(f)
+                    if not isinstance(fields, dict):
+                        fields = None
+            except (OSError, ValueError):
+                fields = None
+            if fields is None:
+                fields = getattr(self, "_muse_pending_fields", None) or {}
+            pending = dict(fields)
+            pending.update({"turn_id": turn_id, "session_id": session_id})
+            pending.setdefault("user_text", "")
+            pending.setdefault("mode", "")
+            pending.setdefault("model_label", "")
+            pending.setdefault("model_id", "")
+            pending.setdefault("sent_at", time.time())
+            self._muse_write_json_atomic(self._muse_pending_file(turn_id), pending)
+            try:
+                os.unlink(staging)
+            except OSError:
+                pass
 
     def _other_send(self, model, text):
         """Ask a non-Claude model: its reply streams into the card's log like Claude's would."""
         text = (text or "").strip()[:8000]
-        if not text or self.claude.status in ("working", "starting"):
-            return
+        if not text:
+            return False
+        if self.claude.status in ("working", "starting"):
+            # Same wording as claudeSend's busy gate, so a dropped send is
+            # visible in the top status and in the panel log, not silent.
+            self.set_status("cannot send: still working — tap Stop to cancel, then send again")
+            self.claude._add("note", "cannot send: still working — tap Stop to cancel, then send again")
+            self.claudeChanged.emit()
+            return False
+        self._muse_tracker = {}
+        self.museTrackerChanged.emit()
+        self._muse_current_turn = ""
+        self._muse_current_session = ""
+        self._muse_pending_fields = {}
         link = self.claude
         link._add("you", text)
         history = [{"role": "you" if m["role"] == "you" else "model", "text": m["text"]}
-                   for m in link.messages if m["role"] in ("you", "claude") and m.get("text")][-16:]
+                   for m in link.messages if m["role"] in ("you", "claude") and m.get("text")][-8:]
         reply = link._add("claude", "", live=True, label=model["label"])
         link._set("working")
         self._other_cancel = cancel = threading.Event()
@@ -2573,13 +4227,26 @@ class Host(QObject):
         api = chatlib.effigy_reference(text)
         mode = self._chat_mode
         model = dict(model, research_policy=research_consent.policy(self._claude_research))
+        _sent_at = time.time()
+        _pending = {"turn_id": "", "session_id": "", "user_text": text, "mode": mode,
+                    "model_label": model.get("label", ""), "model_id": model.get("id", ""),
+                    "sent_at": _sent_at}
+        self._muse_pending_fields = dict(_pending)
+        self._muse_write_json_atomic(self._muse_pending_path(), _pending)
         def work():
             got = ""
             last = 0.0
             error = ""
             try:
-                for chunk in chatlib.stream(model, history, cancel, api=api, session=self._other_session, mode=mode):
+                for chunk in chatlib.stream(model, history, cancel, api=api, session=self._other_session, mode=mode,
+                                             turn_callback=lambda tid, sid, _rid=request_id: self._muse_on_seat_system(tid, sid, _rid)):
                     if cancel.is_set():
+                        # Cancelled, not finished: still run the normal
+                        # completion cleanup (live row + status) via the
+                        # Qt-thread signal. If Stop/New already bumped
+                        # _other_request, _other_done drops this stale id,
+                        # so the Stop/New cleanup is not redone.
+                        self.otherAnswer.emit(request_id, got, "")
                         return
                     got += chunk
                     if chunk and time.monotonic() - last >= 0.05:
@@ -2591,6 +4258,7 @@ class Host(QObject):
                 error = str(e)
             self.otherAnswer.emit(request_id, got, error)
         threading.Thread(target=work, daemon=True).start()
+        return True
 
     def _other_row(self):
         for m in reversed(self.claude.messages):
@@ -2618,22 +4286,279 @@ class Host(QObject):
                 with link.lock:
                     link.messages.remove(row)
         if error:
-            link._add("note", "refused: " + error)
+            if ("BUILD_GATE_NO_RECEIPTS" in error
+                    or "Build did not produce a verified saved revision" in error
+                    or "This connection has no execution tools" in error
+                    or "no Build receipt can be produced" in error):
+                # Build gate refusal, not a dropped send: no verified saved
+                # revision was produced, so no build was sent or claimed.
+                # Kept distinct from the generic "refused:" note so a
+                # gate refusal is never mistaken for a send that vanished.
+                link._add("note", "Build gate refused — no verified saved revision was produced, so no build was sent or claimed. This is not a dropped send: " + error)
+                self.set_status("Build gate refused: no verified saved revision — nothing was built")
+            else:
+                link._add("note", "refused: " + error)
         if link.status == "working":
             link._set("idle")
         self.claudeChanged.emit()
+        _turn = self._muse_current_turn
+        if _turn:
+            _outcome = "delivered" if (text and text.strip() and not error) else ("refused" if error else "error")
+            self._muse_write_delivered(_turn, self._muse_current_session, _outcome)
+            self._muse_delete_pending(_turn)
+            self._muse_current_turn = ""
+            self._muse_current_session = ""
 
     @Slot()
+    def redeliver_orphaned_muse_turn(self):
+        """Deliver a Muse reply that arrived after a restart, exactly once. Idempotent."""
+        link = self.claude
+        if link.status in ("working", "starting", "paused"):
+            return
+        if self._other_row() is not None:
+            return
+        pending_turns = []
+        staging = self._muse_pending_path()
+        try:
+            if os.path.isfile(staging):
+                with open(staging, encoding="utf-8") as f:
+                    sdata = json.load(f)
+                if isinstance(sdata, dict):
+                    if not sdata.get("turn_id"):
+                        try:
+                            os.unlink(staging)
+                        except OSError:
+                            pass
+                    else:
+                        pending_turns.append(sdata)
+        except (OSError, ValueError):
+            pass
+        pdir = os.path.join(self._muse_seat_base(), "host-pending")
+        try:
+            names = sorted(os.listdir(pdir))
+        except OSError:
+            names = []
+        for name in names:
+            if not name.endswith(".json"):
+                continue
+            try:
+                with open(os.path.join(pdir, name), encoding="utf-8") as f:
+                    pdata = json.load(f)
+                if isinstance(pdata, dict) and pdata.get("turn_id"):
+                    if pdata["turn_id"] not in [p.get("turn_id") for p in pending_turns]:
+                        pending_turns.append(pdata)
+            except (OSError, ValueError):
+                continue
+        pending_turns.sort(key=lambda p: p.get("sent_at") or 0)
+        for pending in pending_turns:
+            turn = pending.get("turn_id") or ""
+            if not turn:
+                continue
+            if self._muse_has_delivered(turn):
+                self._muse_delete_pending(turn)
+                continue
+            res_path = os.path.join(self._muse_seat_base(), "responses", turn + ".json")
+            try:
+                with open(res_path, encoding="utf-8") as f:
+                    rdata = json.load(f)
+                text = (rdata.get("result") or rdata.get("text") or "").strip()
+            except (OSError, ValueError):
+                continue
+            if (pending.get("mode") or "") == "build":
+                self._muse_write_delivered(turn, pending.get("session_id") or "", "held-build-unverified")
+                self._muse_delete_pending(turn)
+                link._add("note", "A Build reply for turn %s arrived after a restart, but its receipt could not be re-verified in this host, so it is not shown as a completed build. Send the build again if you still want it." % turn)
+                self.claudeChanged.emit()
+                continue
+            if not text:
+                self._muse_write_delivered(turn, pending.get("session_id") or "", "error")
+                self._muse_delete_pending(turn)
+                link._add("note", "A Muse reply for turn %s arrived after a restart but was empty." % turn)
+                self.claudeChanged.emit()
+                continue
+            self._muse_write_delivered(turn, pending.get("session_id") or "", "delivered")
+            if pending.get("user_text"):
+                link._add("you", pending["user_text"])
+            link._add("claude", text, label=pending.get("model_label") or "")
+            self._muse_delete_pending(turn)
+            if link.status == "working":
+                link._set("idle")
+            self.claudeChanged.emit()
+
+    @Slot()
+    def _muse_cancel_turn(self, turn):
+        """STOP SYSTEM 2026-10-25: a host STOP must actually stop the
+        external worker, not just the seat thread. Write a cancel file the
+        worker polls, delete its marker (next heartbeat returns NO_MARKER,
+        which the worker must treat as stop), and delete its confirm file.
+        No response file is forged here; the worker writes its own cancelled
+        response, or the panel already shows the stop note."""
+        if not turn:
+            return
+        try:
+            seat_dir = self._muse_seat_base()
+            os.makedirs(os.path.join(seat_dir, "cancel"), exist_ok=True)
+            self._muse_write_json_atomic(os.path.join(seat_dir, "cancel", turn + ".json"), {"turn_id": turn, "reason": "user-stopped"})
+            marker = os.path.join(seat_dir, "in-progress", turn + ".json")
+            if os.path.isfile(marker):
+                os.remove(marker)
+            confirm = os.path.join(seat_dir, "confirm", turn + ".json")
+            if os.path.isfile(confirm):
+                os.remove(confirm)
+        except OSError:
+            pass
+
+    @Slot()
+    def notifyMuseReply(self):
+        """PORT 2026-10-25 (standalone v2): one desktop notification that a
+        Muse reply arrived. QML calls this only when the app is not active
+        and only once per turn; this slot sends nothing else, opens no
+        window, and never includes reply text (generic title only)."""
+        try:
+            if not shutil.which("notify-send"):
+                return
+            subprocess.Popen(["notify-send", "Geppetto", "Muse replied in Geppetto."],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
     def claudeStop(self):
         model = self._claude_model_record()
-        if model is not None and model["kind"] != "claude-cli" and self.claude.status == "working":
+        if self.claude.status in ("working", "starting", "paused") and (model is None or model["kind"] != "claude-cli"):
             self._other_cancel.set()
             self._other_request += 1
+            if self._muse_current_turn:
+                self._muse_cancel_turn(self._muse_current_turn)
+                self._muse_delete_pending(self._muse_current_turn)
+                self._muse_current_turn = ""
+                self._muse_current_session = ""
             self._other_done(self._other_request, (self._other_row() or {}).get("text", ""), "")
             self.claude._set("stopped")
             self.claude._add("note", "stopped")
             return
         self.claude.stop()
+
+    @Slot(result=bool)
+    def claudeStopAll(self):
+        """STOP button (2026-10-25): stop everything in progress, all
+        providers, without quitting Geppetto and without clearing the
+        transcript. Harmless no-op when nothing is running.
+        1. Other-provider turns: _other_cancel + request bump, so the
+           seat thread drops the old request id.
+        2. Muse file-bridge turn: _muse_cancel_turn (cancel file the
+           worker polls + marker + confirm file deleted) and pending
+           deletion, in the same order as claudeStop/claudeNew so
+           _other_done does not write a delivered record for it.
+        3. Live modeling runs in every pane / watching / waiting:
+           stopResearch on each live run dir (open runs closed, other
+           runs get a cancel request + claude_gate stop). Only those
+           runs are touched; finished models are never deleted.
+        4. Research tied to the turn: research consent state cleared.
+           A research run that is itself a live viewport run is stopped
+           by (3); there is no separate research-process handle to kill.
+        5. Confirmation stash: _confirm_model/_confirm_turn cleared and
+           any seat confirm file for that turn deleted, so nothing
+           auto-starts after the stop.
+        A worker mid-step stops at its next cancel/marker check: the
+        Muse worker polls the cancel file and treats a missing marker
+        as stop (NO_MARKER), and the other-provider seat thread drops
+        the bumped request id. Nothing here can kill a worker between
+        two of its own steps; it stops it at the next check, which is
+        the fastest a cooperative stop can be."""
+        stopped = False
+        try:
+            model = self._claude_model_record()
+        except Exception:
+            model = None
+        muse_turn = getattr(self, "_muse_current_turn", "") or ""
+        busy = self.claude.status in ("working", "starting", "paused")
+        if busy or muse_turn:
+            if model is not None and model.get("kind") == "claude-cli":
+                try:
+                    self.claude.stop()
+                except Exception:
+                    pass
+                stopped = True
+            else:
+                self._other_cancel.set()
+                self._other_request += 1
+                if muse_turn:
+                    self._muse_cancel_turn(muse_turn)
+                    self._muse_delete_pending(muse_turn)
+                    self._muse_current_turn = ""
+                    self._muse_current_session = ""
+                try:
+                    self._other_done(self._other_request, (self._other_row() or {}).get("text", ""), "")
+                except Exception:
+                    pass
+                try:
+                    self.claude._set("stopped")
+                    self.claude._add("note", "stopped")
+                except Exception:
+                    pass
+                stopped = True
+        confirm_turn = getattr(self, "_confirm_turn", "") or ""
+        if confirm_turn:
+            try:
+                seat_dir = self._muse_seat_base()
+                confirm = os.path.join(seat_dir, "confirm", confirm_turn + ".json")
+                if os.path.isfile(confirm):
+                    os.remove(confirm)
+            except Exception:
+                pass
+        if getattr(self, "_confirm_model", "") or confirm_turn:
+            self._confirm_model = ""
+            self._confirm_turn = ""
+            try:
+                self.confirmModelChanged.emit()
+            except Exception:
+                pass
+            stopped = True
+        if getattr(self, "_claude_research", None) is not None or getattr(self, "_claude_research_prompt", False):
+            self._claude_research = None
+            self._claude_research_prompt = False
+            stopped = True
+        run_dirs = set()
+        if getattr(self, "watching", ""):
+            run_dirs.add(self.watching)
+        for pane in getattr(self, "panes", []) or []:
+            if getattr(pane, "run", ""):
+                run_dirs.add(pane.run)
+        for d in list(getattr(self, "waiting", []) or []):
+            run_dirs.add(d)
+        for d in list(getattr(self, "jobs", {}).keys()):
+            run_dirs.add(d)
+        for d in list(run_dirs):
+            try:
+                state = read_state(d)
+            except Exception:
+                continue
+            if state.get("state") in live_runs.OPEN or run_is_live(d, state):
+                try:
+                    self.stopResearch(d)
+                except Exception:
+                    pass
+                stopped = True
+        if stopped:
+            # Tighten 2026-10-25: a stop ends in READY, not in a stuck
+            # "stopped" status. The transcript note "stopped" above still
+            # records what happened; the panel state itself must go back
+            # to idle, so the next send starts clean and the status line
+            # does not sit on STOPPED until the user sends again.
+            try:
+                self.claude._set("idle")
+            except Exception:
+                pass
+            try:
+                self._muse_tracker = {}
+                self.museTrackerChanged.emit()
+            except Exception:
+                pass
+            try:
+                self.claudeChanged.emit()
+            except Exception:
+                pass
+        return stopped
 
     @Slot()
     def claudePause(self):
@@ -2645,6 +4570,20 @@ class Host(QObject):
 
     @Slot()
     def claudeNew(self):
+        self._other_cancel.set()
+        self._other_request += 1
+        if self._muse_current_turn:
+            self._muse_cancel_turn(self._muse_current_turn)
+            self._muse_delete_pending(self._muse_current_turn)
+            self._muse_current_turn = ""
+            self._muse_current_session = ""
+        # Finalize the cancelled other-model turn (live row + status)
+        # before fresh() clears the log; _other_done with the bumped id
+        # passes its stale guard, and the worker's later otherAnswer for
+        # the old id is dropped, so this cleanup runs exactly once.
+        self._other_done(self._other_request, (self._other_row() or {}).get("text", ""), "")
+        self._muse_tracker = {}
+        self.museTrackerChanged.emit()
         self._other_session = str(uuid.uuid4())
         self.claude.fresh()
         self._claude_research = None
@@ -2680,11 +4619,10 @@ class Host(QObject):
         available = [m for m in catalogue if m.get("available", True)]
         wanted = self._chat_model or self._model_preferences.get("chat", "")
         self._chat_model = wanted if any(m["id"] == wanted for m in available) else (available[0]["id"] if available else "")
-        wanted = self._claude_model or self._model_preferences.get("claude", "") or "claude/opus"
-        if not any(m["id"] == wanted for m in available):
-            claude = [m for m in available if m["kind"] == "claude-cli"]
-            wanted = claude[0]["id"] if claude else (available[0]["id"] if available else "")
-        self._claude_model = wanted
+        # Provider picker starts empty (2026-10-25): no auto-pick, ever.
+        # A pick lasts for this app session only; a new launch starts at choice.
+        wanted = self._claude_model
+        self._claude_model = wanted if any(m["id"] == wanted for m in available) else ""
         picked = chatlib.find(wanted, available)
         self.claude.set_model(picked["model"] if picked and picked["kind"] == "claude-cli" else "")
         self._apply_claude_persona(picked)
@@ -2820,6 +4758,9 @@ class Host(QObject):
 
     @Slot(str)
     def sendChat(self, text):
+        if self._provider_auth is not None:
+            self.set_status("Finish provider sign-in in the terminal before sending.")
+            return
         text = (text or "").strip()[:8000]
         images = list(self._chat_pending)
         if (not text and not images) or self._chat_busy:
@@ -2982,7 +4923,7 @@ def pane_args(args):
 
 
 def main():
-    if len(sys.argv) > 1 and sys.argv[1] in ("snap", "quit", "open", "shut", "page", "cmd", "mask", "clip", "draw", "tools", "replay", "layout", "scheme", "vpmenu", "face", "folder", "openfiled", "placefiled", "drag", "where", "research", "scroll", "sheet", "pane"):
+    if len(sys.argv) > 1 and sys.argv[1] in ("snap", "quit", "open", "shut", "page", "cmd", "mask", "clip", "draw", "tools", "replay", "layout", "scheme", "vpmenu", "face", "folder", "openfiled", "placefiled", "drag", "where", "research", "scroll", "sheet", "pane", "reload", "gate-reserve", "gate-check", "gate-release", "gate-place"):
         app = QCoreApplication(sys.argv)
         cmd = sys.argv[1] + (" " + os.path.abspath(sys.argv[2]) if sys.argv[1] in ("snap", "clip", "replay", "sheet") else
                              " " + pane_args(sys.argv[2:]) if sys.argv[1] == "pane" else
@@ -3000,12 +4941,19 @@ def main():
         return
     app.setApplicationName("Geppetto")
     app.setDesktopFileName("geppetto")
-    icon = os.path.join(PROJECT, "geppetto.svg")
-    if os.path.exists(icon):
-        app.setWindowIcon(QIcon(icon))
+    # Window icon (2026-10-25): PROJECT/geppetto.svg did not exist, so
+    # setWindowIcon was silently skipped and the taskbar showed no icon.
+    # Try every place the icon actually ships, first hit wins.
+    for _icon in (os.path.join(PROJECT, "geppetto.svg"),
+                  os.path.expanduser("~/.local/share/geppetto/geppetto.svg"),
+                  os.path.expanduser("~/.local/share/icons/hicolor/scalable/apps/geppetto.svg")):
+        if os.path.exists(_icon):
+            app.setWindowIcon(QIcon(_icon))
+            break
 
     global HOST
     HOST = host = Host()
+    host.rehydrate_gate_slots()  # LANE C, contract §6: before any scan/restore
     qmlRegisterType(Viewport, "Geppetto", 1, 0, "Viewport")
     eng = QQmlApplicationEngine()
     eng.rootContext().setContextProperty("host", host)
@@ -3013,19 +4961,36 @@ def main():
     if not eng.rootObjects():
         sys.exit(1)
     host.window = eng.rootObjects()[0]
+    # Hot reload, 2026-10-25: the engine and the QML path live on the host so
+    # reloadUi() can clear the cache and re-load. A file watcher on every .qml
+    # in this folder (cabinet.qml, HangingFileMenu, ClaudePanel, ...) reloads
+    # automatically, debounced, when a file is saved — no restart, no close.
+    # A bad save never blanks the UI: reloadUi() keeps the old root on failure.
+    host._engine = eng
+    host._qml_path = os.path.join(HERE, "cabinet.qml")
+    try:
+        from PySide6.QtCore import QFileSystemWatcher
+        host._watcher = QFileSystemWatcher(host)
+        host._watcher.addPaths([os.path.join(HERE, f) for f in os.listdir(HERE) if f.endswith(".qml")])
+        host._watcher.fileChanged.connect(
+            lambda _path: QTimer.singleShot(300, host.reloadUi))
+    except Exception:
+        pass
     host.scanRuns()
     host.refreshTools()
     host.refreshChat()
     host.restore_panes()               # panes 2-4 come back on what they showed before the restart
     host.autoFollow()                  # a run still building when the chest opens: boot straight into watching it
+    host.redeliver_orphaned_muse_turn()  # orphaned Muse turn from before the restart, if its reply has landed
     if model:
         host.openModel(model)
-    elif not host.watching and os.path.isfile(DEFAULT_MODEL):
-        host.openModel(DEFAULT_MODEL)  # pane 1 starts on our character; runs can still take it
-        host._mine = False
     elif not host.watching:
-        # pane 1 starts empty, open to any run; VIEWPORTS > MY SCENE opens your own model there
-        host.set_status("pane 1 is open: any run can land in it. VIEWPORTS > MY SCENE for your own")
+        # 2026-10-25: opening shows a real grid scene, not a label: the
+        # empty viewer is pane 1's viewer, so the user can orbit, pan,
+        # left+right drag and fly around it, and a run can still land
+        # in it (watchRun sends it follow). No model is loaded.
+        host.startEmptyViewer()
+    app.aboutToQuit.connect(host.quit_all)
     app.aboutToQuit.connect(host.benchClose)
     app.aboutToQuit.connect(host.stop)
     app.aboutToQuit.connect(host.claude.close)
@@ -3056,8 +5021,8 @@ def main():
             if msg.startswith("as "):                      # as SESSION VERB ...: the client named its session
                 _, owner, msg = (msg.split(" ", 2) + ["", ""])[:3]
             if msg == "raise" or msg.startswith("model "):
-                host.window.show()          # no raise_/requestActivate: never take focus from what po is typing in
-                kwin_raise()
+                host.window.show()
+                kwin_activate()  # explicit open: actually come to the front, not just flash
                 if msg.startswith("model "):
                     host.openModel(msg[6:])
                     host._mine = False             # a session showed it: pane 1 stays open to runs
@@ -3082,7 +5047,7 @@ def main():
                 if name == "chat":                         # the chat, in its own window, not unrolled over the model
                     host.window.setProperty("chatOut", msg[:4] == "open")
                 elif name == "claude":                     # Claude, in its own window
-                    host.window.setProperty("claudeOpen", msg[:4] == "open")
+                    host.window.setProperty("chatOpen", msg[:4] == "open")
                 elif d is None:
                     reply = "no such drawer"
                 else:
@@ -3098,25 +5063,6 @@ def main():
                 host.window.setProperty("sheetDir", os.path.abspath(msg[5:].strip()) if msg[5:].strip() else "")
             elif msg in ("face", "face shut"):           # the Face Poser on pane 1 (pane N face for the others)
                 host.faceOpen(0 if msg == "face shut" else 1)
-            elif msg == "panemenu shut" or msg == "vpmenu shut":
-                host.window.findChild(QObject, "paneMenu").setProperty("open", False)
-            elif msg.startswith("panemenu") or msg == "vpmenu":  # panemenu [N]: pane N's header menu
-                n = int(msg[8:].strip() or 1) if msg.startswith("panemenu") else 1
-                QMetaObject.invokeMethod(host.window.findChild(QObject, "paneMenu"), "openFor",
-                                         Q_ARG("QVariant", n), Q_ARG("QVariant", None))
-            elif msg == "wheel":                         # the WHEEL key
-                w = host.window.findChild(QObject, "toolWheel")
-                w.setProperty("manual", not w.property("manual"))
-            elif msg.startswith("pick "):                  # pick KEY [LABEL]: a tool off the hand wheel
-                key, _, label = msg[5:].strip().partition(" ")
-                QMetaObject.invokeMethod(host.window.findChild(QObject, "toolWheel"), "picked",
-                                         Q_ARG("QString", key), Q_ARG("QString", label or key.upper()))
-            elif msg.startswith("card "):                  # card KEY=VALUE: type into the tool card
-                k, _, v = msg[5:].partition("=")
-                card = host.window.findChild(QObject, "toolCard")
-                QMetaObject.invokeMethod(card, "setKey", Q_ARG("QVariant", k.strip()), Q_ARG("QVariant", v.strip()))
-            elif msg == "apply":                           # the card's APPLY
-                QMetaObject.invokeMethod(host.window.findChild(QObject, "toolCard"), "applyNow")
             elif msg == "undo":
                 host.benchUndo()
             elif msg in ("view edit", "view run"):         # the EDIT/RUN key
@@ -3129,9 +5075,6 @@ def main():
                 host.replaySeek(int(msg[5:]))
             elif msg == "keep" or msg.startswith("keep "):   # the card's KEEP [as NAME]
                 reply = host.benchKeep(msg[5:].strip()) or host._bench.get("error", "nothing kept")
-            elif msg == "folder":                          # open/shut the MODELING folder
-                f = host.window.findChild(QObject, "folderView")
-                f.setProperty("open", not f.property("open"))
             elif msg == "where":                           # what's on screen: watched run, replay, bench
                 reply = json.dumps({"watching": host.watching, "replay": host._replay.get("dir", ""), "playing": host._replay.get("playing"),
                                     "bench": {k: host._bench.get(k) for k in ("dir", "alive", "ready", "busy", "error", "view")}})
@@ -3164,6 +5107,26 @@ def main():
             elif msg == "tools":
                 host.refreshTools()
                 reply = "%d drawing(s)" % len(host._drawings)
+            elif msg.startswith("gate-reserve "):
+                _, iid, preferred = msg.split(" ", 2)
+                reply = str(host.gate_reserve(iid, preferred) or "FULL")
+            elif msg.startswith("gate-check "):
+                reply = str(host._gate_slots.get(msg[11:], 0))
+            elif msg.startswith("gate-release "):
+                iid = msg[13:]
+                host._gate_free_slot(iid)
+                for run, entry in list(host._gate_placements.items()):
+                    if entry.get("iid") == iid:
+                        host._gate_placements.pop(run, None)
+                        # The intent died after a run was filed: never let
+                        # auto-follow land that run in a pane later.
+                        host._gate_denied.add(run)
+                reply = "ok"
+            elif msg.startswith("gate-place "):
+                _, iid, run = msg.split(" ", 2)
+                reply = "ok" if host.gate_place(iid, run) else "no reservation"
+            elif msg == "reload":
+                reply = "reloaded" if host.reloadUi() else "reload failed"
             elif msg == "quit" and chest_busy():          # another session is driving the chest live: don't pull it away
                 reply = "busy, not quitting: " + chest_busy() + " (quit force to override)"
             elif msg in ("quit", "quit force"):

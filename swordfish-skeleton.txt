@@ -1,0 +1,12 @@
+echo "Swordfish skeleton layer 1, from the accurate diagram"
+add Blob name=Rostrum shapes="capsule -30,0,0 -45,0,0 1.0; capsule -45,0,0 -58,0,0 0.4" voxel=0.35
+add Blob name=LowerJaw shapes="capsule -30,-2,0 -48,-2,0 0.6" voxel=0.35
+add Blob name=Skull shapes="capsule -32,0,0 -22,0,0 4.0; sphere -28,1,0 2.0" voxel=0.35
+add Blob name=Spine shapes="capsule -30,0,0 -10,0,0 1.5; capsule -10,0,0 10,0,0 1.8; capsule 10,0,0 30,0,0 1.2; capsule 30,0,0 42,0,0 0.7" voxel=0.35
+add Blob name=Ribs shapes="capsule -20,3,0 -20,-5,0 0.35; capsule -15,3,0 -15,-5,0 0.35; capsule -10,3,0 -10,-5,0 0.35; capsule -5,3,0 -5,-5,0 0.35; capsule 0,3,0 0,-5,0 0.35; capsule 5,3,0 5,-5,0 0.35; capsule 10,3,0 10,-5,0 0.35" voxel=0.35
+add Blob name=DorsalRays shapes="capsule -18,3,0 -16,12,0 0.4; capsule -14,3,0 -12,13,0 0.4; capsule -10,3,0 -8,12,0 0.4; capsule -6,3,0 -4,10,0 0.4" voxel=0.35
+add Blob name=PectoralRays shapes="capsule -22,-3,0 -18,-10,0 0.4; capsule -20,-3,0 -16,-11,0 0.4" voxel=0.35
+add Blob name=AnalRays shapes="capsule 24,-2,0 28,-8,0 0.4" voxel=0.35
+add Blob name=CaudalRays shapes="capsule 42,0,0 55,11,0 0.5; capsule 42,0,0 55,-11,0 0.5; capsule 42,0,0 52,0,0 0.4" voxel=0.35
+material 0 color=#e6dcc0 rough=0.8 metal=0
+save swordfish_skeleton.effigy

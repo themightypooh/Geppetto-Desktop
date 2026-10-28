@@ -1,0 +1,426 @@
+using System;
+using System.Collections.Generic;
+
+namespace Effigy;
+
+/// <summary>Which body a run of vertices in a merged mesh came from. See PartStudio.ToMeshWithBodies.</summary>
+public readonly struct BodyRange
+{
+	public readonly string BodyId;
+	public readonly string BodyName;
+	public readonly int Start;
+	public readonly int Count;
+
+	/// <summary>The body arrived with skin weights of its own — an imported rigged mesh, or a garment
+	/// that copied the weights of the body under it. Binding keeps them unless the body is pinned
+	/// to a bone.</summary>
+	public readonly bool HasOwnWeights;
+
+	public BodyRange( string bodyId, string bodyName, int start, int count, bool hasOwnWeights = false )
+	{
+		BodyId = bodyId;
+		BodyName = bodyName;
+		Start = start;
+		Count = count;
+		HasOwnWeights = hasOwnWeights;
+	}
+
+	public bool Contains( int vertex ) => vertex >= Start && vertex < Start + Count;
+
+	public override string ToString() => $"{BodyName} [{Start}..{Start + Count})";
+}
+
+/// <summary>
+/// Generating skin weights, so nobody has to paint them.
+///
+/// TWO FAMILIES. This file holds the cheap ones: distance to the bone SEGMENT (BindRigid,
+/// BindSmooth) and smoothing over mesh adjacency (SmoothWeights), which need no solver and are
+/// right for hard-surface props, but let two limbs that are close in space bleed into each other.
+/// The shape-aware ones — bone heat over the cotangent Laplacian and geodesic voxel binding — are
+/// in <see cref="AutoWeights"/>, reached through <see cref="Bind"/> with a <see cref="BindMethod"/>.
+///
+/// THE INTERESTING ONE IS BindBodies. Because the model is parametric, a bone can own a FEATURE
+/// rather than a set of vertices — "this cylinder is the forearm". Vertex indices die on every
+/// rebuild; a body id does not. So the binding survives a parameter change, and the weights are
+/// regenerated rather than invalidated. Blender cannot do this, because it has no history to bind
+/// against.
+/// </summary>
+public static partial class SkinBinder
+{
+	/// <summary>Each vertex fully weighted to whichever bone segment is nearest. Blocky across
+	/// joints, and exactly right for a rigid mechanical part like a hinge or a piston.</summary>
+	public static SkinWeights BindRigid( PolyMesh mesh, Skeleton skeleton )
+	{
+		RequireBones( skeleton );
+
+		var weights = new SkinWeights();
+		var segments = Segments( skeleton );
+
+		foreach ( var p in mesh.Positions )
+		{
+			var best = 0;
+			var bestDist = float.MaxValue;
+
+			for ( var b = 0; b < segments.Length; b++ )
+			{
+				var d = DistanceToSegment( p, segments[b].Head, segments[b].Tail );
+
+				if ( d < bestDist )
+				{
+					bestDist = d;
+					best = b;
+				}
+			}
+
+			weights.Vertices.Add( new[] { new BoneWeight( best, 1f ) } );
+		}
+
+		return weights;
+	}
+
+	/// <summary>
+	/// Inverse-distance weighting against every bone segment, so joints bend smoothly.
+	///
+	/// `falloff` is the exponent: 1 is very soft and reaches across the whole model, 4 is nearly
+	/// rigid. 2 is a reasonable default and matches what most auto-skin tools land on.
+	/// Contributions below `cutoff` of the strongest are dropped before normalising, which is what
+	/// stops a bone on the far side of the model owning half a percent of every vertex.
+	/// </summary>
+	public static SkinWeights BindSmooth( PolyMesh mesh, Skeleton skeleton, float falloff = 2f, float cutoff = 0.02f )
+	{
+		RequireBones( skeleton );
+
+		if ( falloff <= 0f )
+			throw new ArgumentOutOfRangeException( nameof( falloff ), "Falloff must be positive" );
+
+		var weights = new SkinWeights();
+		var segments = Segments( skeleton );
+		var distances = new float[segments.Length];
+
+		foreach ( var p in mesh.Positions )
+		{
+			var nearest = float.MaxValue;
+
+			for ( var b = 0; b < segments.Length; b++ )
+			{
+				distances[b] = DistanceToSegment( p, segments[b].Head, segments[b].Tail );
+				nearest = MathF.Min( nearest, distances[b] );
+			}
+
+			// A vertex sitting exactly on a bone would divide by zero. Snapping it wholly to that
+			// bone is both the limit of the formula and the answer anyone would expect.
+			if ( nearest < 1e-6f )
+			{
+				var onBone = Array.IndexOf( distances, nearest );
+				weights.Vertices.Add( new[] { new BoneWeight( onBone < 0 ? 0 : onBone, 1f ) } );
+				continue;
+			}
+
+			var acc = new Dictionary<int, float>();
+			var strongest = 0f;
+
+			for ( var b = 0; b < segments.Length; b++ )
+			{
+				var influence = 1f / MathF.Pow( distances[b], falloff );
+				acc[b] = influence;
+				strongest = MathF.Max( strongest, influence );
+			}
+
+			var floor = strongest * cutoff;
+
+			foreach ( var b in new List<int>( acc.Keys ) )
+			{
+				if ( acc[b] < floor )
+					acc.Remove( b );
+			}
+
+			weights.Vertices.Add( SkinWeights.Finish( acc ) );
+		}
+
+		return weights;
+	}
+
+	/// <summary>
+	/// Bind whole bodies to named bones — the parametric path.
+	///
+	/// Every vertex of a bound body gets that bone at full weight. Bodies with no mapping fall back
+	/// to the nearest bone, so a partial mapping still produces a complete rig rather than a mesh
+	/// with holes in its weighting.
+	///
+	/// Follow it with SmoothWeights to soften the seams between bodies; on its own this produces
+	/// rigid parts, which is the correct result for machinery and the wrong one for a limb.
+	/// </summary>
+	public static SkinWeights BindBodies(
+		PolyMesh mesh,
+		IReadOnlyList<BodyRange> ranges,
+		IReadOnlyDictionary<string, string> bodyIdToBoneName,
+		Skeleton skeleton )
+	{
+		RequireBones( skeleton );
+
+		if ( ranges is null ) throw new ArgumentNullException( nameof( ranges ) );
+		if ( bodyIdToBoneName is null ) throw new ArgumentNullException( nameof( bodyIdToBoneName ) );
+
+		var fallback = BindRigid( mesh, skeleton );
+		var weights = new SkinWeights( mesh.VertexCount );
+
+		for ( var i = 0; i < mesh.VertexCount; i++ )
+			weights[i] = fallback[i];
+
+		foreach ( var range in ranges )
+		{
+			if ( !bodyIdToBoneName.TryGetValue( range.BodyId, out var boneName ) )
+			{
+				// Not pinned, but carrying weights of its own: those win over nearest-bone. A
+				// garment that copied the body's weights must not be flattened back to rigid here.
+				if ( range.HasOwnWeights && mesh.IsRigged )
+				{
+					for ( var i = range.Start; i < range.Start + range.Count && i < weights.Count; i++ )
+						if ( mesh.Skin[i] is { Length: > 0 } own )
+							weights[i] = own;
+				}
+
+				continue;
+			}
+
+			var bone = skeleton.IndexOf( boneName );
+
+			if ( bone < 0 )
+				throw new InvalidOperationException(
+					$"Body '{range.BodyName}' is bound to bone '{boneName}', which is not in the skeleton" );
+
+			var bound = new[] { new BoneWeight( bone, 1f ) };
+
+			for ( var i = range.Start; i < range.Start + range.Count && i < weights.Count; i++ )
+				weights[i] = bound;
+		}
+
+		return weights;
+	}
+
+	/// <summary>
+	/// Average each vertex's weights with its mesh neighbours, a few times.
+	///
+	/// This is what turns a rigid body-bound rig into one that bends: it diffuses weight ACROSS THE
+	/// SURFACE rather than through space, so it respects the mesh the way plain distance weighting
+	/// does not. It is a poor man's heat diffusion — same idea, no solver, run to a fixed iteration
+	/// count instead of to convergence.
+	///
+	/// `strength` is how far each pass moves toward the neighbour average; 1 is a full replace.
+	/// Each pass is an affine combination, so the partition of unity survives any number of them.
+	/// </summary>
+	public static SkinWeights SmoothWeights( PolyMesh mesh, SkinWeights weights, int iterations = 2, float strength = 0.5f )
+	{
+		if ( iterations <= 0 )
+			return weights;
+
+		strength = Math.Clamp( strength, 0f, 1f );
+
+		var neighbours = mesh.BuildVertexEdges();
+		var current = weights;
+
+		for ( var pass = 0; pass < iterations; pass++ )
+		{
+			var next = new SkinWeights( mesh.VertexCount );
+
+			for ( var v = 0; v < mesh.VertexCount; v++ )
+			{
+				var edges = neighbours[v];
+
+				if ( edges.Count == 0 )
+				{
+					next[v] = current[v];
+					continue;
+				}
+
+				var terms = new List<(BoneWeight[], float)>( edges.Count + 1 )
+				{
+					(current[v], 1f - strength)
+				};
+
+				var share = strength / edges.Count;
+
+				foreach ( var e in edges )
+					terms.Add( (current[e.A == v ? e.B : e.A], share) );
+
+				next[v] = SkinWeights.Blend( terms );
+			}
+
+			current = next;
+		}
+
+		return current;
+	}
+
+	/// <summary>
+	/// Linear blend skinning: deform bind positions by a posed skeleton.
+	///
+	/// THE FIFTEEN LINES THE POSE PREVIEW RUNS ON. For each vertex, blend its bind position through
+	/// every influencing bone's skin matrix — <c>pose * bind⁻¹</c>, the transform that carries the
+	/// bind pose to the current pose — and sum by weight. At a zero pose (pose == bind) every skin
+	/// matrix is identity and the mesh is unchanged, which is the property a "reset pose" leans on.
+	///
+	/// Positions come back as a fresh array parallel to <paramref name="positions"/>; the caller
+	/// owns putting them on a display copy. The cage is never touched — the CAD history owns the
+	/// bind mesh, and a pose must not be able to write its way back into it.
+	/// </summary>
+	public static Vec3[] Deform( IReadOnlyList<Vec3> positions, SkinWeights weights,
+		IReadOnlyList<Xform> bindWorld, IReadOnlyList<Xform> poseWorld )
+	{
+		if ( positions is null ) throw new ArgumentNullException( nameof( positions ) );
+		if ( weights is null ) throw new ArgumentNullException( nameof( weights ) );
+		if ( bindWorld is null ) throw new ArgumentNullException( nameof( bindWorld ) );
+		if ( poseWorld is null ) throw new ArgumentNullException( nameof( poseWorld ) );
+
+		// One skin matrix per bone, computed once rather than per vertex. A bone that has not moved
+		// still pays for an identity here, which is cheap and keeps the loop branch-free.
+		var skin = new Xform[bindWorld.Count];
+
+		for ( var b = 0; b < skin.Length; b++ )
+			skin[b] = poseWorld[b] * bindWorld[b].Inverse;
+
+		var result = new Vec3[positions.Count];
+
+		for ( var v = 0; v < positions.Count; v++ )
+		{
+			var p = positions[v];
+			var acc = Vec3.Zero;
+
+			foreach ( var bw in weights[v] )
+				acc += skin[bw.Bone].TransformPoint( p ) * bw.Weight;
+
+			// An unweighted vertex has no bone to move it; leaving it on its bind position is the
+			// honest answer, and a world better than collapsing it onto the origin.
+			result[v] = weights[v].Length == 0 ? p : acc;
+		}
+
+		return result;
+	}
+
+	/// <summary>
+	/// The bone whose segment passes closest to a point.
+	///
+	/// This is <see cref="BindRigid"/>'s inner loop, lifted out because collision needs the same
+	/// answer for a whole body that weighting needs for a vertex: an unassigned body has to end up
+	/// on SOME bone, and the nearest one is the one its vertices were already going to be weighted
+	/// to. Leaving it on the root instead would be the original bug in miniature — a mesh that bends
+	/// away from collision that does not.
+	/// </summary>
+	public static int NearestBone( Vec3 point, Skeleton skeleton )
+	{
+		RequireBones( skeleton );
+
+		var segments = Segments( skeleton );
+		var best = 0;
+		var bestDist = float.MaxValue;
+
+		for ( var b = 0; b < segments.Length; b++ )
+		{
+			var d = DistanceToSegment( point, segments[b].Head, segments[b].Tail );
+
+			if ( d >= bestDist )
+				continue;
+
+			bestDist = d;
+			best = b;
+		}
+
+		return best;
+	}
+
+	// --- helpers -----------------------------------------------------------------------------
+
+	static void RequireBones( Skeleton skeleton )
+	{
+		if ( skeleton is null )
+			throw new ArgumentNullException( nameof( skeleton ) );
+
+		if ( skeleton.Count == 0 )
+			throw new InvalidOperationException( "Cannot bind to a skeleton with no bones" );
+	}
+
+	static (Vec3 Head, Vec3 Tail)[] Segments( Skeleton skeleton )
+	{
+		var segments = new (Vec3, Vec3)[skeleton.Count];
+
+		for ( var i = 0; i < skeleton.Count; i++ )
+			segments[i] = (skeleton.HeadWorld( i ), skeleton.TailWorld( i ));
+
+		return segments;
+	}
+
+	/// <summary>Distance from a point to a line segment — not to the infinite line, which would
+	/// let a short bone influence vertices far off its ends.</summary>
+	public static float DistanceToSegment( Vec3 p, Vec3 a, Vec3 b )
+	{
+		var ab = b - a;
+		var lengthSquared = ab.LengthSquared;
+
+		if ( lengthSquared < 1e-12f )
+			return (p - a).Length;
+
+		var t = Math.Clamp( Vec3.Dot( p - a, ab ) / lengthSquared, 0f, 1f );
+		return (p - (a + ab * t)).Length;
+	}
+
+	/// <summary>
+	/// Give <paramref name="target"/> the weights of the nearest point on <paramref name="source"/>'s
+	/// surface — how a garment learns to move with the body it was fitted to.
+	///
+	/// NEAREST SURFACE, NOT NEAREST VERTEX. A shirt vertex over the middle of a large chest face is
+	/// nearest to whichever corner happens to be closest, and snapping to it gives stripes of
+	/// rigid weights across the fabric. The point on the face is blended from all its corners by
+	/// inverse distance, which is smooth across the face and exact at a corner.
+	///
+	/// Vertices further than <paramref name="maxDistance"/> from the source keep what they had (or
+	/// nothing). Returns how many were reached.
+	/// </summary>
+	public static int TransferFrom( PolyMesh target, PolyMesh source, float maxDistance = float.MaxValue )
+	{
+		if ( target is null )
+			throw new ArgumentNullException( nameof( target ) );
+		if ( source is null || !source.IsRigged )
+			throw new InvalidOperationException( "The body to copy weights from has no skin weights. Rig it first." );
+
+		var tree = MeshBVH.Build( source );
+		var weights = target.IsRigged ? target.Skin.Clone() : new SkinWeights( target.VertexCount );
+		var reached = 0;
+
+		for ( var v = 0; v < target.VertexCount; v++ )
+		{
+			if ( tree.NearestSurface( source, target.Positions[v], maxDistance ) is not { } hit )
+				continue;
+
+			var face = source.Faces[hit.FaceIndex];
+			var terms = new List<(BoneWeight[] Weights, float Coefficient)>();
+			var total = 0f;
+
+			foreach ( var corner in face.Indices )
+			{
+				var d = (source.Positions[corner] - hit.Point).Length;
+
+				// On a corner: that corner's weights, exactly.
+				if ( d < 1e-6f )
+				{
+					terms.Clear();
+					terms.Add( (source.Skin[corner], 1f) );
+					total = 1f;
+					break;
+				}
+
+				var k = 1f / d;
+				terms.Add( (source.Skin[corner], k) );
+				total += k;
+			}
+
+			for ( var i = 0; i < terms.Count; i++ )
+				terms[i] = (terms[i].Weights, terms[i].Coefficient / total);
+
+			weights[v] = SkinWeights.Blend( terms );
+			reached++;
+		}
+
+		target.Skin = weights;
+		return reached;
+	}
+}

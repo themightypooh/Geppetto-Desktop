@@ -60,6 +60,18 @@ public static class LodExport
 		public bool ReachedTarget;
 		public float SwitchDistance;
 
+		/// <summary>Retopo wave 3: surface deviation of this level from the source mesh it was
+		/// reduced from, measured by projecting level vertices onto the source (see
+		/// <see cref="MeasureError"/>). NaN when not measured (source too large to scan).</summary>
+		public float MaxError = float.NaN;
+		public float MeanError = float.NaN;
+
+		/// <summary>Retopo wave 3: worst normal deviation in degrees between a level face and
+		/// the source face under its centroid. NaN when not measured.</summary>
+		public float MaxNormalDeviation = float.NaN;
+
+		public bool HasError => float.IsFinite( MaxError );
+
 		/// <summary>The files written for this level, on disk.</summary>
 		public List<string> Files = new();
 
@@ -70,6 +82,70 @@ public static class LodExport
 	/// <summary>The decimated copy at <paramref name="ratio"/> of the triangles, seams held.</summary>
 	public static Decimate.Result Reduce( PolyMesh mesh, float ratio ) =>
 		Decimate.Run( mesh, new Decimate.Options { Ratio = ratio } );
+
+	/// <summary>
+	/// Retopo wave 3: the distance at which a surface error subtends
+	/// <paramref name="targetPixels"/> on screen, for a camera with the given vertical FOV and
+	/// screen height. World-per-pixel at distance d is 2*d*tan(fov/2)/screenHeight, so
+	/// d = error * screenHeight / (2 * targetPixels * tan(fov/2)). A level whose max error
+	/// is zero can be used at distance zero — it is lossless at any range the formula can
+	/// see. This replaces the size x 6/15 heuristic only where an error was actually
+	/// measured; <see cref="DefaultDistance"/> stays the fallback everywhere else, so
+	/// existing .vmdl distances do not silently change.
+	/// </summary>
+	public static float PixelDistance( float maxError, float targetPixels = 2f, float fovDeg = 50f, float screenHeight = 1080f )
+	{
+		if ( maxError <= 0f || targetPixels <= 0f || screenHeight <= 0f )
+			return 0f;
+		var halfFov = fovDeg * MathF.PI / 360f;
+		var tan = MathF.Tan( halfFov );
+		if ( tan <= 0f )
+			return 0f;
+		return maxError * screenHeight / (2f * targetPixels * tan);
+	}
+
+	/// <summary>
+	/// Retopo wave 3: per-level error against the source mesh. Level vertices are projected
+	/// onto the source with <see cref="MeshBVH"/> (max and mean distance); each level face's
+	/// normal is compared with the source face under its centroid (max deviation, degrees).
+	/// Skipped (NaN fields) when the source has more than 500,000 vertices, where a full
+	/// scan stops being a log line and starts being a job.
+	/// </summary>
+	public static void MeasureError( PolyMesh source, Level level )
+	{
+		if ( source is null || level?.Mesh is null || source.FaceCount == 0 || level.Mesh.FaceCount == 0
+			|| source.Positions.Count > 500_000 )
+			return;
+		var bvh = MeshBVH.Build( source );
+		var maxDistance = MathF.Max( source.BoundsDiagonal, 1e-6f ) * 2f + 1f;
+		double sum = 0;
+		var count = 0;
+		var max = 0f;
+		foreach ( var pos in level.Mesh.Positions )
+		{
+			var hit = bvh.NearestSurface( source, pos, maxDistance );
+			if ( hit is not { } h ) continue;
+			sum += h.Distance;
+			if ( h.Distance > max ) max = h.Distance;
+			count++;
+		}
+		if ( count == 0 ) return;
+		level.MaxError = max;
+		level.MeanError = (float)(sum / count);
+		var maxNormal = 0f;
+		foreach ( var face in level.Mesh.Faces )
+		{
+			var centroid = Vec3.Zero;
+			foreach ( var vi in face.Indices ) centroid += level.Mesh.Positions[vi];
+			centroid /= Math.Max( 1, face.Count );
+			var hit = bvh.NearestSurface( source, centroid, maxDistance );
+			if ( hit is not { } h || h.FaceIndex < 0 || h.FaceIndex >= source.Faces.Count ) continue;
+			var dot = Math.Clamp( Vec3.Dot( level.Mesh.FaceNormal( face ), source.FaceNormal( source.Faces[h.FaceIndex] ) ), -1f, 1f );
+			var angle = MathF.Acos( dot ) * 180f / MathF.PI;
+			if ( angle > maxNormal ) maxNormal = angle;
+		}
+		level.MaxNormalDeviation = maxNormal;
+	}
 
 	/// <summary>
 	/// The levels as meshes, without writing anything. <paramref name="distances"/> may be null
@@ -122,7 +198,7 @@ public static class LodExport
 		for ( var i = 0; i < ratios.Count; i++ )
 		{
 			var result = Reduce( mesh, ratios[i] );
-			levels.Add( new Level
+			var level = new Level
 			{
 				Index = i + 1,
 				Ratio = ratios[i],
@@ -130,9 +206,65 @@ public static class LodExport
 				Triangles = result.ToTriangles,
 				ReachedTarget = result.ReachedTarget,
 				SwitchDistance = distances?[i] ?? DefaultDistance( mesh.BoundsDiagonal, i + 1 ),
-			} );
+			};
+			MeasureError( mesh, level );
+			if ( distances is null && level.HasError && level.MaxError > 0f )
+				level.SwitchDistance = PixelDistance( level.MaxError );
+			levels.Add( level );
 		}
 
+		return levels;
+	}
+
+	/// <summary>
+	/// Retopo wave 3: quad LODs. The same ladder as <see cref="BuildLevels"/>, but each level
+	/// is a <see cref="QuadRemesh"/> at a descending face target (source faces x ratio, at
+	/// least 16) instead of a triangle decimation, so a distant level still subdivides and
+	/// deforms like a quad mesh. Attributes are transferred onto each level with
+	/// <see cref="AttributeTransfer"/> unless <paramref name="transfer"/> is false — without
+	/// it a quad LOD would lose its rig and texture exactly the way a quad remesh used to.
+	/// Switch distances use the measured pixel distance where an error was measured, else
+	/// the standard heuristic.
+	/// </summary>
+	public static List<Level> BuildQuadLevels( PolyMesh mesh, int lodLevels, IReadOnlyList<float> distances = null, bool transfer = true )
+	{
+		if ( lodLevels < 0 || lodLevels > 3 )
+			throw new ArgumentException( "lodLevels must be 0, 1, 2 or 3", nameof( lodLevels ) );
+		if ( mesh is null )
+			throw new ArgumentNullException( nameof( mesh ) );
+		var lod0Triangles = 0;
+		foreach ( var face in mesh.Faces )
+			lod0Triangles += Math.Max( 0, face.Count - 2 );
+		var levels = new List<Level>
+		{
+			new() { Index = 0, Ratio = 1f, Mesh = mesh, Triangles = lod0Triangles,
+				ReachedTarget = true, SwitchDistance = 0f },
+		};
+		for ( var i = 0; i < lodLevels; i++ )
+		{
+			var ratio = DefaultRatiosLod3[i];
+			var targetFaces = Math.Max( 16, (int)MathF.Round( mesh.FaceCount * ratio ) );
+			var result = QuadRemesh.Run( mesh, new QuadRemesh.Options { TargetFaces = targetFaces } );
+			var levelMesh = result.Mesh;
+			var reached = levelMesh.FaceCount > 0;
+			if ( !reached )
+				levelMesh = mesh;
+			else if ( transfer )
+				AttributeTransfer.Transfer( mesh, levelMesh );
+			var level = new Level
+			{
+				Index = i + 1,
+				Ratio = ratio,
+				Mesh = levelMesh,
+				Triangles = Decimate.TriangleCount( levelMesh ),
+				ReachedTarget = reached,
+				SwitchDistance = distances?[i] ?? DefaultDistance( mesh.BoundsDiagonal, i + 1 ),
+			};
+			MeasureError( mesh, level );
+			if ( distances is null && level.HasError && level.MaxError > 0f )
+				level.SwitchDistance = PixelDistance( level.MaxError );
+			levels.Add( level );
+		}
 		return levels;
 	}
 
@@ -142,15 +274,22 @@ public static class LodExport
 	/// (e.g. models/effigy), for the .vmdl.
 	/// </summary>
 	public static List<Level> WriteStatic( PolyMesh mesh, string dir, string assetFolder, string name,
-		Func<int, string> materialName, IReadOnlyList<float> ratios = null, IReadOnlyList<float> distances = null )
+		Func<int, string> materialName, IReadOnlyList<float> ratios = null, IReadOnlyList<float> distances = null, string materialLibrary = "", bool mergeMaterials = false )
 	{
 		var levels = Build( mesh, ratios, distances );
 
 		foreach ( var level in levels )
 		{
 			var lodName = $"{name}_lod{level.Index}";
+
+			// Wave 3 lodmerge: distant levels use slot 0 only (one draw-call
+			// material). Textures are NOT atlased here; the caller logs that.
+			if ( mergeMaterials )
+				foreach ( var face in level.Mesh.Faces )
+					face.Material = 0;
+
 			var path = Path.Combine( dir, lodName + ".obj" );
-			ObjWriter.WriteFile( level.Mesh, path, lodName, materialName: materialName, triangulate: true );
+			ObjWriter.WriteFile( level.Mesh, path, lodName, materialName: materialName, triangulate: true, materialLibrary: materialLibrary );
 			level.Files.Add( path );
 			level.AssetPath = $"{assetFolder}/{lodName}.obj";
 		}
@@ -167,7 +306,7 @@ public static class LodExport
 	/// </summary>
 	public static List<Level> WriteSkinned( PolyMesh mesh, Skeleton skeleton, string dir, string assetFolder, string name,
 		Func<int, string> materialName, IReadOnlyList<float> ratios = null, IReadOnlyList<float> distances = null, bool smd = true,
-		bool wrinkles = false )
+		bool wrinkles = false, bool mergeMaterials = false )
 	{
 		if ( skeleton is null || skeleton.Count == 0 )
 			throw new InvalidOperationException( "skinned levels of detail need the skeleton the model is bound to" );
@@ -180,6 +319,11 @@ public static class LodExport
 		foreach ( var level in levels )
 		{
 			var lodName = $"{name}_lod{level.Index}";
+
+			if ( mergeMaterials )
+				foreach ( var face in level.Mesh.Faces )
+					face.Material = 0;
+
 			var dmxPath = Path.Combine( dir, lodName + ".dmx" );
 			DmxWriter.WriteFile( level.Mesh, dmxPath, skeleton, materialName: materialName, modelName: lodName,
 				wrinkles: wrinkles && level.Mesh.HasMorphs ? WrinkleMaps.All( level.Mesh ) : null );
@@ -221,7 +365,8 @@ public static class LodExport
 		foreach ( var level in levels )
 		{
 			var note = level.ReachedTarget ? "" : " (as far as it would go)";
-			parts.Add( $"{level.Triangles} tris from {level.SwitchDistance.ToString( "0.#", System.Globalization.CultureInfo.InvariantCulture )}{note}" );
+			var error = level.HasError ? $", max error {level.MaxError:0.###}, normal {level.MaxNormalDeviation:0.#} deg" : "";
+			parts.Add( $"{level.Triangles} tris from {level.SwitchDistance.ToString( "0.#", System.Globalization.CultureInfo.InvariantCulture )}{note}{error}" );
 		}
 
 		return string.Join( ", ", parts );

@@ -1,0 +1,7 @@
+echo "Muse join test: simple test fish"
+material 0 color=#e07a2a rough=0.6 metal=0.05
+add Primitive name=Body shape=Box width=10 depth=4 height=4 position=0,0,0 materialslot=0
+material 1 color=#101010 rough=0.3 metal=0.1
+add Primitive name=Eye shape=Cylinder radius=0.8 height=0.3 position=-4,2.2,1 materialslot=1
+add Primitive name=Tail shape=Wedge width=4 depth=3 height=3 position=6,0,0 materialslot=0
+save muse-join-test.effigy

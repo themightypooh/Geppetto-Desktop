@@ -1,0 +1,4 @@
+echo Rivets pass through the front mounting plates and sign body, with visible heads on both faces, so each eyelet has a mechanical fastener.
+add Blob name=EyeletRivets voxel=0.014 blend=0.01 shapes="cylinder -2.6,-0.34,2.28 -2.6,0.18,2.28 0.055 mat=2; sphere -2.6,-0.34,2.28 0.08 mat=2; sphere -2.6,0.18,2.28 0.08 mat=2; cylinder 2.6,-0.34,2.28 2.6,0.18,2.28 0.055 mat=2; sphere 2.6,-0.34,2.28 0.08 mat=2; sphere 2.6,0.18,2.28 0.08 mat=2"
+turnaround out shade=material size=512 views=front,quarter,side,back name=hanging_menu_fastened
+save hanging_menu.effigy

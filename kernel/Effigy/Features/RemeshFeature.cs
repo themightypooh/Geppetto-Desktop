@@ -82,6 +82,40 @@ public sealed class RemeshFeature : Feature
 	/// exactly symmetric — the version a character wants, and one a mirrored cage already has.</summary>
 	public readonly BoolParam SymmetryX = new( "Symmetry X", false );
 
+	/// <summary>Retopo wave 3 (Gap 2): Quad mode, how hard the orientation field leans toward
+	/// principal curvature, 0..1. Exposes <see cref="QuadRemesh.Options.CurvatureAlign"/> —
+	/// it was in the code all along and unreachable from the feature.</summary>
+	public readonly FloatParam CurvatureAlign = new( "Curvature align", 0.15f, 0f, 1f );
+
+	/// <summary>Retopo wave 3 (Gap 2): Quad mode, whether the field leans toward curvature at
+	/// all. Exposes <see cref="QuadRemesh.Options.AlignToCurvature"/>.</summary>
+	public readonly BoolParam AlignToCurvature = new( "Align to curvature", true );
+
+	/// <summary>Retopo wave 3 (Gap 2): Quad mode, tangential smoothing passes over the final
+	/// mesh, each followed by a reprojection onto the source. Exposes
+	/// <see cref="QuadRemesh.Options.RelaxPasses"/>.</summary>
+	public readonly IntParam RelaxPasses = new( "Relax passes", 10, 0, 100 ) { Slider = false };
+
+	/// <summary>Retopo wave 3 (Gap 1): Quad mode, project the source's UVs, skin weights,
+	/// morphs, colours and per-face materials onto the new mesh with
+	/// <see cref="AttributeTransfer"/> instead of losing them. On by default; turning it
+	/// off restores the old "everything on the first material, no UVs, no weights" behaviour.</summary>
+	public readonly BoolParam TransferAttributes = new( "Transfer attributes", true );
+
+	/// <summary>Retopo wave 3 (Gap 3): Quad mode, guide polylines in source-mesh
+	/// coordinates — "x,y,z;x,y,z|…" per polyline, a closed ring repeats its
+	/// first point at the end. Parsed by <see cref="QuadRemesh.ParseGuides"/>.</summary>
+	public readonly StringParam Guides = new( "Guides", "" );
+
+	/// <summary>Retopo wave 3 (Gap 2): the last Quad run's stats string, readable after a
+	/// rebuild. Features have no info-log channel — only warnings and errors — so the stats
+	/// live here instead of being faked as a warning, and the script <c>retopo</c> verb logs
+	/// them outright.</summary>
+	public string LastQuadStats = "";
+
+	/// <summary>Retopo wave 3 (Gap 1): the last Quad run's attribute-transfer summary, or "".</summary>
+	public string LastTransfer = "";
+
 	/// <summary>
 	/// Which of the two numbers below is the one being read.
 	///
@@ -90,6 +124,13 @@ public sealed class RemeshFeature : Feature
 	/// decision you can make on the spot and correct once. A count is what you switch to when the
 	/// budget is coming from somewhere else — a platform limit, an LOD ladder, a collision hull.
 	/// </summary>
+	/// <summary>Quad mode only: how the per-body face target is set. "Face count" (the default,
+	/// and what every document saved before this choice existed rebuilds as) reads Faces;
+	/// "Percentage" takes that percentage of each body's incoming faces, so one Stage D line can
+	/// say "a quarter of every part, in quads" instead of one number fitting an 11-body fish badly.
+	/// The choice defaults to Face count, so an old Quad feature rebuilds exactly as before.</summary>
+	public readonly ChoiceParam QuadTarget = new( "Target", new[] { "Percentage", "Face count" }, 1 );
+
 	public readonly ChoiceParam Target = new( "Target", new[] { "Percentage", "Triangle count" } );
 
 	/// <summary>Fraction of the incoming triangles to keep, as a percentage. Read when
@@ -113,7 +154,7 @@ public sealed class RemeshFeature : Feature
 
 	public override IReadOnlyList<IParam> Parameters => Mode.Index switch
 	{
-		ModeQuad => new IParam[] { Bodies, Mode, Faces, SymmetryX },
+		ModeQuad => new IParam[] { Bodies, Mode, QuadTarget, Faces, Percent, SymmetryX, CurvatureAlign, AlignToCurvature, RelaxPasses, TransferAttributes, Guides },
 		ModeVoxel => new IParam[] { Bodies, Mode, Voxel, Fuse, Fillet, Smooth },
 		_ => new IParam[] { Bodies, Mode, Target, Percent, Triangles, HoldBorders, Weld },
 	};
@@ -147,11 +188,18 @@ public sealed class RemeshFeature : Feature
 			var count = Decimate.TriangleCount( body.Mesh );
 
 			from += count;
-			to += Mode.Index == ModeQuad ? Faces.Clamped : Math.Clamp( TargetFor( count ), 4, count );
+			to += Mode.Index == ModeQuad ? QuadTargetFor( body.Mesh ) : Math.Clamp( TargetFor( count ), 4, count );
 		}
 
 		return (from, to);
 	}
+
+	/// <summary>Quad mode's per-body face target, in faces (not triangles): the Faces number,
+	/// or that percentage of the body's incoming faces when the quad target is Percentage.</summary>
+	int QuadTargetFor( PolyMesh mesh ) =>
+		QuadTarget.Index == 0
+			? Math.Clamp( (int)MathF.Round( mesh.FaceCount * Math.Clamp( Percent.Clamped, 0f, 100f ) / 100f ), 16, 400_000 )
+			: Faces.Clamped;
 
 	int TargetFor( int triangles ) =>
 		Target.Index == 1
@@ -340,11 +388,16 @@ public sealed class RemeshFeature : Feature
 			var mesh = body.Mesh;
 			var hadUVs = mesh.Faces.Any( f => f.UVs.Any( uv => uv.x != 0f || uv.y != 0f ) );
 			var hadMaterials = mesh.Faces.Select( f => f.Material ).Distinct().Count() > 1;
+			var hadAttributes = hadUVs || hadMaterials || mesh.IsRigged || mesh.HasMorphs || mesh.HasVertexColors;
 
 			var result = QuadRemesh.Run( mesh, new QuadRemesh.Options
 			{
-				TargetFaces = Faces.Clamped,
+				TargetFaces = QuadTargetFor( mesh ),
 				SymmetryX = SymmetryX.Value,
+				CurvatureAlign = CurvatureAlign.Clamped,
+				AlignToCurvature = AlignToCurvature.Value,
+				RelaxPasses = RelaxPasses.Clamped,
+				Guides = QuadRemesh.ParseGuides( Guides.Value ),
 			} );
 
 			if ( result.Mesh.FaceCount == 0 )
@@ -353,16 +406,29 @@ public sealed class RemeshFeature : Feature
 				continue;
 			}
 
-			var material = mesh.FaceCount > 0 ? mesh.Faces[0].Material : 0;
+			LastQuadStats = result.ToString();
 
-			foreach ( var f in result.Mesh.Faces )
-				f.Material = material;
+			if ( TransferAttributes.Value && hadAttributes )
+			{
+				var transfer = AttributeTransfer.Transfer( mesh, result.Mesh );
+				LastTransfer = transfer.ToString();
+			}
+			else
+			{
+				var material = mesh.FaceCount > 0 ? mesh.Faces[0].Material : 0;
+
+				foreach ( var f in result.Mesh.Faces )
+					f.Material = material;
+
+				if ( hadAttributes )
+					lost.Add( body.Name );
+			}
 
 			body.Mesh = result.Mesh;
-
-			if ( hadUVs || hadMaterials || mesh.IsRigged )
-				lost.Add( body.Name );
 		}
+
+		// Transferred attributes are not a loss, so they are not warned about: the note
+		// lives in LastTransfer instead. Only the transfer-off path still warns.
 
 		if ( empty.Count > 0 )
 		{

@@ -11,12 +11,15 @@ namespace Effigy;
 /// </summary>
 public static class MeshFix
 {
-	public static readonly string[] Names = { "loose", "doubles", "holes", "normals" };
+	public static readonly string[] Names = { "loose", "doubles", "degenerate", "holes", "uvs", "normals" };
+
+	/// <summary>Last-resort rebuild, explicit only: never part of "all".</summary>
+	public const string ManifoldFix = "manifold";
 
 	/// <summary>Apply the named fixes to a mesh, in the order that makes sense: loose vertices
 	/// first, merge doubles before filling holes (a hairline gap is a double, not a hole), fix normals last. Returns
 	/// what was done, one line each.</summary>
-	public static List<string> Apply( PolyMesh mesh, IEnumerable<string> fixes, float doublesTolerance = 0.001f )
+	public static List<string> Apply( PolyMesh mesh, IEnumerable<string> fixes, float doublesTolerance = 0.001f, bool holesFan = false, float manifoldVoxel = 0.25f )
 	{
 		var done = new List<string>();
 
@@ -29,6 +32,8 @@ public static class MeshFix
 			wanted.UnionWith( Names );
 
 		var session = new MeshEditSession( mesh );
+
+		var beforeTopo = TopologyReport.Measure( mesh, "before" );
 
 		// Loose first: a merge compacts the mesh too, so running it first would hide the loose
 		// vertices inside the doubles count and leave DeleteLoose nothing to do (it throws on that).
@@ -47,34 +52,79 @@ public static class MeshFix
 
 		if ( wanted.Contains( "doubles" ) )
 		{
-			var before = session.Mesh.VertexCount;
-			session.MergeByDistance( doublesTolerance );
-			done.Add( $"doubles: merged {before - session.Mesh.VertexCount} vertices within {doublesTolerance}" );
+			// Staged, scale-relative welding (repair proposal P7): tiny
+			// tolerance first, growing only while seams keep closing.
+			foreach ( var line in MeshRepair.WeldStaged( session.Mesh, doublesTolerance ) )
+				done.Add( line );
+		}
+
+		if ( wanted.Contains( "degenerate" ) )
+		{
+			var removed = MeshRepair.RemoveDegenerate( session.Mesh );
+			session.ClearSelection();
+			done.Add( $"degenerate: removed {removed} degenerate faces" );
 		}
 
 		if ( wanted.Contains( "holes" ) )
 		{
-			// Fill Holes is an Edit-mode button and refuses when there is nothing to fill, which is
-			// right for a click and wrong here: a watertight body is the result `fix all` wants, not
-			// a failure. The refusal rolls its step back, so the mesh is untouched.
-			int closed;
-			try { closed = session.FillHoles( 6 ); }
-			catch ( InvalidOperationException ) { closed = 0; }
+			if ( holesFan )
+			{
+				// Legacy single-fan close, kept behind fan=1 for scripts
+				// that depended on it. The refusal rolls its step back, so
+				// the mesh is untouched when there is nothing to fill.
+				int closed;
+				try { closed = session.FillHoles( 6 ); }
+				catch ( InvalidOperationException ) { closed = 0; }
+				done.Add( $"holes: closed {closed} with a fan (up to six sides; bigger openings were left)" );
+			}
+			else
+			{
+				// Ear-clipping triangulation (repair proposal P5): concave
+				// and large flat holes close with triangles and interpolated
+				// UVs; non-planar rings are reported, not folded shut.
+				var (closed, unfilled) = MeshRepair.FillHolesV2( session.Mesh );
+				done.Add( $"holes: closed {closed} with triangles (UVs interpolated)"
+					+ (unfilled.Count > 0 ? $"; left open: {string.Join( "; ", unfilled )}" : "") );
+			}
+		}
 
-			done.Add( $"holes: closed {closed} (up to six sides; bigger openings were left)" );
+		if ( wanted.Contains( "uvs" ) )
+		{
+			var fixed_ = MeshRepair.BoxProjectUvs( session.Mesh );
+			done.Add( $"uvs: box-projected UVs onto {fixed_} face(s) that had none" );
 		}
 
 		if ( wanted.Contains( "normals" ) )
 		{
+			// Signed volume per shell first (repair proposal P3): a shell
+			// with negative volume is flipped wholesale, then the flood
+			// makes each piece locally consistent.
+			var flips = MeshRepair.FlipShellsByVolume( session.Mesh );
+			var flipped = flips.Count( l => l.Contains( "(flipped)" ) );
 			session.ClearSelection();
 			session.RecalculateNormals();
-			done.Add( "normals: made every piece consistent and outward" );
+			done.Add( $"normals: flipped {flipped} inward shell(s) by signed volume, then made every piece consistent and outward" );
 		}
 
-		var unknown = wanted.Where( w => w != "all" && !Names.Contains( w ) ).ToList();
+		if ( wanted.Contains( ManifoldFix ) )
+		{
+			var (ok, deviation, note) = MeshRepair.ManifoldFallback( session.Mesh, manifoldVoxel );
+			done.Add( ok ? $"manifold: rebuilt as a closed shell — {note}" : $"manifold: failed — {note}" );
+		}
+
+		var unknown = wanted.Where( w => w != "all" && !Names.Contains( w ) && w != ManifoldFix ).ToList();
 
 		if ( unknown.Count > 0 )
-			done.Add( $"ignored: {string.Join( ", ", unknown )} (fixes are {string.Join( ", ", Names )}, or all)" );
+			done.Add( $"ignored: {string.Join( ", ", unknown )} (fixes are {string.Join( ", ", Names )}, manifold, or all)" );
+
+		// Before/after topology delta (repair proposal P6): a repair step
+		// that cannot prove improvement is a guess. Measured on the session
+		// mesh, before it is written back.
+		{
+			var afterTopo = TopologyReport.Measure( session.Mesh, "after" );
+			var clean = afterTopo.BoundaryEdges == 0 && afterTopo.NonManifoldEdges == 0 && afterTopo.Degenerate == 0;
+			done.Add( $"topology delta: open edges {beforeTopo.BoundaryEdges} -> {afterTopo.BoundaryEdges}, non-manifold edges {beforeTopo.NonManifoldEdges} -> {afterTopo.NonManifoldEdges}, degenerate {beforeTopo.Degenerate} -> {afterTopo.Degenerate}, loose vertices {beforeTopo.LooseVertices} -> {afterTopo.LooseVertices}; {(clean ? "clean" : "still open: see counts")}" );
+		}
 
 		// Write back in place: the body keeps its id and everything holding it.
 		var result = session.Mesh;

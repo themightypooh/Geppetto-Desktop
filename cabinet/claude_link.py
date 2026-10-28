@@ -17,16 +17,17 @@ import subprocess
 import threading
 import time
 import uuid
+import signal
 
 import claude_gate
-from chat_phase import PHASE_PROMPT
+from chat_phase import PHASE_PROMPT, BUILD_PREP_PROMPT, PLAN_BOUNDARY_PROMPT
 
 STATE = os.path.expanduser("~/.cache/geppetto/claude-chat.json")
 PROJECT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CLAUDE = os.environ.get("GEPPETTO_CLAUDE", "claude")
 PROMPT = ("You are talking to the user through the assistant card in the Geppetto chest, right over the viewport "
           "they are watching. Keep replies short: a few lines, no tables. Do the work yourself with "
-          "geppetto-live so it shows in the chest. If a hook says the user pressed STOP, stop at once.") + PHASE_PROMPT
+          "geppetto-live so it shows in the chest. If a hook says the user pressed STOP, stop at once.") + PHASE_PROMPT + BUILD_PREP_PROMPT
 KEEP = 200
 
 # --- Locked-down spawn environment (audit C2); enabled by the cabinet Host. ---
@@ -98,7 +99,7 @@ def _partial(raw):
 
 class ClaudeLink:
     def __init__(self, on_change=lambda: None, spawn=subprocess.Popen, state_path=STATE, cwd=None,
-                 lockdown=None):
+                 lockdown=None, build_guard_factory=None):
         self.on_change = on_change
         self.spawn = spawn
         self.state_path = state_path
@@ -109,6 +110,13 @@ class ClaudeLink:
         self.model = ""             # the Claude model (opus, sonnet, haiku); "" = the CLI's default
         self.persona = ""           # extra system prompt for this card (e.g. Zoopa, from the picked model's persona file)
         self.research_policy = ""
+        self.mode = "build"
+        self._build_guard_factory = build_guard_factory
+        self._execution = None
+        self._execution_retry = 0
+        self._unverified = []
+        self._permission_denied = False
+        self._held_result = None
         self.status = "idle"        # idle | starting | working | paused | stopped | offline
         self.ask = None             # the permission question waiting on you: {"id", "tool", "text"}
         self.session = self._load().get("session", "")
@@ -168,12 +176,13 @@ class ClaudeLink:
 
     # ---- the process ----------------------------------------------------------------------------
     def _start(self):
-        prompt = PROMPT + ("\n\n" + self.persona if self.persona else "")
+        base = PROMPT if self.mode == "build" else "You are in read-only Plan mode. Discuss and inspect; do not edit files, execute builds, or claim a model was created." + PLAN_BOUNDARY_PROMPT + PHASE_PROMPT
+        prompt = base + ("\n\n" + self.persona if self.persona else "")
         if self.research_policy:
             prompt += "\n\n" + self.research_policy
         args = [CLAUDE, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
                 "--include-partial-messages",
-                "--permission-mode", "auto", "--permission-prompt-tool", "stdio",
+                "--permission-mode", "auto" if self.mode == "build" else "plan", "--permission-prompt-tool", "stdio",
                 "--append-system-prompt", prompt, "-n", "Zoopa in the Geppetto chest" if self.persona else "Geppetto chest"]
         args += ["--resume", self.session] if self.session else []
         args += ["--model", self.model] if self.model else []
@@ -183,10 +192,12 @@ class ClaudeLink:
             env = dict(os.environ)
             for name in [k for k in env if k.startswith(("CLAUDE_CODE_", "CLAUDECODE"))]:
                 env.pop(name)       # a chest started from inside a Claude session must not look like its child
+        if self._execution is not None:
+            env.update(self._execution.environment())
         self._set("starting")
         os.makedirs(self.cwd, mode=0o700, exist_ok=True)
         self.proc = self.spawn(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                               text=True, bufsize=1, cwd=self.cwd, env=env)
+                                text=True, bufsize=1, cwd=self.cwd, env=env, start_new_session=True)
         proc = self.proc
         threading.Thread(target=self._read, args=(proc,), daemon=True).start()
         threading.Thread(target=self._errors, args=(proc,), daemon=True).start()
@@ -214,6 +225,8 @@ class ClaudeLink:
 
     def _read(self, proc):
         for line in proc.stdout:
+            if proc is not self.proc:
+                break
             try:
                 self.handle(json.loads(line))
             except ValueError:
@@ -253,6 +266,12 @@ class ClaudeLink:
                 self._send({"type": "control_response", "response": {
                     "subtype": "error", "request_id": msg.get("request_id", ""), "error": "not supported by the chest"}})
         elif kind == "result":
+            if self.status == "paused":
+                self._held_result = msg
+                return
+            if self._execution is not None and self.status != "stopped":
+                self._execution_result(msg)
+                return
             if self.status not in ("stopped",):
                 self._set("idle")
             if msg.get("is_error") and msg.get("subtype") not in ("success",):
@@ -266,7 +285,8 @@ class ClaudeLink:
         if kind == "content_block_start":
             block = event.get("content_block") or {}
             if block.get("type") == "text":
-                self.live[key] = self._add("claude", "", sub=sub, live=True)
+                self.live[key] = ({"role": "unverified", "text": "", "live": True}
+                                  if self._execution is not None else self._add("claude", "", sub=sub, live=True))
             elif block.get("type") == "thinking":
                 self.live[key] = self._add("think", "", sub=sub, live=True)
             elif block.get("type") == "tool_use":
@@ -286,7 +306,10 @@ class ClaudeLink:
                 m["text"] = tool_line(m["name"], data)
             self._changed()
         elif kind == "content_block_stop" and key in self.live:
-            self.live.pop(key)["live"] = False
+            row = self.live.pop(key)
+            row["live"] = False
+            if row.get("role") == "unverified":
+                self._remember_unverified(row.get("text", ""))
             self._changed()
 
     def _final(self, block, mid, sub):
@@ -302,6 +325,9 @@ class ClaudeLink:
             return
         role = {"text": "claude", "thinking": "think"}.get(kind)
         text = (block.get("text") if kind == "text" else block.get("thinking")) or ""
+        if kind == "text" and self._execution is not None:
+            self._remember_unverified(text)
+            return
         if not role or not text.strip():
             return
         streamed = [m for (k, i), m in self.live.items() if k == mid and m["role"] == role]
@@ -331,10 +357,49 @@ class ClaudeLink:
                   full=out[:20000], sub=sub, error=error)
 
     # ---- what you do --------------------------------------------------------------------------
+    def _remember_unverified(self, text):
+        if text.strip() and (not self._unverified or self._unverified[-1] != text):
+            self._unverified.append(text)
+
+    def _execution_result(self, msg):
+        if msg.get("is_error") or self._permission_denied:
+            self._add("note", "Build not executed: " + str(msg.get("result") or "required tool permission was denied")[:300])
+        else:
+            receipt = self._execution.receipt()
+            if receipt:
+                for text in self._unverified:
+                    self._add("claude", text)
+                self._add("note", "Execution verified: saved revision %d in %s" % (receipt["revision"], receipt["run"]))
+            else:
+                # No silent second provider turn. A missing receipt is a
+                # failure; only the user may choose to send another request.
+                self._add("note", str(self._execution.failure()))
+        self._execution = None
+        self._unverified = []
+        self._set("idle")
+
+    def set_mode(self, mode):
+        if mode not in ("build", "plan") or self.status in ("working", "starting", "paused"):
+            return False
+        if self.mode != mode:
+            self.mode = mode
+            self.close()             # next process gets the actual permission mode
+            self._set("idle")
+        return True
+
     def send(self, text):
         text = (text or "").strip()[:8000]
         if not text:
             return False
+        self._permission_denied = False
+        self._held_result = None
+        self._unverified = []
+        self._execution_retry = 0
+        if self.mode == "build" and self._build_guard_factory is not None:
+            self.close()             # fresh receipt env, same resumed conversation
+            self._execution = self._build_guard_factory()
+        else:
+            self._execution = None
         if self.session:
             claude_gate.clear_gate(self.session)      # a new message lifts STOP and PAUSE
         if self.proc is None or self.proc.poll() is not None:
@@ -352,6 +417,7 @@ class ClaudeLink:
             response = {"behavior": "allow", "updatedInput": ask["input"]}
         else:
             response = {"behavior": "deny", "message": "po said no in the Geppetto chest"}
+            self._permission_denied = True
         self._send({"type": "control_response", "response": {"subtype": "success", "request_id": ask["id"], "response": response}})
         self._add("note", ("allowed: " if allow else "denied: ") + ask["text"][:120])
 
@@ -372,6 +438,9 @@ class ClaudeLink:
         return found
 
     def stop(self):
+        self._execution = None
+        self._unverified = []
+        self._held_result = None
         if self.session:
             claude_gate.set_gate(self.session, "stopped", "CLAUDE card")
         for pid in self.runs():
@@ -380,7 +449,10 @@ class ClaudeLink:
             self.answer(False)
         if self.proc is not None:
             self._send({"type": "control_request", "request_id": "stop-" + uuid.uuid4().hex,
-                        "request": {"subtype": "interrupt"}})
+                         "request": {"subtype": "interrupt"}})
+            # An interrupt is cooperative and can be ignored while a tool or
+            # subagent runs. End this turn's private process group as well.
+            self.close()
         self._set("stopped")
         self._add("note", "stopped")
 
@@ -401,6 +473,9 @@ class ClaudeLink:
                 except (OSError, ValueError):
                     pass
         self._set("working" if paused and self.proc is not None else ("idle" if paused else "paused"))
+        if paused and self._held_result is not None:
+            result, self._held_result = self._held_result, None
+            self.handle(result)
 
     def set_persona(self, persona):
         """Switch persona: like set_model, the running process goes and the next message restarts
@@ -447,9 +522,18 @@ class ClaudeLink:
         if proc is not None:
             try:
                 proc.stdin.close()
-                proc.terminate()
             except OSError:
                 pass
+            if proc.poll() is None:
+                try:
+                    # Only kill the session this link created. Never signal
+                    # the user's shell or an unrelated provider process.
+                    if os.getpgid(proc.pid) == proc.pid:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    else:
+                        proc.terminate()
+                except (AttributeError, OSError):
+                    proc.terminate()  # fake process / already gone
 
 
 if __name__ == "__main__":      # talk to it from a terminal: python3 claude_link.py "message"

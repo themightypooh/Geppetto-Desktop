@@ -1,0 +1,15 @@
+add Primitive name=Body shape=Cylinder radius=1.2 height=4.2 position=0,0,1.2 rotationaxis=1,0,0 rotation=90 materialslot=0
+add Primitive name=Head shape=Cylinder radius=0.7 height=1.2 position=0,2.6,1.1 rotationaxis=1,0,0 rotation=90 materialslot=0
+add Primitive name=Snout shape=Cylinder radius=0.25 height=2.4 position=0,4.3,1.0 rotationaxis=1,0,0 rotation=100 materialslot=1
+add Primitive name=ElytraSeam shape=Box width=0.18 depth=3.8 height=0.15 position=0,0,2.45 materialslot=1
+add Primitive name=EyeL shape=Box width=0.25 depth=0.4 height=0.25 position=0.7,2.8,1.3 materialslot=2
+add Primitive name=EyeR shape=Box width=0.25 depth=0.4 height=0.25 position=-0.7,2.8,1.3 materialslot=2
+add Primitive name=AntennaL shape=Box width=0.16 depth=1.6 height=0.16 position=1.1,5.0,1.0 rotationaxis=0,0,1 rotation=40 materialslot=1
+add Primitive name=AntennaR shape=Box width=0.16 depth=1.6 height=0.16 position=-1.1,5.0,1.0 rotationaxis=0,0,1 rotation=-40 materialslot=1
+add Primitive name=LegFL shape=Box width=0.22 depth=1.8 height=0.22 position=1.9,1.4,0.5 rotationaxis=0,0,1 rotation=50 materialslot=1
+add Primitive name=LegFR shape=Box width=0.22 depth=1.8 height=0.22 position=-1.9,1.4,0.5 rotationaxis=0,0,1 rotation=-50 materialslot=1
+add Primitive name=LegML shape=Box width=0.22 depth=1.8 height=0.22 position=1.9,0.1,0.5 rotationaxis=0,0,1 rotation=50 materialslot=1
+add Primitive name=LegMR shape=Box width=0.22 depth=1.8 height=0.22 position=-1.9,0.1,0.5 rotationaxis=0,0,1 rotation=-50 materialslot=1
+add Primitive name=LegRL shape=Box width=0.22 depth=1.8 height=0.22 position=1.9,-1.3,0.5 rotationaxis=0,0,1 rotation=50 materialslot=1
+add Primitive name=LegRR shape=Box width=0.22 depth=1.8 height=0.22 position=-1.9,-1.3,0.5 rotationaxis=0,0,1 rotation=-50 materialslot=1
+save muse-weevil.effigy

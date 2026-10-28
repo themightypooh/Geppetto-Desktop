@@ -187,7 +187,8 @@ public static class VmdlDocument
 	/// bone markup, animations and physics of <see cref="Skinned"/> once for the whole model.
 	/// </summary>
 	public static string SkinnedWithLods( IReadOnlyList<string> meshFilenames, IReadOnlyList<float> switchDistances,
-		Skeleton skeleton, string physics = "", string materials = "", string animations = null, string animGraph = "" )
+		Skeleton skeleton, string physics = "", string materials = "", string animations = null, string animGraph = "",
+		string hitboxes = "", string attachments = "" )
 	{
 		if ( meshFilenames is null || meshFilenames.Count == 0 )
 			throw new ArgumentException( "at least one mesh", nameof( meshFilenames ) );
@@ -197,6 +198,8 @@ public static class VmdlDocument
 		return Wrap( materials
 			+ RenderMeshList( meshFilenames )
 			+ LodGroupList( switchDistances )
+			+ attachments
+			+ hitboxes
 			+ VmdlAnimation.BoneMarkupList( skeleton )
 			+ (string.IsNullOrEmpty( animations ) ? VmdlAnimation.BindPoseList() : animations)
 			+ physics, animGraph );

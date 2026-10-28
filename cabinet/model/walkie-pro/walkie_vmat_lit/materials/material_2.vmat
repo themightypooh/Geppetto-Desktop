@@ -1,0 +1,7 @@
+Layer0
+{
+	shader "complex.shader"
+	g_vColorTint "[0.4591 0.0127 0.0072 0]"
+	g_flRoughnessScaleFactor "0.5"
+	g_flMetalness "0"
+}

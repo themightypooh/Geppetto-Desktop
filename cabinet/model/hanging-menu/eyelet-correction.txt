@@ -1,0 +1,6 @@
+echo Remove the bulky silver mounting posts: they collide with the eyelet and hide where the chain goes through it.
+remove Mounts
+echo Seat each brass eyelet into the sign's top rail, with a clear opening for the bottom chain link.
+set Eyelets shapes="torus -2.6,-0.31,2.7 0.17 0.055 rot=90,0,0 mat=1; torus 2.6,-0.31,2.7 0.17 0.055 rot=90,0,0 mat=1"
+turnaround out shade=material size=512 views=front,quarter,side,back name=hanging_menu_clean_eyelets
+save hanging_menu.effigy

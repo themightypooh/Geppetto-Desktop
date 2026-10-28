@@ -1,0 +1,43 @@
+effigy 1
+rollback 2147483647
+materiallook 0 color=#888888 rough=0.9 metal=0.05
+feature PrimitiveFeature
+	id fe1407ab
+	name MuseTestBox
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position 0 1 0
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 2
+	param SizeY 2
+	param SizeZ 2
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 5f1bfa27
+	name MuseTestSlab
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position 0 0.2 0
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 3
+	param SizeY 3
+	param SizeZ 0.4
+	param UniformScale 0
+end

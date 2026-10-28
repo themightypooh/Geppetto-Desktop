@@ -1,0 +1,60 @@
+echo "Detailed war-torn 90s cubicle, one story, front-left open, blockout replaced"
+add Primitive name=FloorSlab shape=Box width=12 depth=10 height=0.4 position=0,0.2,0 materialslot=0
+add Primitive name=BackWallLeft shape=Box width=7 depth=0.4 height=3.2 position=-2.5,2.0,5 materialslot=1
+add Primitive name=BackWallMid shape=Box width=1.5 depth=0.4 height=3.2 position=1.75,2.0,5 materialslot=1
+add Primitive name=BackWallRight shape=Box width=1 depth=0.4 height=3.2 position=5.5,2.0,5 materialslot=1
+add Primitive name=BackWallLintel shape=Box width=2.5 depth=0.4 height=1.4 position=3.75,2.9,5 materialslot=1
+add Primitive name=WallRight shape=Box width=0.4 depth=10 height=3.2 position=6,2.0,0 materialslot=1
+add Primitive name=PartitionBack shape=Box width=5 depth=0.3 height=1.8 position=0,1.3,3.25 materialslot=2
+add Primitive name=PartitionWest shape=Box width=0.3 depth=4.5 height=1.8 position=-2.5,1.3,1.0 materialslot=2
+add Primitive name=PartitionEast shape=Box width=0.3 depth=4.5 height=1.8 position=2.5,1.3,1.0 materialslot=2
+add Primitive name=PartitionRail shape=Box width=5 depth=0.35 height=0.08 position=0,2.24,3.25 materialslot=7
+add Primitive name=FallenPartition shape=Box width=2.5 depth=1.8 height=0.2 position=0.8,0.5,-0.5 materialslot=2
+add Primitive name=DeskTop shape=Box width=4.4 depth=1.0 height=0.08 position=0,1.11,2.7 materialslot=3
+add Primitive name=DeskLegLeft shape=Box width=0.1 depth=0.9 height=0.7 position=-2.0,0.75,2.7 materialslot=3
+add Primitive name=DeskLegRight shape=Box width=0.1 depth=0.9 height=0.7 position=2.0,0.75,2.7 materialslot=3
+add Primitive name=CRTBody shape=Box width=0.9 depth=0.9 height=0.8 position=-0.8,1.55,2.7 materialslot=4
+add Primitive name=CRTScreen shape=Box width=0.7 depth=0.05 height=0.55 position=-0.8,1.55,2.22 materialslot=5
+add Primitive name=CRTStand shape=Box width=0.6 depth=0.6 height=0.08 position=-0.8,1.19,2.7 materialslot=4
+add Primitive name=Keyboard shape=Box width=0.9 depth=0.35 height=0.06 position=-0.8,1.21,2.0 materialslot=8
+add Primitive name=PCTower shape=Box width=0.5 depth=1.0 height=1.1 position=1.6,1.7,2.7 materialslot=6
+add Primitive name=PCDriveBay shape=Box width=0.4 depth=0.04 height=0.2 position=1.6,1.95,2.18 materialslot=8
+add Primitive name=PhoneBase shape=Box width=0.35 depth=0.3 height=0.12 position=0.6,1.21,2.4 materialslot=8
+add Primitive name=PhoneHandset shape=Box width=0.3 depth=0.12 height=0.08 position=0.6,1.32,2.4 materialslot=8
+add Primitive name=FilingCab shape=Box width=0.6 depth=0.9 height=1.3 position=-2.0,1.05,1.5 materialslot=7
+add Primitive name=FilingDrawerTop shape=Box width=0.5 depth=0.04 height=0.3 position=-2.0,1.35,1.03 materialslot=8
+add Primitive name=FilingDrawerBot shape=Box width=0.5 depth=0.04 height=0.3 position=-2.0,0.85,1.03 materialslot=8
+add Primitive name=ChairSeat shape=Box width=0.55 depth=0.55 height=0.08 position=0.2,0.85,1.2 materialslot=12
+add Primitive name=ChairBack shape=Box width=0.55 depth=0.08 height=0.6 position=0.2,1.35,1.5 materialslot=12
+add Primitive name=ChairPost shape=Box width=0.08 depth=0.08 height=0.45 position=0.2,0.62,1.2 materialslot=8
+add Primitive name=BrokenSeat shape=Box width=0.55 depth=0.55 height=0.08 position=-1.5,0.44,0.0 materialslot=12
+add Primitive name=BrokenBack shape=Box width=0.55 depth=0.6 height=0.08 position=-1.5,0.44,0.9 materialslot=12
+add Primitive name=FluoroFixture shape=Box width=1.2 depth=0.3 height=0.08 position=0,2.9,1.5 materialslot=7
+add Primitive name=FluoroTube shape=Box width=1.1 depth=0.08 height=0.08 position=0,2.84,1.5 materialslot=13
+add Primitive name=FallenTile shape=Box width=1.2 depth=1.2 height=0.05 position=1.8,0.425,0.5 materialslot=11
+add Primitive name=FallenTile2 shape=Box width=1.0 depth=1.0 height=0.05 position=-3.5,0.425,2.0 materialslot=11
+add Primitive name=DebrisHole1 shape=Box width=0.4 depth=0.3 height=0.25 position=3.8,0.525,4.2 materialslot=9
+add Primitive name=DebrisHole2 shape=Box width=0.3 depth=0.4 height=0.2 position=4.3,0.5,3.6 materialslot=9
+add Primitive name=DebrisHole3 shape=Box width=0.25 depth=0.25 height=0.15 position=2.8,0.475,4.6 materialslot=9
+add Primitive name=ScorchWall shape=Box width=2.5 depth=0.05 height=1.2 position=3.75,1.4,4.78 materialslot=10
+add Primitive name=ScorchFloor shape=Box width=2.0 depth=1.5 height=0.04 position=3.75,0.42,4.0 materialslot=10
+add Primitive name=CrackWall shape=Box width=0.08 depth=0.05 height=1.5 position=-1.0,1.8,4.78 materialslot=10
+add Primitive name=PapersFloor shape=Box width=0.3 depth=0.4 height=0.02 position=-0.2,0.42,-0.8 materialslot=14
+add Primitive name=PapersFloor2 shape=Box width=0.3 depth=0.3 height=0.02 position=0.9,0.42,0.2 materialslot=14
+add Primitive name=PapersDesk shape=Box width=0.4 depth=0.3 height=0.02 position=0.2,1.16,2.2 materialslot=14
+material 0 color=#4a5a6a rough=0.95 metal=0
+material 1 color=#d8d2c4 rough=0.9 metal=0
+material 2 color=#c2b49a rough=0.95 metal=0
+material 3 color=#8a6a44 rough=0.8 metal=0.05
+material 4 color=#d9d2b8 rough=0.7 metal=0.05
+material 5 color=#1a2028 rough=0.4 metal=0.1
+material 6 color=#cfc8b0 rough=0.7 metal=0.05
+material 7 color=#7d838a rough=0.5 metal=0.4
+material 8 color=#222222 rough=0.6 metal=0.1
+material 9 color=#3a332c rough=0.95 metal=0
+material 10 color=#101010 rough=1 metal=0
+material 11 color=#e8e8e0 rough=0.95 metal=0
+material 12 color=#7a3a30 rough=0.9 metal=0
+material 13 color=#ffffff rough=0.3 metal=0 emit=#fff8d0
+material 14 color=#f2f0e8 rough=0.95 metal=0
+save war_office_detailed.effigy

@@ -1,0 +1,253 @@
+#!/usr/bin/env python3
+"""Muse seat for Geppetto — NO API key, NO muse CLI, NO network.
+
+How it works (file bridge, modelled on Roundtable's zoobie_seat.py, because
+this Muse personal agent has no CLI/API that Geppetto can call directly, and
+the local `muse` CLI still returns a 402 billing error as of 2026-10-24):
+
+  Geppetto's cabinet/chat.py runs this script as a roundtable-cli seat,
+  prompt on stdin, via roundtable_catalog.command() which passes:
+    --provider muse --model muse-bridge [--act]
+
+  This script writes the prompt to cabinet/muse-seat/requests/<turn>.json
+  and polls for cabinet/muse-seat/responses/<turn>.json.
+  The Muse session (over Tailscale SSH, already connected to this machine)
+  reads the request, answers, edits files in the request's workspace when
+  asked, and writes the response file. This script then prints
+  Claude-style stream-json that cabinet/chat.py already understands:
+    {"type": "system", "session_id": ...}
+    {"type": "result", "result": "...", "session_id": ...}
+
+Timeout: 19 minutes, just inside Geppetto's long-turn window, so a late
+Muse answer fails cleanly instead of racing the app's kill.
+No secrets, no API keys, no subprocesses, no network calls in this script.
+The responder (Muse) is the only side that touches files, and only in the
+workspace recorded in the request — never outside it.
+
+Build mode (v2, 2026-10-24): when Geppetto runs this seat in Build mode,
+cabinet/chat.py goes through build_execution.checked_stream, which creates
+a BuildTurn and injects GEPPETTO_BUILD_RECEIPTS / GEPPETTO_BUILD_TOKEN
+into this process's environment (via build_execution.child_environment).
+This script forwards those two values, plus mode="build", in the request
+JSON — they are per-turn, on the user's own machine, and are exactly what
+geppetto-live needs to call build_execution.record() after a real live
+run. The responder MUST export them when running geppetto-live, run a
+real Effigy build script, and only then write the response file, so the
+receipt is already written before this script prints the result and
+checked_stream checks for it. A text-only reply in Build mode produces
+no receipt and checked_stream will reject it, by design. In Plan mode
+those env vars are absent and the request is unchanged apart from
+mode="plan".
+"""
+import argparse
+import json
+import os
+import sys
+import time
+import uuid
+from datetime import datetime
+from pathlib import Path
+
+BASE = Path(__file__).resolve().parent / "muse-seat"
+REQ = BASE / "requests"
+RES = BASE / "responses"
+STATUS = BASE / "status"
+
+
+def _to_epoch(value):
+    """Normalize a timestamp to epoch float; return None if unusable."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            if text.endswith(("Z", "z")):
+                text = text[:-1] + "+00:00"
+            return datetime.fromisoformat(text).timestamp()
+        except ValueError:
+            return None
+    return None
+
+
+def _write_atomic(path, payload):
+    """Write JSON atomically: temp file in the same directory, fsync, replace."""
+    tmp = path.parent / (path.name + f".tmp-{os.getpid()}")
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(payload, ensure_ascii=False))
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def write_status(turn, session, mode, stage, sent_at, extra=None):
+    try:
+        STATUS.mkdir(parents=True, exist_ok=True)
+        now = time.time()
+        data = {"turn_id": turn, "session_id": session, "mode": mode, "stage": stage,
+                "sent_at": sent_at, "last_check": now}
+        if extra:
+            data.update(extra)
+        for k in ("sent_at", "picked_up_at", "replied_at"):
+            if k in data:
+                v = _to_epoch(data[k])
+                if v is None:
+                    data.pop(k)
+                else:
+                    data[k] = v
+        data["last_check"] = now
+        # Same-turn preservation ONLY, sourced from the per-turn file, never from latest.json.
+        per_turn = STATUS / f"{turn}.json"
+        try:
+            old = json.loads(per_turn.read_text(encoding="utf-8")) if per_turn.exists() else {}
+        except (OSError, ValueError):
+            old = {}
+        if old.get("turn_id") == turn:
+            # TRACKER FIX 2026-10-25: preserve any real stage (Picked up,
+            # Thinking, Building, Reply written, and custom build-announcement
+            # stages) against a Sent/Queued downgrade from the seat poll.
+            if old.get("stage") not in (None, "", "Sent", "Queued", "Cancelled") and stage in ("Sent", "Queued"):
+                data["stage"] = old["stage"]
+            # 2026-10-26 tracker detail: a seat Queued poll must not wipe a worker detail.
+            if stage in ("Sent", "Queued") and "detail" not in data and old.get("detail"):
+                data["detail"] = old["detail"]
+                if old.get("detail_at"):
+                    data["detail_at"] = old["detail_at"]
+            for k in ("picked_up_at", "replied_at"):
+                if k not in data and old.get(k):
+                    v = _to_epoch(old[k])
+                    if v is not None:
+                        data[k] = v
+        # latest.json is an exact copy of this turn's record.
+        _write_atomic(per_turn, data)
+        _write_atomic(STATUS / "latest.json", data)
+    except OSError:
+        pass
+POLL_SECS = 0.5  # speed 2026-10-25: deliver within 0.5s of a response file appearing, was 2s
+TIMEOUT_SECS = 19 * 60
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--provider", default="muse")
+    ap.add_argument("--model", default="muse-bridge")
+    ap.add_argument("--act", action="store_true",
+                    help="Build mode was requested; recorded for the responder, "
+                         "Geppetto itself gates Build mode by model capabilities.")
+    ap.add_argument("--session", default="")
+    a = ap.parse_args()
+    prompt = sys.stdin.read()
+    if not prompt.strip():
+        print("muse_seat: empty prompt on stdin", file=sys.stderr)
+        return 1
+    turn = uuid.uuid4().hex[:12]
+    session = a.session or ("muse-" + turn)
+    REQ.mkdir(parents=True, exist_ok=True)
+    RES.mkdir(parents=True, exist_ok=True)
+    req_file = REQ / f"{turn}.json"
+    res_file = RES / f"{turn}.json"
+    mode = "build" if a.act else "plan"
+    receipts = os.environ.get("GEPPETTO_BUILD_RECEIPTS")
+    token = os.environ.get("GEPPETTO_BUILD_TOKEN")
+    if mode == "build" and not (receipts and token):
+        # Fast-fail: do not write a pending request, do not print the
+        # system event, and do not wait the 19-minute timeout. chat.py
+        # _roundtable_cli turns any non-zero seat exit into a RuntimeError
+        # carrying the last stderr lines, so this surfaces in the panel
+        # instead of looking like a dropped send.
+        print("muse_seat: Build mode but no GEPPETTO_BUILD_RECEIPTS/TOKEN in "
+              "environment; no Build receipt can be produced, so no request "
+              "was written. Send this through Geppetto Build, or use Plan.",
+              file=sys.stderr)
+        return 2
+    req_file.write_text(json.dumps({
+        "turn_id": turn, "session_id": session,
+        "prompt": prompt, "status": "pending",
+        "provider": a.provider, "model": a.model, "act": bool(a.act),
+        "mode": mode,
+        "build_receipts": receipts, "build_token": token,
+        # Pip gate (sub-task 2): forwarded only when BuildTurn set them
+        # in the child environment. The responder uses pip_model to know
+        # the Pip doc, backs it up before editing, and writes
+        # <build_receipts>/pip.json {"backup": path}; enforcement (hash
+        # vs the turn-captured pre-hash) happens in build_execution
+        # receipt(), not here, so the seat trusts no responder claim.
+        "pip_model": os.environ.get("GEPPETTO_PIP_MODEL"),
+        "pip_pre_hash": os.environ.get("GEPPETTO_PIP_PRE_HASH"),
+        "pip_backup": os.environ.get("GEPPETTO_PIP_BACKUP"),
+        "cwd": os.getcwd(),
+    }, ensure_ascii=False), encoding="utf-8")
+    sent_at = time.time()
+    write_status(turn, session, mode, "Sent", sent_at)
+    write_status(turn, session, mode, "Queued", sent_at)
+    print(json.dumps({"type": "system", "session_id": session, "turn_id": turn}), flush=True)
+    deadline = time.time() + TIMEOUT_SECS
+    _last_status = 0
+    while time.time() < deadline:
+        if os.getppid() == 1:
+            # Host parent died / app closed: do not stick around polling.
+            # But do not drop a reply the worker already wrote: check the
+            # response file first and emit it (system + result, same format
+            # as the normal path) before exiting, so a surviving reader /
+            # chat.py can still deliver it. Leave res_file untouched for
+            # startup re-delivery if this print goes nowhere.
+            if not res_file.exists():
+                return 1
+            try:
+                data = json.loads(res_file.read_text(encoding="utf-8"))
+                text = (data.get("result") or data.get("text") or "").strip()
+            except (OSError, ValueError) as e:
+                print(f"muse_seat: bad response file: {e}", file=sys.stderr)
+                return 1
+            if not text:
+                print("muse_seat: empty response file", file=sys.stderr)
+                return 1
+            try:
+                print(json.dumps({"type": "system", "session_id": session, "turn_id": turn}), flush=True)
+                print(json.dumps({"type": "result", "result": text,
+                                  "session_id": session}), flush=True)
+            except BrokenPipeError:
+                # Reader is gone with the old host: do not mark delivered.
+                # res_file is left intact for startup re-delivery.
+                return 1
+            write_status(turn, session, mode, "Reply written", sent_at,
+                         {"replied_at": time.time(), "seat_orphan_printed": True})
+            return 0
+        if res_file.exists():
+            try:
+                data = json.loads(res_file.read_text(encoding="utf-8"))
+                text = (data.get("result") or data.get("text") or "").strip()
+            except (OSError, ValueError) as e:
+                print(f"muse_seat: bad response file: {e}", file=sys.stderr)
+                return 1
+            if text:
+                write_status(turn, session, mode, "Reply written", sent_at, {"replied_at": time.time()})
+                print(json.dumps({"type": "result", "result": text,
+                                  "session_id": session}), flush=True)
+                return 0
+            print("muse_seat: empty response file", file=sys.stderr)
+            return 1
+        # Poll fast (0.5s) for the response, but only rewrite Queued status
+        # at most every 5s - the old code fsync-wrote two status files every poll.
+        if time.time() - _last_status >= 5:
+            write_status(turn, session, mode, "Queued", sent_at)
+            _last_status = time.time()
+        time.sleep(POLL_SECS)
+    print("muse_seat: timed out waiting for Muse (19 min, no response file). "
+          "Muse was not watching the queue, or the reply is still being written — "
+          "check cabinet/muse-seat/requests/ and try again.", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

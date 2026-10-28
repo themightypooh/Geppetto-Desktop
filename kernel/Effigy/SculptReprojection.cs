@@ -219,6 +219,12 @@ public enum Fabric
 	Denim,
 	Leather,
 	Stretch,
+	// Appended, never inserted: GarmentFeature.FabricValue maps by index.
+	Knit,
+	Silk,
+	Wool,
+	Canvas,
+	Pile,
 }
 
 /// <summary>
@@ -340,6 +346,34 @@ public sealed class ClothSim
 				sim.StretchCompliance = 1e-4f;
 				sim.BendCompliance = 1e-3f;
 				sim.Friction = 0.7f;
+				break;
+			case Fabric.Knit:
+				sim.StretchCompliance = 1e-4f;
+				sim.BendCompliance = 1e-3f;
+				sim.Friction = 0.8f;
+				sim.DampingPerSecond = 0.3f;
+				break;
+			case Fabric.Silk:
+				sim.StretchCompliance = 5e-5f;
+				sim.BendCompliance = 5e-4f;
+				sim.Friction = 0.2f;
+				sim.DampingPerSecond = 0.15f;
+				break;
+			case Fabric.Wool:
+				sim.BendCompliance = 5e-6f;
+				sim.Friction = 0.5f;
+				sim.DampingPerSecond = 0.2f;
+				break;
+			case Fabric.Canvas:
+				sim.BendCompliance = 1e-6f;
+				sim.Friction = 0.4f;
+				sim.DampingPerSecond = 0.1f;
+				break;
+			case Fabric.Pile:
+				sim.StretchCompliance = 1e-4f;
+				sim.BendCompliance = 1e-4f;
+				sim.Friction = 0.9f;
+				sim.DampingPerSecond = 0.4f;
 				break;
 		}
 

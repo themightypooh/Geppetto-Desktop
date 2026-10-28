@@ -1,0 +1,22 @@
+echo "Toolbelt edit: Fin features for fins, spine and head untouched"
+remove DorsalRay1
+remove DorsalRay2
+remove DorsalRay3
+remove DorsalRay4
+remove DorsalRay5
+remove PectoralRay1
+remove PectoralRay2
+remove PectoralRay3
+remove AnalRay1
+remove AnalRay2
+remove CaudalRay1
+remove CaudalRay2
+remove CaudalRay3
+remove CaudalRay4
+add Fin name=DorsalFin root=-14,2,0;-8,2.5,0;-2,2,0 tip=-13,9,0;-8,11,0;-3,8,0 thickness=0.26,0.04 rays=8 ridge=0.06 web=0.72 curve=0.15 subdiv=2 materialslot=0
+add Fin name=PectoralFin root=-24,-2,0;-20,-2,0 tip=-20,-9,0;-17,-10,0;-15,-9,0 thickness=0.26,0.04 rays=6 ridge=0.06 web=0.72 curve=0.15 subdiv=2 materialslot=0
+add Fin name=AnalFin root=22,-1,0;26,-1,0 tip=26,-7,0;30,-6,0 thickness=0.26,0.04 rays=4 ridge=0.06 web=0.72 curve=0.15 subdiv=2 materialslot=0
+add Fin name=CaudalFin root=40,-10,0;41,-5,0;42,0,0 tip=46,-14,0;52,2,0;54,8,0 thickness=0.26,0.04 rays=10 ridge=0.06 web=0.72 curve=0.15 subdiv=2 materialslot=0
+material 0 color=#e9e0c8 rough=0.7 metal=0
+save swordfish_sharp_bones_v3.effigy
+render swordfish_sharp_bones_v3.png shade=clay views=4 size=512

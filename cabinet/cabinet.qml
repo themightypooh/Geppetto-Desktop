@@ -60,11 +60,47 @@ Window {
     property int wire: 0
     readonly property var info: host.info
     property bool spinning: false             // turntable
-    property bool followFrame: true           // live: keep the growing model framed every revision
+    property bool followFrame: false          // live: camera stays put across revisions; TRACK turns re-framing back on
     property bool refsOpen: false             // the reference pictures panel over the camera keys
-    property bool claudeOpen: false           // the CLAUDE card: talk to Claude Code from here (Ctrl+L)
-    onClaudeOpenChanged: if (claudeOpen) host.refreshChat()   // its model list is the chat's catalogue
-    Shortcut { sequence: "Ctrl+L"; context: Qt.ApplicationShortcut; onActivated: { root.claudeOpen = !root.claudeOpen; if (root.claudeOpen) claudePanel.focusInput() } }
+    property bool chatOpen: false           // the chat card: talk to your model from here (Ctrl+L)
+    property int chatOpenPane: 0          // TALK fix 2026-10-24: which pane opened chat (0 = global opener, use pane 1)
+    // Chat panel is PART OF THE MAIN WINDOW, not a separate Wayland window.
+    // Wayland ignores app-set Window x/y, so claudeWin follow could never move it.
+    // Internal Item x/y DO move, and root.contentItem is the top layer: it is NOT clipped
+    // by the viewport, chest, or drawer, so the panel can go over all of them.
+    // Panel pops UP out of the walkie: left = walkie left + 43, bottom = walkie top + 70.
+    property real lastGrillX: -1
+    property real lastGrillY: -1
+    property real lastChatH: -1  // drawer-lag fix 2026-10-26: panel height at last placement
+    function placeChatByWalkie() {
+        if (!chatOpen || !research.isOpen) return;
+        try {
+            var wp = claudeKey.mapToItem(root.contentItem, 0, 0);
+            // drawer-lag fix 2026-10-26: skip the whole relayout when the grill
+            // has not actually moved AND the panel height has not changed
+            // (the 32ms anchor timer + every X/Y change used to re-lay out
+            // the chat panel even when nothing moved).
+            if (wp.x === lastGrillX && wp.y === lastGrillY && claudePanel.height === lastChatH) return;
+            // The panel rises from the speaker grille, with its socket on the bottom edge.
+            // Shorten the normal card if the grille is too high for its full height.
+            claudePanel.scale = 1;
+            var px = wp.x + 32;  // tail tip at grill centre x, panel body left = px+20 = walkie+52, just right of grill grid
+            if (px + claudePanel.width > root.contentItem.width - 8) px = wp.x - 20 - claudePanel.width;
+            if (px < 8) px = 8;
+            var grillY = wp.y + 142;  // ACTUAL speaker grill grid, NOT the screen (screen teal "12" is at y=111)
+            claudePanel.maxHeight = Math.min(620, Math.max(320, grillY - 8 + 14));
+            var py = grillY - claudePanel.height + 14;
+            if (py < 8) py = 8;
+            if (py + claudePanel.height > root.contentItem.height - 8) py = root.contentItem.height - 8 - claudePanel.height;
+            if (py < 8) py = 8;
+            claudePanel.x = px;
+            claudePanel.y = py;
+            claudePanel.grillOffset = claudePanel.height - 14;
+            lastGrillX = wp.x; lastGrillY = wp.y; lastChatH = claudePanel.height;
+        } catch (e) {}
+    }
+    onChatOpenChanged: { if (chatOpen) { host.refreshChat(); root.activePane = root.chatOpenPane > 0 ? root.chatOpenPane : 1; root.chatOpenPane = 0; root.placeChatByWalkie(); } }   // chat auto-opens with one panel selected, pane 1 unless a pane TALK opened it
+    Shortcut { sequence: "Ctrl+L"; context: Qt.ApplicationShortcut; onActivated: { root.chatOpen = !root.chatOpen; if (root.chatOpen) claudePanel.focusInput() } }
     // the run the controls work: the one being watched if it is building, else any that is
     readonly property var liveRun: {
         var any = null;
@@ -78,6 +114,7 @@ Window {
     readonly property int solo: host.soloPane      // 1 pane, po's pick: only that pane shows, full size
     property int activePane: 1                // the pane VIEW NOW / WATCH put a run in: last one clicked
     onLayoutNChanged: if (activePane > layoutN) activePane = 1
+    onSoloChanged: if (solo >= 1 && solo <= 4) activePane = solo   // programmatic setSolo must not leave TALK/header pointing at a hidden pane
     readonly property int paneGap: 1          // a hairline seam: the panes butt up, no gutter between them
     function paneRect(n) {                    // pane n's place inside the viewport frame
         const W = root.g0.view.w, H = root.g0.view.h, g = root.paneGap;
@@ -103,15 +140,7 @@ Window {
         else if (n <= 1) host.cmd(line);
         else host.paneList[n - 2].cmd(line);
     }
-    // a VIEWPORTS "1: Pn" row: what that pane has in it, so po knows which one to pick
-    function soloWho(n) {
-        const own = n === 1 ? host.p1Owner : (host.paneList[n - 2] ? host.paneList[n - 2].owner : null);
-        const run = n === 1 ? host.watchedRun : (host.paneList[n - 2] ? host.paneList[n - 2].runDir : "");
-        const model = n === 1 ? (host.myScene ? "your scene" : "") : (host.paneList[n - 2] ? host.paneList[n - 2].modelPath || "" : "");
-        const what = own && own.title ? own.title : run ? host.runScript(run) : model ? model.split("/").pop() : "";
-        return "only pane " + n + (what ? ": " + what : n > layoutN ? " (hidden now)" : ": empty");
-    }
-    function runOf(dir) { if (!dir) return null; for (const r of host.runs) if (r.dir === dir) return r; return null }
+        function runOf(dir) { if (!dir) return null; for (const r of host.runs) if (r.dir === dir) return r; return null }
     // pane 1's own live run, for its HOLD/STOP when the view is split
     readonly property var p1Run: { const r = runOf(host.watchedRun); return r && r.status === "running" && !r.bench ? r : null }
     // a run starts building: pull the tool drawer out, its LIVE BUILD keys pop up on their own
@@ -169,8 +198,6 @@ Window {
         });
         if (openNote.visible) r.push(openNote.x, openNote.y, openNote.width, openNote.height);
         if (buildNote.visible) r.push(buildNote.x, buildNote.y, buildNote.width, buildNote.height);
-        if (flyer.visible) r.push(flyer.x - 30, flyer.y - 30, flyer.width + 60, flyer.height + 60);
-        if (paneMenu.open) r.push(paneMenu.x, paneMenu.y, paneMenu.width, paneMenu.height);
         host.setMask(r);
     }
     function maskLater() { Qt.callLater(updateMask) }
@@ -295,8 +322,14 @@ Window {
         id: tp
         property string text: ""
         width: tl.width + 20; height: 24
-        Image { anchors.fill: parent; source: root.art + "dymo.png"; fillMode: Image.Tile; smooth: false }
-        Px { id: tl; x: 10; y: 4; text: tp.text; color: root.tapeText }
+        // Clean tooltip box, not the old tiled dymo strip: solid panel
+        // colour with a soft shadow, a thin edge, rounded corners, and
+        // the text truly centred vertically (it used to sit low at y 4
+        // on a dithered tile that repeated every 32px). Same size as
+        // before, so every Tape label and tip keeps its place.
+        Rectangle { x: 1; y: 1; width: parent.width; height: parent.height; radius: 3; color: "#000000"; opacity: 0.35 }
+        Rectangle { anchors.fill: parent; radius: 3; color: "#222831"; border.color: "#343d49"; border.width: 1 }
+        Px { id: tl; x: 10; anchors.verticalCenter: parent.verticalCenter; text: tp.text; color: root.tapeText }
     }
 
     // ---- the chat window: talk to the local and the hosted models.
@@ -377,7 +410,7 @@ Window {
             height: parent.height - 100 - chatBox.headH - chatBox.picStrip
             contentHeight: chatLines.height
             boundsBehavior: Flickable.StopAtBounds
-            clip: true
+            clip: false
             onContentHeightChanged: contentY = Math.max(0, contentHeight - height)
             Column {
                 id: chatLines
@@ -540,74 +573,7 @@ Window {
         // every run building right now: first thing in the drawer, loud, one row each: who is on it,
         // what they asked for, the step it is on, and the keys. Each row is a fixed height, every line
         // one elided line, so a long prompt or a long step never spills out of the box.
-        Item {
-            id: liveCard
-            objectName: "liveNow"
-            readonly property var live: { const out = []; for (const r of host.runs) if (r.status === "running") out.push(r); return out }
-            readonly property var lr: live.length ? live[0] : null
-            readonly property int rowH: 10 + 3 * 20 + 6 + root.g0.key.h + 8
-            visible: live.length > 0
-            width: parent.width - 8; height: visible ? 30 + live.length * (rowH + 6) : 0
-            property var rowProbe: []             // what each row says, for the tests (QML-private items can't be walked from Python)
-            function probeRows() {
-                const out = [];
-                for (let i = 0; i < liveRows.count; i++) {
-                    const it = liveRows.itemAt(i);
-                    if (it) out.push({ who: it.who, doing: it.doing, where: it.where, height: it.height, clip: it.clip })
-                }
-                rowProbe = out
-            }
-            Shade { x: 6; y: 6; width: liveCard.width; height: liveCard.height }
-            Rectangle { anchors.fill: parent; color: root.inkRed }
-            Rectangle { anchors.fill: parent; anchors.margins: 4; color: root.amber }
-            Tape { x: 6; y: -6; text: liveCard.live.length > 1 ? "LIVE NOW  x" + liveCard.live.length : "LIVE NOW" }
-            Image { x: liveCard.width - 22; y: 6; source: root.art + "lamp_on.png"; smooth: false; opacity: root.blinkOn ? 1 : 0.3 }
-            Column {
-                x: 6; y: 24; width: liveCard.width - 12; spacing: 6
-                Repeater {
-                    id: liveRows
-                    model: liveCard.live
-                    Item {
-                        id: liveRow
-                        objectName: "liveNowRow"
-                        required property var modelData
-                        readonly property var r: modelData
-                        // who: the session's title, else the model, else the pane it is in
-                        readonly property string who: r.who ? r.who : (r.pane > 0 ? "someone in pane " + r.pane : "someone")
-                        // the step: plain words from the watch panel, else the run's activity
-                        readonly property string doing: (r.watch && r.watch.say) ? r.watch.say : (r.activity || "starting")
-                        readonly property string where: (r.watch && r.watch.total > 0) ? " (" + r.watch.line + "/" + r.watch.total + ")" : ""
-                        width: parent.width; height: liveCard.rowH
-                        clip: true
-                        Rectangle { anchors.fill: parent; color: root.panelFill; border.color: root.inkRed; border.width: 2 }
-                        Column {
-                            x: 6; y: 6; width: parent.width - 12; spacing: 0
-                            Px { text: liveRow.who.toUpperCase(); color: root.inkRed; maxWidth: parent.width; maxLines: 1 }
-                            Px { text: liveRow.r.title || liveRow.r.prompt || liveRow.r.name; maxWidth: parent.width; maxLines: 1 }
-                            Px { text: liveRow.doing + liveRow.where; color: root.inkFaint; bold: false; maxWidth: parent.width; maxLines: 1 }
-                            Item { width: 1; height: 6 }
-                            Row {
-                                // three keys in the drawer's width: the stop key is the narrow transport one
-                                spacing: 2
-                                Key {
-                                    label: liveRow.r.pane > 0 ? "IN " + liveRow.r.pane : "VIEW"; lamp: true; lit: !(liveRow.r.pane > 0)
-                                    tip: liveRow.r.pane > 0 ? "showing in viewport pane " + liveRow.r.pane : "show this run in the selected viewport pane"
-                                    onClicked: if (!(liveRow.r.pane > 0)) host.showRunIn(liveRow.r.dir, root.activePane)
-                                }
-                                Key {
-                                    readonly property bool can: liveRow.r.latestRevision > 0
-                                    enabled: can; opacity: can ? 1 : 0.4
-                                    label: liveRow.r.paused ? "RESUME" : "PAUSE"
-                                    tip: can ? "hold the build before its next change, or let it carry on" : "nothing built yet to pause"
-                                    onClicked: host.togglePause(liveRow.r.dir)
-                                }
-                                Key { small: true; label: "\u25A0"; tip: "STOP: end the run, keep the model"; onClicked: host.stopResearch(liveRow.r.dir) }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        
         // the next run is a blank book lying open on the pile. You letter the page, the model is
         // the stamp in the margin, and START slams the cover: the gilt title is already on the spine,
         // and the run lands in the pile as a closed book. The same pale volume then falls open again.
@@ -1011,7 +977,7 @@ Window {
         property bool lit: false
         property string tip: ""
         signal clicked()
-        width: Math.max(22, chT.implicitWidth + 12); height: 22
+        width: Math.max(22, chT.implicitWidth + 12); height: Math.max(22, chT.implicitHeight + 6)
         Rectangle {
             anchors.fill: parent; radius: 3
             color: ch.lit ? root.amber : (chM.containsMouse ? "#3d424b" : "#1f2228"); border.color: "#0b0c0e"
@@ -1023,6 +989,7 @@ Window {
         }
         MouseArea {
             id: chM; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+            enabled: ch.enabled
             onClicked: ch.clicked()
             onContainsMouseChanged: { if (ch.tip) root.keyTip = containsMouse ? ch.tip : ""; ch.tipReady = false; if (containsMouse) chWait.restart(); else chWait.stop() }
         }
@@ -1035,119 +1002,11 @@ Window {
         }
     }
 
-    // the name strip over a pane in a split view: who models in it (their session's name), whether they
-    // are still there (green: busy now, amber: quiet, grey: gone, the pane frees itself), which script, live or not
-    component PaneHeader: Rectangle {
-        id: ph
-        objectName: "paneHeader" + n
-        property int n: 1
-        property string who: ""
-        property string what: ""
-        property string state: ""
-        property var owner: ({})
-        readonly property string presence: owner && owner.presence ? owner.presence : ""
-        readonly property string title: owner && owner.title ? owner.title : ""
-        x: 0; y: 0; width: parent.width; height: 22
-        visible: false                          // pane name stays off the model
-        color: root.activePane === n ? "#3a2f12" : "#16191c"; opacity: 0.9
-        Rectangle {
-            id: phDot
-            visible: ph.presence !== ""
-            x: 8; anchors.verticalCenter: parent.verticalCenter
-            width: 8; height: 8; radius: 4
-            color: ph.presence === "here" ? "#5fbf6a" : ph.presence === "idle" ? root.amber : "#6b6f75"
-        }
-        Text {
-            x: phDot.visible ? 22 : 8; anchors.verticalCenter: parent.verticalCenter
-            width: phMenuKey.x - x - 8; elide: Text.ElideRight
-            text: "PANE " + ph.n + (ph.who || ph.what || ph.title
-                      ? "  " + [ph.who, ph.title ? "“" + ph.title + "”" : "", ph.what].filter(function (t) { return !!t }).join("  ")
-                      : "  empty")
-                  + (ph.presence === "idle" ? "  idle " + ph.owner.quiet : ph.presence === "left" ? "  gone " + ph.owner.quiet : "")
-                  + (ph.state ? "  [" + ph.state + "]" : "")
-            color: root.activePane === ph.n ? root.amber : root.keyText
-            font.family: root.mono; font.bold: true; font.pixelSize: 11
-        }
-        // the whole strip is the menu's handle; the key on the right says so
-        MouseArea {
-            anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-            onClicked: { root.activePane = ph.n; if (paneMenu.open && paneMenu.n === ph.n) paneMenu.open = false; else paneMenu.openFor(ph.n, ph) }
-        }
-        Rectangle {
-            id: phMenuKey
-            objectName: "paneMenuKey" + ph.n
-            anchors.right: parent.right; anchors.rightMargin: 4; anchors.verticalCenter: parent.verticalCenter
-            width: phMenuText.implicitWidth + 14; height: 16; radius: 2
-            readonly property bool lit: paneMenu.open && paneMenu.n === ph.n
-            color: lit ? root.amber : "#2a2e34"; border.color: "#0b0c0e"
-            Text {
-                id: phMenuText; anchors.centerIn: parent
-                text: phMenuKey.lit ? "^" : "v"
-                color: phMenuKey.lit ? "#1f2228" : root.keyText
-                font.family: root.mono; font.bold: true; font.pixelSize: 10
-            }
-        }
-    }
+    // One pane panel owns identity, telemetry and controls; no duplicate viewport overlays.
+    
 
-    // a live run's bar under its pane header, always readable: what it is doing, how long it has run,
-    // how long since it last did anything (quiet over a minute lights red: it may be stuck), HOLD and STOP
-    component RunBar: Rectangle {
-        id: rb
-        property var run: null
-        property int n: 1                        // the pane it heads (the build note replays there)
-        property real now: Date.now() / 1000
-        // an open run is quiet on purpose (it waits for lines), so it never counts as stuck
-        readonly property real quiet: run && run.lastEvent && !run.openState ? Math.max(0, now - run.lastEvent) : 0
-        function clock(t) { t = Math.floor(t); return Math.floor(t / 60) + ":" + ("0" + t % 60).slice(-2) }
-        onRunChanged: now = Date.now() / 1000
-        Timer { interval: 1000; repeat: true; running: !!rb.run; onTriggered: rb.now = Date.now() / 1000 }
-        visible: false                          // HOLD / STOP / CLAUDE live in the drawers, not on the model
-        width: rbRow.width + 12; height: rbRow.height + 6
-        color: "#16191c"; opacity: 0.92; border.color: rb.quiet > 60 ? "#c0392b" : "#3a2f12"
-        Row {
-            id: rbRow
-            x: 6; y: 3; spacing: 4
-            Text {
-                anchors.verticalCenter: parent.verticalCenter
-                width: Math.min(implicitWidth, 320); elide: Text.ElideRight
-                text: !rb.run ? "" : (rb.run.paused ? "HELD" : rb.run.openState === "open" ? "OPEN" : rb.run.openState === "held" ? "HELD AT A BAD LINE"
-                                     : (rb.run.activity || "working").toUpperCase())
-                      + (rb.run.started ? "  " + rb.clock(rb.now - rb.run.started) : "")
-                      + (rb.quiet > 20 ? "  quiet " + rb.clock(rb.quiet) : "")
-                color: rb.quiet > 60 ? "#e05a4a" : root.amber
-                font.family: root.mono; font.bold: true; font.pixelSize: 11
-            }
-            Chip {                              // the build note: where it is in the script, out on paper
-                id: rbNote
-                objectName: "runBarNote"
-                readonly property var w: rb.run && rb.run.watch ? rb.run.watch : ({})
-                readonly property bool held: !!rb.run && (rb.run.openState === "held" || !!w.error)
-                visible: (w.count || 0) > 0
-                label: "NOTE" + (w.line ? " " + w.line + "/" + w.total : "")
-                lit: (!!rb.run && root.buildNoteDir === rb.run.dir) || (held && root.blinkOn)
-                tip: "the build note: the line, the part, the error and every step"
-                onClicked: root.toggleBuildNote(rb.run.dir, rb.n, rbNote)
-            }
-            Chip {
-                objectName: "runBarHold"
-                label: rb.run && rb.run.paused ? "GO" : "HOLD"; lit: !!rb.run && rb.run.paused && root.blinkOn
-                tip: rb.run && rb.run.paused ? "GO: carry on" : "HOLD: pause before its next step"
-                onClicked: host.togglePause(rb.run.dir)
-            }
-            Chip {
-                objectName: "runBarStop"
-                label: rb.run && rb.run.openState ? "CLOSE" : "STOP"
-                tip: rb.run && rb.run.openState ? "CLOSE: the model is done, end the run and keep it" : "STOP: end the run, keep what it made"
-                onClicked: host.stopResearch(rb.run.dir)
-            }
-            Chip {
-                objectName: "runBarClaude"
-                label: "TALK"; lit: root.claudeOpen
-                tip: "talk to " + claudePanel.who + " about this run (Ctrl+L)"
-                onClicked: root.claudeOpen = !root.claudeOpen
-            }
-        }
-    }
+    // Controls used only inside PaneHeader.
+    
 
     // Lane D: a stage checkpoint bar at the top of a pane. When the run it heads is gated at
     // a checkpoint (run.openState === "checkpoint", from live_runs.OPEN), it shows the
@@ -1161,167 +1020,7 @@ Window {
     // the gate too, with the redo request kept as a note for the modeller, so the run never
     // deadlocks waiting for a stage it cannot redo on its own; the modeller's replacement
     // lines then go in through the run's open loop.
-    component CheckpointBar: Rectangle {
-        id: cb
-        property var run: null
-        property bool sent: false
-        readonly property bool gated: !!cb.run && cb.run.openState === "checkpoint"
-        readonly property string prompt: cb.run ? (cb.run.operation || "Checkpoint") : ""
-        function listAfter(key) {
-            var parts = ((cb.run && cb.run.outcome) || "").split(" ");
-            for (var i = 0; i < parts.length; i++) if (parts[i].indexOf(key + "=") === 0) return parts[i].slice(key.length + 1).split(",");
-            return [];
-        }
-        readonly property var focusList: listAfter("focus")
-        readonly property var varList: listAfter("vars")
-        property real tweakBody: 1.0
-        property real toon: 0; property real stylized: 0; property real rough: 0.5; property real coat: 0; property real sss: 0
-        function tweaks() {
-            var t = [];
-            if (cb.focusList.length) t.push("focus tweak=" + cb.tweakBody.toFixed(2));
-            t.push("toon=" + cb.toon.toFixed(2) + " stylized=" + cb.stylized.toFixed(2) + " rough=" + cb.rough.toFixed(2) + " coat=" + cb.coat.toFixed(2) + " sss=" + cb.sss.toFixed(2));
-            return t.join(" ");
-        }
-        function act(redo) {
-            if (!cb.run || cb.sent) return;
-            cb.sent = true;
-            host.sendDirection(cb.run.dir, (redo ? "CHECKPOINT-REDO " : "CHECKPOINT-APPROVE ") + cb.prompt + " (" + cb.tweaks() + ")");
-        }
-        onGatedChanged: if (gated) cb.sent = false
-        visible: cb.gated
-        width: Math.min(760, (parent ? parent.width : 760) - 24)
-        height: cbCol.height + 12
-        color: "#16191c"; opacity: 0.95; border.color: "#f2a91c"
-        Column {
-            id: cbCol
-            x: 8; y: 6; width: parent.width - 16; spacing: 4
-            Text {
-                width: parent.width; wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
-                text: "CHECKPOINT: " + cb.prompt
-                color: root.amber; font.family: root.mono; font.bold: true; font.pixelSize: 12
-                MouseArea { anchors.fill: parent; hoverEnabled: true; onContainsMouseChanged: root.keyTip = containsMouse ? cb.prompt : "" }
-            }
-            Flow {
-                width: parent.width; spacing: 4
-                Repeater {
-                    model: cb.focusList
-                    Text { text: "focus: " + modelData; color: root.keyText; font.family: root.mono; font.bold: true; font.pixelSize: 11 }
-                }
-                Repeater {
-                    model: cb.varList
-                    Text { text: "var: " + modelData; color: root.keyText; font.family: root.mono; font.pixelSize: 11 }
-                }
-            }
-            Flow {
-                width: parent.width; spacing: 8
-                Repeater {
-                    model: [["focus tweak", 0, 2, 1, function (v) { cb.tweakBody = v }],
-                            ["toon", 0, 1, 0, function (v) { cb.toon = v }],
-                            ["stylized", 0, 1, 0, function (v) { cb.stylized = v }],
-                            ["rough", 0, 1, 0.5, function (v) { cb.rough = v }],
-                            ["coat", 0, 1, 0, function (v) { cb.coat = v }],
-                            ["sss", 0, 1, 0, function (v) { cb.sss = v }]]
-                    Row {
-                        spacing: 4
-                        Text { anchors.verticalCenter: parent.verticalCenter; width: 74; elide: Text.ElideRight; text: modelData[0]; color: root.keyText; font.family: root.mono; font.pixelSize: 11 }
-                        C.Slider {
-                            anchors.verticalCenter: parent.verticalCenter; width: 120
-                            from: modelData[1]; to: modelData[2]; stepSize: 0.01; value: modelData[3]
-                            onMoved: modelData[4](value)
-                        }
-                    }
-                }
-            }
-            Row {
-                spacing: 4
-                Chip {
-                    objectName: "checkpointApprove"
-                    label: cb.sent ? "SENT…" : "APPROVE & CONTINUE"; lit: !cb.sent
-                    tip: "approve this stage and carry on with the lines after it"
-                    onClicked: cb.act(false)
-                }
-                Chip {
-                    objectName: "checkpointRedo"
-                    label: cb.sent ? "SENT…" : "REQUEST REDO"
-                    tip: "flag this stage for a redo and carry on; the modeller's replacement lines go in next"
-                    onClicked: cb.act(true)
-                }
-            }
-        }
-    }
-
-    // Lane O: freehand draw-over layer for pane 1. Armed with DRAW (or the ToolCard DRAW
-    // key), it captures a freehand stroke over the viewport and draws it back as a polyline.
-    // Points are kept as fractions of the layer (fx, fy), so they survive a pane resize, and
-    // strokeJson is the payload the host ray slot turns into 3D hits: the cabinet viewport
-    // is a streamed serve image, it has no 3D camera in QML, so the ray per point comes
-    // from the serve viewer's camera — host.drawOverStroke sends each point as a `drop`
-    // probe (ServeMode ScreenRay + face pick, no selection change) and writes the stroke
-    // as a note on the watched run. While disarmed the MouseArea is disabled, so normal
-    // clicks, picks and orbits are untouched. The CheckpointBar above is not touched by this.
-    component DrawOverLayer: Item {
-        id: dl
-        property bool armed: false
-        property var points: []
-        property bool strokeReady: false
-        property string strokeJson: ""
-        signal sendStroke(string json)
-        Canvas {
-            id: dlCanvas
-            anchors.fill: parent
-            onPaint: {
-                var ctx = getContext("2d");
-                ctx.clearRect(0, 0, width, height);
-                if (dl.points.length < 2) return;
-                ctx.strokeStyle = "#f2a91c"; ctx.lineWidth = 2; ctx.lineJoin = "round"; ctx.lineCap = "round";
-                ctx.beginPath();
-                ctx.moveTo(dl.points[0].fx * width, dl.points[0].fy * height);
-                for (var i = 1; i < dl.points.length; i++) ctx.lineTo(dl.points[i].fx * width, dl.points[i].fy * height);
-                ctx.stroke();
-            }
-        }
-        MouseArea {
-            anchors.fill: parent
-            enabled: dl.armed
-            property bool drawing: false
-            onPressed: function (m) {
-                drawing = true; dl.points = [{ fx: m.x / width, fy: m.y / height }];
-                dl.strokeReady = false; dl.strokeJson = ""; dlCanvas.requestPaint();
-            }
-            onPositionChanged: function (m) {
-                if (!drawing) return;
-                var p = dl.points.slice();
-                p.push({ fx: m.x / width, fy: m.y / height });
-                dl.points = p; dlCanvas.requestPaint();
-            }
-            onReleased: function (m) {
-                drawing = false;
-                if (dl.points.length > 1) { dl.strokeReady = true; dl.strokeJson = JSON.stringify(dl.points); }
-                dlCanvas.requestPaint();
-            }
-        }
-        Row {
-            anchors.left: parent.left; anchors.bottom: parent.bottom; anchors.margins: 8
-            spacing: 4
-            Chip {
-                label: dl.armed ? "DRAW: ON" : "DRAW"; lit: dl.armed
-                tip: "draw-over: drag a freehand stroke over the model; SEND turns it into a note on the watched run"
-                onClicked: { dl.armed = !dl.armed; if (!dl.armed) { dl.points = []; dl.strokeReady = false; dlCanvas.requestPaint(); } }
-            }
-            Chip {
-                visible: dl.strokeReady
-                label: "SEND STROKE"; lit: true
-                tip: "captured stroke payload (fractions of the pane); SEND asks the serve viewer for the face under each point"
-                onClicked: dl.sendStroke(JSON.stringify(dl.points.map(function (pt) { return { x: Math.round(pt.fx * dl.width), y: Math.round(pt.fy * dl.height) }; })))
-            }
-            Chip {
-                visible: dl.points.length > 0
-                label: "CLEAR"
-                tip: "drop this stroke"
-                onClicked: { dl.points = []; dl.strokeReady = false; dl.strokeJson = ""; dlCanvas.requestPaint(); }
-            }
-        }
-    }
+    
 
     // what a live script run is doing, written out on the build note (the paper the run bar's NOTE key
     // tosses out): LINE x of n, the part, what the line does, the line itself, a held run's error, and
@@ -1388,8 +1087,39 @@ Window {
             Item { width: 1; height: 2 }
             Text {
                 visible: (bs.w.steps || []).length > 0
-                text: "STEPS  (click one to replay from it)"
+                text: "STEPS  (drag the line, or click one)"
                 color: bs.faint; font.family: root.mono; font.bold: true; font.pixelSize: 10
+            }
+            Item {
+                id: stepScrub
+                objectName: "buildNoteScrub"
+                visible: (bs.w.steps || []).length > 1
+                width: parent.width; height: 18
+                readonly property var steps: bs.w.steps || []
+                function indexAt(mx) {
+                    var n = steps.length;
+                    if (n <= 1) return 0;
+                    return Math.round(Math.max(0, Math.min(1, mx / Math.max(1, width))) * (n - 1));
+                }
+                function seek(mx) {
+                    var st = steps[indexAt(mx)];
+                    if (st) bs.pick(st.rev);
+                }
+                Rectangle { x: 2; y: 8; width: parent.width - 4; height: 4; radius: 2; color: "#e2d3b0" }
+                Rectangle {
+                    visible: stepDrag.pressed
+                    x: Math.max(0, Math.min(parent.width - 8, stepDrag.mouseX - 4)); y: 4
+                    width: 8; height: 12; radius: 2; color: "#b9852a"
+                }
+                MouseArea {
+                    id: stepDrag
+                    anchors.fill: parent
+                    enabled: stepScrub.steps.length > 1
+                    cursorShape: Qt.SizeHorCursor
+                    preventStealing: true
+                    onPressed: function (m) { stepScrub.seek(m.x) }
+                    onPositionChanged: function (m) { if (pressed) stepScrub.seek(m.x) }
+                }
             }
         }
         ListView {
@@ -1428,108 +1158,8 @@ Window {
         }
     }
 
-    // ---- the BYO-AI notice card: cost pre-flight + first-send disclosure (ai_notice.py).
-    // Shown by host before the first hosted send / research START to a provider; the words
-    // live in ai_notice.py, the acks in ~/.config/geppetto/ai-consent.json. Root-level (whole
-    // frame, never one pane), and deliberately away from the drawers.
-    component NoticeCard: Item {
-        id: ncard
-        objectName: "noticeCard"
-        readonly property var nc: host.notice
-        property bool everyTime: false
-        property bool neverShow: false
-        visible: !!nc.show
-        onVisibleChanged: if (!visible) neverShow = false
-        width: Math.min(660, root.g0.view.w - 24)
-        height: Math.min(560, root.g0.view.h - 24)
-        x: root.cabX + root.g0.view.x + Math.round((root.g0.view.w - width) / 2)
-        y: root.cabY + root.g0.view.y + Math.max(0, Math.round((root.g0.view.h - height) / 3))
-        clip: true
-        Rectangle { anchors.fill: parent; radius: 6; color: "#16191c"; opacity: 0.97 }
-        Rectangle { anchors.fill: parent; radius: 6; color: "transparent"; border.width: 1; border.color: root.amber }
-        MouseArea { anchors.fill: parent }       // the card takes the mouse; nothing sends behind it
-        Tape { x: 10; y: -8; z: 2; text: "BEFORE THE FIRST SEND  " }
-        Flickable {
-            id: nflick
-            x: 16; y: 24; width: parent.width - 32; height: parent.height - 84
-            contentWidth: width; contentHeight: ncol.implicitHeight
-            clip: true; flickableDirection: Flickable.VerticalFlick
-            Column {
-                id: ncol; width: nflick.width; spacing: 12
-                Repeater {
-                    model: ncard.nc.blocks || []
-                    Column {
-                        required property var modelData
-                        width: ncol.width; spacing: 5
-                        Text {
-                            visible: !!modelData.title; width: parent.width
-                            text: modelData.title || ""
-                            color: root.amber; font.family: root.mono; font.bold: true; font.pixelSize: 14
-                            wrapMode: Text.WordWrap
-                        }
-                        Repeater {
-                            model: modelData.lines || []
-                            Text {
-                                required property var modelData
-                                width: ncol.width; text: modelData
-                                color: "#eef0ea"; font.family: root.mono; font.pixelSize: 12
-                                wrapMode: Text.WordWrap; lineHeight: 1.25
-                            }
-                        }
-                    }
-                }
-                Text {
-                    width: ncol.width
-                    text: "No key yet, or a key problem? Connect your own AI (in the docs) shows where it goes."
-                    color: "#8a8f96"; font.family: root.mono; font.pixelSize: 11; wrapMode: Text.WordWrap
-                }
-            }
-        }
-        Row {
-            objectName: "noticeNeverShow"
-            x: 16; width: parent.width - 32
-            anchors.bottom: parent.bottom; anchors.bottomMargin: 44
-            spacing: 10
-            Item {
-                width: 32; height: 32
-                Rectangle {
-                    anchors.fill: parent; radius: 4
-                    color: ncard.neverShow ? root.amber : "transparent"
-                    border.width: 3; border.color: root.amber
-                }
-                Text {
-                    visible: ncard.neverShow
-                    anchors.centerIn: parent; text: "X"
-                    color: "#1f2228"; font.family: root.mono; font.bold: true; font.pixelSize: 20
-                }
-                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: ncard.neverShow = !ncard.neverShow }
-            }
-            Item {
-                width: neverLabel.implicitWidth; height: 32
-                Text {
-                    id: neverLabel; anchors.centerIn: parent; text: "DO NOT SHOW THIS AGAIN"
-                    color: root.amber; font.family: root.mono; font.bold: true; font.pixelSize: 15
-                }
-                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: ncard.neverShow = !ncard.neverShow }
-            }
-        }
-        Row {
-            x: 16; anchors.bottom: parent.bottom; anchors.bottomMargin: 10; spacing: 6
-            Chip { objectName: "noticeCancel"; label: "NOT YET"; onClicked: host.noticeCancel() }
-            Chip {
-                objectName: "noticeEveryTime"; label: "TELL ME EVERY TIME"; lit: ncard.everyTime
-                tip: "show the money words before every hosted build, not just the first per provider"
-                onClicked: ncard.everyTime = !ncard.everyTime
-            }
-        }
-        Chip {
-            objectName: "noticeStart"
-            anchors.right: parent.right; anchors.rightMargin: 16
-            anchors.bottom: parent.bottom; anchors.bottomMargin: 10
-            label: ncard.nc.startLabel || "START THE BUILD"; lit: true
-            onClicked: host.noticeStart(ncard.everyTime, ncard.neverShow)
-        }
-    }
+    // NoticeCard removed 2026-10-25 at user order: no join/start UI.
+
 
     // pane 2-4 of a split viewport: one run, its own camera, header, LIVE/PAUSE/STOP, step wheel,
     // replay strip and notes. A new run only lands here while it's empty; drag a run on to swap
@@ -1560,13 +1190,21 @@ Window {
             FlyCam { id: spFly; n: sp.n }
             onPressed: function (m) {
                 lx = m.x; ly = m.y; root.activePane = sp.n; forceActiveFocus();
-                if (m.button === Qt.RightButton) spFly.start();
+                // left+right together drags the camera (pan), not fly-look: exit
+                // fly when the second button lands, so pan moves the target.
+                if (m.button === Qt.RightButton && (pressedButtons & Qt.LeftButton)) spFly.stop();
+                else if (m.button === Qt.LeftButton && (pressedButtons & Qt.RightButton)) spFly.stop();
+                else if (m.button === Qt.RightButton) spFly.start();
             }
-            onReleased: function (m) { if (m.button === Qt.RightButton) spFly.stop() }
+            onReleased: function (m) {
+                if (m.button === Qt.LeftButton && (pressedButtons & Qt.RightButton)) { spFly.start(); return }
+                if (m.button === Qt.RightButton) spFly.stop()
+            }
             onCanceled: spFly.stop()
             onPositionChanged: function (m) {
                 const dx = m.x - lx, dy = m.y - ly; lx = m.x; ly = m.y;
                 if (spFly.on) spFly.look(dx, dy);
+                else if ((pressedButtons & Qt.LeftButton) && (pressedButtons & Qt.RightButton)) root.paneCmd(sp.n, "pan " + dx + " " + dy);
                 else if (pressedButtons & Qt.LeftButton) root.paneCmd(sp.n, "orbit " + dx + " " + dy);
                 else root.paneCmd(sp.n, "pan " + dx + " " + dy);
             }
@@ -1580,22 +1218,16 @@ Window {
         }
         FlyStrip { fly: spFly; z: 5 }
         Text {                                       // an empty pane says what fills it
-            visible: false
+            visible: !sp.r && !sp.replaying && !sp.pn.modelPath
             anchors.centerIn: parent; width: parent.width - 40
             horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap
             text: "PANE " + sp.n + " IS EMPTY\nclick its header: make something, or put a model here\n(or drag a run from RUNS onto it)"
                   + (host.autoLayout ? "\n\nAUTO: empty panes fold away on their own" : "\n\nfixed at " + root.layoutN + " panes: AUTO SPLIT (header menu) folds empty ones")
             color: "#6b6f75"; font.family: root.mono; font.pixelSize: 12
         }
-        PaneHeader {
-            n: sp.n; who: sp.pn.modeller; what: sp.pn.script || (sp.pn.modelPath ? sp.pn.modelPath.split("/").pop() : "")
-            owner: sp.pn.owner
-            state: sp.replaying ? "REPLAY" : !sp.r ? "" : sp.live ? (sp.r.openState === "held" ? "HELD  REV " + sp.r.latestRevision
-                   : sp.r.openState === "open" ? "OPEN  REV " + sp.r.latestRevision : sp.r.paused ? "PAUSED" : "LIVE  REV " + sp.r.latestRevision) : "DONE"
-        }
-        ReplayStrip { src: sp.pn; x: 8; y: 28; width: sp.width - 16; visible: false }
-        RunBar { id: spRunBar; n: sp.n; run: sp.replaying ? null : sp.r; x: 8; y: 28 }
-        CheckpointBar { run: sp.replaying ? null : sp.r; x: 8; y: 56 }
+        
+        // paneClear removed 2026-10-25 at user order: no CLEAR button in viewports.
+        ReplayStrip { src: sp.pn; x: 8; y: 28; width: sp.width - 16 }
         // this pane's run controls, faint until the mouse comes near
         Flow {
             id: spKeys
@@ -1608,12 +1240,6 @@ Window {
                 label: sp.replaying ? "LIVE" : sp.live ? "LIVE" : "DONE"; lamp: true; lit: sp.live && !sp.replaying && (!sp.r.paused || root.blinkOn)
                 tip: sp.replaying ? "leave the replay: back to the run's newest model" : sp.live ? "showing the run as it builds" : "the run has ended"
                 onClicked: if (sp.replaying) sp.pn.replayLive()
-            }
-            Key {
-                enabled: sp.live; opacity: enabled ? 1 : 0.4
-                label: sp.live && sp.r.paused ? "GO" : "HOLD"
-                tip: !sp.live ? "the run has ended: nothing to pause" : sp.r.paused ? "GO: carry on building" : "HOLD: pause this pane's run before its next change"
-                onClicked: host.togglePause(sp.r.dir)
             }
             Key {
                 enabled: sp.live && sp.r.paused; opacity: enabled ? 1 : 0.4
@@ -1850,7 +1476,7 @@ Window {
         readonly property alias floorItem: floor
         readonly property real travel: side === "b" ? Math.abs(openY - shutY) : Math.abs(openX - shutX)
         // stepped like an old machine: 10 steps while animating, free while dragged, 2px grid
-        readonly property real q: dragging || gliding ? open : Math.round(open * 10) / 10
+        readonly property real q: open  // drawer-lag fix 2026-10-26: was 10-step quantized, so the drawer slid in jerks
         x: Math.round((shutX + (openX - shutX) * q) / 2) * 2
         y: Math.round((shutY + (openY - shutY) * q) / 2) * 2
         width: g.w; height: g.h
@@ -1866,17 +1492,18 @@ Window {
             isOpen = v;
             anim.stop();
             gliding = false;
-            anim.easing.type = Easing.OutQuad;
+            anim.easing.type = Easing.Linear;  // drag-curve fix 2026-10-26: straight motion, no easing curve
             anim.to = v ? 1 : 0;
             anim.duration = 60 + 300 * Math.abs(anim.to - open);
             anim.start();
         }
         function toggle() { setOpen(open < 0.5) }
-        NumberAnimation { id: anim; target: d; property: "open"; easing.type: Easing.OutQuad; onStopped: d.gliding = false }
+        NumberAnimation { id: anim; target: d; property: "open"; easing.type: Easing.Linear; onStopped: d.gliding = false }  // drag-curve fix 2026-10-26
 
         Image { source: root.enamel(d.img); smooth: false }
         property int floorExtra: 0      // content may run this far over the floor's shadow line onto the wall
-        Item { id: floor; x: d.g.floorX; y: d.g.floorY; width: d.g.floorW; height: d.g.floorH + floorExtra; clip: true }
+        property bool clipFloor: true     // false: content may run to the drawer's visible wood, not the baked floor box
+        Item { id: floor; x: d.g.floorX; y: d.g.floorY; width: d.g.floorW; height: d.g.floorH + floorExtra; clip: clipFloor }
 
         // the pull and the drawer front: grab it and pull the drawer out (or push it back) by
         // hand. It follows the mouse 1:1, glides on a little if flung, and stays where let go.
@@ -1919,7 +1546,7 @@ Window {
                 if (Math.abs(target - d.open) * d.travel < 2) return;
                 anim.to = target;
                 anim.duration = Math.min(420, 80 + Math.abs(target - d.open) * d.travel * 1.2);
-                anim.easing.type = Easing.OutCubic;
+                anim.easing.type = Easing.Linear;  // drag-curve fix 2026-10-26: release glides straight, no curve
                 d.gliding = true;
                 anim.start();
             }
@@ -1953,6 +1580,12 @@ Window {
         }
         MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (pl.drawer) pl.drawer.toggle() }
     }
+
+    // a drawer tab: always on screen at the window edge, so a drawer can be found
+    // without hunting for its small frame label plate. Same toggle() as the plate;
+    // the pull-drag behaviour is untouched. High z so it stays visible (and clickable)
+    // even when its drawer is open and slides over this edge. Text only, no new art.
+    
 
     // a black bakelite key, optionally with a jewel lamp
     // ---- reference pictures: a photo stood behind the model (one per view), drawn by the viewer
@@ -2073,6 +1706,7 @@ Window {
         property string label: ""
         property bool lamp: false
         property bool lit: false
+        property bool danger: false
         property bool latched: false
         property bool small: false            // the narrow key, for one-glyph transport keys
         property string tip: ""               // what it does, in words, on the controls sheet's hint line
@@ -2089,7 +1723,7 @@ Window {
             }
             Px {
                 x: k.lamp ? 26 : (k.width - 4 - width) / 2; y: 8
-                text: k.label; color: k.lit ? root.amber : root.keyText
+                text: k.label; color: k.danger ? "#ffb1a2" : k.lit ? root.amber : root.keyText
             }
         }
         MouseArea {
@@ -2217,6 +1851,11 @@ Window {
             b.px += c.nx * k * ib; b.py += c.ny * k * ib;
             if (c.cx === undefined) { c.cx = (a.px + b.px) / 2; c.cy = (a.py + b.py) / 2 }
             hit(a, b, c.nx, c.ny, c.cx, c.cy);
+            var rvx = (b.held ? 0 : b.vx) - (a.held ? 0 : a.vx);
+            var rvy = (b.held ? 0 : b.vy) - (a.held ? 0 : a.vy);
+            var tv = -rvx * c.ny + rvy * c.nx;
+            if (a.shape === "circle" && a.rad > 0) a.spin += tv / a.rad * 0.45;
+            if (b && b.shape === "circle" && b.rad > 0) b.spin -= tv / b.rad * 0.45;
         }
         // an impulse at the point where two bodies touch: it pushes them apart and, off-centre,
         // turns a rod (b null: a fixed wall). The velocity of a point r from a body's centre is
@@ -2264,11 +1903,35 @@ Window {
                 return;
             }
             var hx = b.shape === "box" ? b.cw / 2 : b.rad, hy = b.shape === "box" ? b.ch / 2 : b.rad;
-            var e = b.bounce;
-            if (b.px - hx < minX) { b.px = minX + hx; if (b.vx < 0) b.vx = -b.vx * e }
-            if (b.px + hx > width) { b.px = width - hx; if (b.vx > 0) b.vx = -b.vx * e }
-            if (b.py - hy < minY) { b.py = minY + hy; if (b.vy < 0) b.vy = -b.vy * e }
-            if (b.py + hy > height) { b.py = height - hy; if (b.vy > 0) b.vy = -b.vy * e }
+            var e = b.bounce, r = b.shape === "circle" ? b.rad : 0;
+            if (b.px - hx < minX) {
+                b.px = minX + hx;
+                if (b.vx < 0) {
+                    if (r) b.spin -= b.vy / r * 0.4;
+                    b.vx = -b.vx * e;
+                }
+            }
+            if (b.px + hx > width) {
+                b.px = width - hx;
+                if (b.vx > 0) {
+                    if (r) b.spin += b.vy / r * 0.4;
+                    b.vx = -b.vx * e;
+                }
+            }
+            if (b.py - hy < minY) {
+                b.py = minY + hy;
+                if (b.vy < 0) {
+                    if (r) b.spin += b.vx / r * 0.4;
+                    b.vy = -b.vy * e;
+                }
+            }
+            if (b.py + hy > height) {
+                b.py = height - hy;
+                if (b.vy > 0) {
+                    if (r) b.spin -= b.vx / r * 0.4;
+                    b.vy = -b.vy * e;
+                }
+            }
         }
         function step() {
             if (width <= minX || height <= minY) return;            // not laid out yet
@@ -2284,14 +1947,22 @@ Window {
             for (i = 0; i < n; i++) {
                 b = bodies[i];
                 if (b.held) {
+                    // a held body never leaves the floor: clamp first, so dragging
+                    // past an edge stops at the edge instead of snapping back
+                    b.px = Math.max(minX + b.ox, Math.min(width - b.ox, b.px));
+                    b.py = Math.max(minY + b.oy, Math.min(height - b.oy, b.py));
                     b.vx = 0.5 * b.vx + 0.5 * (b.px - b.lx) / dt;
                     b.vy = 0.5 * b.vy + 0.5 * (b.py - b.ly) / dt;
+                    var hs = Math.hypot(b.vx, b.vy);
+                    if (hs > 900) { b.vx *= 900 / hs; b.vy *= 900 / hs; }
                     b.lx = b.px; b.ly = b.py;
                     if (b.shape === "rod") { b.spin = 0.5 * b.spin + 0.5 * (b.heading - b.lh) / dt; b.lh = b.heading }
                     moving = true;
                     continue;
                 }
-                var vx = b.vx - (sideways ? kick : 0), vy = b.vy - (sideways ? 0 : kick);
+                var kickX = sideways ? kick : 0;
+                var kickY = sideways ? 0 : kick;
+                var vx = b.vx - kickX, vy = b.vy - kickY;
                 if (b.shape === "rod") {
                     // a rod rolls across its length and skids along it, whichever way it lies
                     var ux = -Math.sin(b.heading), uy = -Math.cos(b.heading);
@@ -2304,15 +1975,46 @@ Window {
                     b.spin = Math.max(-25, Math.min(25, b.spin));
                     b.heading += b.spin * dt;
                     if (Math.abs(b.spin) > 0.05) moving = true;
+                } else if (b.shape === "circle") {
+                    // Isotropic friction: decelerates speed smoothly
+                    var sp = Math.hypot(vx, vy);
+                    if (sp > 0) {
+                        var f = Math.min(sp, b.drag * dt) / sp;
+                        vx -= vx * f;
+                        vy -= vy * f;
+                    }
+                    b.spin *= Math.pow(0.2, dt);
+                    if (Math.abs(b.spin) < 0.05) b.spin = 0;
+                    if (Math.abs(b.spin) > 0.05) moving = true;
                 } else {
-                    // friction per axis: a pencil rolls across its length and skids along it
+                    // friction per axis
                     vx -= Math.sign(vx) * Math.min(Math.abs(vx), b.dragX * dt);
                     vy -= Math.sign(vy) * Math.min(Math.abs(vy), b.dragY * dt);
                 }
                 var sp = Math.hypot(vx, vy);
-                if (sp > 2400) { vx *= 2400 / sp; vy *= 2400 / sp }
+                if (sp > 900) { vx *= 900 / sp; vy *= 900 / sp }
                 b.vx = vx; b.vy = vy;
                 b.px += vx * dt; b.py += vy * dt;
+                if (b.rollR > 0) {
+                    b.rollA += vx * dt / b.rollR;
+                    b.rollB -= vy * dt / b.rollR;
+                }
+                if (b.settles) {
+                    var qt = Math.PI / 2;
+                    var dA = Math.round(b.rollA / qt) * qt - b.rollA;
+                    var dB = Math.round(b.rollB / qt) * qt - b.rollB;
+                    if (sp < 90) {
+                        var k = Math.min(1, dt * 14);
+                        b.rollA += dA * k;
+                        b.rollB += dB * k;
+                        if (Math.abs(dA) + Math.abs(dB) > 0.005) moving = true;
+                    }
+                    if (sp < 5 && Math.abs(b.spin) < 0.1) {
+                        b.rollA = Math.round(b.rollA / qt) * qt;
+                        b.rollB = Math.round(b.rollB / qt) * qt;
+                        b.vx = 0; b.vy = 0; b.spin = 0;
+                    }
+                }
                 if (b.ball && b.rollR > 0) {
                     // the roll axis lies across the way it goes, folded to one half-turn: rolling
                     // back the way it came unrolls it rather than flipping it round
@@ -2330,7 +2032,17 @@ Window {
                 for (i = 0; i < n; i++) walls(bodies[i]);
             }
             calm = moving ? 0 : calm + 1;
-            if (calm > 20) { vs = 0; tick.stop() }
+            if (calm > 20) {
+                for (i = 0; i < n; i++) {
+                    var sb = bodies[i];
+                    if (sb.settles) {
+                        sb.rollA = Math.round(sb.rollA / (Math.PI / 2)) * (Math.PI / 2);
+                        sb.rollB = Math.round(sb.rollB / (Math.PI / 2)) * (Math.PI / 2);
+                        sb.vx = 0; sb.vy = 0; sb.spin = 0;
+                    }
+                }
+                vs = 0; tick.stop()
+            }
         }
     }
 
@@ -2351,6 +2063,9 @@ Window {
         property bool ball: false               // rolls whichever way it goes: heading is its roll axis
         property bool rollAcross: false         // its long axis lies across (x): it rolls as it moves in y
         property real roll: 0                   // radians rolled so far
+        property real rollA: 0                  // roll angle along x (rad)
+        property real rollB: 0                  // roll angle along y (rad)
+        property bool settles: false            // rolls to rest on flat faces (die)
         property real halfLen: 0                // rod: half its segment (the ends are rad round)
         property real heading: 0                // rod: which way it lies, radians counter-clockwise from point-up
         property real spin: 0                   // rod: radians/s counter-clockwise
@@ -2379,7 +2094,14 @@ Window {
         property real lift: 0                   // a little hop when tapped
         property var world: null
         readonly property real mass: (shape === "box" ? cw * ch : Math.PI * rad * rad + 4 * halfLen * rad) * density
-        readonly property real inertia: shape === "rod" ? mass * ((2 * halfLen) * (2 * halfLen) / 12 + rad * rad / 4) : 0
+        readonly property real inertia: shape === "rod" ? mass * ((2 * halfLen) * (2 * halfLen) / 12 + rad * rad / 4)
+                                      : shape === "circle" ? 0.5 * mass * rad * rad : 0
+        function scatter(sx, sy, sSpin) {
+            vx = sx !== undefined ? sx : (Math.random() - 0.5) * 500;
+            vy = sy !== undefined ? sy : (Math.random() - 0.5) * 500;
+            spin = sSpin !== undefined ? sSpin : (Math.random() - 0.5) * 20;
+            if (world) world.wake();
+        }
         readonly property real ox: shape === "box" ? cw / 2 : shape === "rod" ? width / 2 : rad
         readonly property real oy: shape === "box" ? ch / 2 : shape === "rod" ? height / 2 : rad
         property string tip: ""               // a label that shows while the pointer rests on it
@@ -2399,7 +2121,12 @@ Window {
             id: loTip
             visible: lo.tip !== "" && loHover.over && !loHover.pressed && loTipWait.done
             z: 30
-            x: Math.round((lo.width - width) / 4) * 2; y: -30
+            // Centred on the loose item, but clamped to the drawer floor
+            // (lo.world), so a long tip never runs off the floor and
+            // gets clipped to a fragment like "se, in its own window (".
+            x: lo.world ? Math.max(-lo.x, Math.min(Math.round((lo.width - width) / 4) * 2, lo.world.width - lo.x - width))
+                        : Math.round((lo.width - width) / 4) * 2
+            y: Math.max(-lo.y, -30)
             text: lo.tip
         }
         Timer {
@@ -2455,13 +2182,29 @@ Window {
                     da = Math.atan2(Math.sin(da), Math.cos(da));
                     lo.heading -= da;
                     lo.px = p.x + dx / dl * gl; lo.py = p.y + dy / dl * gl;
+                    if (lo.world) {
+                        lo.px = Math.max(lo.world.minX + lo.ox, Math.min(lo.world.width - lo.ox, lo.px));
+                        lo.py = Math.max(lo.world.minY + lo.oy, Math.min(lo.world.height - lo.oy, lo.py));
+                    }
                     return;
                 }
-                lo.px = p.x - gx; lo.py = p.y - gy;
+                if (lo.world) {
+                    lo.px = Math.max(lo.world.minX + lo.ox, Math.min(lo.world.width - lo.ox, p.x - gx));
+                    lo.py = Math.max(lo.world.minY + lo.oy, Math.min(lo.world.height - lo.oy, p.y - gy));
+                } else {
+                    lo.px = p.x - gx; lo.py = p.y - gy;
+                }
             }
             onReleased: {
                 lo.held = false;
                 if (!moved && Date.now() - t0 < 500) { lo.vx = 0; lo.vy = 0; lo.tapped() }
+                if (lo.shape === "circle" && lo.rad > 0) {
+                    var r2 = gx * gx + gy * gy + lo.rad * lo.rad;
+                    var addedSpin = (gx * lo.vy - gy * lo.vx) / r2 * 0.9;
+                    lo.spin += addedSpin;
+                    lo.vx += -gy * addedSpin * 0.25;
+                    lo.vy += gx * addedSpin * 0.25;
+                }
             }
         }
     }
@@ -2475,100 +2218,121 @@ Window {
         objectName: "research"
         img: "drawer_research.png"; g: root.g0.research; side: "l"
         floorExtra: 8                     // the book pile sits right down where the floor meets the wall
+        clipFloor: false                  // walkie runs to the visible wood, not the baked floor box
         shutX: root.cabX - root.peek - g.bodyX
         openX: root.cabX + root.tuck - g.bodyW - g.bodyX
         shutY: root.cabY + (root.frameH - g.bodyH) / 2 - g.bodyY
         openY: shutY
-        onIsOpenChanged: if (isOpen) host.refreshChat()
-        Flickable {
-            id: researchScroll
-            objectName: "researchScroll"
-            anchors.fill: parent; anchors.topMargin: 14   // no side or bottom margin: the book pile runs wall to wall: the book pile runs wall to wall, down to the floor wall
-            onMovementStarted: researchPanel.selector.popup.close()
-            contentHeight: rsCol.height
-            boundsBehavior: Flickable.StopAtBounds
-            clip: true
-            Column {
-                id: rsCol
-                x: 6; width: parent.width - 12
-                spacing: 18
-
-                // the research is a crumpled ball of paper lying loose in the drawer: shove it about;
-                // tap it and it is tossed out and opens flat, the live run and the books written on it.
-                // the chat with the picked model is its own window (the TALK badge, Ctrl+L), not this paper
-                Item {
-                    id: chatWell
-                    objectName: "chatWell"
-                    width: parent.width - 8; height: root.g0.paperball.ball.bodyH + 24
-                    LooseWorld {
-                        id: chatKit
-                        drawer: research
-                        anchors.fill: parent
-                        Loose {
-                            id: paperBall
-                            objectName: "paperBall"
-                            readonly property var gb: root.g0.paperball.ball
-                            readonly property var gr: root.g0.paperballRoll
-                            ball: true; rollR: gb.radius; turns: gr.turns
-                            visible: !root.paperOpen && openNote.t === 0
-                            tip: "RESEARCH"
-                            shape: "circle"; rad: gb.radius
-                            width: 2 * rad; height: 2 * rad
-                            px: chatKit.width / 2; py: chatKit.height / 2
-                            density: 0.3; bounce: 0.45; drag: 320     // light, springy paper: it rolls a good way
-                            Image {
-                                x: (paperBall.width - paperBall.gr.w) / 2 + 2; y: (paperBall.height - paperBall.gr.h) / 2 + 2
-                                source: root.art + "paperball_roll_" + paperBall.pad2(paperBall.turnFrame) + "_" + paperBall.pad2(paperBall.rollFrame(paperBall.gr.frames)) + ".png"
-                                smooth: false
-                            }
-                            onTapped: {
-                                root.ballFrom = paperBall.mapToItem(root.contentItem, paperBall.width / 2, paperBall.height / 2);
-                                root.ballHeading = paperBall.heading;
-                                root.ballRoll = paperBall.roll;
-                                root.paperOpen = true;
-                            }
-                        }
-                    }
-                }
-                PoppedNote { visible: root.chatOut; label: "CHAT"; win: chatWin; onDock: root.chatOut = false }
-                Row {
-                    spacing: 8
-                    Intercom {
-                        objectName: "claudeKey"
-                        width: rsCol.width - root.g0.key.w - 8   // fills the row beside PANES
-                        lit: root.claudeOpen; who: claudePanel.who
-                        tip: "talk to " + claudePanel.who + ", in its own window (Ctrl+L)"
-                        onClicked: root.claudeOpen = !root.claudeOpen
-                    }
-                    Key {
-                        objectName: "panesKey"
-                        label: "PANES"
-                        tip: "tools, draw, put a model, how the panes split"
-                        onClicked: paneMenu.openFor(root.activePane, null)
-                    }
-                }
-                // one research column: in the drawer, or written on the open paper. The popped window
-                // builds its own copy. Hidden here while either of those has it
-                Item {
-                    id: researchDock
-                    objectName: "researchDock"
-                    width: parent.width
-                    height: researchPanel.parent === researchDock && researchPanel.visible ? researchPanel.implicitHeight : 0
-                    ResearchPanel {
-                        id: researchPanel
-                        objectName: "researchPanel"
-                        visible: !root.researchOut
-                        width: parent === paperResearchScroll ? paperResearchScroll.width : researchDock.width
-                        popupParent: (root.paperOpen || openNote.t > 0) ? openNote : research.floorItem
-                        states: State {
-                            name: "onPaper"
-                            when: (root.paperOpen || openNote.t > 0) && !root.researchOut
-                            ParentChange { target: researchPanel; parent: paperResearchScroll; x: 0; y: 0 }
-                        }
-                    }
-                }
-                PoppedNote { visible: root.researchOut; label: "RESEARCH"; win: researchWin; onDock: root.researchOut = false }
+        onIsOpenChanged: {
+            if (isOpen) {
+                host.refreshChat();
+                claudeKey.greet();
+            } else {
+                // Chat window closes when the drawer does, 2026-10-25:
+                // the chat panel pops out of the walkie in this drawer, so
+                // when the drawer shuts the chat has no anchor and must not
+                // stay floating on screen. Closes both the in-window panel
+                // (chatOpen) and the popped-out chat window (chatOut).
+                root.chatOpen = false;
+                root.chatOut = false;
             }
+        }
+        // Physical drawer world: button moves about with physics like Pinoch's junk drawer
+        LooseWorld {
+            id: researchWorld
+            objectName: "researchWorld"
+            drawer: research
+            // visible wood, not the baked floor box (62,36,254x414): left 50, top 10, right 349, bottom 495
+            x: -12; y: -26; width: 299; height: 485
+
+            Loose {
+                id: claudeKey
+                objectName: "claudeKey"
+                shape: "box"
+                width: 63
+                height: 192
+                cw: width
+                ch: height
+                density: 1.2
+                bounce: 0.35
+                drag: 800
+                px: 120
+                py: 140
+                tip: "Chat"
+
+                readonly property bool lit: root.chatOpen
+                readonly property string who: claudePanel.who
+                property bool waking: false
+                // antenna retracts as the walkie is pushed up to the top of the drawer:
+                // top = py - 96, so stage 3 is top < 40px, stage 2 < 60px, stage 1 < 80px
+                readonly property int antStage: py < 136 ? 3 : py < 156 ? 2 : py < 176 ? 1 : 0
+
+                function greet() {           // drawer just opened: hop, screen blips on, slides across the floor
+                    hop();
+                    waking = true;
+                    wakeTimer.restart();
+                    scatter((Math.random() < 0.5 ? -1 : 1) * (90 + Math.random() * 60), -(50 + Math.random() * 60), 0);
+                }
+                Timer { id: wakeTimer; interval: 700; onTriggered: claudeKey.waking = false }
+
+                onTapped: {
+                    hop();
+                    root.chatOpen = !root.chatOpen
+                }
+
+                Rectangle {                           // ground shadow under the walkie, gone when pressed/held
+                    visible: !claudeKey.held
+                    x: (claudeKey.width - width) / 2; y: claudeKey.height - 4
+                    width: 48; height: 8; radius: 4
+                    color: "#000000"; opacity: 0.35
+                }
+                Image {                                  // the walkie-talkie, front face, antenna stage follows how high it sits
+                    x: claudeKey.held ? 1 : 0; y: claudeKey.held ? 1 : 0
+                    width: claudeKey.width; height: claudeKey.height
+                    source: root.art + "walkie_ant" + ((claudeKey.lit || claudeKey.waking) ? "_lit_" : "_") + claudeKey.antStage + ".png"; smooth: false
+                }
+            }
+
+            // Kept hidden for state/test references
+            Item {
+                id: researchScroll
+                objectName: "researchScroll"
+                visible: false
+                width: 0; height: 0
+            }
+            Item {
+                id: chatWell
+                objectName: "chatWell"
+                visible: false
+                width: 0; height: 0
+            }
+            Item {
+                id: panesKey
+                objectName: "panesKey"
+                visible: false
+                width: 0; height: 0
+            }
+            Item {
+                id: researchDock
+                objectName: "researchDock"
+                visible: false
+                width: 0
+                height: 0
+                ResearchPanel {
+                    id: researchPanel
+                    objectName: "researchPanel"
+                    visible: (root.paperOpen || openNote.t > 0) && !root.researchOut
+                    width: parent === paperResearchScroll ? paperResearchScroll.width : researchDock.width
+                    popupParent: (root.paperOpen || openNote.t > 0) ? openNote : research.floorItem
+                    states: State {
+                        name: "onPaper"
+                        when: (root.paperOpen || openNote.t > 0) && !root.researchOut
+                        ParentChange { target: researchPanel; parent: paperResearchScroll; x: 0; y: 0 }
+                    }
+                }
+            }
+            PoppedNote { visible: false; label: "CHAT"; win: chatWin; onDock: root.chatOut = false }
+            PoppedNote { visible: false; label: "RESEARCH"; win: researchWin; onDock: root.researchOut = false }
         }
     }
 
@@ -2603,44 +2367,8 @@ Window {
         Item {
             id: toolFloor
             width: toolScroll.width
-            height: Math.max(toolScroll.height,
-                (toolWheel.shown || toolCard.open) ? toolWheel.y + toolWheel.height + 24
-                                                   : miniModels.y + miniModels.height + 16)
+            height: toolScroll.height  // pencil kit removed 2026-10-26
 
-            // ---- the drawing kit: the pencil, lying loose in the drawer
-            Tape { x: 6; y: -6; z: 20; text: "DRAWING" }
-            Image {                                      // the lamp lights when the drawing tool is up
-                x: toolFloor.width - 22; y: 2; z: 20
-                source: root.art + (host.drawingOpen ? "lamp_on.png" : "lamp_off.png"); smooth: false
-            }
-            LooseWorld {
-                id: kit
-                objectName: "drawingKit"
-                drawer: tools
-                y: 24; width: toolFloor.width; height: 110
-                Rectangle { anchors.fill: parent; color: "#000000"; opacity: 0.12 }   // the well
-
-                // the pencil lies loose any way round: shove it across and it rolls on its facets,
-                // drag it by an end and it swings round behind your hand
-                Loose {
-                    id: pencil3d
-                    objectName: "pencil3d"
-                    readonly property var gp: root.g0.pencil3d
-                    shape: "rod"; rad: gp.radius; halfLen: gp.halfLen; turns: gp.turns
-                    width: gp.bodyW; height: gp.bodyH
-                    px: kit.width / 2; py: kit.height / 2; heading: 1.15
-                    density: 0.6; bounce: 0.25
-                    dragX: 260; dragY: 1400                 // rolls easily, skids reluctantly
-                    rollR: gp.radius
-                    Image {
-                        x: (pencil3d.width - pencil3d.gp.w) / 2 + 2; y: (pencil3d.height - pencil3d.gp.h) / 2 + 2
-                        source: root.art + "pencil3d_" + pencil3d.pad2(pencil3d.turnFrame) + "_" + pencil3d.pad2(pencil3d.rollFrame(pencil3d.gp.frames)) + ".png"
-                        smooth: false
-                    }
-                    tip: sketchCarousel.open ? "SKETCH: pick a starting tool from the carousel" : "SKETCH: click for the starting tools"
-                    onTapped: { hop(); sketchCarousel.open = !sketchCarousel.open }
-                }
-            }
 
             // ---- LIVE BUILD: only while a model builds. Its keys pop up under the drawing kit when
             // a run starts and fold away when it ends; hover a key for what it does.
@@ -2652,73 +2380,7 @@ Window {
                 readonly property bool live: !!lr
                 readonly property bool paused: live && lr.paused
             }
-            Item {
-                id: liveRow
-                objectName: "liveBuild"
-                property real open: runCtl.live ? 1 : 0
-                Behavior on open { NumberAnimation { duration: 360; easing.type: Easing.OutQuad } }
-                y: kit.y + kit.height + 22
-                width: toolFloor.width
-                height: Math.round(76 * open / 2) * 2
-                visible: open > 0.01
-                Tape {
-                    x: 6; y: -6; z: 2; opacity: liveRow.open
-                    text: !runCtl.live ? "LIVE BUILD"
-                          : (runCtl.lr.watch && runCtl.lr.watch.line
-                             ? "LIVE BUILD  " + runCtl.lr.watch.line + "/" + runCtl.lr.watch.total
-                             : "LIVE BUILD  REV " + runCtl.lr.latestRevision)
-                }
-                Image {                                  // lit while building, blinks while paused
-                    x: toolFloor.width - 22; y: 2; opacity: liveRow.open
-                    source: root.art + (runCtl.live && (!runCtl.paused || root.blinkOn) ? "lamp_on.png" : "lamp_off.png"); smooth: false
-                }
-                readonly property var keys: !runCtl.live ? [] : [
-                    { label: runCtl.paused ? ">" : "II", tip: runCtl.paused ? "RESUME: carry on building" : "PAUSE: hold before the next change", lit: runCtl.paused, act: "pause" },
-                    { label: ">|", tip: runCtl.paused ? "STEP: one change, then hold" : "STEP: pause first, then step", dim: !runCtl.paused, act: "step" },
-                    { label: runCtl.lr.pace > 0 ? runCtl.lr.pace + "S" : "N", tip: "PACE: seconds between changes, click for the next", act: "pace" },
-                    { label: "[]", tip: "STOP: end the run, keep the model", act: "stop" },
-                    { label: "EYE", tip: host.watchedRun === runCtl.dir ? "SHOW: this run is in the viewport" : "SHOW: put this run in the viewport", lit: host.watchedRun !== runCtl.dir, act: "show" },
-                    { label: "NOTE", tip: (runCtl.lr.watch && runCtl.lr.watch.line ? "line " + runCtl.lr.watch.line + "/" + runCtl.lr.watch.total + " - " : "") + "the build note: the line, the part, the error, the steps", act: "note" }
-                ]
-                readonly property int keyCount: liveKeyRepeater.count
-                readonly property string noteProbe: {
-                    var s = "";
-                    for (var i = 0; i < keys.length; i++) s += keys[i].label + "/" + keys[i].act + ";";
-                    return s;
-                }
-                function run(k) {
-                    if (k.act === "pause") host.togglePause(runCtl.dir);
-                    else if (k.act === "step") { if (runCtl.paused) host.stepRun(runCtl.dir) }
-                    else if (k.act === "pace") host.cyclePace(runCtl.dir);
-                    else if (k.act === "stop") host.stopResearch(runCtl.dir);
-                    else if (k.act === "show") host.watchRun(runCtl.dir);
-                    else if (k.act === "note") root.toggleBuildNote(runCtl.dir, root.activePane, null);
-                }
-                Row {
-                    x: 4; y: 26; spacing: Math.max(0, Math.floor((toolFloor.width - 8 - liveRow.keys.length * root.g0.keyS.w) / (liveRow.keys.length - 1)))
-                    Repeater {                           // each key pops up a beat after the last
-                        id: liveKeyRepeater
-                        model: liveRow.keys
-                        Item {
-                            id: lk
-                            required property var modelData
-                            required property int index
-                            readonly property real t: Math.max(0, Math.min(1, liveRow.open * 1.9 - index * 0.18))
-                            width: kk.width; height: kk.height
-                            Key {
-                                id: kk
-                                objectName: label === "NOTE" ? "liveNote" : ""
-                                small: true
-                                y: Math.round((1 - lk.t) * 24 / 2) * 2
-                                opacity: lk.t * (lk.modelData.dim ? 0.45 : 1)
-                                label: lk.modelData.label; lit: !!lk.modelData.lit
-                                tip: lk.modelData.tip
-                                onClicked: liveRow.run(lk.modelData)
-                            }
-                        }
-                    }
-                }
-            }
+            
 
             // ---- MODELS, in a mini drawer of its own: the MODELING folder sits in a little drawer
             // inside this one. Grab its front (the plate + chrome pull) and it slides straight out —
@@ -2726,270 +2388,13 @@ Window {
             // rides in the box with everything in it following, the folder itself opens as the drawer
             // comes out, and what it leaves behind is a dark slot. No oblique, and the floor does
             // not scroll after it: you wheel down to it like anything else in this tray.
-            Item {
-                id: miniModels
-                objectName: "miniModels"
-                property real open: 0
-                property bool isOpen: false
-                property bool dragging: false
-                property bool gliding: false
-                readonly property real q: dragging || gliding ? open : Math.round(open * 10) / 10
-                readonly property int travel: 170
-                readonly property real slide: Math.round(q * travel / 2) * 2
-                readonly property var gb: root.g0.minidrawerBox
-                readonly property var gfr: root.g0.minidrawerFront
-                x: modelFolder.x - 19
-                y: modelFolder.y - slide - 10
-                width: gb.w
-                height: 280 + slide
-                clip: true
-                function setOpen(v) {
-                    anim.stop(); gliding = false
-                    if (v === isOpen) { open = v ? 1 : 0; return }
-                    isOpen = v; gliding = true
-                    anim.from = open; anim.to = v ? 1 : 0
-                    anim.duration = Math.max(60, Math.round(60 + 300 * Math.abs(anim.to - anim.from)))
-                    anim.restart()
-                }
-                function toggle() { setOpen(!isOpen) }
-                onIsOpenChanged: folderView.open = isOpen
-                NumberAnimation { id: anim; target: miniModels; property: "open"; easing.type: Easing.OutCubic
-                                  onFinished: miniModels.gliding = false }
-                // the slot it leaves behind: a dark hole with a rail glint along its foot
-                Rectangle { x: 3; y: 4; width: 240; height: 276; color: "#0c0805" }
-                Rectangle { x: 3; y: 4; width: 240; height: 10; color: "#000000" }
-                Rectangle { x: 11; y: 264; width: 224; height: 3; color: "#787c82" }
-                // the box, riding out with the front; the folder sits in it (a sibling, drawn over)
-                Image { y: -30 + miniModels.slide; source: root.enamel("minidrawer_box.png"); smooth: false }
-                // the front: baked oak + plate + pull, QML letters the plate so it stays crisp
-                Item {
-                    objectName: "miniFront"
-                    y: 218 + miniModels.slide; width: miniModels.gfr.w; height: miniModels.gfr.h
-                    Image { source: root.art + "minidrawer_front.png"; smooth: false }
-                    Px { x: miniModels.gfr.plateX + Math.round((miniModels.gfr.plateW - width) / 2)
-                         y: miniModels.gfr.plateY + Math.round((miniModels.gfr.plateH - height) / 2)
-                         text: "MODELS"; size: 15; color: "#22252a" }
-                }
-                // the grab: a hit area tracking the front but living in the unit's static coords,
-                // like the big drawers' pulls — drag it 1:1, fling it, or just click it
-                MouseArea {
-                    id: miniGrab
-                    objectName: "miniGrab"
-                    y: 218 + miniModels.slide; width: miniModels.gfr.w; height: miniModels.gfr.h
-                    cursorShape: Qt.SizeVerCursor
-                    property real startY: 0; property real startOpen: 0; property real vel: 0
-                    property real lastY: 0; property int lastT: 0; property bool moved: false
-                    onPressed: function (m) { anim.stop(); miniModels.gliding = false; miniModels.dragging = true
-                                              startY = m.y + y; startOpen = miniModels.open; vel = 0
-                                              lastY = startY; lastT = Date.now(); moved = false }
-                    onPositionChanged: function (m) {
-                        if (!pressed) return
-                        var yy = m.y + y, now = Date.now()
-                        if (now > lastT) { vel = 0.6 * vel + 0.4 * ((yy - lastY) / (now - lastT)); lastY = yy; lastT = now }
-                        if (Math.abs(yy - startY) > 4) moved = true
-                        miniModels.open = Math.max(0, Math.min(1, startOpen + (yy - startY) / miniModels.travel))
-                    }
-                    onReleased: function (m) {
-                        miniModels.dragging = false
-                        if (!moved) { miniModels.toggle(); return }
-                        var v = vel * miniModels.travel        // open-fractions per second, as the big drawers reckon it
-                        if (Math.abs(v) > 0.9) { miniModels.setOpen(v > 0); return }
-                        var to = miniModels.open > 0.5 ? 1 : 0
-                        if (Math.abs(miniModels.open - to) > 0.001) {
-                            miniModels.gliding = true; miniModels.isOpen = to > 0.5
-                            anim.from = miniModels.open; anim.to = to
-                            anim.duration = Math.max(50, Math.round(90 + 260 * Math.abs(to - miniModels.open)))
-                            anim.restart()
-                        }
-                    }
-                }
-            }
+            
 
             // ---- MODELING: the folder every finished model is filed in. The sticker cut from the viewport
             // slides in behind the cover and is gone: nothing of it shows, only the count on the tape.
-            Tape { x: 6; y: modelFolder.y - miniModels.slide - 30; z: 20; text: host.filed.length ? "MODELING " + host.filed.length : "MODELING" }
-            Key {                                        // the tool wheel, by hand: always yours when you press it
-                objectName: "wheelKey"
-                x: toolFloor.width - width - 4; y: modelFolder.y - miniModels.slide - 36; z: 20
-                label: "WHEEL"; lamp: true; lit: toolWheel.manual || toolCard.open || materialRing.open
-                tip: toolWheel.manual ? "WHEEL: put it away" : "WHEEL: pick a tool and use it on the model"
-                onClicked: { toolWheel.manual = !toolWheel.manual; if (toolWheel.manual) tools.setOpen(true) }
-            }
-            Item {
-                id: modelFolder
-                objectName: "modelingBin"
-                readonly property var gf: root.g0.modelfolder
-                property real bump: 0                   // the folder jolts as a sticker lands
-                // the sticker going in: small enough to vanish behind the cover, it starts just above its edge
-                function slipSize(aspect) {             // aspect = w / h
-                    var w = Math.min(gf.pocketW * 0.6, (gf.pocketH - 6) * aspect);
-                    return { w: Math.round(w), h: Math.round(w / aspect) };
-                }
-                function slipX(w) { return gf.pocketX + Math.round((gf.pocketW - w) / 2) }
-                function slipTop(h) { return gf.pocketY - h - 6 }
-                x: Math.round((toolFloor.width - gf.w) / 4) * 2
-                y: camStrip.y + camStrip.height + (replayStrip.visible ? replayStrip.height + 8 : 0) + 36 + Math.round(bump) + miniModels.slide
-                width: gf.w; height: gf.h
-                Item {                                  // clipped at the folder's foot: the slip never shows below it
-                    width: modelFolder.width; height: modelFolder.gf.pocketY + modelFolder.gf.pocketH
-                    clip: true
-                    Image {
-                        id: slip
-                        objectName: "folderSlip"
-                        property real p: 0              // 0 just above the cover .. 1 all the way in
-                        visible: false
-                        smooth: true; mipmap: true; cache: false
-                        readonly property var sz: modelFolder.slipSize(implicitHeight > 0 ? implicitWidth / implicitHeight : 1)
-                        width: sz.w; height: sz.h
-                        x: modelFolder.slipX(sz.w)
-                        y: modelFolder.slipTop(sz.h) + p * (sz.h + 10)
-                    }
-                }
-                // the files in it: an index of slips lying in the drawer box — no folder any more.
-                // Kept models first under their own header (picture, your name, when you kept it),
-                // then the runs, attempts of the same build sitting together under theirs. Hover and
-                // the slips peek up; open the drawer and they rise into place to pick from.
-                Item {
-                    id: folderView
-                    objectName: "folderView"
-                    property bool open: false
-                    onOpenChanged: miniModels.setOpen(open)
-                    readonly property bool peek: folderMouse.containsMouse && !open
-                    readonly property var items: host.folder
-                    // what's up: the run or model followed, or, while you edit a copy, the model it's a copy of
-                    readonly property string onScreen: host.bench.dir && host.watchedRun === host.bench.dir && host.bench.back
-                        ? (host.bench.back.model || host.bench.back.watching || host.bench.back.replay || "")
-                        : host.watchedRun || host.info.model || ""
-                    property real rise: open ? 1 : peek ? 0.12 : 0
-                    Behavior on rise { NumberAnimation { duration: 240; easing.type: Easing.OutCubic } }
-                    // the listing, sorted for finding things: kept models (newest first), then runs
-                    // grouped by what they built — host.folder is newest-first, so groups and the
-                    // attempts inside them come out newest-first on their own. `i` is the host index,
-                    // which is what openFiled and the slip drag still reckon by.
-                    readonly property var rows: {
-                        var out = [], byName = {}, order = []
-                        for (var i = 0; i < items.length; i++) {
-                            var e = items[i]
-                            if (e.kind === "model") out.push({ e: e, i: i, sec: "model", first: out.length === 0 })
-                            else {
-                                if (!byName[e.name]) { byName[e.name] = []; order.push(e.name) }
-                                byName[e.name].push({ e: e, i: i, sec: "run", first: false })
-                            }
-                        }
-                        var seenRun = false
-                        for (var n = 0; n < order.length; n++)
-                            for (var r of byName[order[n]]) { r.first = !seenRun; seenRun = true; out.push(r) }
-                        return out
-                    }
-                    function when(m) {
-                        if (!m) return ""
-                        var months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
-                        var d = new Date(m * 1000)
-                        return months[d.getMonth()] + " " + d.getDate()
-                    }
-                    y: 0
-                    width: modelFolder.width; height: modelFolder.height
-                    clip: true
-                    Px {
-                        visible: folderView.items.length === 0
-                        anchors.centerIn: parent; size: 7; color: root.inkFaint
-                        text: "NOTHING FILED YET"
-                    }
-                    Flickable {
-                        id: fileStack
-                        objectName: "folderFiles"
-                        x: 10; y: 2; width: parent.width - 20; height: parent.height - 4
-                        contentHeight: fileCol.height; clip: true
-                        interactive: folderView.open          // the scroll wheel runs through the files
-                        boundsBehavior: Flickable.StopAtBounds
-                        flickDeceleration: 4000; maximumFlickVelocity: 1600
-                        onContentHeightChanged: if (!folderView.open) contentY = 0
-                        Column {
-                            id: fileCol
-                            width: fileStack.width; spacing: 3
-                            Repeater {
-                                objectName: "folderSlips"
-                                model: folderView.rows
-                                delegate: Item {
-                                    id: fileSlip
-                                    required property var modelData
-                                    required property int index
-                                    readonly property var e: modelData.e
-                                    readonly property bool here: e.path === folderView.onScreen
-                                    // each one up a beat after the one before it; shut, they're all down in the box
-                                    readonly property real t: Math.max(0, Math.min(1, folderView.rise * 1.6 - index * 0.12))
-                                    width: fileCol.width; height: (modelData.first ? 20 : 0) + 30
-                                    Item {
-                                        y: Math.round((1 - fileSlip.t) * (folderView.height + 20))
-                                        width: parent.width; height: parent.height
-                                        Rectangle {               // the section header, riding with its first slip
-                                            visible: modelData.first
-                                            y: 0; width: parent.width; height: 16; color: "#17130e"
-                                            Px { x: 8; y: 3; size: 6; color: "#e8dfc8"
-                                                 text: modelData.sec === "model" ? "KEPT — YOURS" : "RUNS — NOT KEPT" }
-                                        }
-                                        Rectangle {
-                                            y: modelData.first ? 20 : 0
-                                            width: parent.width; height: 28
-                                            color: fileMouse.containsMouse ? "#fffbe9" : "#f1ecd9"
-                                            border.color: fileSlip.here ? root.amber : "#9b937c"; border.width: fileSlip.here ? 2 : 1
-                                            Behavior on color { ColorAnimation { duration: 90 } }
-                                            Rectangle { x: 0; y: 0; width: 5; height: parent.height; color: fileSlip.e.kind === "model" ? root.amber : "#9b937c" }
-                                            Image {           // its picture: the sticker it was filed with
-                                                x: 10; y: 2; width: 24; height: 24
-                                                source: fileSlip.e.sticker; fillMode: Image.PreserveAspectCrop; smooth: false
-                                            }
-                                            Px {
-                                                x: 42; y: 8; size: 7; maxWidth: 86; maxLines: 1
-                                                text: fileSlip.e.name
-                                                color: fileSlip.e.kind === "model" ? root.ink : root.inkFaint
-                                            }
-                                            Px { anchors.right: parent.right; anchors.rightMargin: 8; y: 9; size: 6
-                                                 text: folderView.when(fileSlip.e.mtime)
-                                                 color: fileSlip.e.kind === "model" ? root.amber : root.inkFaint }
-                                            // click to put it on screen, or drag it out onto the viewport: on pane 1
-                                            // it drops INTO the scene there (an undoable bench edit); a run dropped
-                                            // on pane 2-4 replays there
-                                            MouseArea {
-                                                id: fileMouse
-                                                anchors.fill: parent; hoverEnabled: true
-                                                cursorShape: dragging ? Qt.ClosedHandCursor : Qt.PointingHandCursor
-                                                enabled: folderView.open
-                                                preventStealing: true
-                                                property real sx: 0
-                                                property real sy: 0
-                                                property bool dragging: false
-                                                onPressed: function (m) { sx = m.x; sy = m.y; dragging = false }
-                                                onPositionChanged: function (m) {
-                                                    if (!dragging && Math.abs(m.x - sx) + Math.abs(m.y - sy) > 10) {
-                                                        dragging = true; runDrag.beginSlip(fileSlip.e, fileSlip.modelData.i)
-                                                    }
-                                                    if (dragging) runDrag.moveTo(mapToItem(root.contentItem, m.x, m.y))
-                                                }
-                                                onReleased: if (dragging) { dragging = false; if (runDrag.finish()) folderView.open = false }
-                                                onCanceled: if (dragging) { dragging = false; runDrag.cancel() }
-                                                onClicked: if (!dragging) { host.openFiled(fileSlip.modelData.i); folderView.open = false }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                MouseArea {                             // the folder itself: hover to peek, click to open it out
-                    id: folderMouse
-                    objectName: "modelingOpen"
-                    anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                    z: -1
-                    onClicked: miniModels.toggle()
-                }
-                SequentialAnimation {
-                    id: folderBump
-                    NumberAnimation { target: modelFolder; property: "bump"; to: 4; duration: 70; easing.type: Easing.OutQuad }
-                    NumberAnimation { target: modelFolder; property: "bump"; to: 0; duration: 240; easing.type: Easing.OutBounce }
-                }
-            }
+            // MODELING tape removed 2026-10-25, right drawer strip
+            
+            
         }
         }
     }
@@ -3020,13 +2425,13 @@ Window {
             readonly property bool looping: root.ph.loop !== false
             readonly property int playX: xOf(shown)
             property real wheelAcc: 0
-            // which page is in: 0 the timeline, 1 the dope sheet. The other is slid out of
-            // sight past the drawer's side, under the wall.
+            // which page is in: 0 BUILD (run controls), 1 CLIP (the old timeline, verbatim),
+            // 2 KEYS (the dope sheet). The others are slid out of sight past the drawer's side.
             property int page: 0
             property real slide: page
             readonly property int gap: 40
             Behavior on slide { NumberAnimation { duration: 280; easing.type: Easing.InOutQuad } }
-            onPageChanged: if (page === 1) Qt.callLater(function () { lanes.forceActiveFocus() })
+            onPageChanged: if (page === 2) Qt.callLater(function () { lanes.forceActiveFocus() })
 
             // one mapping, frame <-> x, for the cursor, the ticks and the mouse alike
             function xOf(f) { return Math.round(f / Math.max(1, last) * (rule.width - 4) / 2) * 2 }
@@ -3057,12 +2462,111 @@ Window {
             // ...or, if the viewer never says so (rounding, no clip, gone), stop waiting for it
             Timer { id: settle; interval: 800; onTriggered: if (!scrub.pressed) tlFloor.want = -1 }
 
+            // ---- page BUILD: pane-targeted run controls. CLIP (timePage, below) and
+            // KEYS (keyPage) are untouched except for their slide offsets.
             Item {
-            id: timePage
-            objectName: "timePage"
+            id: buildPage
+            objectName: "buildPage"
             x: Math.round(-tlFloor.slide * (tlFloor.width + tlFloor.gap) / 2) * 2
             width: tlFloor.width; height: tlFloor.height
             visible: tlFloor.slide < 1
+            // Selected pane, explicit: pane keys set this. It does NOT follow
+            // root.activePane after load, so a chat window or viewport click
+            // cannot silently retarget a later PAUSE/STOP/STEP.
+            property int buildPane: 1
+            property string buildDir: ""
+            property var buildRun: buildDir ? root.runOf(buildDir) : null
+            property var buildSteps: []
+            property var buildReplay: buildPane <= 1 ? host.replay : (host.paneList[buildPane - 2] ? host.paneList[buildPane - 2].replay : {})
+            property bool replaying: !!(buildReplay && buildReplay.dir)
+            property int buildAt: replaying ? (buildReplay.at || 0) : (buildSteps.length ? buildSteps.length - 1 : -1)
+            property string buildState: !buildDir ? "NO RUN" : !buildRun ? "NOT SHOWN" : buildRun.status === "running" ? (buildRun.paused ? "HELD" : "BUILDING") : (buildRun.status ? buildRun.status.toUpperCase() : "ENDED")
+            property int buildRev: buildRun && buildRun.latestRevision ? buildRun.latestRevision : (replaying && buildReplay.rev ? buildReplay.rev : 0)
+            function paneDir(n) { if (n <= 1) return host.watchedRun || ""; var p = host.paneList[n - 2]; return p ? (p.runDir || "") : ""; }
+            function refreshSteps() { if (replaying && buildReplay.steps) buildSteps = buildReplay.steps; else buildSteps = buildDir ? host.buildSteps(buildDir) : []; }
+            function selectPane(n) { buildPane = n; buildDir = paneDir(n); refreshSteps(); }
+            // The dir a command may use, or "": recompute the pane's dir now and
+            // abort (never retarget) if it changed or vanished since selection.
+            function validDir() { var d = paneDir(buildPane); if (!d || d !== buildDir) { buildDir = d; refreshSteps(); return ""; } return d; }
+            function replayTarget() { return buildPane <= 1 ? host : host.paneList[buildPane - 2]; }
+            function doPauseResume() { var d = validDir(); if (!d) return; if (buildRun && buildRun.paused) host.resumeRun(d); else host.pauseRun(d); }
+            function doStep() { var d = validDir(); if (!d || !(buildRun && buildRun.paused)) return; host.stepRun(d); }
+            function doStop() { var d = validDir(); if (!d) return; host.stopResearch(d); }
+            function doReplayLive() { var t = replayTarget(); if (!t) return; if (replaying) t.replayLive(); else if (buildDir) t.replayRun(buildDir); }
+            function stepX(i) { var c = buildSteps.length; return c <= 1 ? 0 : Math.round(i / (c - 1) * (buildRule.width - 4) / 2) * 2; }
+            function stepAt(mx) { var c = buildSteps.length; if (c <= 1) return 0; return Math.round(Math.max(0, Math.min(1, (mx - 2) / Math.max(1, buildRule.width - 4))) * (c - 1)); }
+            // Seeking never resumes: while replaying it is replaySeek (paused),
+            // otherwise it is replayAt, which opens the replay paused on that step.
+            function seekIndex(i) { if (!buildSteps.length) return; i = Math.max(0, Math.min(buildSteps.length - 1, i)); var t = replayTarget(); if (!t || !buildDir) return; if (replaying) t.replaySeek(i); else t.replayAt(buildDir, buildSteps[i].rev); }
+            Component.onCompleted: { buildDir = paneDir(buildPane); refreshSteps(); }
+            Connections { target: host; function onRunsChanged() { buildPage.refreshSteps(); } }
+            // ---- row 1: pane selectors + status LCD
+            Repeater { model: 4; Key { objectName: "buildPaneKey" + (index + 1); x: index * (84 + 6); label: "PANE " + (index + 1); lamp: true; lit: buildPage.buildPane === index + 1; onClicked: buildPage.selectPane(index + 1) } }
+            Rectangle {
+                id: buildLcd; objectName: "buildLcd"
+                x: 4 * 84 + 3 * 6 + 14; y: 0; width: tlFloor.width - x; height: 34
+                color: "#0b0c0e"; border.width: 2; border.color: "#3a3d41"
+                Rectangle { x: 2; y: 2; width: parent.width - 4; height: 2; color: "#000000" }
+                Px { x: 10; y: 8; maxWidth: Math.max(0, parent.width - buildLcdRight.width - 36); maxLines: 1; text: "PANE " + buildPage.buildPane + "  " + buildPage.buildState + (buildPage.buildRev ? "  REV " + buildPage.buildRev : ""); color: buildPage.buildDir ? root.amber : "#7a5a1c" }
+                Px { id: buildLcdRight; anchors.right: parent.right; anchors.rightMargin: 10; y: 8; maxWidth: 180; maxLines: 1; text: buildPage.buildDir ? buildPage.buildDir.split("/").pop() : ""; color: "#b07a14" }
+                MouseArea { anchors.fill: parent; hoverEnabled: true; C.ToolTip.visible: containsMouse && buildPage.buildDir !== ""; C.ToolTip.delay: 350; C.ToolTip.text: buildPage.buildDir }
+            }
+            // ---- row 2: actions + pace. STEP - is deliberately disabled: history
+            // inspection is not yet wired, and it must not rewind the run.
+            Key { objectName: "buildPauseKey"; x: 0; y: 44; label: (buildPage.buildRun && buildPage.buildRun.paused) ? "RESUME" : "PAUSE"; lamp: true; lit: !!(buildPage.buildRun && buildPage.buildRun.paused); enabled: !!buildPage.buildDir && !!(buildPage.buildRun && buildPage.buildRun.status === "running"); opacity: enabled ? 1 : 0.45; onClicked: buildPage.doPauseResume() }
+            Key { objectName: "buildStepBackKey"; x: 90; y: 44; label: "STEP -"; enabled: false; opacity: 0.45; tip: "History inspection is not yet wired: this does not rewind the run"; onClicked: {} }
+            Key { objectName: "buildStepKey"; x: 180; y: 44; label: "STEP +"; enabled: !!buildPage.buildDir && !!(buildPage.buildRun && buildPage.buildRun.paused); opacity: enabled ? 1 : 0.45; onClicked: buildPage.doStep() }
+            Key { objectName: "buildStopKey"; x: 270; y: 44; label: "STOP"; danger: true; enabled: !!buildPage.buildDir && !!(buildPage.buildRun && buildPage.buildRun.status === "running"); opacity: enabled ? 1 : 0.45; onClicked: buildPage.doStop() }
+            Key { objectName: "buildReplayKey"; x: 360; y: 44; label: buildPage.replaying ? "LIVE" : "REPLAY"; lamp: true; lit: buildPage.replaying; enabled: !!buildPage.buildDir && (buildPage.replaying || buildPage.buildSteps.length > 0); opacity: enabled ? 1 : 0.45; onClicked: buildPage.doReplayLive() }
+            // Drawer-sized pace, same guard as RunPaceSlider.qml: Slow left /
+            // Fast right, value = 30 - seconds, 0.1 step, 120 ms debounce, a
+            // pending edit only goes to the run it was started on. The HTML
+            // mockup's seconds-left-to-right range is NOT used here.
+            Item {
+                id: buildPace; objectName: "buildPace"; x: 450; y: 44; width: tlFloor.width - x; height: 36
+                property var paceRun: buildPage.buildRun
+                readonly property string runDir: paceRun && paceRun.dir ? paceRun.dir : ""
+                readonly property real reportedPace: paceRun && Number.isFinite(paceRun.pace) ? Math.max(0, Math.min(30, paceRun.pace)) : 0
+                property real shownPace: reportedPace
+                property string pendingDir: ""
+                readonly property string paceText: shownPace < 0.05 ? "Full speed" : shownPace.toFixed(1) + " s/step"
+                enabled: runDir !== "" && (!paceRun || !paceRun.status || paceRun.status === "running")
+                opacity: enabled ? 1 : 0.5
+                function submit() { flush.stop(); var d = pendingDir; pendingDir = ""; if (d && d === runDir) host.setPace(d, shownPace); }
+                onReportedPaceChanged: if (!paceSlider.pressed && !pendingDir) shownPace = reportedPace
+                onRunDirChanged: { flush.stop(); pendingDir = ""; shownPace = reportedPace; }
+                Rectangle { anchors.fill: parent; anchors.topMargin: 1; anchors.bottomMargin: 1; color: "#0b0c0e"; border.width: 2; border.color: "#3a3d41" }
+                Text { x: 8; y: 10; text: "PACE"; color: "#c2c8ca"; font.family: root.mono; font.pixelSize: 11; font.bold: true }
+                Text { x: 52; y: 11; text: "Slow"; color: "#c2c8ca"; font.family: root.mono; font.pixelSize: 10 }
+                C.Slider { id: paceSlider; objectName: "buildPaceSlider"; x: 92; y: 4; width: parent.width - 92 - 110; height: 28; from: 0; to: 30; stepSize: 0.1; value: 30 - buildPace.shownPace; Accessible.name: "Build step speed"; Accessible.description: "Slow on the left, full speed on the right. Changes only this pane's run."; onMoved: { buildPace.shownPace = Math.round((30 - value) * 10) / 10; buildPace.pendingDir = buildPace.runDir; flush.restart(); } onPressedChanged: if (!pressed && buildPace.pendingDir) buildPace.submit(); C.ToolTip.visible: hovered || pressed; C.ToolTip.delay: 350; C.ToolTip.text: buildPace.paceText + " — this pane only" }
+                Text { x: parent.width - 106; y: 11; text: "Fast"; color: "#c2c8ca"; font.family: root.mono; font.pixelSize: 10 }
+                Px { x: parent.width - 84; y: 8; size: 6; maxWidth: 80; maxLines: 1; text: buildPace.paceText; color: root.amber }
+                Timer { id: flush; interval: 120; onTriggered: buildPace.submit() }
+            }
+            // ---- row 3: the build-step / replay ruler, NOT the clip-frame ruler.
+            // One mapping, step index <-> x, for ticks, numbers, flag and mouse alike.
+            Item {
+                id: buildRule; objectName: "buildRule"; y: 92; width: tlFloor.width; height: 44; activeFocusOnTab: true
+                readonly property int labelStep: { var e = 1; while (buildPage.buildSteps.length > 1 && e / (buildPage.buildSteps.length - 1) * width < 44) e *= 2; return e; }
+                Keys.onPressed: function (e) { var big = (e.modifiers & Qt.ShiftModifier) ? 10 : 1; if (!buildPage.buildSteps.length) return; if (e.key === Qt.Key_Left) buildPage.seekIndex(buildPage.buildAt - big); else if (e.key === Qt.Key_Right) buildPage.seekIndex(buildPage.buildAt + big); else if (e.key === Qt.Key_Home) buildPage.seekIndex(0); else if (e.key === Qt.Key_End) buildPage.seekIndex(buildPage.buildSteps.length - 1); else return; e.accepted = true; }
+                Image { y: 10; width: parent.width; height: 24; source: root.art + "rule.png"; fillMode: Image.Tile; smooth: false }
+                Rectangle { visible: buildPage.buildSteps.length > 0 && buildPage.buildAt >= 0; y: 4; width: buildPage.stepX(buildPage.buildAt) + 2; height: 4; color: root.amber }
+                Repeater { objectName: "buildTicks"; model: buildPage.buildSteps.length; Rectangle { required property int index; x: buildPage.stepX(index) + 1; y: 10; width: 2; height: index % 10 === 0 || index === buildPage.buildSteps.length - 1 ? 14 : index % 5 === 0 ? 9 : 5; color: "#1d2128" } }
+                Rectangle { visible: buildPage.buildSteps.length > 0; x: buildPage.stepX(buildPage.buildSteps.length - 1) + 1; y: 10; width: 2; height: 14; color: "#1d2128" }
+                Repeater { model: buildPage.buildSteps.length ? Math.floor((buildPage.buildSteps.length - 1) / buildRule.labelStep) + 1 : 0; Px { required property int index; readonly property int stepIndex: index * buildRule.labelStep; x: buildPage.stepX(stepIndex) + 4; visible: x + width <= buildRule.width; y: 22; size: 6; text: buildPage.buildSteps[stepIndex] ? buildPage.buildSteps[stepIndex].rev : ""; color: "#1d2128" } }
+                Px { visible: !buildPage.buildSteps.length; anchors.centerIn: parent; anchors.verticalCenterOffset: 2; text: "NO SAVED STEPS"; color: "#1d2128" }
+                Item { objectName: "buildFlag"; visible: buildPage.buildSteps.length > 0 && buildPage.buildAt >= 0; x: buildPage.stepX(buildPage.buildAt); y: 0; width: 4; height: buildRule.height; Rectangle { y: 6; width: 4; height: parent.height - 6; color: root.inkRed } Rectangle { x: Math.min(-4, buildRule.width - buildPage.stepX(buildPage.buildAt) - 12); y: 6; width: 12; height: 6; color: root.inkRed } Rectangle { readonly property bool flip: buildPage.stepX(buildPage.buildAt) + width + 8 > buildRule.width; x: flip ? -width + 4 : 0; y: -10; width: buildFlagText.width + 10; height: 16; color: root.inkRed; Px { id: buildFlagText; x: 5; y: 2; size: 6; text: buildPage.buildSteps[buildPage.buildAt] ? buildPage.buildSteps[buildPage.buildAt].rev : ""; color: "#f4e9d8" } } }
+                Rectangle { visible: buildRule.activeFocus; anchors.fill: parent; anchors.topMargin: 8; anchors.bottomMargin: 8; color: "transparent"; border.width: 2; border.color: root.amber; opacity: 0.6 }
+                MouseArea { id: buildScrub; objectName: "buildScrub"; anchors.fill: parent; enabled: buildPage.buildSteps.length > 0; preventStealing: true; cursorShape: Qt.SizeHorCursor; onPressed: function (m) { buildRule.forceActiveFocus(); buildPage.seekIndex(buildPage.stepAt(m.x)); } onPositionChanged: function (m) { if (pressed) buildPage.seekIndex(buildPage.stepAt(m.x)); } onWheel: function (w) { buildPage.seekIndex(buildPage.buildAt + (w.angleDelta.y > 0 ? -1 : 1) * ((w.modifiers & Qt.ShiftModifier) ? 10 : 1)); } }
+            }
+            Px { y: 140; size: 6; text: buildPage.replaying ? "REPLAY / SAVED STEP" : "LIVE BUILD · SELECT PANE ABOVE"; color: "#372e22" }
+            }
+            Item {
+            id: timePage
+            objectName: "timePage"
+            x: buildPage.x + tlFloor.width + tlFloor.gap
+            width: tlFloor.width; height: tlFloor.height
+            visible: tlFloor.slide > 0 && tlFloor.slide < 2
             // ---- row 1: the transport, and the readout
             Row {
                 id: transport
@@ -3266,7 +2770,7 @@ Window {
             }
             }
 
-            // ---- page 2: the dope sheet, Geppetto's RigTimeline in the drawer: a row per
+            // ---- page KEYS: the dope sheet, Geppetto's RigTimeline in the drawer: a row per
             // track, a key per frame keyed, its shape its ease. Click a key to pick it and jump
             // there, drag to move (everything picked moves together), drag empty space to lasso,
             // Delete removes. Ctrl+wheel zooms about the mouse, Shift+wheel pans, the wheel scrolls rows.
@@ -3275,7 +2779,7 @@ Window {
                 objectName: "keyPage"
                 x: timePage.x + tlFloor.width + tlFloor.gap
                 width: tlFloor.width; height: tlFloor.height
-                visible: tlFloor.slide > 0
+                visible: tlFloor.slide > 1
 
                 readonly property var sheet: host.keys
                 readonly property var tracks: sheet.tracks || []
@@ -3689,33 +3193,38 @@ Window {
             }
         }
 
-        // ---- the page switch, screwed to the drawer's left wall: TIME up, KEYS down
+        // ---- the page switch, screwed to the drawer's left wall: BUILD top, CLIP
+        // middle, KEYS bottom. Labels sit beside a narrow track, so the middle
+        // CLIP label is never under the knob: the switch is wider (60, at x 4,
+        // still clear of the floor at x 68) and the knob is only 16 wide.
         Item {
             id: pageSwitch
             objectName: "pageSwitch"
             parent: timeline
-            x: 16; y: 44; width: 38; height: 120
-            readonly property bool keys: tlFloor.page === 1
+            x: 4; y: 44; width: 60; height: 120
+            readonly property bool keys: tlFloor.page === 2
+            readonly property bool clip: tlFloor.page === 1
             Rectangle { anchors.fill: parent; color: "#0b0d10"; radius: 2 }
             Rectangle { x: 2; y: 2; width: parent.width - 4; height: parent.height - 4; color: "#1d2128"; radius: 1 }
             Rectangle { x: 2; y: 2; width: parent.width - 4; height: 2; color: "#3a3f47" }
-            Px { x: (parent.width - width) / 2; y: 4; size: 6; text: "TIME"; color: pageSwitch.keys ? "#6b6f75" : root.amber }
-            Px { x: (parent.width - width) / 2; y: parent.height - height - 2; size: 6; text: "KEYS"; color: pageSwitch.keys ? root.amber : "#6b6f75" }
-            Rectangle { x: (parent.width - 8) / 2; y: 24; width: 8; height: parent.height - 48; color: "#000000" }
+            Px { x: 2; y: 24; size: 6; text: "BUILD"; color: tlFloor.page === 0 ? root.amber : "#6b6f75" }
+            Px { x: 2; y: 52; size: 6; text: "CLIP"; color: tlFloor.page === 1 ? root.amber : "#6b6f75" }
+            Px { x: 2; y: 78; size: 6; text: "KEYS"; color: tlFloor.page === 2 ? root.amber : "#6b6f75" }
+            Rectangle { x: 48; y: 24; width: 8; height: parent.height - 48; color: "#000000" }
             Item {                                         // the knob: bakelite, slid in its slot
                 objectName: "pageKnob"
-                x: 5; width: parent.width - 10; height: 22
-                y: Math.round((24 + tlFloor.slide * (pageSwitch.height - 48 - 22)) / 2) * 2
+                x: 44; width: 16; height: 18
+                y: Math.round((24 + (tlFloor.slide / 2) * (pageSwitch.height - 48 - 18)) / 2) * 2
                 Rectangle { anchors.fill: parent; color: "#050607"; radius: 2 }
                 Rectangle { x: 1; y: 1; width: parent.width - 2; height: parent.height - 3; color: switchMouse.pressed ? "#2a2e35" : "#353a42"; radius: 2 }
                 Rectangle { x: 3; y: 2; width: parent.width - 6; height: 2; color: "#5a606a" }
-                Repeater { model: 3; Rectangle { x: 6; y: 7 + index * 4; width: parent.width - 12; height: 1; color: "#14171b" } }
+                Repeater { model: 2; Rectangle { x: 4; y: 6 + index * 4; width: parent.width - 8; height: 1; color: "#14171b" } }
             }
             MouseArea {
                 id: switchMouse
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
-                onClicked: tlFloor.page = 1 - tlFloor.page
+                onClicked: function (m) { tlFloor.page = m.y < height / 3 ? 0 : m.y < 2 * height / 3 ? 1 : 2; }
             }
         }
     }
@@ -3796,7 +3305,12 @@ Window {
             FlyCam { id: viewFly; n: 1 }
             onPressed: function (m) {
                 lx = sx = m.x; ly = sy = m.y; moved = false; cancelled = false; root.activePane = 1; forceActiveFocus();
-                if (m.button === Qt.RightButton) viewFly.start();
+                // left+right together drags the camera (pan), not fly-look: if the
+                // other button is already down, exit fly so pan moves the target,
+                // instead of starting fly and having pan do nothing while flying.
+                if (m.button === Qt.RightButton && (pressedButtons & Qt.LeftButton)) viewFly.stop();
+                else if (m.button === Qt.LeftButton && (pressedButtons & Qt.RightButton)) viewFly.stop();
+                else if (m.button === Qt.RightButton) viewFly.start();
             }
             onCanceled: viewFly.stop()
             Keys.onReleased: function (e) { viewFly.key(e, false) }
@@ -3811,9 +3325,6 @@ Window {
                 else if (e.key === Qt.Key_Escape) {
                     e.accepted = true;
                     if (pressed && !cancelled) cancelled = true;
-                    else if (materialRing.open) materialRing.open = false;
-                    else if (toolCard.open) toolCard.open = false;
-                    else if (toolWheel.manual) toolWheel.manual = false;
                     else if ((host.sel.bone !== undefined && host.sel.bone >= 0) || (host.sel.body !== undefined && host.sel.body >= 0)) host.cmd("select -1");
                     else if ((host.subSelection.count || 0) > 0) host.clearSubSelection();
                     else e.accepted = false;
@@ -3827,10 +3338,13 @@ Window {
                 if (viewFly.on) { viewFly.look(dx, dy); return }
                 if (Math.abs(m.x - sx) + Math.abs(m.y - sy) > 3) moved = true;
                 if (!moved) return;
+                if ((pressedButtons & Qt.LeftButton) && (pressedButtons & Qt.RightButton)) { root.paneCmd(1, "pan " + dx + " " + dy); return }
                 if (pressedButtons & Qt.LeftButton) root.paneCmd(1, "orbit " + dx + " " + dy);
                 else root.paneCmd(1, "pan " + dx + " " + dy);
             }
             onReleased: function (m) {
+                // left let go while right is still held: back to fly-look, not pan.
+                if (m.button === Qt.LeftButton && (pressedButtons & Qt.RightButton)) { viewFly.start(); return }
                 if (m.button === Qt.RightButton) { viewFly.stop(); return }
                 if (dbl) { dbl = false; return }        // s&box selects on each press: one pick per double-click, not two
                 if (cancelled) return;
@@ -3860,224 +3374,102 @@ Window {
             }
         }
         FlyStrip { fly: viewFly; z: 5 }
-        PaneHeader {
-            n: 1
-            who: host.watchedRun ? host.runWho(host.watchedRun) : ""
-            owner: host.p1Owner
-            what: host.watchedRun ? host.runScript(host.watchedRun) : ""
-            state: host.replay && host.replay.dir ? "REPLAY" : root.p1Run ? (root.p1Run.paused ? "PAUSED" : "LIVE  REV " + root.p1Run.latestRevision) : ""
-        }
-        ReplayStrip {
-            id: replayStrip
-            objectName: "replayStrip"
-            parent: toolFloor
-            x: 4; y: camStrip.y + camStrip.height + 6
-            width: Math.max(80, toolFloor.width - 12)
-        }
-        RunBar {
-            id: p1RunBar
-            objectName: "p1RunBar"
-            run: host.replay && host.replay.dir ? null : root.p1Run
-            x: 12; y: 28
-        }
-        CheckpointBar {
-            id: p1CheckpointBar
-            objectName: "p1CheckpointBar"
-            run: host.replay && host.replay.dir ? null : root.p1Run
-            x: 12; y: 56
-        }
-        DrawOverLayer {
-            id: p1DrawOver
-            objectName: "p1DrawOver"
-            anchors.fill: parent
-            z: 6
-            onSendStroke: function (json) {
-                host.drawOverStroke(json);
-            }
-        }
+        
+        
+        
         // ---- pick mode (keys 1-4 on the view) and what's picked, s&box style: tiny, top right, out of the way
-        Column {
-            id: subLabel
-            objectName: "subSelLabel"
-            property string tip: ""
-            parent: toolFloor
-            anchors.right: parent.right; anchors.rightMargin: 8
-            y: liveRow.y + liveRow.height + 8
-            spacing: 3
-            opacity: host.subMode !== "body" || subModeHover.hovered ? 0.95 : 0.35
-            Behavior on opacity { NumberAnimation { duration: 150 } }
-            HoverHandler { id: subModeHover }
-            Row {
-                anchors.right: parent.right
-                spacing: 2
-                Repeater {
-                    model: [["1", "body", "B", "pick whole bodies"],
-                            ["2", "face", "F", "pick faces: the face under the cursor lights blue"],
-                            ["3", "edge", "E", "pick edges: every edge drawn as wire, the one under the cursor lights blue"],
-                            ["4", "vertex", "V", "pick vertices: a dot on every point, the one under the cursor lights blue"]]
-                    Rectangle {
-                        readonly property bool lit: host.subMode === modelData[1]
-                        width: 18; height: 16; radius: 2
-                        color: lit ? "#f2a91c" : "#1f2228"; border.color: "#0b0c0e"
-                        Text {
-                            anchors.centerIn: parent; text: modelData[2]
-                            color: parent.lit ? "#1f2228" : "#c9ccd0"
-                            font.family: "DejaVu Sans Mono"; font.bold: true; font.pixelSize: 11
-                        }
-                        MouseArea {
-                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor; hoverEnabled: true
-                            onContainsMouseChanged: subLabel.tip = containsMouse ? modelData[2] + " (key " + modelData[0] + "): " + modelData[3] : ""
-                            onClicked: { host.setSelMode(modelData[1]); viewMouse.forceActiveFocus() }
-                        }
-                    }
-                }
-            }
-            // the hovered mode key's tip
-            Text {
-                anchors.right: parent.right
-                visible: subLabel.tip !== ""
-                width: Math.min(implicitWidth, view.width * 0.45); wrapMode: Text.Wrap; horizontalAlignment: Text.AlignRight
-                text: subLabel.tip; color: root.amber
-                style: Text.Outline; styleColor: "#0b0c0e"
-                font.family: "DejaVu Sans Mono"; font.pixelSize: 11
-            }
-            Text {
-                anchors.right: parent.right
-                visible: text !== ""
-                width: Math.min(implicitWidth, view.width * 0.45); wrapMode: Text.Wrap; horizontalAlignment: Text.AlignRight
-                text: host.subPrompt
-                color: (host.subSelection.lost || 0) > 0 ? "#e06c5a" : "#c9ccd0"
-                style: Text.Outline; styleColor: "#0b0c0e"
-                font.family: "DejaVu Sans Mono"; font.pixelSize: 11
-            }
-        }
+        
         // ---- camera keys, on the view they move: faint until the mouse comes near
-        Item {
-            id: camStrip
-            objectName: "cameraKeys"
-            parent: toolFloor
-            x: 4; y: subLabel.y + subLabel.height + 6
-            width: Math.max(camCol.width, toolFloor.width - 8); height: camCol.height
-            opacity: 1
-            // the run these keys hold or stop: split, only the one in this pane
-            readonly property var ctl: root.layoutN > 1
-                ? { live: !!root.p1Run, paused: !!root.p1Run && root.p1Run.paused, dir: root.p1Run ? root.p1Run.dir : "" } : runCtl
-            Behavior on opacity { NumberAnimation { duration: 150 } }
-            HoverHandler { id: camHover }
-            Column {
-                id: camCol
-                spacing: 4
-                Px { text: root.keyTip; color: root.amber; visible: camHover.hovered && root.keyTip !== "" }
-                RefPanel { visible: root.refsOpen }
-                Flow {
-                    width: Math.max(80, toolFloor.width - 16)
-                    spacing: 4
-                    // front, side and top are flat and square on, the way their reference pictures face;
-                    // side looks from -y like the kernel's side render, so a side picture is not mirrored
-                    Key { small: true; label: "FR"; tip: "front view, flat: lines up with a front picture"; onClicked: { root.spinning = false; root.camCmd(1, "spin 0"); root.camCmd(1, "view 0 0"); root.camCmd(1, "ortho 1") } }
-                    Key { small: true; label: "SD"; tip: "side view, flat: lines up with a side picture"; onClicked: { root.spinning = false; root.camCmd(1, "spin 0"); root.camCmd(1, "view -90 0"); root.camCmd(1, "ortho 1") } }
-                    Key { small: true; label: "BK"; tip: "back view"; onClicked: { root.spinning = false; root.camCmd(1, "spin 0"); root.camCmd(1, "view 180 8"); root.camCmd(1, "ortho 0") } }
-                    Key { small: true; label: "TOP"; tip: "top-down view, flat: lines up with a top picture"; onClicked: { root.spinning = false; root.camCmd(1, "spin 0"); root.camCmd(1, "view 0 89"); root.camCmd(1, "ortho 1") } }
-                    Key { small: true; label: "3/4"; tip: "three-quarter view"; onClicked: { root.spinning = false; root.camCmd(1, "spin 0"); root.camCmd(1, "view 35 18"); root.camCmd(1, "ortho 0") } }
-                    Key { small: true; label: "+"; tip: "zoom in"; onClicked: root.camCmd(1, "zoom 0.8") }
-                    Key { small: true; label: "-"; tip: "zoom out"; onClicked: root.camCmd(1, "zoom 1.25") }
-                    Key { small: true; label: "FIT"; tip: "fit whole model. Hold the right mouse button to fly: WASD, Q/E down/up, Shift fast, wheel speed"; onClicked: root.camCmd(1, "frame") }
-                    Key {
-                        objectName: "ctlSpin"
-                        label: "SPIN"; lamp: true; lit: root.spinning; tip: "slow turntable"
-                        onClicked: { root.spinning = !root.spinning; root.camCmd(1, "spin " + (root.spinning ? 30 : 0)) }
-                    }
-                    Key {
-                        objectName: "ctlFlat"
-                        label: "FLAT"; lamp: true; lit: host.ortho
-                        tip: "flat view: no perspective, so sizes match a reference picture. Turning the view ends it"
-                        onClicked: root.camCmd(1, "ortho " + (host.ortho ? 0 : 1))
-                    }
-                    Key {                                // the live build from the viewport: hold it or let it go on
-                        objectName: "ctlRun"
-                        readonly property var c: camStrip.ctl
-                        label: !c.live ? "TIME" : c.paused ? "GO" : "HOLD"
-                        lamp: true; lit: c.live && (!c.paused || root.blinkOn)
-                        tip: !c.live ? "timeline: open the build's timeline"
-                            : c.paused ? "GO: carry on building" : "HOLD: pause before the next change"
-                        onClicked: c.live ? host.togglePause(c.dir) : timeline.toggle()
-                    }
-                    Key {
-                        objectName: "ctlRunStop"
-                        visible: camStrip.ctl.live
-                        label: "STOP"; tip: "STOP: end the run, keep the model"
-                        onClicked: host.stopResearch(camStrip.ctl.dir)
-                    }
-                    Key {
-                        objectName: "ctlFollow"
-                        label: "TRACK"; lamp: true; lit: root.followFrame; tip: "re-fit as the model grows"
-                        onClicked: { root.followFrame = !root.followFrame; host.cmd("autoframe " + (root.followFrame ? 1 : 0)) }
-                    }
-                    Key {                                // your copy on screen, or what you copied it from
-                        objectName: "ctlBenchView"
-                        readonly property bool editing: !!host.bench.dir && host.watchedRun === host.bench.dir
-                        visible: !!host.bench.dir
-                        label: editing ? "EDIT" : "RUN"; lamp: true; lit: editing
-                        tip: editing ? "showing your edit: click for the run you started from" : "showing the run: click for your edit"
-                        onClicked: host.benchView(!editing)
-                    }
-                }
-            }
-        }
+        
         // the tool wheel: comes up each time the live run reaches for a different tool
-        ToolWheel {
-            id: toolWheel
-            objectName: "toolWheel"
-            parent: toolFloor
-            x: toolFloor.width - width; y: miniModels.y + miniModels.height + 8
-            // in the drawer, scaled to the floor. the bottom-right corner stays put
-            readonly property real fit: Math.max(0.35, Math.min(0.58, (toolFloor.width - 8) / width))
-            transform: Scale { origin.x: toolWheel.width; origin.y: toolWheel.height; xScale: toolWheel.fit; yScale: toolWheel.fit }
-            // in step with the viewport: the op of the revision on screen (a run, a replay, your bench);
-            // with nothing on screen, the latest change of whichever run is building
-            readonly property var rp: host.replay && host.replay.dir ? host.replay : null
-            readonly property var run: root.layoutN > 1 ? root.p1Run
-                : root.liveRun && (host.watchedRun === "" || root.liveRun.dir === host.watchedRun) ? root.liveRun : null
-            op: host.watchedRun !== "" ? host.shownOp : run ? (run.wheelOp || "") : ""
-            working: !rp && run ? (run.operation || "") : ""   // the step being built, before it lands
-            // picked by hand: the tool card comes up with that tool's fields, to use it on the model
-            onPicked: (key, label) => {
-                toolWheel.manual = false
-                // MATERIAL brings up the material ring round the wheel; every other tool its card
-                if (key === "material") { toolCard.open = false; materialRing.open = true; host.benchStart(); return }
-                materialRing.open = false
-                toolCard.label = label; toolCard.open = true; host.benchDescribe(key)
-            }
-            pace: rp ? 0.7 : run ? (run.pace || 0) : 0
-            revision: rp ? (rp.shown || 0) : run ? (run.displayedRevision || run.latestRevision || 0) : 0     // the change as the viewport shows it
-            stepping: rp ? !!rp.playing : !!run && run.status === "running" && !run.paused && !run.bench
-        }
+        
         // the tool you picked off the wheel: its fields, APPLY runs it on your copy of what's on screen
-        ToolCard {
-            id: toolCard
-            objectName: "toolCard"
-            parent: toolFloor
-            x: 4; y: miniModels.y + miniModels.height + 8
-            maxHeight: 360
-            bench: host.bench
-            onApply: line => host.benchApply(line)
-            onUndo: host.benchUndo()
-            onKeep: host.benchKeep("")
-            onWheel: { open = false; toolWheel.manual = true }
-            onClosed: open = false
-            onDrawOver: p1DrawOver.armed = true
-            onOpenChanged: host.toolPicking(open)   // a face tool lights the face under the cursor; closing puts the old mode back
-        }
-        // the CLAUDE card, bottom-left over the model: Claude's replies, the tools it runs, ALLOW/DENY, PAUSE/STOP
+        
+        // the chat card, bottom-left over the model: Claude's replies, the tools it runs, ALLOW/DENY, PAUSE/STOP
         ClaudePanel {
             id: claudePanel
             objectName: "claudePanel"
-            parent: claudeWin.contentItem
-            anchors.fill: parent                // the card is the whole window: size the window, not the card
-            popupParent: claudeWin.contentItem
-            open: root.claudeOpen
-            onClosed: root.claudeOpen = false
+            parent: root.contentItem
+            z: 1000
+            popupParent: root.contentItem
+            open: root.chatOpen
+            onClosed: root.chatOpen = false
             onPictureClicked: path => claudePicture.pop(path, false)
+        }
+        // ---- model confirmation, 2026-10-25, timing corrected: NOT at send time.
+        // Pops right before the model joins the viewport to start modeling.
+        // A worker writes muse-seat/confirm/<turn>.json before any geppetto-live
+        // run; host.confirmModel shows it, Yes/No write the answer file the
+        // worker is polling. No modeling starts until Yes.
+        // Tracker refresh must NOT depend on the chat panel being open/busy/Muse:
+        // the confirmation card lives in the viewport, so it has to appear even
+        // if the panel is closed or the model was switched after sending.
+        // This was the bug 2026-10-25: the only refresh was ClaudePanel's 1s timer,
+        // running only when card.open && busy && isMuseBridge, so a closed panel
+        // or a switched model meant the confirm file was never read and the card
+        // never showed, while the worker waited for an answer that could not come.
+        Timer { interval: 2000; repeat: true; running: true; onTriggered: host.refreshMuseTracker() }
+        // ---- JOIN GATE A, 2026-10-26, approved A+B: someone is about to join
+        // and start modeling. This is a viewport card, NOT the chat panel and
+        // NOT the removed 2026-10-25 chat-panel banner. It shows who, the exact
+        // subject, the pane to look at and the preflight, and it stays until
+        // answered. Backdrop click, Esc and close all mean NO, never YES.
+        // The desktop card B (~/.local/bin/geppetto-join-gate) shows the same
+        // words; answering either layer answers the intent once.
+        Item {
+            id: modelConfirm
+            objectName: "modelConfirm"
+            parent: root.contentItem
+            z: 2000
+            anchors.fill: parent
+            visible: host.confirmModel !== ""
+            focus: visible
+            onVisibleChanged: { if (visible) { forceActiveFocus(); flicker.restart() } }
+            Keys.onEscapePressed: host.confirmModelNo()
+            Rectangle { anchors.fill: parent; color: "#000000"; opacity: 0.65 }
+            MouseArea { anchors.fill: parent; onClicked: host.confirmModelNo() }
+            SequentialAnimation {
+                id: flicker
+                NumberAnimation { target: joinCard; property: "opacity"; from: 1; to: 0.35; duration: 90 }
+                NumberAnimation { target: joinCard; property: "opacity"; from: 0.35; to: 1; duration: 160 }
+            }
+            Item {
+                id: joinCard
+                anchors.centerIn: parent
+                width: Math.min(560, parent.width - 48)
+                height: joinCol.height + 40
+                property var g: host.joinGate ? host.joinGate : {}
+                property string who: g.who ? g.who : "someone"
+                property string subject: g.subject ? g.subject : host.confirmModel
+                property string pane: g.pane ? g.pane : "pane 1"
+                property string preflight: g.firstShape ? ("Preflight passed: first shape " + g.firstShape + " · " + g.lines + " script lines") : "Preflight: see the run script"
+                Rectangle { anchors.fill: parent; color: "#16191c"; border.color: "#d9b13a"; border.width: 3; radius: 0 }
+                MouseArea { anchors.fill: parent; acceptedButtons: Qt.AllButtons; hoverEnabled: true }
+                Column {
+                    id: joinCol
+                    x: 24; y: 20; width: parent.width - 48; spacing: 10
+                    Text { width: parent.width; wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter; text: "SOMEONE IS ABOUT TO JOIN"; color: "#f4efe2"; font.family: "DejaVu Sans Mono"; font.pixelSize: 20; font.bold: true }
+                    Text { width: parent.width; wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter; text: joinCard.who + " is about to join and start modeling"; color: "#ecdcb4"; font.family: "DejaVu Sans Mono"; font.pixelSize: 15 }
+                    Text { width: parent.width; wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter; text: joinCard.subject; color: "#f4efe2"; font.family: "DejaVu Sans Mono"; font.pixelSize: 26; font.bold: true }
+                    Rectangle {
+                        width: parent.width; height: 34; color: "#d9b13a"
+                        Text { anchors.centerIn: parent; text: "LOOK AT: " + joinCard.pane.toUpperCase(); color: "#000000"; font.family: "DejaVu Sans Mono"; font.pixelSize: 16; font.bold: true }
+                    }
+                    Text { width: parent.width; wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter; text: joinCard.preflight; color: "#ecdcb4"; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
+                    Text { width: parent.width; wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter; text: "No answer in 10 minutes = intent dies. Nobody joins, nothing builds."; color: "#ecdcb4"; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
+                    Item { width: parent.width; height: 8 }
+                    Rectangle {
+                        objectName: "modelConfirmYes"; width: parent.width; height: 48; color: "#3fae5a"; border.color: "#1d5c2e"; border.width: 2
+                        Text { anchors.centerIn: parent; text: "✓  YES — LET THEM MODEL"; color: "#000000"; font.family: "DejaVu Sans Mono"; font.pixelSize: 17; font.bold: true }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: host.confirmModelYes() }
+                    }
+                    Rectangle {
+                        objectName: "modelConfirmNo"; width: parent.width; height: 48; color: "#c8452f"; border.color: "#7a2415"; border.width: 2
+                        Text { anchors.centerIn: parent; text: "✕  NO — DON'T LET THEM IN"; color: "#ffffff"; font.family: "DejaVu Sans Mono"; font.pixelSize: 17; font.bold: true }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: host.confirmModelNo() }
+                    }
+                }
+            }
         }
         // the FACE POSER, in its own window: flex sliders for the posed pane
         FacePoser {
@@ -4087,19 +3479,19 @@ Window {
             anchors.fill: parent                // likewise: the poser fills its window
         }
         // a picture Claude just looked at or sent you: pops large on the right (clear of the red
-        // errors top-right), holds ~4 s, then shrinks away into the CLAUDE card's strip
+        // errors top-right), holds ~4 s, then shrinks away into the chat card's strip
         Item {
             id: claudePicture
             objectName: "claudePicture"
-            parent: claudeWin.contentItem
+            parent: root.contentItem
             property string path: ""
             property bool held: false                 // popped by a click: stays until clicked away
-            readonly property real bigW: Math.max(160, claudeWin.width - 24)
-            readonly property real bigH: Math.max(120, claudeWin.height * 0.45)
+            readonly property real bigW: Math.max(160, claudePanel.width - 24)
+            readonly property real bigH: Math.max(120, claudePanel.height * 0.45)
             z: 45
             visible: path !== "" && opacity > 0
             opacity: 0
-            x: 8; y: 36
+            x: claudePanel.x + 8; y: claudePanel.y + 36
             width: bigW; height: bigH
             transformOrigin: Item.BottomLeft
             function pop(p, timed) {
@@ -4135,46 +3527,9 @@ Window {
             }
         }
         // why your edit didn't take: called out top-right, red, the whole reason; holds a few seconds, then fades
-        Rectangle {
-            id: benchError
-            objectName: "benchError"
-            parent: toolFloor
-            property string shown: toolCard.problem
-            onShownChanged: if (shown) { errFade.stop(); opacity = 0.94; errFade.start() } else opacity = 0
-            visible: shown !== "" && opacity > 0
-            opacity: 0
-            z: 50
-            SequentialAnimation {
-                id: errFade
-                PauseAnimation { duration: 6000 }
-                NumberAnimation { target: benchError; property: "opacity"; to: 0; duration: 900 }
-            }
-            anchors.top: parent.top; anchors.right: parent.right; anchors.margins: 6
-            width: Math.min(420, Math.max(80, toolFloor.width - 12)); height: errText.implicitHeight + 16
-            radius: 4; color: "#2a0f0c"; border.color: "#e0604a"; border.width: 2
-            Text {
-                id: errText
-                anchors.fill: parent; anchors.margins: 8
-                text: "CAN'T: " + benchError.shown
-                color: "#ffb3a6"; wrapMode: Text.Wrap
-                font.family: "DejaVu Sans Mono"; font.pixelSize: 12; font.bold: true
-            }
-            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { errFade.stop(); benchError.opacity = 0 } }
-        }
+        
         // the material browser, after Linework's colour ring: opens round the wheel's centre
-        MaterialRing {
-            id: materialRing
-            objectName: "materialRing"
-            parent: toolFloor
-            anchors.fill: parent
-            cx: toolWheel.x + toolWheel.width - toolWheel.fit * toolWheel.width / 2
-            cy: toolWheel.y + toolWheel.height - toolWheel.fit * toolWheel.height / 2
-            k: toolWheel.fit
-            bench: host.bench
-            onApply: line => host.benchApply(line)
-            onUndo: host.benchUndo()
-            onClosed: open = false
-        }
+        
         // status over the viewport: shows on each change, holds a moment, then fades out
         Px {
             id: viewStatus
@@ -4193,8 +3548,19 @@ Window {
                 NumberAnimation { target: viewStatus; property: "opacity"; to: 0; duration: 800 }
             }
         }
+        // Empty scene, not a broken screen: only when pane 1 has no model,
+        // no run is watching it, and no empty grid viewer is running.
+        // No MouseArea here, so orbit/pan still work through it. It
+        // vanishes the moment a model, run, or grid viewer lands in pane 1.
+        Column {
+            id: emptySceneNote
+            visible: host.p1ModelPath === "" && host.watchedRun === "" && !host.emptyViewer
+            anchors.centerIn: parent
+            spacing: 8
+            Px { anchors.horizontalCenter: parent.horizontalCenter; text: "EMPTY SCENE"; size: 14; color: root.amber }
+            Px { anchors.horizontalCenter: parent.horizontalCenter; text: "GEPPETTO > OPEN to load a model"; size: 8; color: "#9ba8b8" }
+        }
     }
-    NoticeCard { z: 31 }
 
     // the pencil's carousel: the starting tools fanned along the bottom of the viewport
     SketchCarousel {
@@ -4204,11 +3570,8 @@ Window {
         x: root.cabX + root.g0.view.x; y: root.cabY + root.g0.view.y
         width: root.g0.view.w; height: root.g0.view.h
         z: 6
-        onPicked: (key, label) => {
-            toolWheel.manual = false
-            materialRing.open = false
-            toolCard.label = label; toolCard.open = true; host.benchDescribe(key)
-        }
+        // tool UI removed 2026-10-25: picking a carousel tool does nothing until a new tool UI is built
+        onPicked: (key, label) => { }
     }
     // pane 1 in a split view: the selected-pane edge, and the glow when a dragged run is over it
     Rectangle {
@@ -4224,21 +3587,6 @@ Window {
     }
 
     // ---- the chest, over the viewport's edges ----------------------------------------------
-    // Keep correction windows alive when panes fold away or enter solo view.
-    Repeater {
-        model: 4
-        ViewportCorrection {
-            required property int index
-            pane: index + 1
-            readonly property var cell: root.paneRect(pane)
-            x: root.cabX + root.g0.view.x + cell.x
-            y: root.cabY + root.g0.view.y + cell.y
-            width: cell.w; height: cell.h
-            paneVisible: pane <= root.layoutN && (!root.solo || root.solo === pane)
-            runDir: pane === 1 ? host.watchedRun : host.paneList[pane - 2].runDir
-            active: { const r = root.runOf(runDir); return !!r && r.status === "running" && !r.bench }
-        }
-    }
     Image {
         x: root.cabX; y: root.cabY
         source: root.enamel("frame.png"); smooth: false
@@ -4258,6 +3606,10 @@ Window {
         x: root.cabX + (root.frameW - width) / 2
         y: root.cabY + root.frameH - root.g0.frame.border + (root.g0.frame.border - height) / 2
     }
+    // DrawerTabs removed 2026-10-25: grey Plates stay, yellow tabs gone.
+    
+    
+    
 
     // ---- the research note, open: the paper ball flies out of the drawer and opens flat (the unfold
     // frames baked from model/paperball). The one research column is written on it. Click the paper
@@ -4447,66 +3799,15 @@ Window {
                 onClicked: fileTag.open = !fileTag.open
             }
         }
-        // the file tag: a paper shop tag on a string that swings down from the plate (SAVE, SAVE AS)
-        Item {
+        // Baked Effigy hardware hangs the growing file sign from the nameplate.
+        HangingFileMenu {
             id: fileTag
-            property bool open: false
-            property bool naming: false
-            x: nameplate.x + 14; y: nameplate.y + nameplate.height - 2
-            width: 150; height: open ? col.height + 22 : 0
+            cabinetRoot: root
+            x: nameplate.x + 14 - (panelWidth - 150) / 2 - sideMargin
+            y: nameplate.y + nameplate.height - 2
             z: 50
-            clip: true
-            transformOrigin: Item.Top
-            rotation: open ? 0 : -8
-            Behavior on height { NumberAnimation { duration: 220; easing.type: Easing.OutBack } }
-            Behavior on rotation { SpringAnimation { spring: 3; damping: 0.18 } }
-            onOpenChanged: if (!open) naming = false
-            Rectangle { x: 70; y: 0; width: 2; height: 8; color: "#6e5a30" }      // the string
-            Image {
-                y: 8; width: parent.width; height: col.height + 14
-                source: root.art + "parchment.png"; fillMode: Image.Tile; smooth: false
-                Rectangle { anchors.fill: parent; color: "transparent"; border.color: "#4a3a1c"; border.width: 2 }
-                Rectangle { x: parent.width / 2 - 4; y: 4; width: 8; height: 8; radius: 4; color: "#2a1a06" }   // the eyelet
-                Column {
-                    id: col
-                    x: 10; y: 14; width: parent.width - 20; spacing: 4
-                    Repeater {
-                        model: [ { t: "SAVE", a: "save" }, { t: "SAVE AS...", a: "as" } ]
-                        delegate: Item {
-                            width: col.width; height: 22
-                            Rectangle { anchors.fill: parent; color: rowMouse.containsMouse ? "#3a2f12" : "transparent" }
-                            Px { x: 4; y: 2; text: modelData.t; color: rowMouse.containsMouse ? root.amber : "#2a1a06" }
-                            MouseArea {
-                                id: rowMouse; anchors.fill: parent; hoverEnabled: true
-                                onClicked: {
-                                    if (modelData.a === "save") { host.benchKeep(""); fileTag.open = false }
-                                    else { fileTag.naming = true; nameIn.text = ""; nameIn.forceActiveFocus() }
-                                }
-                            }
-                        }
-                    }
-                    Rectangle {
-                        visible: fileTag.naming
-                        width: col.width; height: 22; color: "#fbf6e2"; border.color: "#4a3a1c"
-                        TextInput {
-                            id: nameIn
-                            anchors.fill: parent; anchors.margins: 3
-                            font.family: root.mono; font.pixelSize: 14; color: "#2a1a06"
-                            Keys.onReturnPressed: { if (text.trim()) host.benchKeep(text.trim()); fileTag.open = false }
-                            Keys.onEscapePressed: fileTag.open = false
-                        }
-                    }
-                }
-            }
         }
-        Px {
-            x: nameplate.x + nameplate.width + 18
-            y: root.g0.bar.faceY + 8
-            maxWidth: buttons.x - x - 16
-            maxLines: 1
-            text: host.status
-            color: "#2a0608"
-        }
+        // Top-bar file/status text removed 2026-10-25: host.status kept internally, for a more elegant display elsewhere later.
         Row {
             id: buttons
             x: root.g0.bar.barW - width - 18
@@ -4514,7 +3815,32 @@ Window {
             spacing: 6
             Button { glyph: "shut"; onClicked: { research.setOpen(false); tools.setOpen(false); timeline.setOpen(false) } }
             Button { glyph: "min"; onClicked: root.showMinimized() }
-            Button { glyph: "close"; onClicked: Qt.quit() }
+            Button { glyph: "close"; onClicked: host.closeAndKill() }
+        }
+    }
+
+    // Click outside the top-left dropdown closes it: viewport, drawers,
+    // lid, anywhere else in Geppetto. Only live while the menu is open,
+    // so it never blocks anything when the menu is shut. A press on the
+    // menu itself (expanded a little for its hanging plates) or on the
+    // GEPPETTO nameplate is let through, so the menu and its toggle
+    // still work; any other press closes the menu and is consumed,
+    // so that first click does not also orbit, open a drawer, etc.
+    MouseArea {
+        id: outsideClose
+        anchors.fill: parent
+        z: 4000
+        enabled: fileTag.open
+        visible: fileTag.open
+        onPressed: function (mouse) {
+            var pMenu = fileTag.mapFromItem(outsideClose, mouse.x, mouse.y)
+            var inMenu = pMenu.x >= -20 && pMenu.x < fileTag.width + 20
+                      && pMenu.y >= -20 && pMenu.y < fileTag.height + 20
+            var pPlate = nameplate.mapFromItem(outsideClose, mouse.x, mouse.y)
+            var inPlate = pPlate.x >= 0 && pPlate.x < nameplate.width
+                       && pPlate.y >= 0 && pPlate.y < nameplate.height
+            if (inMenu || inPlate) mouse.accepted = false
+            else fileTag.open = false
         }
     }
 
@@ -4522,180 +3848,9 @@ Window {
     // the send-off's last frame is the model pressed flat, square on; the host cuts it out (stickerMade)
     // and this lifts it off the glass, flies it over to the tool drawer and slips it in behind the
     // folder's cover, where it goes out of sight
-    Item {
-        id: flyer
-        objectName: "stickerFlyer"
-        // a pane's run finished: its sticker lifts off that pane (n 1-4) and flies to the folder
-        function launch(src, nx, ny, nw, nh, n) {
-            if (flight.running) flight.complete();
-            tools.setOpen(true);
-            const c = n > 1 ? root.paneRect(n) : null;
-            const vx = c ? root.cabX + root.g0.view.x + c.x : view.x, vy = c ? root.cabY + root.g0.view.y + c.y : view.y;
-            const vw = c ? c.w : view.width, vh = c ? c.h : view.height;
-            flyer.x0 = vx + nx * vw; flyer.y0 = vy + ny * vh;
-            flyer.w0 = nw * vw; flyer.h0 = nh * vh;
-            flyImg.source = "";
-            flyImg.source = src;
-            flyer.lift = 0; flyer.p = 0; flyer.place();
-            flyer.visible = true;
-            flight.restart();
-        }
-        z: 1000
-        visible: false
-        property real x0: 0; property real y0: 0; property real w0: 0; property real h0: 0
-        property real lift: 0                   // 0 on the glass .. 1 peeled up off it
-        property real p: 0                      // 0 over the viewport .. 1 over the folder
-        onXChanged: if (visible) root.maskLater()
-        onYChanged: if (visible) root.maskLater()
-        onVisibleChanged: root.maskLater()
-        function place() {
-            var sz = modelFolder.slipSize(w0 / h0);
-            var t = modelFolder.mapToItem(null, modelFolder.slipX(sz.w), modelFolder.slipTop(sz.h));
-            var e = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
-            var grow = 1 + 0.05 * lift * (1 - e);
-            var w = (w0 + (sz.w - w0) * e) * grow, h = (h0 + (sz.h - h0) * e) * grow;
-            var cx = x0 + w0 / 2 + (t.x + sz.w / 2 - x0 - w0 / 2) * e;
-            var cy = y0 + h0 / 2 + (t.y + sz.h / 2 - y0 - h0 / 2) * e - 70 * Math.sin(Math.PI * p) - 6 * lift * (1 - e);
-            x = cx - w / 2; y = cy - h / 2; width = w; height = h;
-            rotation = -4 * lift * (1 - e);
-        }
-        onPChanged: place()
-        onLiftChanged: place()
-        Image { id: flyImg; anchors.fill: parent; smooth: true; mipmap: true; cache: false }
-        SequentialAnimation {
-            id: flight
-            NumberAnimation { target: flyer; property: "lift"; from: 0; to: 1; duration: 220; easing.type: Easing.OutQuad }
-            PauseAnimation { duration: 160 }
-            NumberAnimation { target: flyer; property: "p"; from: 0; to: 1; duration: 720 }
-            ScriptAction { script: { slip.source = flyImg.source; slip.p = 0; slip.visible = true; flyer.visible = false } }
-            NumberAnimation { target: slip; property: "p"; from: 0; to: 1; duration: 260; easing.type: Easing.InQuad }
-            ScriptAction { script: { slip.visible = false; slip.source = ""; host.stickerLanded(); folderBump.restart() } }
-        }
-        Connections {
-            target: host
-            function onPaneStickerMade(n, src, nx, ny, nw, nh) { flyer.launch(src, nx, ny, nw, nh, n) }
-            function onStickerMade(src, nx, ny, nw, nh) { flyer.launch(src, nx, ny, nw, nh, 1) }
-        }
-    }
+    
 
-    // ---- a pane's menu, dropped from its header (click "PANE n v"): make something in it, put a
-    // model in it, how the panes split, clear it. One menu for every pane: it holds which pane it is for
-    MouseArea {                                  // a click anywhere else puts it away
-        anchors.fill: parent; z: 2400
-        visible: paneMenu.open
-        onPressed: paneMenu.open = false
-    }
-    Rectangle {
-        id: paneMenu
-        objectName: "paneMenu"
-        property bool open: false
-        property int n: 1
-        property var rows: []
-        z: 2500
-        visible: open
-        // what pane n holds now: a run (live or done), a model file, or nothing
-        function holds(n) {
-            if (n === 1) return { run: host.watchedRun, model: host.myScene ? "your scene" : "" };
-            const p = host.paneList[n - 2];
-            return p ? { run: p.runDir || "", model: p.modelPath || "" } : { run: "", model: "" };
-        }
-        property string page: ""                 // "" the four choices, "put" the runs, "panes" the split
-        function build() {
-            const n = paneMenu.n, h = holds(n), r = [];
-            if (page === "put") {
-                r.push({ k: "back", t: "< BACK" });
-                const runs = host.runs.filter(function (x) { return !x.bench && x.latestRevision > 0 }).slice(0, 8);
-                for (const x of runs)
-                    r.push({ k: "run", dir: x.dir, live: x.status === "running", on: x.dir === h.run,
-                             t: (x.status === "running" ? "LIVE " : "") + (x.title || x.name || x.dir.split("/").pop()) });
-                if (!runs.length) r.push({ k: "", t: "no runs yet" });
-                if (h.run || (n > 1 && h.model)) r.push({ k: "clear", t: "EMPTY THIS PANE" });
-            } else if (page === "panes") {
-                r.push({ k: "back", t: "< BACK" });
-                r.push(root.solo === n ? { k: "all", t: "SHOW ALL" } : { k: "solo", t: "ONLY THIS ONE" });
-                r.push({ k: "split0", t: "AUTO", on: host.autoLayout && !root.solo });
-                r.push({ k: "split2", t: "2", on: !host.autoLayout && !root.solo && root.layoutN === 2 });
-                r.push({ k: "split4", t: "4", on: !host.autoLayout && !root.solo && root.layoutN === 4 });
-            } else {
-                r.push({ k: "tools", t: "TOOLS" });
-                r.push({ k: "draw", t: "DRAW" });
-                r.push({ k: "page:put", t: "PUT A MODEL HERE  >" });
-                r.push({ k: "page:panes", t: "PANES  >" });
-            }
-            rows = r;
-        }
-        // the edit tools work on pane 1: a model picked in another pane is moved there first
-        function toPane1() {
-            const h = holds(paneMenu.n);
-            if (paneMenu.n === 1) return;
-            if (h.run) host.showRunIn(h.run, 1); else if (h.model) host.openModel(h.model);
-        }
-        function act(row) {
-            const n = paneMenu.n;
-            if (row.k === "back") { page = ""; build(); return }
-            if (row.k.indexOf("page:") === 0) { page = row.k.slice(5); build(); return }
-            switch (row.k) {
-            case "tools": toPane1(); materialRing.open = false; toolCard.open = false; toolWheel.manual = true; break;
-            case "material": toPane1(); toolCard.open = false; materialRing.open = true; host.benchStart(); break;
-            case "draw": host.openDrawingTool(); break;
-            case "face": host.faceOpen(host.facePane === n ? 0 : n); break;
-            case "run": if (row.live) host.showRunIn(row.dir, n); else host.replayIn(row.dir, n); break;
-            case "myscene": host.setMyScene(!host.myScene); break;
-            case "all": host.setViewLayout(0); break;
-            case "solo": host.setSolo(n); break;
-            case "split0": host.setViewLayout(0); break;
-            case "split2": host.setViewLayout(2); break;
-            case "split4": host.setViewLayout(4); break;
-            case "link": host.setLinkCameras(!host.linkCameras); break;
-            case "clear": host.clearPane(n); break;
-            default: return;
-            }
-            root.activePane = n;
-            paneMenu.open = false;
-        }
-        // under the header it was dropped from, kept inside the window
-        function openFor(n, header) {
-            paneMenu.n = n; page = ""; build();
-            tools.setOpen(true);
-            x = Math.max(4, Math.min(tools.x + 24, root.width - width - 4));
-            y = Math.max(4, Math.min(tools.y + 80, root.height - height - 4));
-            open = true;
-        }
-        onOpenChanged: root.maskLater()
-        width: 230; height: pmCol.height + 12
-        radius: 4; color: "#16191c"; border.color: root.amber
-        Column {
-            id: pmCol
-            x: 6; y: 6; width: paneMenu.width - 12
-            Repeater {
-                model: paneMenu.rows
-                Rectangle {
-                    required property var modelData
-                    readonly property bool head: !!modelData.head
-                    width: pmCol.width; height: head ? 22 : 26; radius: 2
-                    color: !head && pmRow.containsMouse && modelData.k ? "#3a2f12" : "transparent"
-                    Text {
-                        x: parent.head ? 4 : 8; anchors.verticalCenter: parent.verticalCenter
-                        width: parent.width - 16; elide: Text.ElideRight
-                        text: parent.head ? parent.modelData.head : (parent.modelData.on ? "* " : "  ") + parent.modelData.t
-                        color: parent.head ? "#8a8f96" : parent.modelData.on ? root.amber : parent.modelData.k ? root.keyText : "#6b6f75"
-                        font.family: root.mono; font.bold: true; font.pixelSize: parent.head ? 10 : 12
-                    }
-                    Text {
-                        visible: !parent.head && !!parent.modelData.d
-                        x: 164; width: parent.width - x - 6; anchors.verticalCenter: parent.verticalCenter; elide: Text.ElideRight
-                        text: parent.modelData.d || ""; color: "#8a8f96"; font.family: root.mono; font.pixelSize: 11
-                    }
-                    Rectangle { visible: parent.head; x: 4; y: 0; width: parent.width - 8; height: 1; color: "#3a3f45" }
-                    MouseArea {
-                        id: pmRow; anchors.fill: parent; enabled: !parent.head
-                        hoverEnabled: true; cursorShape: parent.modelData.k ? Qt.PointingHandCursor : Qt.ArrowCursor
-                        onClicked: paneMenu.act(parent.modelData)
-                    }
-                }
-            }
-        }
-    }
+    
 
     // ---- a run card being dragged onto a viewport pane
     Item {
@@ -4814,13 +3969,23 @@ Window {
     PopWindow {
         id: claudeWin
         objectName: "claudeWin"
+        gripRight: 60
         title: "Geppetto: " + claudePanel.who
         width: claudePanel.big ? 600 : 420
-        height: 680
-        transientParent: root                   // rides above the chest: clicking the chest never sinks the chat
-        out: root.claudeOpen
-        onDocked: root.claudeOpen = false
+        height: claudePanel.height  // follows the card: folded ~300, normal 420, big 700 (no overflow, no empty fill)
+        minimumHeight: claudePanel.folded ? 260 : 360  // PopWindow floor is 360; folded card (~300) must not be clamped back up
+        transientParent: root
+        out: false  // panel lives in root.contentItem now, not in this window
+        onDocked: root.chatOpen = false
     }
+    // Follow: walkie drag/physics, drawer slide, and main-window move all move the chat window.
+    Connections { target: claudeKey; function onXChanged() { root.placeChatByWalkie() } function onYChanged() { root.placeChatByWalkie() } }
+    Connections { target: research; function onXChanged() { root.placeChatByWalkie() } function onYChanged() { root.placeChatByWalkie() } }
+    Connections { target: root; function onXChanged() { root.placeChatByWalkie() } function onYChanged() { root.placeChatByWalkie() } }
+    Connections { target: claudePanel; function onHeightChanged() { root.placeChatByWalkie() } function onWidthChanged() { root.placeChatByWalkie() } }
+    // Anchor poll: catches walkie physics / drawer animation steps that signal handlers miss.
+    // Only moves the window when the grill actually moved, so dragging the chat window itself still works while the walkie is still.
+    Timer { id: grillAnchorTimer; interval: 32; repeat: true; running: root.chatOpen && research.isOpen; onTriggered: root.placeChatByWalkie() }
     PopWindow {
         id: faceWin
         objectName: "faceWin"
@@ -4870,7 +4035,11 @@ Window {
                         Text { id: playTxt; anchors.centerIn: parent; text: "▶ PLAY"; color: "#f0d68a"; font.family: "DejaVu Sans Mono"; font.pixelSize: 15; font.bold: true }
                         MouseArea {
                             id: playMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                            onClicked: { const d = root.sheetDir; root.sheetDir = ""; host.replayIn(d, root.activePane) }
+                            onClicked: {
+                                const d = root.sheetDir; root.sheetDir = "";
+                                timeline.setOpen(true); tlFloor.page = 0;
+                                host.replayIn(d, root.activePane);
+                            }
                         }
                     }
                     Rectangle {   // OPEN: the run's best model
@@ -4901,53 +4070,6 @@ Window {
 
     // ---- Space on the viewport: type to find a command (layout, link cameras, views), Enter runs it
     // A live run the chest just put in a pane you are not in. Nobody gets moved and nobody's pane gets
-    // taken without asking: a YES/NO sheet over the viewport. YES puts the run in your pane when that pane
-    // is free, or takes you to its pane when yours is busy; NO leaves everything as it is. It goes away
-    // by itself after a while, so an unanswered question never sits over the model.
-    Item {
-        id: joinAsk
-        objectName: "joinAsk"
-        z: 2900
-        visible: false
-        property string dir: ""
-        property int pane: 0
-        property string who: ""
-        property string what: ""
-        property int mine: 1                  // the pane you are in, when the run landed
-        property bool mineBusy: false         // that pane shows a live run, a replay or your bench
-        readonly property string question: mineBusy
-            ? "It is building in pane " + pane + ". Go there?"
-            : "It is building in pane " + pane + ". Show it in your pane " + mine + " instead?"
-        x: root.cabX + root.g0.view.x + (root.g0.view.w - width) / 2; y: root.cabY + root.g0.view.y + 40
-        width: 420; height: askCol.height + 16
-        function ask(d, n) {
-            if (n === root.activePane) return                       // it landed where you are
-            let r = null; for (const x of host.runs) if (x.dir === d) r = x;
-            who = r && r.who ? r.who : "someone"; what = r ? (r.title || r.name) : d;
-            dir = d; pane = n; mine = root.activePane; mineBusy = host.paneBusy(root.activePane);
-            visible = true; askAway.restart()
-        }
-        function yes() {
-            if (mineBusy) { root.activePane = pane; if (root.solo) host.setSolo(pane) }
-            else host.showRunIn(dir, mine);
-            visible = false
-        }
-        function no() { visible = false }
-        Timer { id: askAway; interval: 45000; onTriggered: joinAsk.visible = false }
-        Rectangle { anchors.fill: parent; radius: 4; color: "#16191c"; border.color: root.amber; opacity: 0.95 }
-        Column {
-            id: askCol
-            x: 8; y: 8; width: joinAsk.width - 16; spacing: 6
-            Px { objectName: "joinAskWho"; text: joinAsk.who.toUpperCase() + " started: " + joinAsk.what; color: root.amber; maxWidth: askCol.width; maxLines: 2 }
-            Px { objectName: "joinAskText"; text: joinAsk.question; color: root.keyText; bold: false; maxWidth: askCol.width; maxLines: 2 }
-            Row {
-                spacing: 8
-                Key { objectName: "joinAskYes"; label: "YES"; lamp: true; lit: true; tip: joinAsk.mineBusy ? "select that pane" : "put the run in your pane"; onClicked: joinAsk.yes() }
-                Key { objectName: "joinAskNo"; label: "NO"; tip: "leave it where it is"; onClicked: joinAsk.no() }
-            }
-        }
-    }
-    Connections { target: host; function onRunLanded(d, n) { joinAsk.ask(d, n) } }
     Item {
         id: palette
         objectName: "commandPalette"

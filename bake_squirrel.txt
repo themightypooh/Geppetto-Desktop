@@ -1,0 +1,5 @@
+echo "Bake normal + AO maps"
+bake Low High folder=out/squirrel/maps maps=normal,ao size=512
+
+echo "Final render"
+render out.png shade=material views=4 size=512

@@ -1,0 +1,5 @@
+echo "Muse Build test: small grey box"
+add Primitive name=MuseTestBox shape=Box width=2 depth=2 height=2 position=0,1,0 materialslot=0
+add Primitive name=MuseTestSlab shape=Box width=3 depth=3 height=0.4 position=0,0.2,0 materialslot=0
+material 0 color=#888888 rough=0.9 metal=0.05
+save muse_test_box.effigy

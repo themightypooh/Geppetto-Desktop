@@ -1,0 +1,19 @@
+{
+  "created_at": 1792997560.1536179,
+  "id": "gate-1792997560-99fcf30f",
+  "pane": "1",
+  "preflight": {
+    "errors": [],
+    "first_geom_line": 3,
+    "first_shape": "Cylinder",
+    "lines": 30,
+    "materials_before_first": 2,
+    "ok": true,
+    "rotated_boxes": 0
+  },
+  "script": "/home/poo/workspace/peen-hairy/peen-v2.txt",
+  "script_hash": "e78961811c61f8612bf0b184d25097461d9652462ca10d30ba1c2c739cb1a493",
+  "status": "cancelled",
+  "subject": "peen v2 from photo",
+  "worker": "muse-main"
+}

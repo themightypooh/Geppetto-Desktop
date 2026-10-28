@@ -62,9 +62,13 @@ public static class ServeMode
 		} ) { IsBackground = true };
 		reader.Start();
 
+		// --empty: no model at all. Clear the default model path first, so nothing
+		// downstream mistakes the default FBX for the scene, then skip the loader
+		// entirely and use the same empty mesh the live-run viewers use.
+		if ( options.Empty ) options.Model = "";
 		Emit( new JsonObject { ["ev"] = "loading", ["model"] = options.Model } );
 		var loader = new DocumentLoader();
-		if ( options.WatchRun is null )
+		if ( options.WatchRun is null && !options.Empty )
 		{
 			loader.Start( options.Model, options.Clip, options.Animate, options.Time );
 			loader.Completion.GetAwaiter().GetResult();
@@ -74,8 +78,8 @@ public static class ServeMode
 				return 1;
 			}
 		}
-		var mesh = options.WatchRun is null ? loader.Mesh : AiLivePreview.EmptyMesh();
-		var player = options.WatchRun is null ? loader.Player : null;
+		var mesh = options.WatchRun is not null || options.Empty ? AiLivePreview.EmptyMesh() : loader.Mesh;
+		var player = options.WatchRun is null && !options.Empty ? loader.Player : null;
 		// Lane E: the clip currently playing in this pane, if any — including one
 		// set with `clip` after load, so a live revision can re-apply it instead of
 		// silently dropping back to the rest pose (player is reset per revision).
@@ -290,6 +294,23 @@ public static class ServeMode
 			camera.FlySpeed = Math.Clamp( size * 1.2f * MathF.Pow( 1.25f, flySteps ), 0.05f, 2000f );
 		}
 		Reframe();
+		if ( options.Empty )
+		{
+			// Reframe on the empty mesh's radius 1 would park the camera 5 units
+			// out, showing only the grid's centre cross. The grid floor is 200x200
+			// (step 10, half 10), so frame it at the default 200-unit distance instead,
+			// same angle as a fresh model view. Orbit/pan still work from there.
+			camera.Target = Vector3.Zero;
+			camera.Distance = 200f;
+			camera.YawDegrees = 35f;
+			camera.PitchDegrees = 18f;
+			// Reframe() above set Far from the empty mesh's radius 1 (Far 100),
+			// which clips everything at Distance 200 — only the grid's near
+			// edge survived, a sliver at the bottom of the frame. Push Far
+			// out with the new distance, like Frame() does.
+			camera.Near = Math.Max( 0.01f, camera.Distance * 0.001f );
+			camera.Far = Math.Max( camera.Distance * 20f, 4000f );
+		}
 		if ( mesh.TriangleCount > 0 ) mesh.Upload( gl );
 		renderer.WireframeMode = options.Wireframe ? 1 : 0;
 

@@ -407,6 +407,7 @@ public static class ScriptLive
         try
         {
             var note = new JsonObject {
+                ["id"] = Guid.NewGuid().ToString("N"),
                 ["time"] = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture),
                 ["run"] = Path.GetFileName(root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)),
                 ["rev"] = live.Revision, ["op"] = $"checkpoint \"{title}\"", ["text"] = text,
@@ -464,7 +465,12 @@ public static class ScriptLive
         Directory.CreateDirectory(parent);
         string meta = root + ".json";
         if (!File.Exists(meta) || new FileInfo(meta).Length == 0)    // empty: the name NewRunDirectory claimed
-            AiLiveRun.AtomicWrite(meta, new JsonObject { ["prompt"] = "script: " + Path.GetFileName(script), ["script"] = Path.GetFullPath(script), ["pid"] = Environment.ProcessId }.ToJsonString());
+            AiLiveRun.AtomicWrite(meta, new JsonObject { ["prompt"] = "script: " + Path.GetFileName(script), ["script"] = Path.GetFullPath(script), ["pid"] = Environment.ProcessId,
+                ["modeller"] = Environment.GetEnvironmentVariable("GEPPETTO_MODELLER"),
+                ["agentModel"] = Environment.GetEnvironmentVariable("GEPPETTO_AGENT_MODEL"),
+                ["subject"] = Environment.GetEnvironmentVariable("GEPPETTO_SUBJECT"),
+                ["session"] = Environment.GetEnvironmentVariable("CODEX_THREAD_ID") ?? Environment.GetEnvironmentVariable("CLAUDE_CODE_SESSION_ID"),
+                ["identitySource"] = "launcher" }.ToJsonString());
         // the script as it ran, so a replay shows the very line each step came from after build.txt is edited
         Directory.CreateDirectory(root);
         string copy = Path.Combine(root, "script.txt");

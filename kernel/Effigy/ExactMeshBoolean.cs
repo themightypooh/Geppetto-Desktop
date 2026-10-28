@@ -108,53 +108,72 @@ public sealed class ExactMeshBoolean : IMeshBoolean
 
 		List<Polygon> combined;
 
-		switch ( op )
+		var budget = new Budget { DeadlineTicks = Environment.TickCount64 + 50_000 };
+
+		try
 		{
-			case BooleanOp.Union:
+
+			switch ( op )
 			{
-				var a = new Node( aPolys );
-				var b = new Node( bPolys );
-				a.ClipTo( b );
-				b.ClipTo( a );
-				b.Invert();
-				b.ClipTo( a );
-				b.Invert();
-				a.Build( b.AllPolygons() );
-				combined = a.AllPolygons();
-				break;
-			}
-			case BooleanOp.Subtract:
-			{
-				var a = new Node( aPolys );
-				var b = new Node( bPolys );
-				a.Invert();
-				a.ClipTo( b );
-				b.ClipTo( a );
-				b.Invert();
-				b.ClipTo( a );
-				b.Invert();
-				a.Build( b.AllPolygons() );
-				a.Invert();
-				combined = a.AllPolygons();
-				break;
-			}
-			default: // Intersect
-			{
-				var a = new Node( aPolys );
-				var b = new Node( bPolys );
-				a.Invert();
-				b.ClipTo( a );
-				b.Invert();
-				a.ClipTo( b );
-				b.ClipTo( a );
-				a.Build( b.AllPolygons() );
-				a.Invert();
-				combined = a.AllPolygons();
-				break;
+				case BooleanOp.Union:
+				{
+					var a = new Node( aPolys, budget );
+					var b = new Node( bPolys, budget );
+					a.ClipTo( b );
+					b.ClipTo( a );
+					b.Invert();
+					b.ClipTo( a );
+					b.Invert();
+					a.Build( b.AllPolygons() );
+					combined = a.AllPolygons();
+					break;
+				}
+				case BooleanOp.Subtract:
+				{
+					var a = new Node( aPolys, budget );
+					var b = new Node( bPolys, budget );
+					a.Invert();
+					a.ClipTo( b );
+					b.ClipTo( a );
+					b.Invert();
+					b.ClipTo( a );
+					b.Invert();
+					a.Build( b.AllPolygons() );
+					a.Invert();
+					combined = a.AllPolygons();
+					break;
+				}
+				default: // Intersect
+				{
+					var a = new Node( aPolys, budget );
+					var b = new Node( bPolys, budget );
+					a.Invert();
+					b.ClipTo( a );
+					b.Invert();
+					a.ClipTo( b );
+					b.ClipTo( a );
+					a.Build( b.AllPolygons() );
+					a.Invert();
+					combined = a.AllPolygons();
+					break;
+				}
 			}
 		}
+		catch ( BooleanDepthException e )
+		{
+			error = e.Message;
+				result = null;
+				return false;
+		}
 
-		result = PolygonsToMesh( combined );
+		if ( combined.Count > MaxFragments )
+		{
+			error = "The exact boolean exploded to " + combined.Count + " fragments (cap " + MaxFragments + "), so it was refused rather than hanging in mesh conversion. Simplify the sections, lower the segment count, or use Method=Voxel.";
+			result = null;
+			return false;
+		}
+
+		result = PolygonsToMesh( combined, budget );
 
 		if ( result.FaceCount == 0 )
 		{
@@ -289,7 +308,11 @@ public sealed class ExactMeshBoolean : IMeshBoolean
 
 			for ( var i = 0; i < count; i++ )
 			{
-				var t = Vec3.Dot( N, polygon.Verts[i] ) - W;
+				// Double-precision dot: float rounding on near-coincident planes
+				// (coaxial loft skins share angles, so their side planes are
+				// nearly identical) used to flip classifications and breed slivers.
+				var v = polygon.Verts[i];
+				var t = (double)N.x * v.x + (double)N.y * v.y + (double)N.z * v.z - W;
 				types[i] = t < -Eps ? Back : t > Eps ? Front : Coplanar;
 				polyType |= types[i];
 			}
@@ -346,8 +369,9 @@ public sealed class ExactMeshBoolean : IMeshBoolean
 
 				if ( (ti | tj) == (Front | Back) )
 				{
-					var denom = Vec3.Dot( N, vj - vi );
-					var t = MathF.Abs( denom ) < 1e-12f ? 0f : (W - Vec3.Dot( N, vi )) / denom;
+					var d = new Vec3( vj.x - vi.x, vj.y - vi.y, vj.z - vi.z );
+					var denom = (double)N.x * d.x + (double)N.y * d.y + (double)N.z * d.z;
+					var t = Math.Abs( denom ) < 1e-12 ? 0f : (float)((W - ((double)N.x * vi.x + (double)N.y * vi.y + (double)N.z * vi.z)) / denom);
 					var v = vi + (vj - vi) * t;
 					fVerts.Add( v );
 					bVerts.Add( v );
@@ -369,59 +393,203 @@ public sealed class ExactMeshBoolean : IMeshBoolean
 		}
 	}
 
+	/// <summary>Thrown when a BSP tree grows deeper than <see cref="MaxBspDepth"/>:
+	/// the old code recursed until the process died with a stack overflow
+	/// (BranchLoft, 2026-10-25: offset/concentric branch sections, exit 134,
+	/// tens of thousands of Node.Build frames). A depth exception is caught
+	/// in TryApply and returned as a clean boolean error, so the feature
+	/// fails with a message instead of taking the whole process down.
+	/// Legitimate BSP depth for the meshes this provider is built for
+	/// (hard-surface / kitbash scale, capped at 100k triangles) is far
+	/// below this cap; a tree deeper than this is degenerate splitting,
+	/// not a bigger model, and the remedy is fewer segments / Voxel.</summary>
+	sealed class BooleanDepthException : System.Exception
+	{
+		public BooleanDepthException( string message ) : base( message ) { }
+	}
+
+	/// <summary>Maximum BSP depth before TryApply refuses cleanly.
+	/// 512 frames is far above legitimate depth here and far below the
+	/// ~1MB thread stack a deeper recursion would exhaust.</summary>
+	const int MaxBspDepth = 512;
+
+	/// <summary>Maximum fragments a single BSP Build call may hold, and
+	/// maximum combined fragments TryApply will feed to mesh conversion.
+	/// A 300-triangle input that explodes past this is degenerate splitting,
+	/// and the O(n^2) weld/stitch/merge passes after it would take minutes
+	/// to hours (BranchLoft segments>=48, 2026-10-25: 99% CPU, >180s, no output).
+	/// Refusing is the clean failure; lowering segments is the remedy.</summary>
+	const int MaxFragments = 20000;
+
+	/// <summary>Per-TryApply work budget: the BSP phase previously had no
+	/// global bound, so a fragment-exploding input (BranchLoft segments=64)
+	/// could burn 99% CPU past 180s without ever tripping the per-call depth
+	/// or fragment caps. Split counting + a 50s wall-clock deadline make any
+	/// such input fail cleanly instead of hanging the rebuild.</summary>
+	sealed class Budget
+	{
+		public long Splits;
+		public const long MaxSplits = 5_000_000;
+		public long DeadlineTicks = long.MaxValue;
+
+		public void CheckSplit()
+		{
+			if ( ++Splits > MaxSplits )
+				throw new BooleanDepthException(
+					"The exact boolean exceeded its split budget (5,000,000 polygon splits), so it was refused rather than hanging. " +
+					"Simplify the sections, lower the segment count, or use Method=Voxel." );
+			CheckDeadline();
+		}
+
+		public void CheckDeadline()
+		{
+			if ( Environment.TickCount64 > DeadlineTicks )
+				throw new BooleanDepthException(
+					"The exact boolean exceeded its 50 second time budget, so it was refused rather than hanging the rebuild. " +
+					"Simplify the sections, lower the segment count, or use Method=Voxel." );
+		}
+	}
+
 	sealed class Node
 	{
+		public Budget Budget;
 		public Plane Plane;
 		public Node Front, Back;
 		public List<Polygon> Polys = new();
 
 		public Node() { }
 
-		public Node( List<Polygon> polygons ) => Build( polygons );
+		public Node( Budget budget ) { Budget = budget; }
 
-		public void Build( List<Polygon> polygons )
+		public Node( List<Polygon> polygons, Budget budget )
 		{
+			Budget = budget;
+			Build( polygons, 0 );
+		}
+
+		public void Build( List<Polygon> polygons ) => Build( polygons, 0 );
+
+		void Build( List<Polygon> polygons, int depth )
+		{
+			if ( depth > MaxBspDepth )
+				throw new BooleanDepthException(
+					$"The exact boolean's BSP tree grew deeper than {MaxBspDepth} levels, so it was refused rather than crashing the process. " +
+					"Degenerate or coincident faces (e.g. a branch section sharing a trunk face) make the splitter re-split the same fragments. " +
+					"Simplify the sections, lower the segment count, move the branch so its faces are not coincident with the trunk, or use Method=Voxel." );
+
+			if ( polygons.Count > MaxFragments )
+				throw new BooleanDepthException(
+					"The exact boolean exploded to more than " + MaxFragments + " fragments, so it was refused rather than hanging in mesh conversion. " +
+					"Degenerate or coincident faces make the splitter re-split the same fragments. " +
+					"Simplify the sections, lower the segment count, move the branch so its faces are not coincident with the trunk, or use Method=Voxel." );
+
 			if ( polygons.Count == 0 )
 				return;
 
 			if ( Plane is null )
-			{
-				var first = polygons[0];
-				Plane = new Plane( first.Normal, first.W );
-			}
+				Plane = ChoosePlane( polygons );
 
 			var front = new List<Polygon>();
 			var back = new List<Polygon>();
 
 			foreach ( var p in polygons )
+			{
+				Budget?.CheckSplit();
 				Plane.SplitPolygon( p, Polys, Polys, front, back );
+			}
 
 			if ( front.Count > 0 )
 			{
-				Front ??= new Node();
-				Front.Build( front );
+				Front ??= new Node( Budget );
+				Front.Build( front, depth + 1 );
 			}
 
 			if ( back.Count > 0 )
 			{
-				Back ??= new Node();
-				Back.Build( back );
+				Back ??= new Node( Budget );
+				Back.Build( back, depth + 1 );
 			}
 		}
 
-		public void Invert()
+		// BALANCED PLANE CHOICE. The old code always split on polygons[0]'s
+		// plane. On loft skins that plane is often a cap or a side face that
+		// separates almost nothing, so the tree degenerated into a chain:
+		// depth grew past 512 on a 32-segment tapered loft and fragment work
+		// exploded on 64 segments. Choosing the candidate plane that best
+		// balances front/back and splits fewest polygons keeps the tree
+		// shallow and the fragment count near the input size. Candidates are
+		// sampled (all of them for small sets) so the choice itself stays cheap.
+		static Plane ChoosePlane( List<Polygon> polygons )
 		{
+			var n = polygons.Count;
+			var k = n <= 64 ? n : n <= 1000 ? 24 : n <= 5000 ? 12 : 6;
+			Plane best = null;
+			var bestScore = double.MaxValue;
+
+			for ( var ci = 0; ci < k; ci++ )
+			{
+				var cand = polygons[n == k ? ci : (int)((long)ci * n / k)];
+				var cn = cand.Normal;
+				var cw = cand.W;
+				var front = 0;
+				var back = 0;
+				var coplanar = 0;
+				var spanning = 0;
+
+				foreach ( var p in polygons )
+				{
+					var hasFront = false;
+					var hasBack = false;
+
+					foreach ( var v in p.Verts )
+					{
+						var d = (double)cn.x * v.x + (double)cn.y * v.y + (double)cn.z * v.z - cw;
+						if ( d < -Eps ) hasBack = true;
+						else if ( d > Eps ) hasFront = true;
+					}
+
+					if ( hasFront && hasBack ) spanning++;
+					else if ( hasFront ) front++;
+					else if ( hasBack ) back++;
+					else coplanar++;
+				}
+
+				var score = Math.Abs( front - back ) + spanning * 4 - Math.Min( coplanar, 16 );
+
+				if ( score < bestScore )
+				{
+					bestScore = score;
+					best = new Plane( cn, cw );
+				}
+			}
+
+			return best ?? new Plane( polygons[0].Normal, polygons[0].W );
+		}
+
+		public void Invert() => Invert( 0 );
+
+		void Invert( int depth )
+		{
+			Budget?.CheckDeadline();
+			if ( depth > MaxBspDepth )
+				throw new BooleanDepthException( $"The exact boolean's BSP tree grew deeper than {MaxBspDepth} levels, so it was refused rather than crashing the process. Simplify the sections, lower the segment count, or use Method=Voxel." );
+
 			foreach ( var p in Polys )
 				p.Flip();
 
 			Plane = Plane?.Flip();
 			(Front, Back) = (Back, Front);
-			Front?.Invert();
-			Back?.Invert();
+			Front?.Invert( depth + 1 );
+			Back?.Invert( depth + 1 );
 		}
 
-		public List<Polygon> ClipPolygons( List<Polygon> polygons )
+		public List<Polygon> ClipPolygons( List<Polygon> polygons ) => ClipPolygons( polygons, 0 );
+
+		List<Polygon> ClipPolygons( List<Polygon> polygons, int depth )
 		{
+			if ( depth > MaxBspDepth )
+				throw new BooleanDepthException( $"The exact boolean's BSP tree grew deeper than {MaxBspDepth} levels, so it was refused rather than crashing the process. Simplify the sections, lower the segment count, or use Method=Voxel." );
+
 			if ( Plane is null )
 				return new List<Polygon>( polygons );
 
@@ -429,35 +597,49 @@ public sealed class ExactMeshBoolean : IMeshBoolean
 			var back = new List<Polygon>();
 
 			foreach ( var p in polygons )
+			{
+				Budget?.CheckSplit();
 				Plane.SplitPolygon( p, front, back, front, back );
+			}
 
 			if ( Front is not null )
-				front = Front.ClipPolygons( front );
+				front = Front.ClipPolygons( front, depth + 1 );
 
 			// No back child means that region is inside this solid: fragments that end up
 			// there are dropped, which is exactly the "keep only the outside" clip.
-			back = Back is not null ? Back.ClipPolygons( back ) : new List<Polygon>();
+			back = Back is not null ? Back.ClipPolygons( back, depth + 1 ) : new List<Polygon>();
 
 			front.AddRange( back );
 			return front;
 		}
 
-		public void ClipTo( Node other )
+		public void ClipTo( Node other ) => ClipTo( other, 0 );
+
+		void ClipTo( Node other, int depth )
 		{
+			if ( depth > MaxBspDepth )
+				throw new BooleanDepthException( $"The exact boolean's BSP tree grew deeper than {MaxBspDepth} levels, so it was refused rather than crashing the process. Simplify the sections, lower the segment count, or use Method=Voxel." );
+
 			Polys = other.ClipPolygons( Polys );
-			Front?.ClipTo( other );
-			Back?.ClipTo( other );
+			Front?.ClipTo( other, depth + 1 );
+			Back?.ClipTo( other, depth + 1 );
 		}
 
-		public List<Polygon> AllPolygons()
+		public List<Polygon> AllPolygons() => AllPolygons( 0 );
+
+		List<Polygon> AllPolygons( int depth )
 		{
+			Budget?.CheckDeadline();
+			if ( depth > MaxBspDepth )
+				throw new BooleanDepthException( $"The exact boolean's BSP tree grew deeper than {MaxBspDepth} levels, so it was refused rather than crashing the process. Simplify the sections, lower the segment count, or use Method=Voxel." );
+
 			var all = new List<Polygon>( Polys );
 
 			if ( Front is not null )
-				all.AddRange( Front.AllPolygons() );
+				all.AddRange( Front.AllPolygons( depth + 1 ) );
 
 			if ( Back is not null )
-				all.AddRange( Back.AllPolygons() );
+				all.AddRange( Back.AllPolygons( depth + 1 ) );
 
 			return all;
 		}
@@ -469,23 +651,23 @@ public sealed class ExactMeshBoolean : IMeshBoolean
 	{
 		var polys = new List<Polygon>();
 
-		foreach ( var face in mesh.Faces )
+		for ( var faceIndex = 0; faceIndex < mesh.FaceCount; faceIndex++ )
 		{
+			var face = mesh.Faces[faceIndex];
 			if ( face.Count < 3 )
 				continue;
 
 			var hasUvs = face.UVs is not null && face.UVs.Length == face.Count;
 
-			// Fan-triangulate. Inputs here are kernel meshes (quad-dominant, convex faces);
-			// a fan of a convex n-gon is exact, and a warped quad's diagonal is the same
-			// choice every other triangulator in this tree makes.
-			for ( var k = 1; k + 1 < face.Count; k++ )
+			// Use the same diagonal and concave-face handling as render/export.
+			// A fan across a concave face fills its notch and can wind triangles inward.
+			foreach ( var (a, b, c) in NormalBake.FaceTriangles( mesh, faceIndex ) )
 			{
 				var verts = new List<Vec3>
 				{
-					mesh.Positions[face.Indices[0]],
-					mesh.Positions[face.Indices[k]],
-					mesh.Positions[face.Indices[k + 1]],
+					mesh.Positions[face.Indices[a]],
+					mesh.Positions[face.Indices[b]],
+					mesh.Positions[face.Indices[c]],
 				};
 
 				if ( Vec3.Cross( verts[1] - verts[0], verts[2] - verts[0] ).LengthSquared < 1e-12f )
@@ -494,7 +676,7 @@ public sealed class ExactMeshBoolean : IMeshBoolean
 				List<Vec2> uvs = null;
 
 				if ( hasUvs )
-					uvs = new List<Vec2> { face.UVs[0], face.UVs[k], face.UVs[k + 1] };
+					uvs = new List<Vec2> { face.UVs[a], face.UVs[b], face.UVs[c] };
 
 				polys.Add( new Polygon( verts, uvs, face.Material ) );
 			}
@@ -503,21 +685,55 @@ public sealed class ExactMeshBoolean : IMeshBoolean
 		return polys;
 	}
 
-	static PolyMesh PolygonsToMesh( List<Polygon> polygons )
+	static PolyMesh PolygonsToMesh( List<Polygon> polygons, Budget budget )
 	{
 		var mesh = new PolyMesh();
-		var weld = new Dictionary<(long, long, long), int>();
+
+		// The weld grid MUST be searched with neighbours, not just the corner's own
+		// cell: the old single-cell lookup left vertices 1e-6 apart unwelded whenever
+		// they straddled a cell boundary, and those near-duplicates are exactly what
+		// left BranchLoft's union with 11 boundary edges (wave 5 probe: faces piled
+		// up around twin vertices 1e-6 apart that no later weld could merge, because
+		// the faces themselves contained both twins). Cell side is sqrt(3) * WeldEps,
+		// so any two points within the weld distance sit in the same or an adjacent
+		// cell, and every merge the old lookup made is still made. The representative
+		// is the first corner seen, as before; only the search widens.
+		const float WeldCell = WeldEps * 1.7320508f;
+		var weldCells = new Dictionary<(long, long, long), List<int>>();
 
 		int Weld( Vec3 p )
 		{
-			var key = ((long)MathF.Round( p.x / WeldEps ), (long)MathF.Round( p.y / WeldEps ), (long)MathF.Round( p.z / WeldEps ));
+			var cx = (long)Math.Floor( p.x / WeldCell );
+			var cy = (long)Math.Floor( p.y / WeldCell );
+			var cz = (long)Math.Floor( p.z / WeldCell );
+			var best = -1;
+			var bestSq = WeldCell * WeldCell;
 
-			if ( weld.TryGetValue( key, out var idx ) )
-				return idx;
+			for ( var dx = -1; dx <= 1; dx++ )
+				for ( var dy = -1; dy <= 1; dy++ )
+					for ( var dz = -1; dz <= 1; dz++ )
+						if ( weldCells.TryGetValue( (cx + dx, cy + dy, cz + dz), out var reps ) )
+							foreach ( var r in reps )
+							{
+								var d = (mesh.Positions[r] - p).LengthSquared;
 
-			idx = mesh.Positions.Count;
+								if ( d < bestSq )
+								{
+									bestSq = d;
+									best = r;
+								}
+							}
+
+			if ( best >= 0 )
+				return best;
+
+			var idx = mesh.Positions.Count;
 			mesh.Positions.Add( p );
-			weld[key] = idx;
+
+			if ( !weldCells.TryGetValue( (cx, cy, cz), out var list ) )
+				weldCells[(cx, cy, cz)] = list = new List<int>();
+
+			list.Add( idx );
 			return idx;
 		}
 
@@ -555,12 +771,138 @@ public sealed class ExactMeshBoolean : IMeshBoolean
 		}
 
 		DropDuplicatesAndDegenerates( mesh );
-		StitchTJunctions( mesh );
+		StitchTJunctions( mesh, budget );
 		DropDuplicatesAndDegenerates( mesh );
 		CoplanarMerge.Merge( mesh );
 		DropDuplicatesAndDegenerates( mesh );
+		CloseMicroHoles( mesh );
 
 		return mesh;
+	}
+
+
+	// A boolean can lose a fragment where three cut surfaces meet: the neighbours
+	// survive, but the micro-face between them never comes out of the BSP, leaving
+	// a hole bounded by exactly three edges. BranchLoft's union lost exactly one
+	// such triangle (edges ~0.001 long) after the weld fix, and the feature then
+	// refused the mesh as not closed. This closes ONLY that case: a 3-edge loop
+	// whose every edge is short against the mesh size, oriented against its
+	// neighbours so the closure is consistent, each edge used at most once so the
+	// result stays manifold. Anything bigger, longer, or inconsistently oriented
+	// is left open on purpose - a real gap must still fail loudly downstream,
+	// and a plain weld that merely renames the crack is not the answer (it masked
+	// the 11-edge case while dropping volume).
+	// Returns how many triangles were added.
+	static int CloseMicroHoles( PolyMesh mesh )
+	{
+		if ( mesh is null || mesh.FaceCount == 0 || mesh.Positions.Count == 0 )
+			return 0;
+
+		var lo = mesh.Positions[0];
+		var hi = mesh.Positions[0];
+
+		foreach ( var p in mesh.Positions )
+		{
+			lo = new Vec3( Math.Min( lo.x, p.x ), Math.Min( lo.y, p.y ), Math.Min( lo.z, p.z ) );
+			hi = new Vec3( Math.Max( hi.x, p.x ), Math.Max( hi.y, p.y ), Math.Max( hi.z, p.z ) );
+		}
+
+		// 0.1% of the mesh extent: far above float noise for a face this size, far
+		// below any modelled feature. A 0.38-unit strip is NOT closed by this.
+		var maxEdge = (hi - lo).Length * 1e-3f;
+
+		if ( maxEdge <= 0 )
+			return 0;
+
+		var edgeFaces = mesh.BuildEdgeFaces();
+		var boundary = new Dictionary<EdgeKey, int>();
+
+		foreach ( var (key, faces) in edgeFaces )
+		{
+			if ( faces.Count != 1 )
+				continue;
+			if ( (mesh.Positions[key.A] - mesh.Positions[key.B]).Length > maxEdge )
+				continue;
+			boundary[key] = faces[0];
+		}
+
+		if ( boundary.Count < 3 )
+			return 0;
+
+		var seen = new HashSet<(int, int, int)>();
+		var used = new HashSet<EdgeKey>();
+		var added = 0;
+
+		foreach ( var (e1, f1) in boundary )
+		{
+			foreach ( var (e2, f2) in boundary )
+			{
+				int a, b, c;
+				if ( e2.A == e1.B ) { a = e1.A; b = e1.B; c = e2.B; }
+				else if ( e2.B == e1.B ) { a = e1.A; b = e1.B; c = e2.A; }
+				else continue;
+				if ( a == c )
+					continue;
+
+				var e3 = new EdgeKey( c, a );
+				if ( !boundary.TryGetValue( e3, out var f3 ) )
+					continue;
+				if ( used.Contains( e1 ) || used.Contains( e2 ) || used.Contains( e3 ) )
+					continue;
+
+				var sorted = new[] { a, b, c };
+				Array.Sort( sorted );
+				if ( !seen.Add( (sorted[0], sorted[1], sorted[2]) ) )
+					continue;
+
+				// The closure must traverse every edge OPPOSITE to its owning face,
+				// or the patch faces backwards and the volume goes wrong. Exactly one
+				// of the two cyclic orders can satisfy all three edges; if neither
+				// does, the neighbourhood is inconsistently oriented and the hole
+				// stays open.
+				int[] order = null;
+				foreach ( var cand in new[] { new[] { a, b, c }, new[] { a, c, b } } )
+				{
+					if ( Opposes( mesh, cand, e1, f1 ) && Opposes( mesh, cand, e2, f2 ) && Opposes( mesh, cand, e3, f3 ) )
+					{ order = cand; break; }
+				}
+				if ( order is null )
+					continue;
+
+				mesh.Faces.Add( new Face( order, null, mesh.Faces[f1].Material ) );
+				used.Add( e1 ); used.Add( e2 ); used.Add( e3 );
+				added++;
+			}
+		}
+
+		return added;
+	}
+
+	// Does the candidate triangle traverse `edge` in the opposite direction to the
+	// loop of `faceIndex`? Both loops are cyclic, so direction is read off the
+	// consecutive pair that forms the edge, whichever way round it appears.
+	static bool Opposes( PolyMesh mesh, int[] tri, EdgeKey edge, int faceIndex )
+	{
+		var face = mesh.Faces[faceIndex];
+		var n = face.Indices.Length;
+		for ( var i = 0; i < n; i++ )
+		{
+			var u = face.Indices[i];
+			var v = face.Indices[(i + 1) % n];
+			if ( (u == edge.A && v == edge.B) || (u == edge.B && v == edge.A) )
+			{
+				// Candidate direction along the same edge, cyclic over its 3 corners.
+				for ( var k = 0; k < 3; k++ )
+				{
+					var cu = tri[k];
+					var cv = tri[(k + 1) % 3];
+					if ( (cu == edge.A && cv == edge.B) || (cu == edge.B && cv == edge.A) )
+						return (u == edge.A && v == edge.B) != (cu == edge.A && cv == edge.B);
+				}
+				return false;
+			}
+		}
+		return false;
 	}
 
 	// Two faces with the same vertex set are either the same surface twice (keep one) or the
@@ -669,7 +1011,7 @@ public sealed class ExactMeshBoolean : IMeshBoolean
 	// sides of the seam disagree about where the seam runs and the mesh reads as open.
 	// Restarted after every insertion, because inserting changes the edge list; a vertex is
 	// never inserted at an endpoint, and insertion creates no new vertices, so this terminates.
-	static void StitchTJunctions( PolyMesh mesh )
+	static void StitchTJunctions( PolyMesh mesh, Budget budget )
 	{
 		// The stitch is quadratic in the worst case; for the kitbash-scale meshes this
 		// provider is for, that is seconds at most. Above this size the seam is left as the
@@ -677,11 +1019,18 @@ public sealed class ExactMeshBoolean : IMeshBoolean
 		if ( (long)mesh.VertexCount * mesh.FaceCount > 20_000_000L )
 			return;
 
+		// Insertion cap + deadline: the loop restarts its scan after every
+		// insertion, so an explosion of seam vertices previously meant hours
+		// of rescans with no output. Stopping leaves the seam as the BSP
+		// produced it; downstream validation then fails loudly if it is open,
+		// instead of the rebuild hanging.
+		var insertions = 0;
 		var changed = true;
 
 		while ( changed )
 		{
 			changed = false;
+			budget?.CheckDeadline();
 
 			for ( var vi = 0; vi < mesh.VertexCount && !changed; vi++ )
 			{
@@ -724,6 +1073,8 @@ public sealed class ExactMeshBoolean : IMeshBoolean
 
 						mesh.Faces[fi] = new Face( indices.ToArray(), uvs?.ToArray(), face.Material );
 						changed = true;
+						if ( ++insertions > 50_000 )
+							return;
 						break;
 					}
 				}

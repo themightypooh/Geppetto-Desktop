@@ -1,0 +1,21 @@
+remove Transform 7
+remove RearUnderside
+remove Transform 6
+remove JawVert2
+remove Transform 5
+remove JawVert1
+remove Transform 4
+remove Operculum
+remove Transform 3
+remove TriFrame
+add Inflate2D name=TriFrame2 rings="10.60,-37.10;10.90,-35.70;10.40,-33.40;8.30,-28.90;5.60,-25.60;4.10,-25.80;2.70,-27.70;1.50,-30.80;2.60,-33.50;4.60,-36.10;5.80,-36.80;7.70,-37.30|8.63,-34.98;8.80,-34.21;8.53,-32.95;7.37,-30.47;5.88,-28.66;5.06,-28.77;4.29,-29.81;3.63,-31.52;4.23,-33.00;5.33,-34.43;6.00,-34.82;7.04,-35.09" thickness=0.5 profile=Flat materialslot=1
+add Transform bodies=TriFrame2 translate=0,0,0.8
+add Inflate2D name=Operculum2 rings="-1.00,-32.00;-2.00,-33.50;-3.00,-36.50;-5.00,-37.50;-8.00,-38.00;-10.00,-37.00;-12.00,-35.00;-13.00,-32.00;-12.00,-29.00;-10.00,-26.00;-7.00,-25.50;-4.00,-27.50;-2.00,-30.00" thickness=0.5 profile=Flat materialslot=1
+add Transform bodies=Operculum2 translate=0,0,-0.5
+add Inflate2D name=JawVertA rings="-11.00,-28.00;-12.50,-29.50;-13.50,-30.50;-14.50,-33.00;-14.00,-35.00;-12.50,-35.50;-11.00,-33.00;-10.00,-30.00" thickness=0.4 profile=Flat materialslot=1
+add Transform bodies=JawVertA translate=0,0,0.3
+add Inflate2D name=JawVertB rings="-13.00,-32.50;-14.50,-34.00;-15.50,-36.00;-15.00,-38.00;-13.50,-38.00;-12.00,-36.00;-11.50,-33.50" thickness=0.4 profile=Flat materialslot=1
+add Transform bodies=JawVertB translate=0,0,0.3
+add Inflate2D name=RearUnderside2 rings="10.00,-28.00;8.50,-31.00;8.00,-33.00;5.00,-35.00;3.00,-36.00;0.00,-37.00;-2.00,-37.50;-5.00,-37.00;-8.00,-36.00;-10.50,-34.00;-11.00,-32.00;-10.00,-29.00;-9.00,-27.00;-6.00,-25.80;-3.00,-25.50;0.00,-25.80;4.00,-26.00;7.00,-27.00" thickness=0.4 profile=Flat materialslot=1
+add Transform bodies=RearUnderside2 translate=0,0,-1.0
+save angler_trace.effigy

@@ -25,7 +25,17 @@ public sealed record AiRubric(double Target, double Floor, IReadOnlyList<AiCrite
 
     public static double Number(JsonNode? node, double min, double max)
     {
-        double n = node?.GetValue<double>() ?? throw new ArgumentException("Missing numeric value.");
+        if (node == null) throw new ArgumentException("Missing numeric value.");
+        double n;
+        if (node is JsonValue jv)
+        {
+            if (jv.TryGetValue<double>(out var d)) n = d;
+            else if (jv.TryGetValue<int>(out var i)) n = i;
+            else if (jv.TryGetValue<long>(out var l)) n = l;
+            else if (jv.TryGetValue<float>(out var f)) n = f;
+            else throw new ArgumentException("Expected numeric value.");
+        }
+        else throw new ArgumentException("Expected numeric value.");
         if (!double.IsFinite(n) || n < min || n > max) throw new ArgumentException($"Value must be finite in [{min},{max}].");
         return n;
     }
@@ -295,4 +305,12 @@ public static class AiJudge
 
     public static AiScore HybridScore(AiRubric rubric, JsonNode visionReport, AiGateInput gates) =>
         HybridScore(rubric.Score(visionReport), gates);
+
+    public sealed record PromptMetric(string PromptKind, double QualityScore, bool Passed, int ProblemScore);
+    static readonly List<PromptMetric> promptMetrics = new();
+    public static IReadOnlyList<PromptMetric> Metrics => promptMetrics;
+    public static void RecordPromptMetric(string kind, double score, bool passed, int problemScore)
+    {
+        lock (promptMetrics) promptMetrics.Add(new(kind, score, passed, problemScore));
+    }
 }

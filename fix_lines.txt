@@ -1,0 +1,56 @@
+add Primitive name=Rebar1 shape=Cylinder radius=0.05 height=1.6 position=5.8,2.2,-5.8 rotationaxis=1,0,0 rotation=15 materialslot=1
+add Primitive name=Rebar2 shape=Cylinder radius=0.05 height=1.8 position=6.2,2.3,-6.1 rotationaxis=0,0,1 rotation=-15 materialslot=1
+add Primitive name=Rebar3 shape=Cylinder radius=0.05 height=1.4 position=5.9,2.1,-6.2 rotationaxis=0,1,0 rotation=10 materialslot=1
+material 1 color=#3a332d rough=0.65 metal=0.85
+
+echo "Ground floor commercial: rear and side infill walls with concrete masonry unit texture tone"
+add Primitive name=WallBackGround shape=Box width=12 depth=0.4 height=3 position=0,1.8,6 materialslot=2
+add Primitive name=WallLeftGround shape=Box width=0.4 depth=12 height=3 position=-6,1.8,0 materialslot=2
+material 2 color=#8c8273 rough=0.92 metal=0.0
+
+echo "Storefront: intact metal roll-up shutter bay on left"
+add Primitive name=ShutterFrameLeft shape=Box width=5.2 depth=0.3 height=2.7 position=-3,1.65,-6 materialslot=3
+add Primitive name=ShutterCurtain shape=Box width=4.8 depth=0.15 height=2.5 position=-3,1.55,-6 materialslot=3
+material 3 color=#545b63 rough=0.55 metal=0.7
+
+echo "Floor 1 slab: reinforced concrete slab sheared off at front-right blast zone"
+add Primitive name=Floor1SlabIntact shape=Box width=7 depth=12.4 height=0.4 position=-2.5,3.4,0 materialslot=0
+add Primitive name=Floor1SlabRear shape=Box width=5.4 depth=6.4 height=0.4 position=3.3,3.4,3 materialslot=0
+
+echo "Floor 1 buckled slab: dangling fractured slab segment hanging into blast breach"
+add Primitive name=Floor1SlabBroken shape=Box width=4.2 depth=4.5 height=0.35 position=3.6,2.6,-2.6 rotationaxis=1,0,0 rotation=-18 materialslot=0
+
+echo "Floor 2 walls: residential level exterior facade with window cutouts and heavy spalling"
+add Primitive name=WallLeftFloor2 shape=Box width=0.4 depth=12 height=3.0 position=-6,5.1,0 materialslot=2
+add Primitive name=WallBackFloor2 shape=Box width=12 depth=0.4 height=3.0 position=0,5.1,6 materialslot=2
+add Primitive name=WallFrontFloor2Left shape=Box width=5.6 depth=0.4 height=3.0 position=-3.2,5.1,-6 materialslot=2
+
+echo "Floor 2 slab: sheared concrete slab pancaking downwards"
+add Primitive name=Floor2SlabIntact shape=Box width=7 depth=12.4 height=0.4 position=-2.5,6.8,0 materialslot=0
+add Primitive name=Floor2SlabBroken shape=Box width=4.5 depth=4.2 height=0.35 position=3.2,5.8,-2.2 rotationaxis=1,0,0 rotation=-22 materialslot=0
+
+echo "Roof slab: partially collapsed rooftop terrace with overhang"
+add Primitive name=RoofSlabIntact shape=Box width=7.2 depth=12.6 height=0.4 position=-2.4,9.8,0 materialslot=0
+add Primitive name=RoofParapetLeft shape=Box width=0.3 depth=12.6 height=0.8 position=-6,10.4,0 materialslot=0
+add Primitive name=RoofParapetBack shape=Box width=7.2 depth=0.3 height=0.8 position=-2.4,10.4,6.3 materialslot=0
+
+echo "Rooftop utilities: damaged black polyethylene water tank tilted on roof"
+add Primitive name=WaterTank shape=Cylinder radius=0.9 height=1.8 position=-3,11.0,2 rotationaxis=1,0,0 rotation=15 materialslot=4
+material 4 color=#1c1d20 rough=0.4 metal=0.05
+
+echo "Rooftop starter rebar: unpoured vertical column rebar bent by blast pressure"
+add Primitive name=RoofRebar1 shape=Cylinder radius=0.04 height=1.4 position=-6,10.9,-6 rotationaxis=1,0,0 rotation=-12 materialslot=1
+add Primitive name=RoofRebar2 shape=Cylinder radius=0.04 height=1.5 position=-6,10.95,6 rotationaxis=0,0,1 rotation=8 materialslot=1
+add Primitive name=RoofRebar3 shape=Cylinder radius=0.04 height=1.3 position=0,10.85,6 rotationaxis=1,0,0 rotation=-10 materialslot=1
+
+echo "Debris mound: tumbled concrete blocks and shattered masonry at building base"
+add Primitive name=DebrisPile shape=Box width=6.2 depth=6.2 height=1.2 position=4.2,0.8,-3.8 rotationaxis=0,1,0 rotation=25 materialslot=0
+add Primitive name=DebrisChunk1 shape=Box width=1.4 depth=1.1 height=0.7 position=3.5,1.5,-4.2 rotationaxis=0,1,0 rotation=35 materialslot=2
+add Primitive name=DebrisChunk2 shape=Box width=1.6 depth=0.9 height=0.8 position=5.2,1.3,-3.2 rotationaxis=1,0,0 rotation=-20 materialslot=0
+add Primitive name=DebrisChunk3 shape=Box width=0.9 depth=0.8 height=0.6 position=2.2,0.6,-5.4 rotationaxis=0,1,0 rotation=40 materialslot=2
+
+echo "Save building model"
+save war_torn_building.effigy
+
+echo "Render 4-view milestone"
+render war_torn_building_sheet.png shade=material views=4 size=512

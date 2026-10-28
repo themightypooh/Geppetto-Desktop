@@ -14,7 +14,8 @@ namespace Effigy;
 /// THE TABLE IS MEASURED, NOT GUESSED. Each <see cref="Scale"/> entry is the multiplier on the
 /// kernel strength that makes Effigy's displacement match Blender 5.2's on the parity test (a 10 in
 /// bumpy sheet, a 1.5 in brush, Blender's own strength): Effigy.Tests --parity prints it as SCALE
-/// for every brush, from the cached reference fields in Effigy.Tests/parity-refs. ParityTests holds
+/// for every brush, measured 2026-10-25 against Blender 5.2.2 LTS by Effigy.Tests --parity (windowed oracle,
+/// one Blender launch, bumpy 10 in sheet, 1.5 in brush, Blender strength 0.5). ParityTests holds
 /// each calibrated gain near 1, so a brush change that moves the gain fails the suite until the
 /// table is re-measured.
 ///
@@ -35,8 +36,44 @@ public static class BrushCalibration
 
 	/// <summary>Kernel strength per unit of calibrated strength at the reference radius, per brush.
 	/// Brushes absent here are 1 (measured at about 1, or with no reference to measure against).</summary>
-	static readonly Dictionary<BrushKind, float> _scale = new()
+	/// Measured SCALE per brush (see the class doc). Absent brushes stay at 1:
+/// Crease (SCALE NaN in both its cases — no strength multiplier brings its gain to 1),
+/// ClothDrag (SCALE NaN; the Blender reference barely moves), and Relax (no brush parity
+/// case — the Relax row in the parity table is a mesh filter, not a brush). Slide uses the
+/// Nudge case (0.143); the Relax Slide case measured 0.094. Pinch uses Pinch/Magnify
+/// (0.428); Relax Pinch measured 0.150. MultiplaneScrape's shape correlation is only 0.17,
+/// so its entry matches magnitude, not shape.
+static readonly Dictionary<BrushKind, float> _scale = new()
 	{
+		{ BrushKind.Smooth, 1.754f },
+		{ BrushKind.Draw, 0.862f },
+		{ BrushKind.Inflate, 0.221f },
+		{ BrushKind.Grab, 1.0f },
+		{ BrushKind.Flatten, 0.469f },
+		{ BrushKind.Pinch, 0.428f },
+		{ BrushKind.Clay, 0.399f },
+		{ BrushKind.ClayStrips, 0.088f },
+		{ BrushKind.Layer, 0.121f },
+		{ BrushKind.Blob, 0.866f },
+		{ BrushKind.DrawSharp, 1.314f },
+		{ BrushKind.Fill, 0.547f },
+		{ BrushKind.Scrape, 0.410f },
+		{ BrushKind.ElasticGrab, 0.599f },
+		{ BrushKind.SnakeHook, 1.0f },
+		{ BrushKind.Thumb, 1.0f },
+		{ BrushKind.Slide, 0.143f },
+		{ BrushKind.Twist, 0.785f },
+		{ BrushKind.Boundary, 2.288f },
+		{ BrushKind.Pose, 1.665f },
+		{ BrushKind.ClothGrab, 0.121f },
+		{ BrushKind.ClothPush, 0.210f },
+		{ BrushKind.ClothInflate, 0.139f },
+		{ BrushKind.ClothPinchFolds, 0.037f },
+		{ BrushKind.ClothExpand, 0.008f },
+		{ BrushKind.ClothTwist, 0.010f },
+		{ BrushKind.Plateau, 0.079f },
+		{ BrushKind.ClayThumb, 0.196f },
+		{ BrushKind.MultiplaneScrape, 0.097f },
 	};
 
 	/// <summary>Brushes whose kernel strength is a distance, so calibrated strength scales with radius.</summary>

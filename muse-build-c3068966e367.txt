@@ -1,0 +1,8 @@
+echo "Banana: curved crescent body, tapered ends, stem and tip"
+add Blob name=BananaBody shapes="capsule -9,2.5,0 -6,0.9,0 1.0; capsule -6,0.9,0 -3,0.2,0 1.6; capsule -3,0.2,0 3,0.2,0 1.8; capsule 3,0.2,0 6,0.9,0 1.6; capsule 6,0.9,0 9,2.5,0 1.0; sphere -9,2.5,0 0.8; sphere 9,2.5,0 0.8" voxel=0.3
+add Primitive name=Stem shape=Cylinder width=0.9 depth=0.9 height=2.0 position=-9.8,3.6,0 rotationaxis=0,0,1 rotation=40 materialslot=1
+add Primitive name=Tip shape=Cylinder width=0.5 depth=0.5 height=0.8 position=9.4,2.9,0 rotationaxis=0,0,1 rotation=-40 materialslot=2
+material 0 color=#f2c531 rough=0.6 metal=0
+material 1 color=#6a7a3a rough=0.8 metal=0
+material 2 color=#4a2f1d rough=0.8 metal=0
+save banana.effigy

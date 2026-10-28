@@ -1,0 +1,29 @@
+echo "Angler skull v5 pixel-traced"
+add Inflate2D name=Cranium rings="-19.00,2.00;-19.00,2.92;-18.48,4.00;-17.56,5.12;-16.36,6.16;-15.00,7.00;-13.38,7.61;-11.43,8.06;-9.29,8.42;-7.10,8.71;-5.00,9.00;-2.95,9.30;-0.86,9.57;1.22,9.79;3.19,9.94;5.00,10.00;6.58,9.94;7.97,9.79;9.27,9.57;10.58,9.30;12.00,9.00;13.57,8.68;15.22,8.32;16.90,7.92;18.51,7.48;20.00,7.00;21.39,6.51;22.74,6.02;23.98,5.46;25.09,4.81;26.00,4.00;26.72,2.99;27.28,1.82;27.68,0.54;27.92,-0.75;28.00,-2.00;27.86,-3.22;27.49,-4.45;26.99,-5.67;26.46,-6.86;26.00,-8.00;25.66,-9.18;25.39,-10.43;25.09,-11.59;24.66,-12.50;24.00,-13.00;23.12,-13.00;22.08,-12.59;20.88,-11.93;19.52,-11.18;18.00,-10.50;16.26,-9.86;14.29,-9.15;12.19,-8.41;10.06,-7.68;8.00,-7.00;6.00,-6.37;4.00,-5.76;2.00,-5.18;0.00,-4.59;-2.00,-4.00;-4.05,-3.40;-6.14,-2.80;-8.22,-2.20;-10.19,-1.60;-12.00,-1.00;-13.77,-0.43;-15.54,0.10;-17.14,0.66;-18.35,1.27|16.30,-1.29;16.07,0.47;15.39,2.11;14.31,3.52;12.90,4.60;11.26,5.28;9.50,5.51;7.74,5.28;6.10,4.60;4.69,3.52;3.61,2.11;2.93,0.47;2.70,-1.29;2.93,-3.05;3.61,-4.69;4.69,-6.10;6.10,-7.18;7.74,-7.86;9.50,-8.09;11.26,-7.86;12.90,-7.18;14.31,-6.10;15.39,-4.69;16.07,-3.05|22.00,7.00;30.00,8.00;27.00,0.00;21.00,3.00" thickness=0.8 profile=FlatBevel bevel=0.1 materialslot=1
+add Inflate2D name=LowerJaw rings="-21.00,-16.00;-20.19,-15.89;-18.14,-16.22;-15.38,-16.82;-12.49,-17.47;-10.00,-18.00;-7.94,-18.40;-5.93,-18.80;-3.95,-19.20;-1.98,-19.60;0.00,-20.00;2.00,-20.40;4.00,-20.80;6.00,-21.20;8.00,-21.60;10.00,-22.00;12.10,-22.53;14.29,-23.18;16.43,-23.78;18.38,-24.11;20.00,-24.00;21.28,-23.10;22.32,-21.55;23.12,-19.85;23.68,-18.50;24.00,-18.00;24.14,-18.65;24.11,-20.10;23.81,-21.94;23.14,-23.71;22.00,-25.00;20.21,-25.77;17.82,-26.30;15.14,-26.66;12.43,-26.87;10.00,-27.00;7.87,-27.04;5.86,-26.96;3.90,-26.76;1.97,-26.44;0.00,-26.00;-1.98,-25.42;-3.95,-24.71;-5.93,-23.89;-7.94,-22.98;-10.00,-22.00;-12.49,-20.80;-15.38,-19.36;-18.14,-17.92;-20.19,-16.72" thickness=0.8 profile=FlatBevel bevel=0.1 materialslot=1
+add Inflate2D name=Operculum rings="26,-2;30,-2;30,-14;26,-14" thickness=0.6 profile=Flat materialslot=1
+add Inflate2D name=RostralSpike rings="-20.6,16.2;-7.5,5.7;-12,4;-18,8" thickness=0.5 profile=Flat materialslot=1
+add Primitive name=JawJoint shape=Cylinder radius=1.0 height=8.00 position=24.00,-12.00,0 rotationaxis=1.000,0.000,0 rotation=90 segments=6 materialslot=1
+add Primitive name=Illicium1 shape=Cylinder radius=0.8 height=5.39 position=1.00,9.50,0 rotationaxis=-0.928,-0.371,0 rotation=90 segments=6 materialslot=1
+add Primitive name=Illicium2 shape=Cylinder radius=0.73 height=6.08 position=-0.50,15.00,0 rotationaxis=-0.986,-0.164,0 rotation=90 segments=6 materialslot=1
+add Primitive name=Illicium3 shape=Cylinder radius=0.66 height=5.39 position=-2.00,20.50,0 rotationaxis=-0.928,-0.371,0 rotation=90 segments=6 materialslot=1
+add Primitive name=Illicium4 shape=Cylinder radius=0.5900000000000001 height=3.61 position=-4.00,24.50,0 rotationaxis=-0.832,-0.555,0 rotation=90 segments=6 materialslot=1
+add Primitive name=Illicium5 shape=Cylinder radius=0.52 height=1.41 position=-5.50,26.50,0 rotationaxis=-0.707,-0.707,0 rotation=90 segments=6 materialslot=1
+add Primitive name=EscaTip shape=Sphere radius=1.0 position=-6,28,0 scale=1,1,0.6 segments=12 materialslot=2
+add Primitive name=UpperTooth1 shape=Cylinder radius=0.3 height=1.4 position=-15,-6.5,0 rotationaxis=1,0,0 rotation=90 segments=4 materialslot=1
+add Primitive name=UpperTooth2 shape=Cylinder radius=0.3 height=1.4 position=-9,-6.5,0 rotationaxis=1,0,0 rotation=90 segments=4 materialslot=1
+add Primitive name=UpperTooth3 shape=Cylinder radius=0.3 height=1.4 position=-3,-6.5,0 rotationaxis=1,0,0 rotation=90 segments=4 materialslot=1
+add Primitive name=UpperTooth4 shape=Cylinder radius=0.3 height=1.4 position=3,-6.5,0 rotationaxis=1,0,0 rotation=90 segments=4 materialslot=1
+add Primitive name=UpperTooth5 shape=Cylinder radius=0.3 height=1.4 position=9,-6.5,0 rotationaxis=1,0,0 rotation=90 segments=4 materialslot=1
+add Primitive name=UpperTooth6 shape=Cylinder radius=0.3 height=1.4 position=15,-6.5,0 rotationaxis=1,0,0 rotation=90 segments=4 materialslot=1
+add Primitive name=LowerTooth1 shape=Cylinder radius=0.3 height=1.4 position=-18,-19,0 rotationaxis=1,0,0 rotation=-90 segments=4 materialslot=1
+add Primitive name=LowerTooth2 shape=Cylinder radius=0.3 height=1.4 position=-12,-19,0 rotationaxis=1,0,0 rotation=-90 segments=4 materialslot=1
+add Primitive name=LowerTooth3 shape=Cylinder radius=0.3 height=1.4 position=-6,-19,0 rotationaxis=1,0,0 rotation=-90 segments=4 materialslot=1
+add Primitive name=LowerTooth4 shape=Cylinder radius=0.3 height=1.4 position=0,-19,0 rotationaxis=1,0,0 rotation=-90 segments=4 materialslot=1
+add Primitive name=LowerTooth5 shape=Cylinder radius=0.3 height=1.4 position=6,-19,0 rotationaxis=1,0,0 rotation=-90 segments=4 materialslot=1
+add Primitive name=LowerTooth6 shape=Cylinder radius=0.3 height=1.4 position=12,-19,0 rotationaxis=1,0,0 rotation=-90 segments=4 materialslot=1
+add Primitive name=LowerTooth7 shape=Cylinder radius=0.3 height=1.4 position=18,-19,0 rotationaxis=1,0,0 rotation=-90 segments=4 materialslot=1
+material 1 color=#e9e0c8 rough=0.7 metal=0
+material 2 color=#ffdf6b rough=0.4 metal=0
+save angler_skull_v5.effigy
+render angler_skull_v5.png shade=material views=4 size=1024

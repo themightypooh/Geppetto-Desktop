@@ -1,0 +1,151 @@
+echo "Penny: true-scale US Lincoln cent, 19.05mm diameter, 1.52mm thick, plain edge"
+echo "Materials: bright copper and darker aged copper"
+material 0 color=#b87333 rough=0.35 metal=0.9
+material 1 color=#8a4b1f rough=0.55 metal=0.8
+echo "Coin disc: 19.05 diameter, 1.52 thick, face in XY, thickness in Z"
+add Primitive name=CoinDisc shape=Cylinder radius=9.525 height=1.52 position=0,0,0 segments=64 materialslot=0
+echo "Plain edge band, slightly darker aged copper"
+add Primitive name=EdgeBand shape=Cylinder radius=9.53 height=1.54 position=0,0,0 segments=64 materialslot=1
+echo "Raised rim, front"
+add Primitive name=RimF00 shape=Box width=1.7 depth=0.18 height=0.95 position=9.000,0.000,0.85 rotationaxis=0,0,1 rotation=90.00 materialslot=0
+add Primitive name=RimF01 shape=Box width=1.7 depth=0.18 height=0.95 position=8.827,1.756,0.85 rotationaxis=0,0,1 rotation=101.25 materialslot=0
+add Primitive name=RimF02 shape=Box width=1.7 depth=0.18 height=0.95 position=8.315,3.444,0.85 rotationaxis=0,0,1 rotation=112.50 materialslot=0
+add Primitive name=RimF03 shape=Box width=1.7 depth=0.18 height=0.95 position=7.483,5.000,0.85 rotationaxis=0,0,1 rotation=123.75 materialslot=0
+add Primitive name=RimF04 shape=Box width=1.7 depth=0.18 height=0.95 position=6.364,6.364,0.85 rotationaxis=0,0,1 rotation=135.00 materialslot=0
+add Primitive name=RimF05 shape=Box width=1.7 depth=0.18 height=0.95 position=5.000,7.483,0.85 rotationaxis=0,0,1 rotation=146.25 materialslot=0
+add Primitive name=RimF06 shape=Box width=1.7 depth=0.18 height=0.95 position=3.444,8.315,0.85 rotationaxis=0,0,1 rotation=157.50 materialslot=0
+add Primitive name=RimF07 shape=Box width=1.7 depth=0.18 height=0.95 position=1.756,8.827,0.85 rotationaxis=0,0,1 rotation=168.75 materialslot=0
+add Primitive name=RimF08 shape=Box width=1.7 depth=0.18 height=0.95 position=0.000,9.000,0.85 rotationaxis=0,0,1 rotation=180.00 materialslot=0
+add Primitive name=RimF09 shape=Box width=1.7 depth=0.18 height=0.95 position=-1.756,8.827,0.85 rotationaxis=0,0,1 rotation=191.25 materialslot=0
+add Primitive name=RimF10 shape=Box width=1.7 depth=0.18 height=0.95 position=-3.444,8.315,0.85 rotationaxis=0,0,1 rotation=202.50 materialslot=0
+add Primitive name=RimF11 shape=Box width=1.7 depth=0.18 height=0.95 position=-5.000,7.483,0.85 rotationaxis=0,0,1 rotation=213.75 materialslot=0
+add Primitive name=RimF12 shape=Box width=1.7 depth=0.18 height=0.95 position=-6.364,6.364,0.85 rotationaxis=0,0,1 rotation=225.00 materialslot=0
+add Primitive name=RimF13 shape=Box width=1.7 depth=0.18 height=0.95 position=-7.483,5.000,0.85 rotationaxis=0,0,1 rotation=236.25 materialslot=0
+add Primitive name=RimF14 shape=Box width=1.7 depth=0.18 height=0.95 position=-8.315,3.444,0.85 rotationaxis=0,0,1 rotation=247.50 materialslot=0
+add Primitive name=RimF15 shape=Box width=1.7 depth=0.18 height=0.95 position=-8.827,1.756,0.85 rotationaxis=0,0,1 rotation=258.75 materialslot=0
+add Primitive name=RimF16 shape=Box width=1.7 depth=0.18 height=0.95 position=-9.000,0.000,0.85 rotationaxis=0,0,1 rotation=270.00 materialslot=0
+add Primitive name=RimF17 shape=Box width=1.7 depth=0.18 height=0.95 position=-8.827,-1.756,0.85 rotationaxis=0,0,1 rotation=281.25 materialslot=0
+add Primitive name=RimF18 shape=Box width=1.7 depth=0.18 height=0.95 position=-8.315,-3.444,0.85 rotationaxis=0,0,1 rotation=292.50 materialslot=0
+add Primitive name=RimF19 shape=Box width=1.7 depth=0.18 height=0.95 position=-7.483,-5.000,0.85 rotationaxis=0,0,1 rotation=303.75 materialslot=0
+add Primitive name=RimF20 shape=Box width=1.7 depth=0.18 height=0.95 position=-6.364,-6.364,0.85 rotationaxis=0,0,1 rotation=315.00 materialslot=0
+add Primitive name=RimF21 shape=Box width=1.7 depth=0.18 height=0.95 position=-5.000,-7.483,0.85 rotationaxis=0,0,1 rotation=326.25 materialslot=0
+add Primitive name=RimF22 shape=Box width=1.7 depth=0.18 height=0.95 position=-3.444,-8.315,0.85 rotationaxis=0,0,1 rotation=337.50 materialslot=0
+add Primitive name=RimF23 shape=Box width=1.7 depth=0.18 height=0.95 position=-1.756,-8.827,0.85 rotationaxis=0,0,1 rotation=348.75 materialslot=0
+add Primitive name=RimF24 shape=Box width=1.7 depth=0.18 height=0.95 position=-0.000,-9.000,0.85 rotationaxis=0,0,1 rotation=0.00 materialslot=0
+add Primitive name=RimF25 shape=Box width=1.7 depth=0.18 height=0.95 position=1.756,-8.827,0.85 rotationaxis=0,0,1 rotation=11.25 materialslot=0
+add Primitive name=RimF26 shape=Box width=1.7 depth=0.18 height=0.95 position=3.444,-8.315,0.85 rotationaxis=0,0,1 rotation=22.50 materialslot=0
+add Primitive name=RimF27 shape=Box width=1.7 depth=0.18 height=0.95 position=5.000,-7.483,0.85 rotationaxis=0,0,1 rotation=33.75 materialslot=0
+add Primitive name=RimF28 shape=Box width=1.7 depth=0.18 height=0.95 position=6.364,-6.364,0.85 rotationaxis=0,0,1 rotation=45.00 materialslot=0
+add Primitive name=RimF29 shape=Box width=1.7 depth=0.18 height=0.95 position=7.483,-5.000,0.85 rotationaxis=0,0,1 rotation=56.25 materialslot=0
+add Primitive name=RimF30 shape=Box width=1.7 depth=0.18 height=0.95 position=8.315,-3.444,0.85 rotationaxis=0,0,1 rotation=67.50 materialslot=0
+add Primitive name=RimF31 shape=Box width=1.7 depth=0.18 height=0.95 position=8.827,-1.756,0.85 rotationaxis=0,0,1 rotation=78.75 materialslot=0
+echo "Raised rim, back"
+add Primitive name=RimB00 shape=Box width=1.7 depth=0.18 height=0.95 position=9.000,0.000,-0.85 rotationaxis=0,0,1 rotation=90.00 materialslot=0
+add Primitive name=RimB01 shape=Box width=1.7 depth=0.18 height=0.95 position=8.827,1.756,-0.85 rotationaxis=0,0,1 rotation=101.25 materialslot=0
+add Primitive name=RimB02 shape=Box width=1.7 depth=0.18 height=0.95 position=8.315,3.444,-0.85 rotationaxis=0,0,1 rotation=112.50 materialslot=0
+add Primitive name=RimB03 shape=Box width=1.7 depth=0.18 height=0.95 position=7.483,5.000,-0.85 rotationaxis=0,0,1 rotation=123.75 materialslot=0
+add Primitive name=RimB04 shape=Box width=1.7 depth=0.18 height=0.95 position=6.364,6.364,-0.85 rotationaxis=0,0,1 rotation=135.00 materialslot=0
+add Primitive name=RimB05 shape=Box width=1.7 depth=0.18 height=0.95 position=5.000,7.483,-0.85 rotationaxis=0,0,1 rotation=146.25 materialslot=0
+add Primitive name=RimB06 shape=Box width=1.7 depth=0.18 height=0.95 position=3.444,8.315,-0.85 rotationaxis=0,0,1 rotation=157.50 materialslot=0
+add Primitive name=RimB07 shape=Box width=1.7 depth=0.18 height=0.95 position=1.756,8.827,-0.85 rotationaxis=0,0,1 rotation=168.75 materialslot=0
+add Primitive name=RimB08 shape=Box width=1.7 depth=0.18 height=0.95 position=0.000,9.000,-0.85 rotationaxis=0,0,1 rotation=180.00 materialslot=0
+add Primitive name=RimB09 shape=Box width=1.7 depth=0.18 height=0.95 position=-1.756,8.827,-0.85 rotationaxis=0,0,1 rotation=191.25 materialslot=0
+add Primitive name=RimB10 shape=Box width=1.7 depth=0.18 height=0.95 position=-3.444,8.315,-0.85 rotationaxis=0,0,1 rotation=202.50 materialslot=0
+add Primitive name=RimB11 shape=Box width=1.7 depth=0.18 height=0.95 position=-5.000,7.483,-0.85 rotationaxis=0,0,1 rotation=213.75 materialslot=0
+add Primitive name=RimB12 shape=Box width=1.7 depth=0.18 height=0.95 position=-6.364,6.364,-0.85 rotationaxis=0,0,1 rotation=225.00 materialslot=0
+add Primitive name=RimB13 shape=Box width=1.7 depth=0.18 height=0.95 position=-7.483,5.000,-0.85 rotationaxis=0,0,1 rotation=236.25 materialslot=0
+add Primitive name=RimB14 shape=Box width=1.7 depth=0.18 height=0.95 position=-8.315,3.444,-0.85 rotationaxis=0,0,1 rotation=247.50 materialslot=0
+add Primitive name=RimB15 shape=Box width=1.7 depth=0.18 height=0.95 position=-8.827,1.756,-0.85 rotationaxis=0,0,1 rotation=258.75 materialslot=0
+add Primitive name=RimB16 shape=Box width=1.7 depth=0.18 height=0.95 position=-9.000,0.000,-0.85 rotationaxis=0,0,1 rotation=270.00 materialslot=0
+add Primitive name=RimB17 shape=Box width=1.7 depth=0.18 height=0.95 position=-8.827,-1.756,-0.85 rotationaxis=0,0,1 rotation=281.25 materialslot=0
+add Primitive name=RimB18 shape=Box width=1.7 depth=0.18 height=0.95 position=-8.315,-3.444,-0.85 rotationaxis=0,0,1 rotation=292.50 materialslot=0
+add Primitive name=RimB19 shape=Box width=1.7 depth=0.18 height=0.95 position=-7.483,-5.000,-0.85 rotationaxis=0,0,1 rotation=303.75 materialslot=0
+add Primitive name=RimB20 shape=Box width=1.7 depth=0.18 height=0.95 position=-6.364,-6.364,-0.85 rotationaxis=0,0,1 rotation=315.00 materialslot=0
+add Primitive name=RimB21 shape=Box width=1.7 depth=0.18 height=0.95 position=-5.000,-7.483,-0.85 rotationaxis=0,0,1 rotation=326.25 materialslot=0
+add Primitive name=RimB22 shape=Box width=1.7 depth=0.18 height=0.95 position=-3.444,-8.315,-0.85 rotationaxis=0,0,1 rotation=337.50 materialslot=0
+add Primitive name=RimB23 shape=Box width=1.7 depth=0.18 height=0.95 position=-1.756,-8.827,-0.85 rotationaxis=0,0,1 rotation=348.75 materialslot=0
+add Primitive name=RimB24 shape=Box width=1.7 depth=0.18 height=0.95 position=-0.000,-9.000,-0.85 rotationaxis=0,0,1 rotation=0.00 materialslot=0
+add Primitive name=RimB25 shape=Box width=1.7 depth=0.18 height=0.95 position=1.756,-8.827,-0.85 rotationaxis=0,0,1 rotation=11.25 materialslot=0
+add Primitive name=RimB26 shape=Box width=1.7 depth=0.18 height=0.95 position=3.444,-8.315,-0.85 rotationaxis=0,0,1 rotation=22.50 materialslot=0
+add Primitive name=RimB27 shape=Box width=1.7 depth=0.18 height=0.95 position=5.000,-7.483,-0.85 rotationaxis=0,0,1 rotation=33.75 materialslot=0
+add Primitive name=RimB28 shape=Box width=1.7 depth=0.18 height=0.95 position=6.364,-6.364,-0.85 rotationaxis=0,0,1 rotation=45.00 materialslot=0
+add Primitive name=RimB29 shape=Box width=1.7 depth=0.18 height=0.95 position=7.483,-5.000,-0.85 rotationaxis=0,0,1 rotation=56.25 materialslot=0
+add Primitive name=RimB30 shape=Box width=1.7 depth=0.18 height=0.95 position=8.315,-3.444,-0.85 rotationaxis=0,0,1 rotation=67.50 materialslot=0
+add Primitive name=RimB31 shape=Box width=1.7 depth=0.18 height=0.95 position=8.827,-1.756,-0.85 rotationaxis=0,0,1 rotation=78.75 materialslot=0
+echo "Obverse: Lincoln head, right-facing profile, scaled-sphere relief"
+add Primitive name=LincolnHead shape=Sphere radius=3.2 position=-1.2,2.0,0.38 scale=1,1.25,0.18 segments=24 materialslot=0
+add Primitive name=LincolnHair shape=Sphere radius=2.6 position=-2.2,3.4,0.55 scale=1,1.1,0.15 segments=20 materialslot=1
+add Primitive name=LincolnBeard shape=Sphere radius=2.4 position=0.2,-0.6,0.55 scale=0.9,1.0,0.15 segments=20 materialslot=1
+add Primitive name=LincolnEar shape=Sphere radius=0.7 position=-1.0,2.2,0.74 scale=0.8,1.1,0.3 segments=12 materialslot=0
+add Primitive name=LincolnEye shape=Sphere radius=0.45 position=0.8,2.8,0.85 scale=1,0.6,0.3 segments=12 materialslot=1
+add Primitive name=LincolnNose shape=Box width=0.9 depth=0.3 height=1.6 position=1.9,1.7,0.85 materialslot=0
+add Primitive name=LincolnNoseTip shape=Sphere radius=0.5 position=2.3,1.1,0.8 scale=1,0.8,0.4 segments=12 materialslot=0
+add Primitive name=LincolnBrow shape=Box width=1.2 depth=0.25 height=0.4 position=0.9,3.6,0.85 materialslot=0
+add Primitive name=LincolnNeck shape=Box width=2.2 depth=0.3 height=2.4 position=-0.6,-2.6,0.85 materialslot=0
+add Primitive name=LincolnShoulder shape=Sphere radius=3.5 position=-0.5,-5.0,0.45 scale=1.4,0.7,0.15 segments=20 materialslot=0
+add Primitive name=LincolnBowL shape=Box width=1.4 depth=0.25 height=0.8 position=-1.6,-3.4,0.88 rotationaxis=0,0,1 rotation=45 materialslot=1
+add Primitive name=LincolnBowR shape=Box width=1.4 depth=0.25 height=0.8 position=0.6,-3.4,0.88 rotationaxis=0,0,1 rotation=-45 materialslot=1
+add Primitive name=LincolnCollar shape=Box width=3.2 depth=0.25 height=0.6 position=-0.5,-2.9,0.88 materialslot=0
+echo "Obverse lettering: motto arc above, LIBERTY left, date right, as raised bars"
+add Primitive name=Motto00 shape=Box width=0.9 depth=0.2 height=0.45 position=6.389,4.474,0.88 rotationaxis=0,0,1 rotation=125.00 materialslot=0
+add Primitive name=Motto01 shape=Box width=0.9 depth=0.2 height=0.45 position=5.515,5.515,0.88 rotationaxis=0,0,1 rotation=135.00 materialslot=0
+add Primitive name=Motto02 shape=Box width=0.9 depth=0.2 height=0.45 position=4.474,6.389,0.88 rotationaxis=0,0,1 rotation=145.00 materialslot=0
+add Primitive name=Motto03 shape=Box width=0.9 depth=0.2 height=0.45 position=3.296,7.069,0.88 rotationaxis=0,0,1 rotation=155.00 materialslot=0
+add Primitive name=Motto04 shape=Box width=0.9 depth=0.2 height=0.45 position=2.019,7.534,0.88 rotationaxis=0,0,1 rotation=165.00 materialslot=0
+add Primitive name=Motto05 shape=Box width=0.9 depth=0.2 height=0.45 position=0.680,7.770,0.88 rotationaxis=0,0,1 rotation=175.00 materialslot=0
+add Primitive name=Motto06 shape=Box width=0.9 depth=0.2 height=0.45 position=-0.680,7.770,0.88 rotationaxis=0,0,1 rotation=185.00 materialslot=0
+add Primitive name=Motto07 shape=Box width=0.9 depth=0.2 height=0.45 position=-2.019,7.534,0.88 rotationaxis=0,0,1 rotation=195.00 materialslot=0
+add Primitive name=Motto08 shape=Box width=0.9 depth=0.2 height=0.45 position=-3.296,7.069,0.88 rotationaxis=0,0,1 rotation=205.00 materialslot=0
+add Primitive name=Motto09 shape=Box width=0.9 depth=0.2 height=0.45 position=-4.474,6.389,0.88 rotationaxis=0,0,1 rotation=215.00 materialslot=0
+add Primitive name=Motto10 shape=Box width=0.9 depth=0.2 height=0.45 position=-5.515,5.515,0.88 rotationaxis=0,0,1 rotation=225.00 materialslot=0
+add Primitive name=Motto11 shape=Box width=0.9 depth=0.2 height=0.45 position=-6.389,4.474,0.88 rotationaxis=0,0,1 rotation=235.00 materialslot=0
+add Primitive name=Liberty0 shape=Box width=0.45 depth=0.2 height=0.9 position=-7.6,-2.4,0.88 materialslot=0
+add Primitive name=Liberty1 shape=Box width=0.45 depth=0.2 height=0.9 position=-7.6,-1.6,0.88 materialslot=0
+add Primitive name=Liberty2 shape=Box width=0.45 depth=0.2 height=0.9 position=-7.6,-0.8,0.88 materialslot=0
+add Primitive name=Liberty3 shape=Box width=0.45 depth=0.2 height=0.9 position=-7.6,0.0,0.88 materialslot=0
+add Primitive name=Liberty4 shape=Box width=0.45 depth=0.2 height=0.9 position=-7.6,0.8,0.88 materialslot=0
+add Primitive name=Liberty5 shape=Box width=0.45 depth=0.2 height=0.9 position=-7.6,1.6,0.88 materialslot=0
+add Primitive name=Date0 shape=Box width=0.45 depth=0.2 height=0.9 position=6.9,-2.0,0.88 materialslot=0
+add Primitive name=Date1 shape=Box width=0.45 depth=0.2 height=0.9 position=6.9,-1.2,0.88 materialslot=0
+add Primitive name=Date2 shape=Box width=0.45 depth=0.2 height=0.9 position=6.9,-0.4,0.88 materialslot=0
+add Primitive name=Date3 shape=Box width=0.45 depth=0.2 height=0.9 position=6.9,0.4,0.88 materialslot=0
+echo "Reverse: Lincoln Memorial, columns, roof, steps"
+add Primitive name=MemorialSteps shape=Box width=8.0 depth=0.3 height=0.6 position=0,-3.8,-0.9 materialslot=0
+add Primitive name=MemorialBase shape=Box width=7.0 depth=0.3 height=1.2 position=0,-2.9,-0.9 materialslot=0
+add Primitive name=MemorialCol0 shape=Cylinder radius=0.35 height=3.5 position=-3.0,-0.5,-0.9 rotationaxis=1,0,0 rotation=90 segments=10 materialslot=0
+add Primitive name=MemorialCol1 shape=Cylinder radius=0.35 height=3.5 position=-1.8,-0.5,-0.9 rotationaxis=1,0,0 rotation=90 segments=10 materialslot=0
+add Primitive name=MemorialCol2 shape=Cylinder radius=0.35 height=3.5 position=-0.6,-0.5,-0.9 rotationaxis=1,0,0 rotation=90 segments=10 materialslot=0
+add Primitive name=MemorialCol3 shape=Cylinder radius=0.35 height=3.5 position=0.6,-0.5,-0.9 rotationaxis=1,0,0 rotation=90 segments=10 materialslot=0
+add Primitive name=MemorialCol4 shape=Cylinder radius=0.35 height=3.5 position=1.8,-0.5,-0.9 rotationaxis=1,0,0 rotation=90 segments=10 materialslot=0
+add Primitive name=MemorialCol5 shape=Cylinder radius=0.35 height=3.5 position=3.0,-0.5,-0.9 rotationaxis=1,0,0 rotation=90 segments=10 materialslot=0
+add Primitive name=MemorialRoof shape=Box width=7.5 depth=0.3 height=0.8 position=0,1.9,-0.9 materialslot=0
+add Primitive name=MemorialPediment shape=Box width=5.0 depth=0.3 height=0.7 position=0,2.7,-0.9 materialslot=1
+add Primitive name=MemorialStatue shape=Box width=0.9 depth=0.25 height=1.8 position=0,-0.8,-0.95 materialslot=1
+echo "Reverse lettering: country arc above, denomination arc below, as raised bars"
+add Primitive name=Country00 shape=Box width=0.9 depth=0.2 height=0.45 position=6.755,3.900,-0.88 rotationaxis=0,0,1 rotation=120.00 materialslot=0
+add Primitive name=Country01 shape=Box width=0.9 depth=0.2 height=0.45 position=5.705,5.320,-0.88 rotationaxis=0,0,1 rotation=133.00 materialslot=0
+add Primitive name=Country02 shape=Box width=0.9 depth=0.2 height=0.45 position=4.362,6.466,-0.88 rotationaxis=0,0,1 rotation=146.00 materialslot=0
+add Primitive name=Country03 shape=Box width=0.9 depth=0.2 height=0.45 position=2.795,7.282,-0.88 rotationaxis=0,0,1 rotation=159.00 materialslot=0
+add Primitive name=Country04 shape=Box width=0.9 depth=0.2 height=0.45 position=1.086,7.724,-0.88 rotationaxis=0,0,1 rotation=172.00 materialslot=0
+add Primitive name=Country05 shape=Box width=0.9 depth=0.2 height=0.45 position=-0.680,7.770,-0.88 rotationaxis=0,0,1 rotation=185.00 materialslot=0
+add Primitive name=Country06 shape=Box width=0.9 depth=0.2 height=0.45 position=-2.410,7.418,-0.88 rotationaxis=0,0,1 rotation=198.00 materialslot=0
+add Primitive name=Country07 shape=Box width=0.9 depth=0.2 height=0.45 position=-4.017,6.686,-0.88 rotationaxis=0,0,1 rotation=211.00 materialslot=0
+add Primitive name=Country08 shape=Box width=0.9 depth=0.2 height=0.45 position=-5.418,5.611,-0.88 rotationaxis=0,0,1 rotation=224.00 materialslot=0
+add Primitive name=Country09 shape=Box width=0.9 depth=0.2 height=0.45 position=-6.542,4.248,-0.88 rotationaxis=0,0,1 rotation=237.00 materialslot=0
+add Primitive name=Denom00 shape=Box width=0.9 depth=0.2 height=0.45 position=-6.755,-3.900,-0.88 rotationaxis=0,0,1 rotation=300.00 materialslot=0
+add Primitive name=Denom01 shape=Box width=0.9 depth=0.2 height=0.45 position=-5.705,-5.320,-0.88 rotationaxis=0,0,1 rotation=313.00 materialslot=0
+add Primitive name=Denom02 shape=Box width=0.9 depth=0.2 height=0.45 position=-4.362,-6.466,-0.88 rotationaxis=0,0,1 rotation=326.00 materialslot=0
+add Primitive name=Denom03 shape=Box width=0.9 depth=0.2 height=0.45 position=-2.795,-7.282,-0.88 rotationaxis=0,0,1 rotation=339.00 materialslot=0
+add Primitive name=Denom04 shape=Box width=0.9 depth=0.2 height=0.45 position=-1.086,-7.724,-0.88 rotationaxis=0,0,1 rotation=352.00 materialslot=0
+add Primitive name=Denom05 shape=Box width=0.9 depth=0.2 height=0.45 position=0.680,-7.770,-0.88 rotationaxis=0,0,1 rotation=5.00 materialslot=0
+add Primitive name=Denom06 shape=Box width=0.9 depth=0.2 height=0.45 position=2.410,-7.418,-0.88 rotationaxis=0,0,1 rotation=18.00 materialslot=0
+add Primitive name=Denom07 shape=Box width=0.9 depth=0.2 height=0.45 position=4.017,-6.686,-0.88 rotationaxis=0,0,1 rotation=31.00 materialslot=0
+add Primitive name=Denom08 shape=Box width=0.9 depth=0.2 height=0.45 position=5.418,-5.611,-0.88 rotationaxis=0,0,1 rotation=44.00 materialslot=0
+add Primitive name=Denom09 shape=Box width=0.9 depth=0.2 height=0.45 position=6.542,-4.248,-0.88 rotationaxis=0,0,1 rotation=57.00 materialslot=0
+echo "Checks: parts fit the disc, left and right match"
+clearance
+symmetry
+echo "Save penny"
+save penny.effigy
+echo "Render penny, front and back"
+render penny.png shade=material views=2 size=512

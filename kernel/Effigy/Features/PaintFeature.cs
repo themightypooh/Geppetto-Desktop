@@ -154,6 +154,18 @@ public sealed class PaintFeature : Feature
 	/// <summary>Seed for the spot grid jitter, so the same recipe always lands the same spots.</summary>
 	public readonly IntParam SpotsSeed = new( "Spots Seed", 1, 0 ) { Slider = false };
 
+	/// <summary>World-space tri-planar pattern modulating this layer's strokes (P2).
+	/// None is the plain path, exactly as before; Fbm/Worley/Ridged are the 3D
+	/// noise patterns from TriPlanar, sampled on world position so they do not
+	/// restart at a UV island boundary. Order matches TriPlanarPattern.</summary>
+	public readonly ChoiceParam TriPattern = new( "Tri Pattern", new[] { "None", "Stripes", "Checker", "Spots", "Fbm", "Worley", "Ridged" } );
+
+	/// <summary>World units per pattern repeat for the tri-planar pattern.</summary>
+	public readonly FloatParam TriScale = new( "Tri Scale", 1f, 0.01f );
+
+	/// <summary>Blend sharpness for the tri-planar pattern (see TriPlanar.Weights).</summary>
+	public readonly FloatParam TriSharpness = new( "Tri Sharpness", 4f, 0.5f, 16f );
+
 	/// <summary>
 	/// Every layer setting, for the script and the feature dialog. Blend is carried for old documents
 	/// and deliberately absent: showing a combo that changes nothing is a bug report waiting to be filed.
@@ -166,6 +178,7 @@ public sealed class PaintFeature : Feature
 		Recipe, GradientAxis, GradientStart, GradientEnd, GradientFalloff,
 		BandsAxis, BandsSpacing, BandsWidth, BandsTaperAxis, BandsWarp, BandsRangeMin, BandsRangeMax,
 		SpotsRadius, SpotsSpacing, SpotsJitter, SpotsRingWidth, SpotsSeed,
+		TriPattern, TriScale, TriSharpness,
 	};
 
 	public PaintBlendMode BlendMode => (PaintBlendMode)Math.Clamp( Mode.Index, 0, Enum.GetValues<PaintBlendMode>().Length - 1 );
@@ -210,6 +223,7 @@ public sealed class PaintFeature : Feature
 	long _atlasId;
 	int _canvasRevision = -1;
 	int _canvasResolution = -1;
+	string _triKey;
 
 	// The layer with its fill under the strokes, keyed on the stroke maps and the fill settings.
 	PaintLayerMaps _layerMaps;
@@ -380,10 +394,14 @@ public sealed class PaintFeature : Feature
 			return;
 		}
 
+		var triKey = $"{TriPattern.Index}|{TriScale.Clamped}|{TriSharpness.Clamped}";
 		if ( _strokeMaps is null || _topologyId != topology || _atlasId != atlas
-			|| _canvasRevision != Revision || _canvasResolution != resolution )
+			|| _canvasRevision != Revision || _canvasResolution != resolution || _triKey != triKey )
 		{
-			_strokeMaps = PaintLayers.Replay( mesh, Strokes, resolution );
+			_strokeMaps = TriPattern.Index == 0
+				? PaintLayers.Replay( mesh, Strokes, resolution )
+				: PaintLayers.ReplayTriPlanar( mesh, Strokes, resolution, (TriPlanarPattern)TriPattern.Index, TriScale.Clamped, TriSharpness.Clamped );
+			_triKey = triKey;
 			_topologyId = topology;
 			_atlasId = atlas;
 			_canvasRevision = Revision;

@@ -1,0 +1,23 @@
+{
+  "cancel_reason": "user answered no",
+  "created_at": 1793005033.4065185,
+  "doc": "-",
+  "id": "gate-1793005032-20ad6c44",
+  "out": "/home/poo/workspace/her-separate",
+  "pane": "2",
+  "preflight": {
+    "errors": [],
+    "first_geom_line": 9,
+    "first_shape": "Profile",
+    "lines": 65,
+    "materials_before_first": 2,
+    "ok": true,
+    "rotated_boxes": 0
+  },
+  "script": "/home/poo/workspace/her-separate/her-separate.txt",
+  "script_hash": "ed41a2c857d229557b531aae0b27cbc9d139d4bb24e4f797118a4a2739cc593a",
+  "session": "e1401c8e-294c-4c67-8e5a-3e28fa239e75",
+  "status": "cancelled",
+  "subject": "blonde woman, separate shirt, pants, socks, undies and bra, arcade character method, full body",
+  "worker": "subagent-her-separate-arcade"
+}

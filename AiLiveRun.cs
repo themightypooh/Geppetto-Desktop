@@ -57,6 +57,14 @@ public sealed class AiLiveRun
         }
     }
 
+    public void Progress(int calls, int maxCalls, int mutations, string? summary = null)
+    {
+        lock (gate)
+        {
+            if (!cancelling) Append("progress", null, summary, current);
+        }
+    }
+
     /// <param name="fileLabel">Lane D user edits: a fixed label (e.g. "user") instead of a random
     /// suffix, so a user-edit revision reads <c>00000014-user.effigy</c>. The revision number
     /// still makes it unique; the preview loader matches the <c>DDDDDDDD-*.effigy</c> prefix.</param>

@@ -30,5 +30,7 @@ buffers (BufferSubData) instead of new VAO/VBO per revision.
   commits. Now pinned in kernel/Effigy.Kernel.csproj; do not remove.
 - ViewportMesh.PieceCache: per-body extract cache keyed by geometry hash (unrigged, no shape keys).
 - Upload(gl, previous): reuse VAO/VBO/EBO + textures, grow only when needed, partial body writes.
-- AiLivePreview (working tree, with the every-revision queue): MaxBacklog = 3, older waiting steps skipped.
+- AiLivePreview: every committed revision stays queued in order (2026-10-26 correction:
+  removed the three-step backlog truncation that silently skipped changes). The queue
+  holds paths/metadata, not meshes; only one loaded mesh waits for the renderer.
 - Barracuda: load ~1.5 s -> ~0.23 s; frame p95 ~60-75 ms -> ~21 ms; output pixel-identical.

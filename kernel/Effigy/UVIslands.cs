@@ -160,11 +160,271 @@ public static class UVIslands
 	}
 
 	/// <summary>
+	/// SLIM-style stretch relax for one island: iterative, pinned-boundary, edge-length
+	/// preserving. Boundary vertices (shared with another island, or on the mesh boundary)
+	/// do not move, so islands keep their shape and their seams; interior vertices move
+	/// toward the position that best preserves their 3D edge lengths at the island's mean
+	/// UV/3D scale. Iterates until the mean stretch improves by less than 1% between
+	/// iterations, or <paramref name="iterations"/> runs out. If the best iteration is
+	/// worse than the starting layout, the original UVs are restored and
+	/// <c>Restored</c> is true — relax never silently makes a layout worse.
+	/// Returns before/after mean and max distortion over <paramref name="faces"/>.
+	/// </summary>
+	public static (float BeforeMean, float BeforeMax, float AfterMean, float AfterMax, bool Restored) Relax(
+		PolyMesh mesh, IReadOnlyCollection<int> faces, int iterations = 10 )
+	{
+		var faceList = new List<int>( faces );
+		var (beforeMean, beforeMax) = Distortion( mesh, faceList );
+		if ( faceList.Count == 0 || iterations <= 0 )
+			return (beforeMean, beforeMax, beforeMean, beforeMax, false);
+
+		var inIsland = new HashSet<int>( faceList );
+		// Consistent per-vertex UVs within the island; a vertex whose island corners
+		// disagree is pinned and never rewritten, so a seam vertex cannot be smeared.
+		var uv = new Dictionary<int, Vec2>();
+		var consistent = new HashSet<int>();
+		foreach ( var f in faceList )
+		{
+			var face = mesh.Faces[f];
+			for ( var i = 0; i < face.Count; i++ )
+			{
+				var v = face.Indices[i];
+				if ( !uv.TryGetValue( v, out var prev ) ) { uv[v] = face.UVs[i]; consistent.Add( v ); }
+				else if ( MathF.Abs( prev.x - face.UVs[i].x ) > 1e-5f || MathF.Abs( prev.y - face.UVs[i].y ) > 1e-5f )
+					consistent.Remove( v );
+			}
+		}
+		var original = new Dictionary<int, Vec2>( uv );
+
+		// Neighbours with 3D edge lengths, island faces only.
+		var neighbours = new Dictionary<int, List<(int Other, float Len3)>>();
+		void Link( int a, int b )
+		{
+			var len = (mesh.Positions[a] - mesh.Positions[b]).Length;
+			if ( len < 1e-9f ) return;
+			if ( !neighbours.TryGetValue( a, out var la ) ) neighbours[a] = la = new List<(int, float)>();
+			if ( !neighbours.TryGetValue( b, out var lb ) ) neighbours[b] = lb = new List<(int, float)>();
+			if ( !la.Exists( e => e.Other == b ) ) la.Add( (b, len) );
+			if ( !lb.Exists( e => e.Other == a ) ) lb.Add( (a, len) );
+		}
+		foreach ( var f in faceList )
+		{
+			var face = mesh.Faces[f];
+			for ( var i = 0; i < face.Count; i++ )
+				Link( face.Indices[i], face.Indices[(i + 1) % face.Count] );
+		}
+
+		// Pinned: shared with a non-island face, or on a mesh-boundary edge.
+		var pinned = new HashSet<int>();
+		var edgeFaces = mesh.BuildEdgeFaces();
+		foreach ( var (key, owners) in edgeFaces )
+		{
+			var inCount = 0;
+			foreach ( var o in owners ) if ( inIsland.Contains( o ) ) inCount++;
+			if ( inCount > 0 && inCount < owners.Count ) { pinned.Add( key.A ); pinned.Add( key.B ); }
+			if ( owners.Count < 2 && inCount > 0 ) { pinned.Add( key.A ); pinned.Add( key.B ); }
+		}
+
+		// Mean UV length per 3D length, the scale the relax preserves.
+		var ratioSum = 0.0; var ratioCount = 0;
+		foreach ( var (v, list) in neighbours )
+		{
+			foreach ( var (o, len3) in list )
+			{
+				if ( v >= o ) continue;
+				var uvLen = (uv[v] - uv[o]).Length;
+				if ( uvLen > 1e-9f ) { ratioSum += uvLen / len3; ratioCount++; }
+			}
+		}
+		if ( ratioCount == 0 )
+			return (beforeMean, beforeMax, beforeMean, beforeMax, false);
+		var scale = (float)(ratioSum / ratioCount);
+
+		Dictionary<int, Vec2> best = null;
+		var bestMean = beforeMean; var bestMax = beforeMax;
+		var prevMean = beforeMean;
+		for ( var it = 0; it < iterations; it++ )
+		{
+			var next = new Dictionary<int, Vec2>( uv );
+			foreach ( var (v, list) in neighbours )
+			{
+				if ( pinned.Contains( v ) || !consistent.Contains( v ) || list.Count == 0 )
+					continue;
+				var sum = Vec2.Zero; var n = 0;
+				foreach ( var (o, len3) in list )
+				{
+					var dir = uv[v] - uv[o];
+					if ( dir.Length < 1e-9f ) continue;
+					sum += uv[o] + dir.Normal * (len3 * scale);
+					n++;
+				}
+				if ( n > 0 ) next[v] = sum / n;
+			}
+			uv = next;
+			WriteIslandUVs( mesh, faceList, uv, consistent );
+			var (m, mx) = Distortion( mesh, faceList );
+			if ( m < bestMean || (m == bestMean && mx < bestMax) )
+			{
+				bestMean = m; bestMax = mx;
+				best = new Dictionary<int, Vec2>( uv );
+			}
+			if ( prevMean > 0f && (prevMean - m) / prevMean < 0.01f && it > 0 )
+				break;
+			prevMean = m;
+		}
+
+		if ( best is null )
+		{
+			WriteIslandUVs( mesh, faceList, original, consistent );
+			return (beforeMean, beforeMax, beforeMean, beforeMax, true);
+		}
+		WriteIslandUVs( mesh, faceList, best, consistent );
+		return (beforeMean, beforeMax, bestMean, bestMax, false);
+	}
+
+	static void WriteIslandUVs( PolyMesh mesh, IReadOnlyCollection<int> faces, Dictionary<int, Vec2> uv, HashSet<int> consistent )
+	{
+		foreach ( var f in faces )
+		{
+			var face = mesh.Faces[f];
+			for ( var i = 0; i < face.Count; i++ )
+			{
+				var v = face.Indices[i];
+				if ( consistent.Contains( v ) && uv.TryGetValue( v, out var value ) )
+					face.UVs[i] = value;
+			}
+		}
+	}
+
+	/// <summary>
+	/// Turn an island so its longest straight boundary run lies along U. The run is found
+	/// in UV space: boundary edges chained while each next edge stays within 15 degrees
+	/// of the run's direction. Returns the degrees rotated (0 when the island has no
+	/// usable boundary run, e.g. a single face). This is what makes straps, panels and
+	/// trim read straight instead of landing diagonal after packing.
+	/// </summary>
+	public static float Straighten( PolyMesh mesh, IReadOnlyCollection<int> faces )
+	{
+		var faceList = new List<int>( faces );
+		if ( faceList.Count == 0 )
+			return 0f;
+		var inIsland = new HashSet<int>( faceList );
+		var edgeCount = new Dictionary<EdgeKey, int>();
+		var edgeUV = new Dictionary<EdgeKey, (Vec2 A, Vec2 B)>();
+		foreach ( var f in faceList )
+		{
+			var face = mesh.Faces[f];
+			for ( var i = 0; i < face.Count; i++ )
+			{
+				var a = face.Indices[i]; var b = face.Indices[(i + 1) % face.Count];
+				var key = new EdgeKey( Math.Min( a, b ), Math.Max( a, b ) );
+				edgeCount[key] = edgeCount.TryGetValue( key, out var c ) ? c + 1 : 1;
+				if ( !edgeUV.ContainsKey( key ) )
+					edgeUV[key] = (face.UVs[i], face.UVs[(i + 1) % face.Count]);
+			}
+		}
+		var boundary = new List<EdgeKey>();
+		foreach ( var (key, count) in edgeCount )
+			if ( count == 1 ) boundary.Add( key );
+		if ( boundary.Count == 0 )
+			return 0f;
+
+		// Greedy straight runs from every boundary edge; keep the longest by UV length.
+		var bestRun = new List<EdgeKey>(); var bestLen = 0f;
+		var atVertex = new Dictionary<int, List<EdgeKey>>();
+		foreach ( var e in boundary )
+		{
+			if ( !atVertex.TryGetValue( e.A, out var la ) ) atVertex[e.A] = la = new List<EdgeKey>();
+			if ( !atVertex.TryGetValue( e.B, out var lb ) ) atVertex[e.B] = lb = new List<EdgeKey>();
+			la.Add( e ); lb.Add( e );
+		}
+		foreach ( var start in boundary )
+		{
+			foreach ( var flip in new[] { false, true } )
+			{
+				var run = new List<EdgeKey> { start };
+				var used = new HashSet<EdgeKey> { start };
+				var current = flip ? start.A : start.B;
+				var (ua, ub) = edgeUV[start];
+				var dir = (flip ? ua - ub : ub - ua).Normal;
+				var len = (ub - ua).Length;
+				while ( true )
+				{
+					EdgeKey next = default; var nextDir = Vec2.Zero; var nextLen = 0f; var bestDot = 0.9659f; // cos 15 deg
+					if ( atVertex.TryGetValue( current, out var incident ) )
+					{
+						foreach ( var e in incident )
+						{
+							if ( used.Contains( e ) ) continue;
+							var (ea, eb) = edgeUV[e];
+							var other = e.A == current ? e.B : e.A;
+							_ = other;
+							var d = (e.A == current ? eb - ea : ea - eb).Normal;
+							var dot = Vec2.Dot( d, dir );
+							if ( dot > bestDot ) { bestDot = dot; next = e; nextDir = d; nextLen = (eb - ea).Length; }
+						}
+					}
+					if ( next.Equals( default( EdgeKey ) ) ) break;
+					run.Add( next ); used.Add( next ); len += nextLen; dir = nextDir;
+					current = next.A == current ? next.B : next.A;
+				}
+				if ( len > bestLen ) { bestLen = len; bestRun = run; }
+			}
+		}
+		if ( bestRun.Count == 0 || bestLen < 1e-9f )
+			return 0f;
+		// Direction of the run in UV space, from its first edge.
+		var (ra, rb) = edgeUV[bestRun[0]];
+		var runDir = rb - ra;
+		if ( runDir.Length < 1e-9f )
+			return 0f;
+		var angleDeg = -MathF.Atan2( runDir.y, runDir.x ) * 180f / MathF.PI;
+		if ( MathF.Abs( angleDeg ) < 0.01f )
+			return 0f;
+		Rotate( mesh, faceList, angleDeg );
+		return angleDeg;
+	}
+
+	/// <summary>
+	/// Scale the island containing the face nearest <paramref name="point"/> (3D) by
+	/// <paramref name="factor"/> about its own UV centre — the per-island density
+	/// priority: the hero island gets more texels than its neighbours. Returns the
+	/// island index, or -1 when the mesh has no faces. The caller must repack with
+	/// KeepScale afterwards, or the packer rescales everything to fill and the
+	/// priority is undone.
+	/// </summary>
+	public static int HeroIsland( PolyMesh mesh, Vec3 point, float factor )
+	{
+		var layout = Find( mesh );
+		if ( layout.Count == 0 || factor <= 0f )
+			return -1;
+		var bestFace = -1; var bestDist = float.MaxValue;
+		for ( var f = 0; f < mesh.FaceCount; f++ )
+		{
+			var face = mesh.Faces[f];
+			var c = Vec3.Zero;
+			foreach ( var vi in face.Indices ) c += mesh.Positions[vi];
+			c = c / Math.Max( 1, face.Indices.Length );
+			var d = (c - point).LengthSquared;
+			if ( d < bestDist ) { bestDist = d; bestFace = f; }
+		}
+		if ( bestFace < 0 )
+			return -1;
+		var island = layout.IslandOfFace[bestFace];
+		Scale( mesh, layout.Islands[island], new Vec2( factor, factor ) );
+		return island;
+	}
+
+	/// <summary>
 	/// Lay every island into the unit square, all at one scale — the largest that fits, found by
 	/// halving — with <paramref name="margin"/> between them (as a fraction of the square). Islands
 	/// are laid tallest first in rows, and a tall island is turned on its side if that packs
 	/// tighter. Returns the scale used, so a caller can say how much texture the layout gets.
+	///
+	/// LEGACY: prefer <see cref="UVPack.Pack"/> (pixel margins, arbitrary rotation) for new work.
+	/// This fraction-margin, quarter-turn packer stays for the mesh-edit step that still calls it.
 	/// </summary>
+	[System.Obsolete( "Use UVPack.Pack (pixel margins, arbitrary rotation) instead of this fraction-margin, quarter-turn packer." )]
 	public static float Pack( PolyMesh mesh, float margin = 0.01f, Layout layout = null )
 	{
 		layout ??= Find( mesh );

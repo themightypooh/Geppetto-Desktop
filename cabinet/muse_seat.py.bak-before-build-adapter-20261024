@@ -1,0 +1,91 @@
+#!/usr/bin/env python3
+"""Muse seat for Geppetto — NO API key, NO muse CLI, NO network.
+
+How it works (file bridge, modelled on Roundtable's zoobie_seat.py, because
+this Muse personal agent has no CLI/API that Geppetto can call directly, and
+the local `muse` CLI still returns a 402 billing error as of 2026-10-24):
+
+  Geppetto's cabinet/chat.py runs this script as a roundtable-cli seat,
+  prompt on stdin, via roundtable_catalog.command() which passes:
+    --provider muse --model muse-bridge [--act]
+
+  This script writes the prompt to cabinet/muse-seat/requests/<turn>.json
+  and polls for cabinet/muse-seat/responses/<turn>.json.
+  The Muse session (over Tailscale SSH, already connected to this machine)
+  reads the request, answers, edits files in the request's workspace when
+  asked, and writes the response file. This script then prints
+  Claude-style stream-json that cabinet/chat.py already understands:
+    {"type": "system", "session_id": ...}
+    {"type": "result", "result": "...", "session_id": ...}
+
+Timeout: 19 minutes, just inside Geppetto's long-turn window, so a late
+Muse answer fails cleanly instead of racing the app's kill.
+No secrets, no API keys, no subprocesses, no network calls in this script.
+The responder (Muse) is the only side that touches files, and only in the
+workspace recorded in the request — never outside it.
+"""
+import argparse
+import json
+import os
+import sys
+import time
+import uuid
+from pathlib import Path
+
+BASE = Path(__file__).resolve().parent / "muse-seat"
+REQ = BASE / "requests"
+RES = BASE / "responses"
+POLL_SECS = 5
+TIMEOUT_SECS = 19 * 60
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--provider", default="muse")
+    ap.add_argument("--model", default="muse-bridge")
+    ap.add_argument("--act", action="store_true",
+                    help="Build mode was requested; recorded for the responder, "
+                         "Geppetto itself gates Build mode by model capabilities.")
+    ap.add_argument("--session", default="")
+    a = ap.parse_args()
+    prompt = sys.stdin.read()
+    if not prompt.strip():
+        print("muse_seat: empty prompt on stdin", file=sys.stderr)
+        return 1
+    turn = uuid.uuid4().hex[:12]
+    session = a.session or ("muse-" + turn)
+    REQ.mkdir(parents=True, exist_ok=True)
+    RES.mkdir(parents=True, exist_ok=True)
+    req_file = REQ / f"{turn}.json"
+    res_file = RES / f"{turn}.json"
+    req_file.write_text(json.dumps({
+        "turn_id": turn, "session_id": session,
+        "prompt": prompt, "status": "pending",
+        "provider": a.provider, "model": a.model, "act": bool(a.act),
+        "cwd": os.getcwd(),
+    }, ensure_ascii=False), encoding="utf-8")
+    print(json.dumps({"type": "system", "session_id": session}), flush=True)
+    deadline = time.time() + TIMEOUT_SECS
+    while time.time() < deadline:
+        if res_file.exists():
+            try:
+                data = json.loads(res_file.read_text(encoding="utf-8"))
+                text = (data.get("result") or data.get("text") or "").strip()
+            except (OSError, ValueError) as e:
+                print(f"muse_seat: bad response file: {e}", file=sys.stderr)
+                return 1
+            if text:
+                print(json.dumps({"type": "result", "result": text,
+                                  "session_id": session}), flush=True)
+                return 0
+            print("muse_seat: empty response file", file=sys.stderr)
+            return 1
+        time.sleep(POLL_SECS)
+    print("muse_seat: timed out waiting for Muse (19 min, no response file). "
+          "Muse was not watching the queue, or the reply is still being written — "
+          "check cabinet/muse-seat/requests/ and try again.", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,4 @@
+add Inflate2D name=Base rings="0,0;10,0;10,10;0,10" thickness=0.8 profile=FlatBevel bevel=0.1 materialslot=1
+add Inflate2D name=Rim rings="2,2;8,2;8,8;2,8|3,3;7,3;7,7;3,7" thickness=0.6 profile=FlatBevel bevel=0.1 materialslot=1
+add Transform bodies=Rim translate=0,0,0.8
+save test_transform.effigy

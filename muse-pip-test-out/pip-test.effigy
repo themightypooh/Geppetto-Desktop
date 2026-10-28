@@ -1,0 +1,1397 @@
+effigy 2
+rollback 2147483647
+materiallook 0 color=#6b4a35 rough=0.7 metal=0
+materiallook 1 color=#c8962c rough=0.6 metal=0
+materiallook 6 color=#4a4f57 rough=0.4 metal=0.8
+materiallook 8 color=#262626 rough=0.8 metal=0
+materiallook 14 color=#b3a688 rough=0.85 metal=0
+materiallook 16 color=#8a8f96 rough=0.35 metal=0.9
+materiallook 24 color=#7d8288 rough=0.35 metal=0.9
+materiallook 25 color=#3a2a1c rough=0.7 metal=0
+materiallook 26 color=#7d8288 rough=0.35 metal=0.9
+materiallook 27 color=#1c1c1c rough=0.6 metal=0
+materiallook 28 color=#7d8288 rough=0.35 metal=0.9
+materiallook 29 color=#1c1c1c rough=0.6 metal=0
+materiallook 30 color=#4a3a26 rough=0.65 metal=0
+materiallook 31 color=#3b2e1f rough=0.7 metal=0
+refimage front 69.5 0 0 0 0.4 1 /home/poo/games/projects/deep_sentance/tools/out/suit/front.png
+rig
+	bone root_IK
+		parent -1
+		x -2.3841858E-07 -1 5.526343E-07
+		y 1 -1.6410372E-07 1.9404927E-14
+		z 7.128442E-14 5.526343E-07 1
+		origin 6.738625E-06 -0.19685048 1.4861797E-08
+		length 13.118273
+	endbone
+	bone aim_matrix_01
+		parent 0
+		x 1 3.3419926E-20 0
+		y 1.0723827E-20 1 -3.3881318E-21
+		z 0 0 1
+		origin 5.70866 1.75998E-06 11.811024
+		length 6.5591364
+	endbone
+	bone aim_matrix_02a
+		parent 0
+		x 1 -1.490117E-07 -2.8113448E-08
+		y 1.4901165E-07 1 1.3552527E-20
+		z 2.8113448E-08 -4.189242E-15 1
+		origin 5.70866 1.75998E-06 9.842519
+		length 3.937008
+	endbone
+	bone aim_matrix_02b
+		parent 2
+		x 1 7.491357E-20 5.684342E-14
+		y -2.5321515E-21 1 -1.0658144E-13
+		z -5.684342E-14 1.0658145E-13 1
+		origin 3.9370074 1.17332E-06 1.9073486E-06
+		length 1.968504
+	endbone
+	bone foot_R_IK_target
+		parent 0
+		x 0.77737445 -0.1511869 -0.61059916
+		y 0.59936905 -0.116567925 0.7919398
+		z -0.19090727 -0.9816081 -2.0861626E-07
+		origin -2.1228917 -7.4324303 3.6096158
+		length 6.5591364
+	endbone
+	bone foot_L_IK_target
+		parent 0
+		x 0.7775064 0.15131466 -0.61039966
+		y 0.59920895 0.11634561 0.7920936
+		z 0.19087276 -0.98161477 -0.00020965935
+		origin -2.123807 7.432373 3.6096892
+		length 6.5591364
+	endbone
+	bone hand_R_IK_attach
+		parent 0
+		x 1 1.1165469E-09 -4.1586645E-10
+		y -1.1165326E-09 1 9.5323495E-15
+		z 4.1586645E-10 -9.531899E-15 1
+		origin -8.940697E-08 0 6.3948846E-14
+		length 43.75549
+	endbone
+	bone hand_R_IK_target
+		parent 6
+		x 0.3198702 -0.66167355 -0.6781381
+		y 0.94562227 0.17837654 0.2719938
+		z -0.059007198 -0.72826505 0.6827505
+		origin 0.96280754 -20.16812 38.818333
+		length 21.877745
+	endbone
+	bone hand_L_IK_attach
+		parent 0
+		x 1 1.1164047E-09 -4.1603698E-10
+		y -1.1164047E-09 1 9.532309E-15
+		z 4.1603698E-10 -9.5318515E-15 1
+		origin -8.940697E-08 0 6.3948846E-14
+		length 43.755447
+	endbone
+	bone hand_L_IK_target
+		parent 8
+		x 0.31987083 0.6616743 -0.67813694
+		y 0.9456218 -0.1783766 0.27199462
+		z 0.0590081 -0.7282644 -0.6827512
+		origin 0.96280575 20.168064 38.818314
+		length 21.877724
+	endbone
+	bone pelvis
+		parent -1
+		x 2.821214E-07 2.929478E-06 1
+		y 2.9294781E-06 -1 2.9294774E-06
+		z 1 2.9294772E-06 -2.8212997E-07
+		origin 6.738625E-06 -0.1968477 36.614174
+		length 3.1633928
+	endbone
+	bone spine_0
+		parent 10
+		x 1 2.9139878E-06 -1.5100385E-07
+		y -2.913989E-06 1 -2.7736E-06
+		z 1.5099576E-07 2.7736E-06 1
+		origin 3.149582 0.29528412 8.96129E-06
+		length 4.429161
+	endbone
+	bone spine_1
+		parent 11
+		x 1 1.0596257E-06 -3.178699E-08
+		y -1.0596261E-06 1 -3.894145E-07
+		z 3.178659E-08 3.8941408E-07 1
+		origin 4.429161 -2.6524067E-06 -6.464197E-07
+		length 4.42918
+	endbone
+	bone spine_2
+		parent 12
+		x 1 -1.0431421E-06 -2.702053E-07
+		y 1.0431423E-06 1 8.742239E-08
+		z 2.702052E-07 -8.742263E-08 1
+		origin 4.42918 -3.5464764E-06 -1.9811487E-06
+		length 8.615182
+	endbone
+	bone neck_0
+		parent 13
+		x 0.92122316 0.38903466 -5.913723E-07
+		y -0.38903478 0.9212231 -4.5212937E-07
+		z 3.688918E-07 6.4657627E-07 1
+		origin 8.562305 -0.9530406 0.0001110244
+		length 3.5121186
+	endbone
+	bone head
+		parent 14
+		x 0.921223 -0.3890346 5.5648616E-07
+		y 0.38903475 0.92122304 2.4099526E-07
+		z -6.0640343E-07 -5.5179985E-09 1
+		origin 3.5121193 5.722046E-06 -8.61763E-06
+		length 1.7560593
+	endbone
+	bone clavicle_L
+		parent 13
+		x -0.082890816 -0.1239975 0.9888143
+		y -0.08037801 0.9898281 0.11738672
+		z -0.99331194 -0.06974863 -0.09201434
+		origin 5.7077827 -0.78876185 0.78724754
+		length 6.5986614
+	endbone
+	bone arm_upper_L
+		parent 16
+		x 0.67032623 0.05579511 0.739966
+		y 0.15769508 0.9636827 -0.21551797
+		z -0.7251172 0.2611564 0.6371831
+		origin 6.5986614 0 -3.8146973E-06
+		length 5.267039
+	endbone
+	bone arm_upper_L_twist1
+		parent 17
+		x 1 -3.427267E-07 1.1920929E-07
+		y 3.7252903E-07 1 -1.6391277E-07
+		z -1.4901161E-07 1.7881393E-07 1.0000001
+		origin 5.267044 0 1.1444092E-05
+		length 2.6335194
+	endbone
+	bone arm_upper_L_twist0
+		parent 17
+		x 1 -5.5879354E-07 1.4901161E-07
+		y 5.811453E-07 0.99999994 6.7055225E-07
+		z -5.9604645E-08 -7.227063E-07 1
+		origin 1.5258789E-05 -9.536743E-07 3.8146973E-06
+		length 2.6335194
+	endbone
+	bone arm_lower_L
+		parent 17
+		x 0.91140354 0.41151404 2.9802322E-07
+		y -0.41151392 0.9114035 7.748604E-07
+		z 0 -8.791685E-07 1
+		origin 10.534084 9.536743E-07 7.6293945E-06
+		length 4.889756
+	endbone
+	bone arm_lower_L_twist1
+		parent 20
+		x 1 2.9802322E-07 2.3841858E-07
+		y -2.682209E-07 0.99144495 0.13052642
+		z -2.9802322E-08 -0.13052638 0.9914448
+		origin 4.889757 1.9073486E-06 7.6293945E-06
+		length 2.444878
+	endbone
+	bone arm_lower_L_twist0
+		parent 20
+		x 1 9.834766E-07 1.1920929E-07
+		y -9.536743E-07 1 -7.748604E-07
+		z -2.9802322E-08 8.34465E-07 1
+		origin -3.8146973E-06 -1.9073486E-06 -3.8146973E-06
+		length 2.444878
+	endbone
+	bone hand_L
+		parent 20
+		x 0.99997556 -0.00051006675 0.0069795847
+		y -0.0013136715 0.96592623 0.25881433
+		z -0.006873548 -0.25881714 0.96590185
+		origin 9.779521 1.1444092E-05 1.5258789E-05
+		length 1.9039003
+	endbone
+	bone finger_thumb_0_L
+		parent 23
+		x 0.8719317 0.38696647 0.29998654
+		y -0.43191195 0.31929797 0.84350514
+		z 0.23062286 -0.8650467 0.44554147
+		origin 1.1309595 1.2140169 0.9337692
+		length 1.7074986
+	endbone
+	bone finger_thumb_1_L
+		parent 24
+		x 0.9619273 -0.1499178 0.22851822
+		y 0.15042242 0.9885033 0.015310854
+		z -0.22818631 0.019646257 0.97341925
+		origin 1.7074966 -7.6293945E-06 1.5258789E-05
+		length 1.4173284
+	endbone
+	bone finger_thumb_2_L
+		parent 25
+		x 0.982247 1.7881393E-07 0.18759266
+		y -4.61936E-07 0.99999994 9.834766E-07
+		z -0.18759254 -9.983778E-07 0.9822469
+		origin 1.4173279 7.6293945E-06 1.9073486E-06
+		length 0.7086642
+	endbone
+	bone finger_index_meta_L
+		parent 23
+		x 0.996593 0.082457975 0.0017143786
+		y -0.082401454 0.9945989 0.06311102
+		z 0.0034987926 -0.06303732 0.99800503
+		origin 1.4805584 1.0343857 -0.024349213
+		length 2.6643617
+	endbone
+	bone finger_index_0_L
+		parent 27
+		x 0.9296189 -0.16398436 0.33002713
+		y 0.16428769 0.98603785 0.02717913
+		z -0.32987615 0.028953232 0.94358015
+		origin 2.664362 -4.7683716E-07 7.6293945E-06
+		length 1.6901588
+	endbone
+	bone finger_index_1_L
+		parent 28
+		x 0.8742193 -9.0897083E-07 0.48553118
+		y 4.917383E-07 1.0000001 8.866191E-07
+		z -0.48553118 -4.7450885E-07 0.8742195
+		origin 1.6901608 -5.722046E-06 -7.6293945E-06
+		length 1.0966133
+	endbone
+	bone finger_index_2_L
+		parent 29
+		x 0.99638337 -4.440546E-06 0.0849717
+		y 4.4852495E-06 0.9999999 -4.1117892E-07
+		z -0.084971726 8.121133E-07 0.9963835
+		origin 1.096611 -5.2452087E-06 -3.8146973E-06
+		length 0.54830664
+	endbone
+	bone finger_middle_meta_L
+		parent 23
+		x 0.9920659 -0.11347191 -0.054121614
+		y 0.1118038 0.9931848 -0.03292168
+		z 0.057488292 0.02660945 0.99799156
+		origin 1.499937 0.5026865 -0.002418518
+		length 2.6734037
+	endbone
+	bone finger_middle_0_L
+		parent 31
+		x 0.84060675 -0.11309647 0.529707
+		y 0.112721 0.9930735 0.03314869
+		z -0.529787 0.03184411 0.8475327
+		origin 2.6734037 -1.1444092E-05 7.6293945E-06
+		length 2.0981097
+	endbone
+	bone finger_middle_1_L
+		parent 32
+		x 0.9140681 -1.475215E-06 0.40556067
+		y 5.662441E-07 1 2.2482127E-06
+		z -0.40556064 -1.8142164E-06 0.9140682
+		origin 2.0981102 1.9073486E-06 -3.8146973E-06
+		length 1.2415466
+	endbone
+	bone finger_middle_2_L
+		parent 33
+		x 0.99569106 3.479421E-05 0.092732504
+		y -1.5348196E-06 0.99999994 -0.00035849027
+		z -0.09273258 0.00035679527 0.9956911
+		origin 1.2415466 -3.8146973E-06 -1.9073486E-06
+		length 0.6207733
+	endbone
+	bone finger_ring_meta_L
+		parent 23
+		x 0.96180344 -0.27188075 0.03185898
+		y 0.27179056 0.9345937 -0.22948739
+		z 0.032617897 0.22938083 0.97279006
+		origin 1.5119247 -0.08664703 0.022003174
+		length 2.4350114
+	endbone
+	bone finger_ring_0_L
+		parent 35
+		x 0.9074874 -0.10556872 0.40659797
+		y 0.09878167 0.99439436 0.037712112
+		z -0.40829962 0.00594113 0.9128286
+		origin 2.43501 -1.335144E-05 1.1444092E-05
+		length 1.8312261
+	endbone
+	bone finger_ring_1_L
+		parent 36
+		x 0.92427564 -1.8626451E-06 0.38172528
+		y 1.5571713E-06 1.0000001 1.2107193E-06
+		z -0.3817253 -5.206093E-07 0.92427605
+		origin 1.8312263 -5.722046E-06 -5.722046E-06
+		length 1.1515856
+	endbone
+	bone finger_ring_2_L
+		parent 37
+		x 0.9975356 6.377697E-06 0.07016278
+		y -6.273389E-06 0.99999994 -1.4901161E-06
+		z -0.07016279 1.0430813E-06 0.9975356
+		origin 1.1515846 -9.536743E-07 1.9073486E-06
+		length 0.5757928
+	endbone
+	bone finger_pinky_meta_L
+		parent 23
+		x 0.8861878 -0.3752068 0.27182898
+		y 0.43599942 0.8738246 -0.21525529
+		z -0.15676588 0.30927387 0.9379628
+		origin 1.5242357 -0.75538254 0.04970932
+		length 2.0967586
+	endbone
+	bone finger_pinky_0_L
+		parent 39
+		x 0.97715986 -0.004448086 0.21245894
+		y 0.0040979385 0.9999894 0.002088327
+		z -0.21246594 -0.00116992 0.97716784
+		origin 2.0967598 -1.5258789E-05 3.8146973E-06
+		length 1.4708458
+	endbone
+	bone finger_pinky_1_L
+		parent 40
+		x 0.94219375 0.00043155998 0.33506832
+		y -0.0002592653 0.9999998 -0.0005588941
+		z -0.33506843 0.0004396974 0.94219375
+		origin 1.4708462 7.6293945E-06 1.9073486E-06
+		length 0.8326798
+	endbone
+	bone finger_pinky_2_L
+		parent 41
+		x 0.99998087 0.006161928 -0.0001533851
+		y -0.00616204 0.9999806 -0.00080797356
+		z 0.00014844537 0.0008089673 0.9999995
+		origin 0.83267593 3.8146973E-06 0
+		length 0.4163399
+	endbone
+	bone hand_R_to_L_ikrule
+		parent 23
+		x 0.1243743 0.2360535 0.96374774
+		y 0.23605575 0.9363636 -0.25980985
+		z -0.9637472 0.259812 0.060737938
+		origin -26.68945 7.19501 29.375397
+		length 0.95195013
+	endbone
+	bone hold_L
+		parent 23
+		x 0.6781364 -0.27199578 0.6827511
+		y 0.6616746 -0.17837568 -0.72826433
+		z 0.3198708 0.9456217 0.059009444
+		origin 3.5459404 -0.087198734 2.5548248
+		length 0.95195013
+	endbone
+	bone arm_elbow_helper_L
+		parent 20
+		x -0.21047117 -0.97760004 -1.0430813E-06
+		y 0.9776001 -0.21047115 1.2814999E-06
+		z -1.3113022E-06 -6.854534E-07 1
+		origin -3.8146973E-06 0 -7.6293945E-06
+		length 2.444878
+	endbone
+	bone clavicle_R
+		parent 13
+		x -0.082890816 -0.123997316 -0.9888143
+		y -0.080380075 0.98982805 -0.117386356
+		z 0.9933117 0.069750704 -0.09201456
+		origin 5.7077827 -0.78876185 -0.78726757
+		length 6.598669
+	endbone
+	bone arm_upper_R
+		parent 46
+		x 0.67032623 0.055796012 -0.739966
+		y 0.1576956 0.96368223 0.21551941
+		z 0.72511727 -0.2611576 0.6371827
+		origin 6.598669 9.536743E-07 7.6293945E-06
+		length 5.267026
+	endbone
+	bone arm_upper_R_twist1
+		parent 47
+		x 1 1.5646219E-07 -2.682209E-07
+		y -1.3411045E-07 0.99999994 -2.3841858E-07
+		z 2.9802322E-07 1.5646219E-07 0.9999999
+		origin 5.267025 -4.7683716E-07 -3.8146973E-06
+		length 2.633513
+	endbone
+	bone arm_upper_R_twist0
+		parent 47
+		x 1 -6.7800283E-07 -2.0861626E-07
+		y 6.92904E-07 0.99999994 -6.3329935E-07
+		z 2.682209E-07 5.289912E-07 1
+		origin -1.1444092E-05 2.3841858E-06 3.8146973E-06
+		length 2.633513
+	endbone
+	bone arm_lower_R
+		parent 47
+		x 0.9114031 0.41151452 -3.5762787E-07
+		y -0.41151464 0.9114032 -8.34465E-07
+		z 8.940697E-08 8.493662E-07 1
+		origin 10.534069 -4.7683716E-07 3.8146973E-06
+		length 4.8897667
+	endbone
+	bone arm_lower_R_twist1
+		parent 50
+		x 1 -5.9604645E-08 1.1920929E-07
+		y -1.4901161E-08 0.9914447 -0.13052677
+		z -8.940697E-08 0.13052683 0.9914447
+		origin 4.8897705 -3.8146973E-06 1.5258789E-05
+		length 2.4448833
+	endbone
+	bone arm_lower_R_twist0
+		parent 50
+		x 1 2.9802322E-07 2.0861626E-07
+		y -3.5762787E-07 1 3.5762787E-07
+		z -1.4901161E-07 -2.9802322E-07 0.99999994
+		origin 1.9073486E-06 0 -3.8146973E-06
+		length 2.4448833
+	endbone
+	bone hand_R
+		parent 50
+		x 0.99997556 -0.00051027536 -0.006979376
+		y -0.0013136119 0.9659261 -0.25881428
+		z 0.0068736672 0.25881726 0.96590185
+		origin 9.779542 -5.722046E-06 1.9073486E-05
+		length 1.9038775
+	endbone
+	bone finger_thumb_0_R
+		parent 53
+		x 0.87193125 0.38696694 -0.29998744
+		y -0.43191272 0.31929737 -0.8435049
+		z -0.23062317 0.8650466 0.44554114
+		origin 1.1309462 1.2140112 -0.93374634
+		length 1.7074989
+	endbone
+	bone finger_thumb_1_R
+		parent 54
+		x 0.961927 -0.1499199 -0.22851795
+		y 0.15042429 0.9885029 -0.015311927
+		z 0.22818613 -0.019645683 0.97341937
+		origin 1.7074986 3.8146973E-06 -3.8146973E-06
+		length 1.4173208
+	endbone
+	bone finger_thumb_2_R
+		parent 55
+		x 0.9822468 8.046627E-07 -0.18759352
+		y -1.0281801E-06 1 -5.5134296E-07
+		z 0.18759349 6.556511E-07 0.98224664
+		origin 1.4173203 7.6293945E-06 -7.6293945E-06
+		length 0.7086604
+	endbone
+	bone finger_index_meta_R
+		parent 53
+		x 0.996593 0.0824592 -0.0017134845
+		y -0.08240256 0.9945987 -0.06311187
+		z -0.0034999847 0.06303795 0.998005
+		origin 1.4805346 1.0343761 0.02437973
+		length 2.6643841
+	endbone
+	bone finger_index_0_R
+		parent 57
+		x 0.9296181 -0.16398686 -0.3300278
+		y 0.16429037 0.9860375 -0.027179375
+		z 0.32987687 -0.028953947 0.94357985
+		origin 2.664383 0 0
+		length 1.6901635
+	endbone
+	bone finger_index_1_R
+		parent 58
+		x 0.8742195 3.7252903E-07 -0.4855308
+		y -6.854534E-07 1 -4.0233135E-07
+		z 0.4855309 7.003546E-07 0.8742196
+		origin 1.6901627 0 0
+		length 1.096613
+	endbone
+	bone finger_index_2_R
+		parent 59
+		x 0.99638313 -4.3660402E-06 -0.08497317
+		y 4.3958426E-06 0.9999999 3.4598634E-07
+		z 0.08497316 -7.0780516E-07 0.99638313
+		origin 1.0966148 -9.536743E-06 -5.722046E-06
+		length 0.5483065
+	endbone
+	bone finger_middle_meta_R
+		parent 53
+		x 0.9920658 -0.11347285 0.054121524
+		y 0.11180495 0.9931847 0.032920435
+		z -0.057488143 -0.026608258 0.9979915
+		origin 1.4999123 0.502697 0.0024261475
+		length 2.6734052
+	endbone
+	bone finger_middle_0_R
+		parent 61
+		x 0.8406072 -0.11309679 -0.52970636
+		y 0.112721145 0.9930735 -0.033148885
+		z 0.5297861 -0.031843908 0.8475331
+		origin 2.6734047 -9.536743E-07 -3.8146973E-06
+		length 2.0981255
+	endbone
+	bone finger_middle_1_R
+		parent 62
+		x 0.9140675 1.3560057E-06 -0.40556166
+		y -1.3038516E-06 0.99999994 3.799796E-07
+		z 0.40556172 1.8253922E-07 0.9140678
+		origin 2.0981236 -5.2452087E-06 -7.6293945E-06
+		length 1.2415692
+	endbone
+	bone finger_middle_2_R
+		parent 63
+		x 0.9956911 3.0569732E-05 -0.09273194
+		y 2.6002526E-06 1 0.0003572926
+		z 0.09273195 -0.00035599433 0.99569106
+		origin 1.2415695 7.1525574E-06 -3.8146973E-06
+		length 0.6207846
+	endbone
+	bone finger_ring_meta_R
+		parent 53
+		x 0.9618032 -0.27188128 -0.031858236
+		y 0.2717911 0.9345936 0.22948723
+		z -0.03261894 -0.22938035 0.9727901
+		origin 1.511899 -0.08666134 -0.021965027
+		length 2.4350328
+	endbone
+	bone finger_ring_0_R
+		parent 65
+		x 0.9074873 -0.10556943 -0.40659797
+		y 0.09878256 0.9943942 -0.037712313
+		z 0.40830004 -0.0059413016 0.91282845
+		origin 2.435032 2.861023E-06 -3.8146973E-06
+		length 1.8312316
+	endbone
+	bone finger_ring_1_R
+		parent 66
+		x 0.92427534 8.1956387E-07 -0.38172647
+		y 7.450581E-09 1 2.1830201E-06
+		z 0.38172647 -1.9995496E-06 0.9242753
+		origin 1.8312321 5.722046E-06 -7.6293945E-06
+		length 1.1515745
+	endbone
+	bone finger_ring_2_R
+		parent 67
+		x 0.9975354 4.5523047E-06 -0.07016254
+		y -4.440546E-06 0.9999999 1.7117709E-06
+		z 0.07016249 -1.4193356E-06 0.9975355
+		origin 1.151577 1.9073486E-06 1.9073486E-06
+		length 0.57578725
+	endbone
+	bone finger_pinky_meta_R
+		parent 53
+		x 0.8861872 -0.37520808 -0.27182925
+		y 0.43600085 0.8738243 0.2152538
+		z 0.15676588 -0.3092729 0.93796307
+		origin 1.5242147 -0.75538445 -0.049690247
+		length 2.096767
+	endbone
+	bone finger_pinky_0_R
+		parent 69
+		x 0.9771599 -0.0044474304 -0.21245845
+		y 0.0040973276 0.9999894 -0.0020879395
+		z 0.21246572 0.0011697374 0.9771677
+		origin 2.0967674 -2.861023E-06 0
+		length 1.4708443
+	endbone
+	bone finger_pinky_1_R
+		parent 70
+		x 0.94219327 0.00043199956 -0.33506986
+		y -0.00025978684 0.9999998 0.00055862404
+		z 0.33506992 -0.0004393882 0.9421931
+		origin 1.4708443 -5.722046E-06 -1.9073486E-06
+		length 0.83266085
+	endbone
+	bone finger_pinky_2_R
+		parent 71
+		x 0.999981 0.006162137 0.00015361607
+		y -0.006162271 0.9999807 0.00081063807
+		z -0.00014863163 -0.00081156427 0.99999976
+		origin 0.8326607 -1.9073486E-06 -5.722046E-06
+		length 0.41633043
+	endbone
+	bone hand_L_to_R_ikrule
+		parent 53
+		x 0.12437469 0.23605578 -0.96374714
+		y 0.2360535 0.93636346 0.2598119
+		z 0.9637477 -0.25980976 0.060738206
+		origin -26.689371 7.1950607 -29.375433
+		length 0.95193875
+	endbone
+	bone hold_R
+		parent 53
+		x 0.6781377 -0.2719942 -0.6827506
+		y -0.66167367 0.17837639 -0.72826487
+		z 0.31987053 0.94562197 -0.059007615
+		origin 3.5459185 -0.08716774 -2.5548553
+		length 0.95193875
+	endbone
+	bone arm_elbow_helper_R
+		parent 50
+		x -0.21047282 -0.9775996 -1.6391277E-07
+		y 0.97759974 -0.21047276 -4.7683716E-07
+		z 4.172325E-07 -1.4901161E-07 1
+		origin 9.536743E-06 -1.9073486E-06 7.6293945E-06
+		length 2.4448833
+	endbone
+	bone leg_upper_R
+		parent 10
+		x -0.9932024 -0.021067174 -0.114477985
+		y -0.01015331 0.9954164 -0.09509534
+		z 0.11595665 -0.09328656 -0.9888638
+		origin -1.7391548 -0.4583556 -3.9233797
+		length 8.207739
+	endbone
+	bone leg_upper_R_twist1
+		parent 76
+		x 1 3.6135316E-07 1.4901161E-08
+		y -3.6135316E-07 1 0.0001725204
+		z -7.450581E-09 -0.00017251074 0.9999999
+		origin 8.207737 2.3841858E-06 9.059906E-06
+		length 4.1038694
+	endbone
+	bone leg_upper_R_twist0
+		parent 76
+		x 0.99999994 2.8777868E-07 8.195639E-08
+		y -2.8777868E-07 1 2.1187589E-08
+		z -8.940697E-08 -5.355105E-09 1
+		origin 3.8146973E-06 -5.662441E-07 -4.7683716E-07
+		length 4.1038694
+	endbone
+	bone leg_lower_R
+		parent 76
+		x 0.9978839 -0.06502064 1.4901161E-08
+		y 0.06502064 0.9978839 3.4458935E-08
+		z -2.2351742E-08 -1.9557774E-08 1
+		origin 16.052378 -4.0233135E-06 -0.00017499924
+		length 7.7350016
+	endbone
+	bone leg_lower_R_twist1
+		parent 79
+		x 0.99999994 1.8626451E-07 1.6391277E-07
+		y -2.1606684E-07 0.9970365 0.076929376
+		z -1.4156103E-07 -0.07692942 0.99703664
+		origin 7.7350016 8.34465E-07 1.4305115E-06
+		length 3.8675008
+	endbone
+	bone leg_lower_R_twist0
+		parent 79
+		x 0.99999994 -7.450581E-09 5.2154064E-08
+		y 1.4901161E-08 0.99999994 -7.4505806E-08
+		z -7.4505806E-08 7.4505806E-08 1.0000001
+		origin 0 -1.1920929E-07 -9.536743E-07
+		length 3.8675008
+	endbone
+	bone ankle_R
+		parent 79
+		x 0.5544441 0.8321981 0.0061841086
+		y -0.82316566 0.5473026 0.15118885
+		z 0.122434415 -0.08891626 0.9884856
+		origin 15.46999 1.66893E-06 6.198883E-06
+		length 5.3121862
+	endbone
+	bone ball_R
+		parent 82
+		x 0.7919404 0.6105984 1.7762184E-05
+		y -0.6105982 0.7919402 -6.904317E-08
+		z -1.4072403E-05 -1.0785912E-05 1
+		origin 5.3120785 -0.0036084652 -0.033436775
+		length 2.6560931
+	endbone
+	bone leg_knee_helper_R
+		parent 79
+		x -0.032527328 0.9994707 -3.73926E-07
+		y -0.9994708 -0.03252711 -5.2154064E-08
+		z -6.7055225E-08 3.594905E-07 1
+		origin 0 1.1920929E-07 -2.3841858E-06
+		length 3.8675008
+	endbone
+	bone leg_upper_L
+		parent 10
+		x -0.9932019 -0.021095162 0.114476435
+		y -0.010181702 0.9954163 0.095093705
+		z -0.115957715 0.093281664 -0.9888641
+		origin -1.7391472 -0.4583515 3.92338
+		length 1.5816964
+	endbone
+	bone leg_upper_L_twist0
+		parent 85
+		x 0.99999994 -5.5879354E-09 -1.4901161E-08
+		y 9.313226E-09 1 -2.142042E-08
+		z -7.450581E-09 1.4551915E-08 1
+		origin 0 1.847744E-06 0
+		length 0.7908482
+	endbone
+	bone leg_upper_L_twist1
+		parent 85
+		x 0.99999994 6.5378845E-07 -7.450581E-09
+		y -6.5006316E-07 0.9999999 -0.00017268711
+		z -7.450581E-09 0.00017265487 1
+		origin 8.207733 4.172325E-06 -9.536743E-07
+		length 0.7908482
+	endbone
+	bone leg_lower_L
+		parent 85
+		x 0.99788386 -0.06501971 -7.4505806E-08
+		y 0.065019704 0.9978839 3.3527613E-08
+		z 5.9604645E-08 -5.9371814E-08 1
+		origin 16.052372 -4.157424E-06 0.00017976761
+		length 7.734992
+	endbone
+	bone leg_lower_L_twist1
+		parent 88
+		x 1.0000001 1.0430813E-07 5.2154064E-08
+		y -9.685755E-08 0.9970366 -0.07692832
+		z -4.4703484E-08 0.07692827 0.9970367
+		origin 7.734993 -2.3841858E-06 -5.722046E-06
+		length 3.867496
+	endbone
+	bone leg_lower_L_twist0
+		parent 88
+		x 1.0000001 -1.4156103E-07 7.4505806E-08
+		y 1.4901161E-07 0.9999999 -5.5879354E-08
+		z -3.7252903E-08 6.61239E-08 1
+		origin 5.722046E-06 4.7683716E-07 9.536743E-07
+		length 3.867496
+	endbone
+	bone ankle_L
+		parent 88
+		x 0.5542262 0.8323421 -0.006318897
+		y -0.82334286 0.5470876 -0.15100193
+		z -0.12222827 0.08889183 0.9885133
+		origin 15.469975 -5.1259995E-06 -9.059906E-06
+		length 5.312185
+	endbone
+	bone ball_L
+		parent 91
+		x 0.79209375 0.6103995 -0.00014787914
+		y -0.61039937 0.79209393 -0.00020961327
+		z -1.0770195E-05 0.00025635134 1
+		origin 5.3120785 -0.003610611 0.033435345
+		length 2.6560924
+	endbone
+	bone leg_knee_helper_L
+		parent 88
+		x -0.032527104 0.9994709 8.381903E-09
+		y -0.99947095 -0.03252724 1.0430813E-07
+		z 1.0430813E-07 -1.3038516E-08 1
+		origin 7.6293945E-06 5.9604645E-07 0
+		length 3.867496
+	endbone
+endrig
+feature ImportFeature
+	id 80704d3a
+	name Suit
+	suppressed 0
+	visible 1
+	param Material 0
+	ints RemovedPieces
+	param Source /home/poo/games/projects/deep_sentance/tools/out/suit/work-defaultguy/player_suit_defaultguy.fbx
+end
+feature ImportFeature
+	id 2b65a71d
+	name Face
+	suppressed 0
+	visible 1
+	param Material 0
+	ints RemovedPieces
+	param Source /home/poo/games/projects/deep_sentance/tools/out/suit/live/face_now.fbx
+end
+feature PocketFeature
+	id e35bb80b
+	name ThighPocket
+	suppressed 0
+	visible 1
+	param Across 0
+	param Angle 0
+	bodies Bodies 80704d3ab14
+	param Depth 0.8
+	param Facing 1
+	param Fastener 0
+	param Finish 0
+	param Height 6.5
+	param Side 2
+	param Spot 7
+	param Style 1
+	param Up 0
+	param Width 5.5
+end
+feature GlowFeature
+	id 4e34840d
+	name KneePad
+	suppressed 0
+	visible 1
+	param Across 0
+	param Angle 0
+	bodies Bodies 80704d3ab14
+	param Brightness 4
+	param Colour #3b342c
+	param Facing 1
+	param Height 5.5
+	param Openings 0
+	param Pattern 1
+	param Side 2
+	param Speed 0.15
+	param Spot 8
+	param Style 3
+	param Text EFFIGY
+	param Up 0
+	param Width 4.5
+end
+feature PocketFeature
+	id d6c57b98
+	name ZipChest
+	suppressed 0
+	visible 1
+	param Across -3.5
+	param Angle 90
+	bodies Bodies 80704d3ab14
+	param Depth 1
+	param Facing 1
+	param Fastener 0
+	param Finish 0
+	param Height 5.5
+	param Side 0
+	param Spot 0
+	param Style 2
+	param Up 0
+	param Width 12
+end
+feature PocketFeature
+	id b00bc062
+	name ZipBelly
+	suppressed 0
+	visible 1
+	param Across -2.5
+	param Angle 90
+	bodies Bodies 80704d3ab14
+	param Depth 1
+	param Facing 1
+	param Fastener 0
+	param Finish 0
+	param Height 5.5
+	param Side 0
+	param Spot 1
+	param Style 2
+	param Up 0
+	param Width 10
+end
+feature LatticeFeature
+	id b50917bd
+	name BootRaiseL
+	suppressed 0
+	visible 1
+	bodies Bodies 80704d3ab1
+	param Interpolation 1
+	param Margin 0.05
+	param Offsets 0,0,2: 0,0,2.5; 1,0,2: 0,0,2.5; 0,1,2: 0,0,2.5; 1,1,2: 0,0,2.5
+	param PointsX 2
+	param PointsY 2
+	param PointsZ 3
+end
+feature LatticeFeature
+	id cd26cb76
+	name BootRaiseR
+	suppressed 0
+	visible 1
+	bodies Bodies 80704d3ab2
+	param Interpolation 1
+	param Margin 0.05
+	param Offsets 0,0,2: 0,0,2.5; 1,0,2: 0,0,2.5; 0,1,2: 0,0,2.5; 1,1,2: 0,0,2.5
+	param PointsX 2
+	param PointsY 2
+	param PointsZ 3
+end
+feature SimpleDeformFeature
+	id 00bda54f
+	name BootTightL
+	suppressed 0
+	visible 1
+	param Angle 45
+	param Axis 2
+	param BendToward 0
+	bodies Bodies 80704d3ab1
+	param Factor -0.1
+	param Lower 0.4
+	param Mode 2
+	param Pivot 2
+	param PivotPoint 6.8 2.05 5
+	param Upper 1
+end
+feature SimpleDeformFeature
+	id 7032df4d
+	name BootTightR
+	suppressed 0
+	visible 1
+	param Angle 45
+	param Axis 2
+	param BendToward 0
+	bodies Bodies 80704d3ab2
+	param Factor -0.1
+	param Lower 0.4
+	param Mode 2
+	param Pivot 2
+	param PivotPoint -6.8 2.05 5
+	param Upper 1
+end
+feature ShrinkwrapFeature
+	id e698a855
+	name BootHugL
+	suppressed 0
+	visible 1
+	param Blend 1
+	bodies Bodies 80704d3ab1
+	param Clearance 0.15
+	param KeepHeight 1
+	param Lower 0.65
+	bodies Onto 80704d3ab14
+	param Reach 2
+	param Smooth 2
+	param Strength 1
+	param Upper 1
+	param WallThickness 0.4
+end
+feature ShrinkwrapFeature
+	id f31a8b96
+	name BootHugR
+	suppressed 0
+	visible 1
+	param Blend 1
+	bodies Bodies 80704d3ab2
+	param Clearance 0.15
+	param KeepHeight 1
+	param Lower 0.65
+	bodies Onto 80704d3ab14
+	param Reach 2
+	param Smooth 2
+	param Strength 1
+	param Upper 1
+	param WallThickness 0.4
+end
+feature SubdivideFeature
+	id 0f3f5cd2
+	name SoleDenseL
+	suppressed 0
+	visible 1
+	param AllFaces 1
+	bodies Bodies 80704d3ab12
+	param Levels 2
+end
+feature FootprintFeature
+	id 021c6228
+	name SoleFitL
+	suppressed 0
+	visible 1
+	param At 1.9
+	bodies Bodies 80704d3ab12
+	param Clearance 0.12
+	param Falloff 4
+	bodies Onto 80704d3ab1
+	param OwnAt 0.6
+	param Smooth 0.3
+	param Strength 1
+end
+feature RemeshFeature
+	id 855d991e
+	name SoleTrimL
+	suppressed 0
+	visible 1
+	bodies Bodies 80704d3ab12
+	param Faces 4000
+	param Fillet 0
+	param Fuse 1
+	param HoldBorders 1
+	param Mode 0
+	param Percent 10
+	param Smooth 2
+	param SymmetryX 0
+	param Target 1
+	param Triangles 8000
+	param Voxel 0.25
+	param Weld 1
+end
+feature LatticeFeature
+	id fbac0c62
+	name SoleRaiseL
+	suppressed 0
+	visible 1
+	bodies Bodies 80704d3ab12
+	param Interpolation 1
+	param Margin 0.05
+	param Offsets 0,0,2: 0,0,0.45; 1,0,2: 0,0,0.45; 0,1,2: 0,0,0.45; 1,1,2: 0,0,0.45
+	param PointsX 2
+	param PointsY 2
+	param PointsZ 3
+end
+feature SubdivideFeature
+	id bc12201d
+	name SoleDenseR
+	suppressed 0
+	visible 1
+	param AllFaces 1
+	bodies Bodies 80704d3ab13
+	param Levels 2
+end
+feature FootprintFeature
+	id 2c56fc51
+	name SoleFitR
+	suppressed 0
+	visible 1
+	param At 1.9
+	bodies Bodies 80704d3ab13
+	param Clearance 0.12
+	param Falloff 4
+	bodies Onto 80704d3ab2
+	param OwnAt 0.6
+	param Smooth 0.3
+	param Strength 1
+end
+feature RemeshFeature
+	id 6957abe1
+	name SoleTrimR
+	suppressed 0
+	visible 1
+	bodies Bodies 80704d3ab13
+	param Faces 4000
+	param Fillet 0
+	param Fuse 1
+	param HoldBorders 1
+	param Mode 0
+	param Percent 10
+	param Smooth 2
+	param SymmetryX 0
+	param Target 1
+	param Triangles 8000
+	param Voxel 0.25
+	param Weld 1
+end
+feature LatticeFeature
+	id c247d80b
+	name SoleRaiseR
+	suppressed 0
+	visible 1
+	bodies Bodies 80704d3ab13
+	param Interpolation 1
+	param Margin 0.05
+	param Offsets 0,0,2: 0,0,0.45; 1,0,2: 0,0,0.45; 0,1,2: 0,0,0.45; 1,1,2: 0,0,0.45
+	param PointsX 2
+	param PointsY 2
+	param PointsZ 3
+end
+feature HardwareFeature
+	id 050eb5dd
+	name BootStrap
+	suppressed 0
+	visible 1
+	param Across 0
+	param Angle 0
+	bodies Bodies 80704d3ab1 80704d3ab2
+	param Count 5
+	param Facing 1
+	param Finish 0
+	param Height 0.75
+	param Layout 0
+	param Sag 2
+	param Side 2
+	param Size 0.9
+	param Spacing 0.8
+	param Span 7
+	param Spot 14
+	param Style 6
+	param Up 2.6
+end
+feature HardwareFeature
+	id 59e44251
+	name BootEyeletsIn
+	suppressed 0
+	visible 1
+	param Across -0.7
+	param Angle 90
+	bodies Bodies 80704d3ab1 80704d3ab2
+	param Count 4
+	param Facing 1
+	param Finish 0
+	param Height 0.75
+	param Layout 0
+	param Sag 2
+	param Side 2
+	param Size 0.35
+	param Spacing 0.9
+	param Span 7
+	param Spot 14
+	param Style 3
+	param Up 0.2
+end
+feature HardwareFeature
+	id 1906a82c
+	name BootEyeletsOut
+	suppressed 0
+	visible 1
+	param Across 0.7
+	param Angle 90
+	bodies Bodies 80704d3ab1 80704d3ab2
+	param Count 4
+	param Facing 1
+	param Finish 0
+	param Height 0.75
+	param Layout 0
+	param Sag 2
+	param Side 2
+	param Size 0.35
+	param Spacing 0.9
+	param Span 7
+	param Spot 14
+	param Style 3
+	param Up 0.2
+end
+feature GlowFeature
+	id 25bee095
+	name ToeCap
+	suppressed 0
+	visible 1
+	param Across 0
+	param Angle 0
+	bodies Bodies 80704d3ab1 80704d3ab2
+	param Brightness 4
+	param Colour #4a3a26
+	param Facing 1
+	param Height 2.4
+	param Openings 0
+	param Pattern 1
+	param Side 2
+	param Speed 0.15
+	param Spot 16
+	param Style 3
+	param Text EFFIGY
+	param Up -1.6
+	param Width 3.6
+end
+feature UVProjectFeature
+	id d6e74e4c
+	name BootUVL
+	suppressed 0
+	visible 1
+	param Atlas 0
+	bodies Bodies 80704d3ab1
+	param ChartAngle 66
+	param Direction 0 0 1
+	param Margin 0.01
+	param MarginPixels 0
+	param Mode 3
+	param RotateIslands 0
+	param Scale 1
+	param TexelDensity 0
+	param TextureSize 1024
+end
+feature UVProjectFeature
+	id 874e3df0
+	name BootUVR
+	suppressed 0
+	visible 1
+	param Atlas 0
+	bodies Bodies 80704d3ab2
+	param ChartAngle 66
+	param Direction 0 0 1
+	param Margin 0.01
+	param MarginPixels 0
+	param Mode 3
+	param RotateIslands 0
+	param Scale 1
+	param TexelDensity 0
+	param TextureSize 1024
+end
+feature PaintFeature
+	id 08c6bff3
+	name BootGrimeL
+	suppressed 0
+	visible 1
+	param BandsAxis 0 1 0
+	param BandsRangeMax 0
+	param BandsRangeMin 0
+	param BandsSpacing 2
+	param BandsTaperAxis 0 0 0
+	param BandsWarp 0
+	param BandsWidth 0.35
+	param Blend 0
+	bodies Bodies 80704d3ab1
+	param Fill 1
+	param FillColor 0.25 0.19 0.12
+	param FillHeight 0.5
+	param FillMetalness 0
+	param FillRoughness 0.95
+	param FillUseColor 1
+	param FillUseHeight 0
+	param FillUseMetalness 0
+	param FillUseRoughness 1
+	param GradientAxis 0 0 1
+	param GradientEnd 0
+	param GradientFalloff 0
+	param GradientStart 0
+	param InvertMask 0
+	param MaskGenerator 2
+	param MaskLevel 0.45
+	param MaskSlot 0
+	param MaskSoftness 0.4
+	param Mode 0
+	param Opacity 0.8
+	param Resolution 512
+	param SpotsJitter 0.35
+	param SpotsRadius 0.5
+	param SpotsRingWidth 0
+	param SpotsSeed 1
+	param SpotsSpacing 2
+end
+feature PaintFeature
+	id 208b694c
+	name BootGrimeR
+	suppressed 0
+	visible 1
+	param BandsAxis 0 1 0
+	param BandsRangeMax 0
+	param BandsRangeMin 0
+	param BandsSpacing 2
+	param BandsTaperAxis 0 0 0
+	param BandsWarp 0
+	param BandsWidth 0.35
+	param Blend 0
+	bodies Bodies 80704d3ab2
+	param Fill 1
+	param FillColor 0.25 0.19 0.12
+	param FillHeight 0.5
+	param FillMetalness 0
+	param FillRoughness 0.95
+	param FillUseColor 1
+	param FillUseHeight 0
+	param FillUseMetalness 0
+	param FillUseRoughness 1
+	param GradientAxis 0 0 1
+	param GradientEnd 0
+	param GradientFalloff 0
+	param GradientStart 0
+	param InvertMask 0
+	param MaskGenerator 2
+	param MaskLevel 0.45
+	param MaskSlot 0
+	param MaskSoftness 0.4
+	param Mode 0
+	param Opacity 0.8
+	param Resolution 512
+	param SpotsJitter 0.35
+	param SpotsRadius 0.5
+	param SpotsRingWidth 0
+	param SpotsSeed 1
+	param SpotsSpacing 2
+end
+feature PaintFeature
+	id 35206a6f
+	name BootScuffL
+	suppressed 0
+	visible 1
+	param BandsAxis 0 1 0
+	param BandsRangeMax 0
+	param BandsRangeMin 0
+	param BandsSpacing 2
+	param BandsTaperAxis 0 0 0
+	param BandsWarp 0
+	param BandsWidth 0.35
+	param Blend 0
+	bodies Bodies 80704d3ab1
+	param Fill 1
+	param FillColor 0.62 0.47 0.2
+	param FillHeight 0.5
+	param FillMetalness 0
+	param FillRoughness 0.85
+	param FillUseColor 1
+	param FillUseHeight 0
+	param FillUseMetalness 0
+	param FillUseRoughness 1
+	param GradientAxis 0 0 1
+	param GradientEnd 0
+	param GradientFalloff 0
+	param GradientStart 0
+	param InvertMask 0
+	param MaskGenerator 1
+	param MaskLevel 0.55
+	param MaskSlot 0
+	param MaskSoftness 0.3
+	param Mode 0
+	param Opacity 0.7
+	param Resolution 512
+	param SpotsJitter 0.35
+	param SpotsRadius 0.5
+	param SpotsRingWidth 0
+	param SpotsSeed 1
+	param SpotsSpacing 2
+end
+feature PaintFeature
+	id 4d52704d
+	name BootScuffR
+	suppressed 0
+	visible 1
+	param BandsAxis 0 1 0
+	param BandsRangeMax 0
+	param BandsRangeMin 0
+	param BandsSpacing 2
+	param BandsTaperAxis 0 0 0
+	param BandsWarp 0
+	param BandsWidth 0.35
+	param Blend 0
+	bodies Bodies 80704d3ab2
+	param Fill 1
+	param FillColor 0.62 0.47 0.2
+	param FillHeight 0.5
+	param FillMetalness 0
+	param FillRoughness 0.85
+	param FillUseColor 1
+	param FillUseHeight 0
+	param FillUseMetalness 0
+	param FillUseRoughness 1
+	param GradientAxis 0 0 1
+	param GradientEnd 0
+	param GradientFalloff 0
+	param GradientStart 0
+	param InvertMask 0
+	param MaskGenerator 1
+	param MaskLevel 0.55
+	param MaskSlot 0
+	param MaskSoftness 0.3
+	param Mode 0
+	param Opacity 0.7
+	param Resolution 512
+	param SpotsJitter 0.35
+	param SpotsRadius 0.5
+	param SpotsRingWidth 0
+	param SpotsSeed 1
+	param SpotsSpacing 2
+end
+feature PaintFeature
+	id e9e1a29a
+	name ShinMuck
+	suppressed 0
+	visible 1
+	param BandsAxis 0 1 0
+	param BandsRangeMax 0
+	param BandsRangeMin 0
+	param BandsSpacing 2
+	param BandsTaperAxis 0 0 0
+	param BandsWarp 0
+	param BandsWidth 0.35
+	param Blend 0
+	bodies Bodies 80704d3ab14
+	param Fill 1
+	param FillColor 0.28 0.22 0.15
+	param FillHeight 0.5
+	param FillMetalness 0
+	param FillRoughness 0.95
+	param FillUseColor 1
+	param FillUseHeight 0
+	param FillUseMetalness 0
+	param FillUseRoughness 1
+	param GradientAxis 0 0 1
+	param GradientEnd 0
+	param GradientFalloff 0
+	param GradientStart 0
+	param InvertMask 1
+	param MaskGenerator 3
+	param MaskLevel 0.16
+	param MaskSlot 0
+	param MaskSoftness 0.12
+	param Mode 0
+	param Opacity 0.85
+	param Resolution 512
+	param SpotsJitter 0.35
+	param SpotsRadius 0.5
+	param SpotsRingWidth 0
+	param SpotsSeed 1
+	param SpotsSpacing 2
+end

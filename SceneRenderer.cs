@@ -646,7 +646,7 @@ public sealed class SceneRenderer : IDisposable
 		_gl.GetInteger( GetPName.Samples, out int targetSamples );
 		if ( targetSamples == 0 )
 		{
-			_gl.BindFramebuffer( FramebufferTarget.ReadFramebuffer, _bloom.ColorFbo );
+			_gl.BindFramebuffer( FramebufferTarget.ReadFramebuffer, _depthTarget.Framebuffer );
 			_gl.BindFramebuffer( FramebufferTarget.DrawFramebuffer, target );
 			_gl.BlitFramebuffer( 0, 0, width, height, 0, 0, width, height,
 				ClearBufferMask.DepthBufferBit, BlitFramebufferFilter.Nearest );

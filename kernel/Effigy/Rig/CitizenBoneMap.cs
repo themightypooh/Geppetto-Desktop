@@ -53,6 +53,8 @@ public static class CitizenBoneMap
 				set.Add( $"pinky_0{j}_{side}" );
 
 			set.Add( $"brow_{side}" );
+			set.Add( $"brow_inner_{side}" );
+			set.Add( $"brow_outer_{side}" );
 			set.Add( $"lid_{side}" );
 			set.Add( $"lidup_{side}" );
 			set.Add( $"lidlo_{side}" );
@@ -206,8 +208,15 @@ public static class CitizenBoneMap
 			map[$"iris_{side}"] = $"eye_{side}";
 			map[$"pupil_{side}"] = $"eye_{side}";
 
-			// No citizen brow. Rigid on the head beats stranded.
+			// No citizen brow bone exists, so template brow bones still ride the
+			// head on citizen (rigid, not stranded). Template rigs now carry
+			// brow_inner/brow_outer and lid_upper/lid_lower as real bones;
+			// citizen lids already exist and are mapped below.
 			map[$"brow_{side}"] = "head";
+			map[$"brow_inner_{side}"] = "head";
+			map[$"brow_outer_{side}"] = "head";
+			map[$"lidupper_{side}"] = $"face_lid_upper_{side}";
+			map[$"lidlower_{side}"] = $"face_lid_lower_{side}";
 		}
 
 		return map;

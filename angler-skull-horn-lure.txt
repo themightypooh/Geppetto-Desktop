@@ -1,0 +1,12 @@
+echo "Add rostral horn + nose horn + illicium going up"
+remove SnoutSpike1
+remove SnoutSpike2
+add Inflate2D name=RostralHorn rings="-40,3;-40,8;-52,11;-40,5" thickness=0.5 profile=Flat materialslot=0
+add Inflate2D name=NoseHorn rings="-34,8;-30,10;-38,14;-34,9" thickness=0.5 profile=Flat materialslot=0
+add Primitive name=Illicium1 shape=Cylinder radius=0.7 height=6.32 position=-21.00,13.00,0 rotationaxis=-0.949,-0.316,0 rotation=90 segments=6 materialslot=0
+add Primitive name=Illicium2 shape=Cylinder radius=0.6 height=7.21 position=-24.00,19.00,0 rotationaxis=-0.832,-0.555,0 rotation=90 segments=6 materialslot=0
+add Primitive name=Illicium3 shape=Cylinder radius=0.5 height=7.21 position=-29.00,24.00,0 rotationaxis=-0.555,-0.832,0 rotation=90 segments=6 materialslot=0
+add Primitive name=Esca shape=Sphere radius=1.2 position=-32,27,0 scale=1,1,0.6 segments=12 materialslot=3
+material 3 color=#ffdf6b rough=0.4 metal=0
+save angler_skull_v3.effigy
+render angler_skull_v3.png shade=material views=4 size=1024

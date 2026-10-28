@@ -1,0 +1,2 @@
+# part	model	pivot x	y	z	size x	y	z
+tincan	out/tincan.vmdl	0	0	-0.057	5.114	1.514	1.515

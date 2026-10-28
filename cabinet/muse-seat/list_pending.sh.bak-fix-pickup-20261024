@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# List Geppetto Muse turns that are pending, recent, and unanswered.
+BASE="/home/poo/Desktop/geppetto-desktop/cabinet/muse-seat"
+for f in "$BASE"/requests/*.json; do
+  [ -e "$f" ] || continue
+  t=$(basename "$f" .json)
+  [ -e "$BASE/responses/$t.json" ] && continue
+  [ -n "$(find "$f" -mmin -15 -print 2>/dev/null)" ] || continue
+  echo "$t"
+done

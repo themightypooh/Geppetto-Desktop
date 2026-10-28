@@ -1,0 +1,44 @@
+"""Explicit, model-reported workflow phases; never guess from incidental prose."""
+import re
+
+PHASE_PROMPT = (
+    '\nFor a modeling task, announce your current phase with a standalone line '
+    '"Phase: Researching" before gathering references or reading modeling guidance. '
+    'When research is complete and you are about to create or edit the model, '
+    'announce "Phase: Modeling" and briefly say research is complete. '
+    'Report transitions as they happen, not a planned or invented phase. '
+    'Do not use phase lines for ordinary conversation.'
+)
+
+# Shared by every tool-capable seat (including the Muse file bridge) and the
+# in-viewport Claude card. This is preparation before an accept intent, not a
+# second user-facing planning turn or permission to skip the live-run gate.
+BUILD_PREP_PROMPT = (
+    '\nBefore filing a Geppetto model intent or showing the join notice, inspect the '
+    'current Geppetto skill and the relevant Effigy API/toolset sections for this '
+    'specific subject. Make a short internal tool plan: silhouette and proportions; '
+    'which actual Effigy features/brushes/edits make each part; material slots, '
+    'surface detail and texture/UV/bake needs; and the first visible shape. '
+    'Check command names and parameters against the API, not memory. Choose the '
+    'appropriate tools rather than defaulting to a stack of flat-coloured '
+    'Primitive boxes/cylinders; simple primitives are fine where the subject '
+    'really calls for them. Prepare the executable script and preflight it, then '
+    'file ONE intent for the exact script/subject/pane. After Yes, start the '
+    'live run promptly in that pane; No means no build. Do not spend the '
+    'approval window doing research or preparing another script. If a required '
+    'tool is missing, say so instead of inventing syntax or silently replacing '
+    'the shape with blobs. This applies equally to models working inside the '
+    'cabinet and agents connecting from outside it.\n'
+)
+_PHASE = re.compile(r'^Phase: (Researching|Modeling)\s*$', re.MULTILINE | re.IGNORECASE)
+
+
+def reported_phase(rows):
+    phase = ''
+    for row in rows:
+        if row.get('role') == 'you':
+            phase = ''
+        elif row.get('role') == 'claude':
+            for match in _PHASE.finditer(row.get('text', '')):
+                phase = match[1].lower()
+    return phase

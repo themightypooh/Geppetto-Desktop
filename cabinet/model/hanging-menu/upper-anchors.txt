@@ -1,0 +1,6 @@
+echo Upper anchors: fixed plates and perpendicular rings receive the top chain links and carry their load into the nameplate.
+add Blob name=UpperAnchors voxel=0.013 blend=0.015 shapes="box -2.6,-0.205,4.79 0.35,0.13,0.32 r=0.04 mat=1; cylinder -2.6,-0.42,4.53 -2.6,-0.205,4.7 0.06 mat=1; torus -2.6,-0.42,4.53 0.17 0.05 rot=90,0,0 mat=1; box 2.6,-0.205,4.79 0.35,0.13,0.32 r=0.04 mat=1; cylinder 2.6,-0.42,4.53 2.6,-0.205,4.7 0.06 mat=1; torus 2.6,-0.42,4.53 0.17 0.05 rot=90,0,0 mat=1"
+echo Upper rivets pass through the mounting plates and the nameplate substrate rather than leaving a floating ring.
+add Blob name=UpperRivets voxel=0.014 blend=0.01 shapes="cylinder -2.6,-0.34,4.79 -2.6,0.18,4.79 0.055 mat=2; sphere -2.6,-0.34,4.79 0.08 mat=2; cylinder 2.6,-0.34,4.79 2.6,0.18,4.79 0.055 mat=2; sphere 2.6,-0.34,4.79 0.08 mat=2"
+turnaround out shade=material size=512 views=front,quarter,side,back name=hanging_menu_full_hardware
+save hanging_menu.effigy

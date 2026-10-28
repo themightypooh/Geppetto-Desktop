@@ -27,6 +27,11 @@ namespace Effigy;
 /// lowest. The largest scale that still fits is found by bisection, unless
 /// <see cref="Options.KeepScale"/> asks for the islands' present size - which is what texel
 /// density needs: after <see cref="UVDensity.Set"/>, packing must place the islands, not resize them.
+/// STACKING. With <see cref="Options.StackSymmetric"/>, congruent islands share one packed box
+/// (RizomUV-style symmetric stacking): the packer packs one representative per congruence class
+/// and rewrites the other members onto its box, so symmetric parts use one texture region.
+/// A stacked mirrored island reads the representative's region with flipped winding - inherent
+/// to sharing one region between mirror parts, and why stacking is opt-in, not default.
 /// </summary>
 public static class UVPack
 {
@@ -48,6 +53,28 @@ public static class UVPack
 		/// <summary>Place the islands at their present size instead of scaling them to fill the square.</summary>
 		public bool KeepScale;
 
+		/// <summary>Exact-shape packing (opt-in): place islands by their rasterised triangles
+		/// instead of their bounding boxes, so concave and diagonal islands stop paying for
+		/// their whole box. Slower than the box packer; use it for final bakes where
+		/// coverage matters more than seconds. Falls back to the box packer only when the
+		/// caller says so — <see cref="Pack"/> returns Fits=false rather than silently
+		/// substituting a different layout.</summary>
+		public bool Exact;
+
+		/// <summary>Stack congruent islands onto one packed box (RizomUV-style symmetric
+		/// stacking): islands whose UV point sets match under rotation and/or mirror share
+		/// one packed box, so symmetric parts (left/right limbs, duplicated panels) use one
+		/// region of texture instead of two. Off by default: existing callers pack exactly
+		/// as before. A stacked mirrored island reads the representative's region with
+		/// flipped winding - inherent to sharing one region between mirror parts, and the
+		/// reason this is opt-in rather than default.</summary>
+		public bool StackSymmetric;
+
+		/// <summary>Point-set match tolerance for stacking, in units of the island's
+		/// largest side. Two islands stack only when their centred point sets match under
+		/// some quarter-turn and/or mirror within this tolerance, with matching UV areas.</summary>
+		public float StackTolerance = 1e-3f;
+
 		/// <summary>Texel density PackAtlas normalises every mesh to, in pixels per world
 		/// unit at <see cref="TextureSize"/>. Zero (the default) means: use the median of the
 		/// meshes' own measured densities, so no mesh is arbitrarily resized and no caller
@@ -64,6 +91,12 @@ public static class UVPack
 		public bool Fits;
 
 		public int Islands;
+
+		/// <summary>Islands stacked onto a representative's box (0 unless
+		/// <see cref="Options.StackSymmetric"/>). These islands occupy no box of their own.
+		/// Set whenever stacking runs, even if the pack then does not fit (nothing is
+		/// written in that case).</summary>
+		public int Stacked;
 
 		/// <summary>The margin in UV units: pixels over the texture size.</summary>
 		public float Margin;
@@ -91,11 +124,20 @@ public static class UVPack
 		public Vec2 Size;         // of the rotated island, at scale 1
 		public Vec2 At;           // where the box's corner lands, after scaling
 		public bool Turned;       // a further quarter turn by the packer
+		public Vec2 Centroid;     // mean of the island's local (rotated, min-subtracted) points
+		public List<Vec2> Centred = new(); // local points minus Centroid, for congruence matching
+		public float MaxDim = 1f; // max(Size.x, Size.y), the match normaliser
+		public float UvArea;      // island UV area at box scale (density-scaled for PackAtlas)
+		public int StackOn = -1;  // representative box index when stacked, else -1
+		public int StackRot;      // quarter-turns mapping this island's centred frame onto the rep's
+		public bool StackMirror;  // mirror (x-flip) in that same mapping
 	}
 
 	/// <summary>Pack every island of <paramref name="mesh"/>. Writes nothing when they do not fit.</summary>
 	public static Result Pack( PolyMesh mesh, Options options = null, UVIslands.Layout layout = null )
 	{
+		if ( options is not null && options.Exact )
+			return PackExact( mesh, options, layout );
 		if ( mesh is null )
 			throw new ArgumentNullException( nameof( mesh ) );
 
@@ -108,6 +150,8 @@ public static class UVPack
 		var margin = options.MarginPixels / options.TextureSize;
 		if ( margin >= 0.5f )
 			throw new InvalidOperationException( $"A {options.MarginPixels:0.#} px margin is half of a {options.TextureSize} px texture or more, which leaves no room for any island." );
+		if ( options.StackSymmetric && ( options.StackTolerance <= 0f || !float.IsFinite( options.StackTolerance ) ) )
+			throw new InvalidOperationException( "The stacking tolerance has to be above zero." );
 
 		layout ??= UVIslands.Find( mesh );
 		var result = new Result { Islands = layout.Count, Margin = margin, Scale = 1f, MarginPixels = options.MarginPixels, TextureSize = options.TextureSize };
@@ -123,44 +167,53 @@ public static class UVPack
 			var points = Points( mesh, layout.Islands[i] );
 			var angle = options.Rotate ? TightestAngle( points ) : 0f;
 			var (min, max) = RotatedBounds( points, angle );
-			boxes.Add( new Box { Island = i, Angle = angle, Min = min, Size = max - min } );
+			var box = new Box { Island = i, Angle = angle, Min = min, Size = max - min };
+			FillMatch( box, points, angle, min, mesh, layout.Islands[i], 1f );
+			boxes.Add( box );
 		}
 
+		var packBoxes = boxes;
+		if ( options.StackSymmetric )
+		{
+			GroupStacks( boxes, options.StackTolerance );
+			packBoxes = boxes.Where( b => b.StackOn < 0 ).ToList();
+			result.Stacked = boxes.Count - packBoxes.Count;
+		}
 		float scale;
 		if ( options.KeepScale )
 		{
 			scale = 1f;
-			if ( !TryPack( boxes, scale, margin, options.QuarterTurns, commit: true ) )
+			if ( !TryPack( packBoxes, scale, margin, options.QuarterTurns, commit: true ) )
 				return result;
 		}
 		else
 		{
-			var largest = boxes.Max( b => MathF.Max( b.Size.x, b.Size.y ) );
+			var largest = packBoxes.Max( b => MathF.Max( b.Size.x, b.Size.y ) );
 			if ( largest <= 1e-12f )
 				return result;
 
 			var low = 0f;
 			var high = 1f / largest;
-			while ( TryPack( boxes, high, margin, options.QuarterTurns, commit: false ) && high < 1e8f )
+			while ( TryPack( packBoxes, high, margin, options.QuarterTurns, commit: false ) && high < 1e8f )
 				high *= 2f;
 
 			for ( var i = 0; i < 40; i++ )
 			{
 				var mid = (low + high) * 0.5f;
-				if ( TryPack( boxes, mid, margin, options.QuarterTurns, commit: false ) )
+				if ( TryPack( packBoxes, mid, margin, options.QuarterTurns, commit: false ) )
 					low = mid;
 				else
 					high = mid;
 			}
 
 			scale = low;
-			if ( scale <= 0f || !TryPack( boxes, scale, margin, options.QuarterTurns, commit: true ) )
+			if ( scale <= 0f || !TryPack( packBoxes, scale, margin, options.QuarterTurns, commit: true ) )
 				return result;
 		}
 
 		// Write: rotate by the island's angle, drop its rotated bounds to the origin, scale, turn
 		// a quarter if the packer stood it up (counter-clockwise, which keeps the winding), place.
-		foreach ( var box in boxes )
+		foreach ( var box in packBoxes )
 		{
 			var cos = MathF.Cos( box.Angle );
 			var sin = MathF.Sin( box.Angle );
@@ -180,6 +233,29 @@ public static class UVPack
 			}
 		}
 
+		// Stacked members: each corner is mapped onto its representative's packed box
+		// through the congruence transform found by GroupStacks, so the member island
+		// ends up occupying exactly the representative's region.
+		foreach ( var box in boxes )
+		{
+			if ( box.StackOn < 0 )
+				continue;
+			var rep = boxes[box.StackOn];
+			var cos = MathF.Cos( box.Angle );
+			var sin = MathF.Sin( box.Angle );
+			foreach ( var f in layout.Islands[box.Island] )
+			{
+				var uvs = mesh.Faces[f].UVs;
+				for ( var c = 0; c < uvs.Length; c++ )
+				{
+					var p = uvs[c];
+					var r = new Vec2( p.x * cos - p.y * sin, p.x * sin + p.y * cos );
+					var centred = (r - box.Min) - box.Centroid;
+					var mapped = TransformCentred( centred, box.StackRot, box.StackMirror ) * (rep.MaxDim / box.MaxDim) + rep.Centroid;
+					uvs[c] = RepFinal( rep, mapped, scale );
+				}
+			}
+		}
 		result.Fits = true;
 		result.Scale = scale;
 		result.Coverage = Coverage( mesh );
@@ -197,6 +273,157 @@ public static class UVPack
 	/// simulation runs on copies of the UV points, and the meshes are only touched after
 	/// a fitting scale is found. Returns the pack scale (1 with
 	/// <see cref="Options.KeepScale"/>) and the total coverage across all meshes.</summary>
+	/// <summary>
+	/// Exact-shape packing: rasterise each island's triangles once per scale onto a
+	/// 256-cell grid (with the pixel margin dilated around every island) and place
+	/// largest-first at the first grid position where none of its cells collide.
+	/// Tries uniform scales from 1 down to 0.1 (KeepScale tries 1 only); writes
+	/// nothing when nothing fits. Coverage is the islands' true UV area, not their
+	/// boxes, so it is directly comparable with the box packer's coverage.
+	/// </summary>
+	public static Result PackExact( PolyMesh mesh, Options options = null, UVIslands.Layout layout = null )
+	{
+		options ??= new Options();
+		layout ??= UVIslands.Find( mesh );
+		var result = new Result { Islands = layout.Count, Margin = options.MarginPixels / Math.Max( 1, options.TextureSize ), MarginPixels = options.MarginPixels, TextureSize = options.TextureSize };
+		if ( layout.Count == 0 || mesh.FaceCount > 20000 )
+			return result;
+
+		const int grid = 256;
+		var islands = new List<(List<(int Face, Vec2[] Local)> Tris, float Area, float W, float H)>();
+		foreach ( var faces in layout.Islands )
+		{
+			var points = new List<Vec2>();
+			foreach ( var f in faces )
+				foreach ( var uv in mesh.Faces[f].UVs ) points.Add( uv );
+			var angle = TightestAngle( points );
+			var cos = MathF.Cos( angle ); var sin = MathF.Sin( angle );
+			Vec2 Rot( Vec2 v ) => new( v.x * cos - v.y * sin, v.x * sin + v.y * cos );
+			var tris = new List<(int, Vec2[])>();
+			var area = 0f;
+			foreach ( var f in faces )
+			{
+				var face = mesh.Faces[f];
+				var local = new Vec2[face.Count];
+				for ( var i = 0; i < face.Count; i++ ) local[i] = Rot( face.UVs[i] );
+				for ( var i = 1; i + 1 < face.Count; i++ )
+					area += MathF.Abs( Vec2.Cross( local[i] - local[0], local[i + 1] - local[0] ) ) * 0.5f;
+				tris.Add( (f, local) );
+			}
+			var min = new Vec2( float.MaxValue, float.MaxValue );
+			var max = new Vec2( float.MinValue, float.MinValue );
+			foreach ( var (_, local) in tris )
+				foreach ( var v in local )
+				{
+					min = new Vec2( MathF.Min( min.x, v.x ), MathF.Min( min.y, v.y ) );
+					max = new Vec2( MathF.Max( max.x, v.x ), MathF.Max( max.y, v.y ) );
+				}
+			for ( var ti = 0; ti < tris.Count; ti++ )
+			{
+				var local = tris[ti].Item2;
+				for ( var i = 0; i < local.Length; i++ ) local[i] = local[i] - min;
+			}
+			islands.Add( (tris, area, max.x - min.x, max.y - min.y) );
+		}
+		var order = islands.Select( (v, i) => (i, v.Area) ).OrderByDescending( e => e.Area ).Select( e => e.i ).ToList();
+
+		var marginCells = Math.Max( 1, (int)Math.Ceiling( options.MarginPixels / options.TextureSize * grid ) );
+		var scales = options.KeepScale ? new[] { 1f } : new[] { 1f, 0.9f, 0.8f, 0.7f, 0.6f, 0.5f, 0.4f, 0.3f, 0.2f, 0.1f };
+		foreach ( var scale in scales )
+		{
+			var occupied = new bool[grid, grid];
+			var placements = new Dictionary<int, (int Gx, int Gy)>();
+			var fits = true;
+			foreach ( var idx in order )
+			{
+				var isl = islands[idx];
+				var cells = RasterCells( isl, scale, marginCells );
+				var w = cells.Count == 0 ? 0 : cells.Max( c => c.X ) + 1;
+				var h = cells.Count == 0 ? 0 : cells.Max( c => c.Y ) + 1;
+				if ( w > grid || h > grid ) { fits = false; break; }
+				var placed = false;
+				for ( var gy = 0; gy + h <= grid && !placed; gy++ )
+				{
+					for ( var gx = 0; gx + w <= grid && !placed; gx++ )
+					{
+						var free = true;
+						foreach ( var (cx, cy) in cells )
+							if ( occupied[gx + cx, gy + cy] ) { free = false; break; }
+						if ( !free ) continue;
+						foreach ( var (cx, cy) in cells ) occupied[gx + cx, gy + cy] = true;
+						placements[idx] = (gx, gy);
+						placed = true;
+					}
+				}
+				if ( !placed ) { fits = false; break; }
+			}
+			if ( !fits ) continue;
+
+			var coverage = 0f;
+			foreach ( var (idx, (gx, gy)) in placements )
+			{
+				var isl = islands[idx];
+				var ox = gx / (float)grid; var oy = gy / (float)grid;
+				foreach ( var (f, local) in isl.Tris )
+				{
+					var face = mesh.Faces[f];
+					for ( var i = 0; i < face.Count; i++ )
+						face.UVs[i] = new Vec2( ox + local[i].x * scale, oy + local[i].y * scale );
+				}
+				coverage += isl.Area * scale * scale;
+			}
+			result.Fits = true; result.Scale = scale; result.Coverage = coverage;
+			return result;
+		}
+		return result;
+
+		static List<(int X, int Y)> RasterCells( (List<(int Face, Vec2[] Local)> Tris, float Area, float W, float H) isl, float scale, int dilate )
+		{
+			var set = new HashSet<(int, int)>();
+			foreach ( var (_, local) in isl.Tris )
+			{
+				for ( var i = 1; i + 1 < local.Length; i++ )
+				{
+					var a = local[0] * scale * grid; var b = local[i] * scale * grid; var c = local[i + 1] * scale * grid;
+					var minX = (int)Math.Floor( Math.Min( a.x, Math.Min( b.x, c.x ) ) ) - dilate;
+					var maxX = (int)Math.Ceiling( Math.Max( a.x, Math.Max( b.x, c.x ) ) ) + dilate;
+					var minY = (int)Math.Floor( Math.Min( a.y, Math.Min( b.y, c.y ) ) ) - dilate;
+					var maxY = (int)Math.Ceiling( Math.Max( a.y, Math.Max( b.y, c.y ) ) ) + dilate;
+					for ( var y = minY; y <= maxY; y++ )
+					{
+						for ( var x = minX; x <= maxX; x++ )
+						{
+							var p = new Vec2( x + 0.5f, y + 0.5f );
+							if ( Inside( p, a, b, c ) ) { set.Add( (x, y) ); continue; }
+							if ( dilate > 0 )
+							{
+								if ( PointSegDist( p, a, b ) <= dilate || PointSegDist( p, b, c ) <= dilate || PointSegDist( p, c, a ) <= dilate )
+									set.Add( (x, y) );
+							}
+						}
+					}
+				}
+			}
+			var cells = set.ToList();
+			var shiftX = cells.Count == 0 ? 0 : -cells.Min( c => c.Item1 );
+			var shiftY = cells.Count == 0 ? 0 : -cells.Min( c => c.Item2 );
+			if ( shiftX > 0 || shiftY > 0 )
+				cells = cells.Select( c => (c.Item1 + shiftX, c.Item2 + shiftY) ).ToList();
+			return cells;
+		}
+		static bool Inside( Vec2 p, Vec2 a, Vec2 b, Vec2 c )
+		{
+			var d1 = Vec2.Cross( b - a, p - a ); var d2 = Vec2.Cross( c - b, p - b ); var d3 = Vec2.Cross( a - c, p - c );
+			var hasNeg = d1 < 0 || d2 < 0 || d3 < 0; var hasPos = d1 > 0 || d2 > 0 || d3 > 0;
+			return !(hasNeg && hasPos);
+		}
+		static float PointSegDist( Vec2 p, Vec2 a, Vec2 b )
+		{
+			var ab = b - a; var t = ab.LengthSquared < 1e-12f ? 0f : Math.Clamp( Vec2.Dot( p - a, ab ) / ab.LengthSquared, 0f, 1f );
+			return (p - (a + ab * t)).Length;
+		}
+	}
+
 	public static Result PackAtlas( IReadOnlyList<PolyMesh> meshes, Options options = null )
 	{
 		if ( meshes is null )
@@ -209,6 +436,8 @@ public static class UVPack
 		var margin = options.MarginPixels / options.TextureSize;
 		if ( margin >= 0.5f )
 			throw new InvalidOperationException( $"A {options.MarginPixels:0.#} px margin is half of a {options.TextureSize} px texture or more, which leaves no room for any island." );
+		if ( options.StackSymmetric && ( options.StackTolerance <= 0f || !float.IsFinite( options.StackTolerance ) ) )
+			throw new InvalidOperationException( "The stacking tolerance has to be above zero." );
 
 		var layouts = new List<UVIslands.Layout>();
 		var total = 0;
@@ -265,36 +494,45 @@ public static class UVPack
 				var points = Points( mesh, islandFaces ).Select( p => centre + (p - centre) * k ).ToList();
 				var angle = options.Rotate ? TightestAngle( points ) : 0f;
 				var (min, max) = RotatedBounds( points, angle );
-				boxes.Add( new Box { Mesh = mi, Island = i, Centre = centre, DensityScale = k, Angle = angle, Min = min, Size = max - min } );
+				var box = new Box { Mesh = mi, Island = i, Centre = centre, DensityScale = k, Angle = angle, Min = min, Size = max - min };
+				FillMatch( box, points, angle, min, mesh, islandFaces, k * k );
+				boxes.Add( box );
 			}
 		}
 
+		var packBoxes = boxes;
+		if ( options.StackSymmetric )
+		{
+			GroupStacks( boxes, options.StackTolerance );
+			packBoxes = boxes.Where( b => b.StackOn < 0 ).ToList();
+			result.Stacked = boxes.Count - packBoxes.Count;
+		}
 		float scale;
 		if ( options.KeepScale )
 		{
 			scale = 1f;
-			if ( !TryPack( boxes, scale, margin, options.QuarterTurns, commit: true ) )
+			if ( !TryPack( packBoxes, scale, margin, options.QuarterTurns, commit: true ) )
 				return result;
 		}
 		else
 		{
-			var largest = boxes.Max( b => MathF.Max( b.Size.x, b.Size.y ) );
+			var largest = packBoxes.Max( b => MathF.Max( b.Size.x, b.Size.y ) );
 			if ( largest <= 1e-12f )
 				return result;
 			var low = 0f;
 			var high = 1f / largest;
-			while ( TryPack( boxes, high, margin, options.QuarterTurns, commit: false ) && high < 1e8f )
+			while ( TryPack( packBoxes, high, margin, options.QuarterTurns, commit: false ) && high < 1e8f )
 				high *= 2f;
 			for ( var i = 0; i < 40; i++ )
 			{
 				var mid = (low + high) * 0.5f;
-				if ( TryPack( boxes, mid, margin, options.QuarterTurns, commit: false ) )
+				if ( TryPack( packBoxes, mid, margin, options.QuarterTurns, commit: false ) )
 					low = mid;
 				else
 					high = mid;
 			}
 			scale = low;
-			if ( scale <= 0f || !TryPack( boxes, scale, margin, options.QuarterTurns, commit: true ) )
+			if ( scale <= 0f || !TryPack( packBoxes, scale, margin, options.QuarterTurns, commit: true ) )
 				return result;
 		}
 
@@ -302,7 +540,7 @@ public static class UVPack
 		// corner (density-scale about the island centre, then the packer's rotate /
 		// scale / quarter-turn / place). Calling UVDensity.Set here as well would scale
 		// twice, so it is deliberately NOT called.
-		foreach ( var box in boxes )
+		foreach ( var box in packBoxes )
 		{
 			var mesh = meshes[box.Mesh];
 			var cos = MathF.Cos( box.Angle );
@@ -327,6 +565,31 @@ public static class UVPack
 			}
 		}
 
+		// Stacked members: same mapping as Pack, but the member corner first goes
+		// through the atlas density scale about its island centre, exactly like the
+		// representative write loop above.
+		foreach ( var box in boxes )
+		{
+			if ( box.StackOn < 0 )
+				continue;
+			var rep = boxes[box.StackOn];
+			var mesh = meshes[box.Mesh];
+			var cos = MathF.Cos( box.Angle );
+			var sin = MathF.Sin( box.Angle );
+			foreach ( var f in layouts[box.Mesh].Islands[box.Island] )
+			{
+				var uvs = mesh.Faces[f].UVs;
+				for ( var c = 0; c < uvs.Length; c++ )
+				{
+					var p = uvs[c];
+					var scaled = box.Centre + (p - box.Centre) * box.DensityScale;
+					var rs = new Vec2( scaled.x * cos - scaled.y * sin, scaled.x * sin + scaled.y * cos );
+					var centred = (rs - box.Min) - box.Centroid;
+					var mapped = TransformCentred( centred, box.StackRot, box.StackMirror ) * (rep.MaxDim / box.MaxDim) + rep.Centroid;
+					uvs[c] = RepFinal( rep, mapped, scale );
+				}
+			}
+		}
 		result.Fits = true;
 		result.Scale = scale;
 		var coverage = 0.0;
@@ -336,7 +599,157 @@ public static class UVPack
 		return result;
 	}
 
-	/// <summary>Skyline bottom-left at one scale. Boxes are inflated by the margin, and the bin is
+		/// <summary>Fill a box's congruence-matching data: its local points (rotated by the
+	/// box angle, bounds-min subtracted), their centroid, the centred set, and its UV
+	/// area at box scale (raw island UV area times <paramref name="areaScale"/>, which
+	/// is the squared density scale for PackAtlas and 1 for Pack).</summary>
+	static void FillMatch( Box box, List<Vec2> points, float angle, Vec2 min, PolyMesh mesh, List<int> islandFaces, float areaScale )
+	{
+		var cos = MathF.Cos( angle );
+		var sin = MathF.Sin( angle );
+		var local = new List<Vec2>( points.Count );
+		foreach ( var p in points )
+			local.Add( new Vec2( p.x * cos - p.y * sin, p.x * sin + p.y * cos ) - min );
+		var sum = Vec2.Zero;
+		foreach ( var r in local )
+			sum += r;
+		var centroid = local.Count > 0 ? sum / local.Count : Vec2.Zero;
+		box.Centroid = centroid;
+		foreach ( var r in local )
+			box.Centred.Add( r - centroid );
+		box.MaxDim = MathF.Max( box.Size.x, box.Size.y );
+		box.UvArea = IslandUvArea( mesh, islandFaces ) * areaScale;
+	}
+
+	/// <summary>UV area of one island's faces, fan-triangulated (the same formula as
+	/// <see cref="Coverage"/>).</summary>
+	static float IslandUvArea( PolyMesh mesh, List<int> faces )
+	{
+		var area = 0.0;
+		foreach ( var f in faces )
+		{
+			var uvs = mesh.Faces[f].UVs;
+			for ( var i = 1; i + 1 < uvs.Length; i++ )
+				area += 0.5 * Math.Abs( Vec2.Cross( uvs[i] - uvs[0], uvs[i + 1] - uvs[0] ) );
+		}
+		return (float)area;
+	}
+
+	/// <summary>Group congruent boxes: each box either becomes a representative or stacks
+	/// onto an earlier representative whose centred point set it matches under some
+	/// quarter-turn and/or mirror, within tolerance (normalised by largest side), with
+	/// matching face-corner counts and UV areas. Degenerate boxes never stack and never
+	/// accept a stack: they pack normally.</summary>
+	static void GroupStacks( List<Box> boxes, float tol )
+	{
+		var reps = new List<int>();
+		for ( var i = 0; i < boxes.Count; i++ )
+		{
+			var box = boxes[i];
+			if ( box.MaxDim <= 1e-9f || box.UvArea <= 0f || box.Centred.Count == 0 )
+			{
+				reps.Add( i );
+				continue;
+			}
+			var matched = false;
+			foreach ( var r in reps )
+			{
+				var rep = boxes[r];
+				if ( rep.MaxDim <= 1e-9f || rep.UvArea <= 0f || rep.Centred.Count == 0 )
+					continue;
+				if ( MatchStack( rep, box, tol, out var rot, out var mirror ) )
+				{
+					box.StackOn = r;
+					box.StackRot = rot;
+					box.StackMirror = mirror;
+					matched = true;
+					break;
+				}
+			}
+			if ( !matched )
+				reps.Add( i );
+		}
+	}
+
+	/// <summary>True when <paramref name="box"/>'s centred point set matches the
+	/// representative's under some quarter-turn and/or mirror. Guards first: equal
+	/// corner counts, equal-or-swapped box sizes, and UV areas within tolerance; the
+	/// point-set test is the real verdict.</summary>
+	static bool MatchStack( Box rep, Box box, float tol, out int rot, out bool mirror )
+	{
+		rot = 0;
+		mirror = false;
+		if ( box.Centred.Count != rep.Centred.Count )
+			return false;
+		var tolSize = tol * MathF.Max( rep.MaxDim, box.MaxDim );
+		var direct = MathF.Abs( box.Size.x - rep.Size.x ) <= tolSize && MathF.Abs( box.Size.y - rep.Size.y ) <= tolSize;
+		var swapped = MathF.Abs( box.Size.x - rep.Size.y ) <= tolSize && MathF.Abs( box.Size.y - rep.Size.x ) <= tolSize;
+		if ( !direct && !swapped )
+			return false;
+		if ( MathF.Min( box.UvArea, rep.UvArea ) / MathF.Max( box.UvArea, rep.UvArea ) < 1f - MathF.Max( tol * 10f, 1e-3f ) )
+			return false;
+		for ( var m = 0; m < 2; m++ )
+		{
+			for ( var k = 0; k < 4; k++ )
+			{
+				var ok = true;
+				foreach ( var c in box.Centred )
+				{
+					var t = TransformCentred( c / box.MaxDim, k, m == 1 );
+					var found = false;
+					foreach ( var r in rep.Centred )
+					{
+						if ( (t - r / rep.MaxDim).Length <= tol )
+						{
+							found = true;
+							break;
+						}
+					}
+					if ( !found )
+					{
+						ok = false;
+						break;
+					}
+				}
+				if ( ok )
+				{
+					rot = k;
+					mirror = m == 1;
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	/// <summary>One dihedral transform of a centred point: mirror (x-flip) first, then
+	/// a quarter-turn. The matcher and the stacked writer share this helper, so a match
+	/// found by one is exactly the transform applied by the other.</summary>
+	static Vec2 TransformCentred( Vec2 c, int rot, bool mirror )
+	{
+		if ( mirror )
+			c = new Vec2( -c.x, c.y );
+		return rot switch
+		{
+			0 => c,
+			1 => new Vec2( -c.y, c.x ),
+			2 => new Vec2( -c.x, -c.y ),
+			_ => new Vec2( c.y, -c.x ),
+		};
+	}
+
+	/// <summary>Final packed UV of a representative-local point: the same math as the
+	/// representative write loops (scale, then the packer's counter-clockwise quarter
+	/// turn if it stood the box up, then place).</summary>
+	static Vec2 RepFinal( Box rep, Vec2 local, float scale )
+	{
+		var v = local * scale;
+		if ( rep.Turned )
+			v = new Vec2( -v.y, v.x ) + new Vec2( rep.Size.y * scale, 0f );
+		return rep.At + v;
+	}
+
+/// <summary>Skyline bottom-left at one scale. Boxes are inflated by the margin, and the bin is
 	/// the square less half a margin all round, so inflated boxes that do not overlap leave a whole
 	/// margin between the islands and half of one at the edge.</summary>
 	static bool TryPack( List<Box> boxes, float scale, float margin, bool quarterTurns, bool commit )

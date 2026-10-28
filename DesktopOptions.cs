@@ -9,6 +9,10 @@ public sealed class DesktopOptions
 	public string Clip, Screenshot;
 	public int Frames, Width = 1600, Height = 900;
 	public bool Stats, Animate, ListBones, Iso, NoVsync, Help, Headless, Turntable, Wireframe, Serve;
+	/// <summary>--empty: serve an empty scene — no model, just the grid floor. Used for the
+	/// cabinet's default empty pane, so it never shows a black void. No .effigy is invented
+	/// for it: a feature-less .effigy fails with "document produced no visible mesh".</summary>
+	public bool Empty;
 	public float Exposure = 1f;
 	public ViewSettings View = new();
 	public AntiAliasingMode AntiAliasing;
@@ -133,6 +137,7 @@ public sealed class DesktopOptions
 				case "--stats": result.Stats = true; break;
 				case "--headless": result.Headless = true; break;
 				case "--serve": result.Serve = true; break;
+				case "--empty": result.Empty = true; break;
 				case "--fog":
 					if ( !float.TryParse( Value(), NumberStyles.Float, CultureInfo.InvariantCulture, out float fog ) || !float.IsFinite( fog ) || fog < 0 || fog > 64 )
 						throw new ArgumentException( "--fog must be an optical depth in [0,64]." );

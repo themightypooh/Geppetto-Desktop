@@ -1,0 +1,205 @@
+effigy 1
+rollback 2147483647
+materiallook 0 color=#e8b417 rough=0.45 metal=0.1
+materiallook 1 color=#22242a rough=0.6 metal=0.1
+materiallook 2 color=#c22a22 rough=0.5 metal=0.1
+materiallook 3 color=#aeb5b9 rough=0.27 metal=0.9
+materiallook 4 color=#1d3a3a rough=0.3 metal=0.2
+materiallook 5 color=#ffb020 rough=0.3 metal=0.1
+materiallook 6 color=#3a3d41 rough=0.6 metal=0.1
+materiallook 7 color=#e8e8e8 rough=0.5 metal=0.1
+feature BlobFeature
+	id fb4c2ba8
+	name Body
+	suppressed 0
+	visible 1
+	param Blend 0.01
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 0,0,1.4 1.7,0.65,2.8 r=0.15 mat=0; box 0,0,2.85 1.7,0.65,0.25 r=0.08 mat=1; box 0,0,1.4 1.74,0.69,0.08 r=0.03 mat=6
+	param Smooth 2
+	param Voxel 0.02
+end
+feature BlobFeature
+	id 6c34bf3a
+	name Screen
+	suppressed 0
+	visible 1
+	param Blend 0.01
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 0,-0.36,2.45 0.95,0.05,0.5 r=0.04 mat=4; paint box -0.25,-0.39,2.5 0.3,0.02,0.08 mat=5; paint box 0.15,-0.39,2.5 0.3,0.02,0.08 mat=7; paint box 0,-0.39,2.3 0.7,0.02,0.06 mat=7
+	param Smooth 2
+	param Voxel 0.02
+end
+feature BlobFeature
+	id 73615162
+	name FrontButtons
+	suppressed 0
+	visible 1
+	param Blend 0.01
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes sphere 0.55,-0.37,2.12 0.07 mat=5; cylinder 0.55,-0.39,2.12 0.55,-0.33,2.12 0.1 r=0.02 mat=1; cylinder -0.3,-0.39,2.12 -0.3,-0.33,2.12 0.09 r=0.02 mat=1; cylinder 0,-0.39,2.12 0,-0.33,2.12 0.09 r=0.02 mat=2
+	param Smooth 2
+	param Voxel 0.02
+end
+feature BlobFeature
+	id 034b46ba
+	name Grille
+	suppressed 0
+	visible 1
+	param Blend 0.01
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes cylinder -0.45,-0.4,1.9 -0.45,-0.32,1.9 0.06 mat=1; cylinder -0.22,-0.4,1.9 -0.22,-0.32,1.9 0.06 mat=1; cylinder 0,-0.4,1.9 0,-0.32,1.9 0.06 mat=1; cylinder 0.22,-0.4,1.9 0.22,-0.32,1.9 0.06 mat=1; cylinder 0.45,-0.4,1.9 0.45,-0.32,1.9 0.06 mat=1; cylinder -0.45,-0.4,1.65 -0.45,-0.32,1.65 0.06 mat=1; cylinder -0.22,-0.4,1.65 -0.22,-0.32,1.65 0.06 mat=1; cylinder 0,-0.4,1.65 0,-0.32,1.65 0.06 mat=1; cylinder 0.22,-0.4,1.65 0.22,-0.32,1.65 0.06 mat=1; cylinder 0.45,-0.4,1.65 0.45,-0.32,1.65 0.06 mat=1; cylinder -0.45,-0.4,1.4 -0.45,-0.32,1.4 0.06 mat=1; cylinder -0.22,-0.4,1.4 -0.22,-0.32,1.4 0.06 mat=1; cylinder 0,-0.4,1.4 0,-0.32,1.4 0.06 mat=1; cylinder 0.22,-0.4,1.4 0.22,-0.32,1.4 0.06 mat=1; cylinder 0.45,-0.4,1.4 0.45,-0.32,1.4 0.06 mat=1; cylinder -0.33,-0.4,1.15 -0.33,-0.32,1.15 0.06 mat=1; cylinder 0,-0.4,1.15 0,-0.32,1.15 0.06 mat=1; cylinder 0.33,-0.4,1.15 0.33,-0.32,1.15 0.06 mat=1
+	param Smooth 2
+	param Voxel 0.02
+end
+feature BlobFeature
+	id fb87b87f
+	name Mic
+	suppressed 0
+	visible 1
+	param Blend 0.01
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes cylinder -0.2,-0.4,0.92 -0.2,-0.32,0.92 0.04 mat=1; cylinder 0,-0.4,0.92 0,-0.32,0.92 0.04 mat=1; cylinder 0.2,-0.4,0.92 0.2,-0.32,0.92 0.04 mat=1
+	param Smooth 2
+	param Voxel 0.02
+end
+feature BlobFeature
+	id e209ebbd
+	name Call
+	suppressed 0
+	visible 1
+	param Blend 0.01
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 0,-0.36,0.55 0.6,0.08,0.35 r=0.05 mat=2
+	param Smooth 2
+	param Voxel 0.02
+end
+feature BlobFeature
+	id 062665b6
+	name Screws
+	suppressed 0
+	visible 1
+	param Blend 0.01
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes cylinder -0.7,-0.39,0.25 -0.7,-0.33,0.25 0.06 r=0.02 mat=3; cylinder 0.7,-0.39,0.25 0.7,-0.33,0.25 0.06 r=0.02 mat=3; cylinder -0.7,-0.39,2.62 -0.7,-0.33,2.62 0.06 r=0.02 mat=3; cylinder 0.7,-0.39,2.62 0.7,-0.33,2.62 0.06 r=0.02 mat=3
+	param Smooth 2
+	param Voxel 0.02
+end
+feature BlobFeature
+	id c5d65a47
+	name PTT
+	suppressed 0
+	visible 1
+	param Blend 0.01
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 0.9,0,1.15 0.08,0.55,1.1 r=0.06 mat=2; box 0.95,0,0.85 0.04,0.55,0.08 mat=1; box 0.95,0,1.15 0.04,0.55,0.08 mat=1; box 0.95,0,1.45 0.04,0.55,0.08 mat=1
+	param Smooth 2
+	param Voxel 0.02
+end
+feature BlobFeature
+	id 343c4e27
+	name Grips
+	suppressed 0
+	visible 1
+	param Blend 0.01
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 0.88,0,1.4 0.06,0.5,1.8 r=0.04 mat=1; box -0.88,0,1.4 0.06,0.5,1.8 r=0.04 mat=1; box 0.92,0,0.8 0.04,0.55,0.08 mat=6; box 0.92,0,1.2 0.04,0.55,0.08 mat=6; box 0.92,0,1.6 0.04,0.55,0.08 mat=6; box 0.92,0,2.0 0.04,0.55,0.08 mat=6; box -0.92,0,0.8 0.04,0.55,0.08 mat=6; box -0.92,0,1.2 0.04,0.55,0.08 mat=6; box -0.92,0,1.6 0.04,0.55,0.08 mat=6; box -0.92,0,2.0 0.04,0.55,0.08 mat=6
+	param Smooth 2
+	param Voxel 0.02
+end
+feature BlobFeature
+	id 3ddea6cf
+	name Accessory
+	suppressed 0
+	visible 1
+	param Blend 0.01
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes cylinder -0.9,0.1,1.9 -0.84,0.1,1.9 0.12 r=0.02 mat=3; cylinder -0.92,0.1,1.9 -0.86,0.1,1.9 0.07 r=0.02 mat=1; box -0.88,-0.1,1.2 0.05,0.3,0.15 mat=1
+	param Smooth 2
+	param Voxel 0.02
+end
+feature BlobFeature
+	id 7dce4f5d
+	name Knobs
+	suppressed 0
+	visible 1
+	param Blend 0.01
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes cylinder -0.5,0,2.95 -0.5,0,3.2 0.22 r=0.03 mat=1; torus -0.5,0,2.98 0.22 0.03 mat=6; box -0.5,0,3.22 0.06,0.3,0.03 mat=7; cylinder 0.05,0,2.95 0.05,0,3.18 0.18 r=0.03 mat=6; torus 0.05,0,2.98 0.18 0.03 mat=1; box 0.05,0,3.2 0.05,0.24,0.03 mat=7
+	param Smooth 2
+	param Voxel 0.02
+end
+feature BlobFeature
+	id 65b3929f
+	name Antenna
+	suppressed 0
+	visible 1
+	param Blend 0.01
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes cylinder 0.62,0,2.95 0.62,0,3.25 0.15 r=0.03 mat=1; cylinder 0.62,0,3.25 0.62,0,4.0 0.07 r=0.02 mat=1; torus 0.62,0,3.6 0.09 0.025 mat=6; torus 0.62,0,3.75 0.09 0.025 mat=6; torus 0.62,0,3.9 0.09 0.025 mat=6; cylinder 0.62,0,4.0 0.62,0,4.7 0.05 r=0.02 mat=1; sphere 0.62,0,4.75 0.11 mat=2
+	param Smooth 2
+	param Voxel 0.02
+end
+feature BlobFeature
+	id bc02ff28
+	name Battery
+	suppressed 0
+	visible 1
+	param Blend 0.01
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 0,0.36,1.25 1.4,0.08,1.9 r=0.08 mat=6; box 0,0.42,2.05 0.4,0.06,0.25 mat=1; sphere -0.5,0.41,0.6 0.06 mat=3; sphere 0.5,0.41,0.6 0.06 mat=3
+	param Smooth 2
+	param Voxel 0.02
+end

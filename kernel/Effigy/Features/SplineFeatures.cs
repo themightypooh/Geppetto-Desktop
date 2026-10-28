@@ -42,10 +42,19 @@ public sealed class SplineFeature : Feature
 	public readonly IntParam Resolution = new( "Points per segment", 8, 1, 64 );
 	public readonly IntParam Material = new( "Material slot", 0, 0, 63 ) { Slider = false };
 
-	public override IReadOnlyList<IParam> Parameters =>
-		new IParam[] { Closed, Smooth, Tube, Profile, Radius, Width, Thickness, Taper, Sides, Twist, Resolution, Material };
+	/// <summary>Per-station radius as "t:×,…" pairs, t in 0..1 along the path by arc length,
+	/// × a multiplier of Radius (1 = the base radius). Empty keeps the old end-taper tube.</summary>
+	public readonly StringParam RadiusProfile = new( "Radius profile (t:×,…)", "" );
 
-	public override IReadOnlyList<IParam> AdvancedParameters => new IParam[] { Facing, Resolution, Material };
+	/// <summary>Frame mode: Parallel transport (default), Fixed up, or Frenet.</summary>
+	public readonly ChoiceParam FrameMode = new( "Frame mode", new[] { "Parallel transport", "Fixed up", "Frenet" } );
+
+	public readonly BoolParam BendGuard = new( "Bend guard", true );
+
+	public override IReadOnlyList<IParam> Parameters =>
+		new IParam[] { Closed, Smooth, Tube, Profile, Radius, Width, Thickness, Taper, Sides, Twist, Resolution, RadiusProfile, FrameMode, Material };
+
+	public override IReadOnlyList<IParam> AdvancedParameters => new IParam[] { Facing, Resolution, BendGuard, Material };
 
 	/// <summary>The curve as this feature would publish it, for the viewport to draw while it is
 	/// being edited without waiting on a rebuild.</summary>
@@ -89,20 +98,138 @@ public sealed class SplineFeature : Feature
 			return;
 		}
 
+		// Bend guard (wave 3): the bend radius at an interior station must exceed the
+		// tube radius / band extent toward the centre of curvature, or the tube folds.
+		if ( BendGuard.Value )
+		{
+			var frames = Spline3.Frames( path, Closed.Value, FrameMode.Index );
+			var totalLen = Spline3.Length( path, Closed.Value );
+			var along = 0f;
+			for ( var i = 0; i < path.Count; i++ )
+			{
+				if ( i > 0 )
+					along += (path[i] - path[i - 1]).Length;
+				if ( Closed.Value )
+				{
+					if ( path.Count < 3 )
+						continue;
+				}
+				else if ( i == 0 || i == path.Count - 1 )
+					continue;
+				var n = path.Count;
+				var prev = path[(i - 1 + n) % n];
+				var next = path[(i + 1) % n];
+				var cur = path[i];
+				var tIn = (cur - prev).LengthSquared < 1e-12f ? new Vec3( 1, 0, 0 ) : (cur - prev).Normal;
+				var tOut = (next - cur).LengthSquared < 1e-12f ? new Vec3( 1, 0, 0 ) : (next - cur).Normal;
+				var theta = MathF.Acos( Math.Clamp( Vec3.Dot( tIn, tOut ), -1f, 1f ) );
+				if ( theta < 1e-4f )
+					continue;
+				var radius = (next - prev).Length / (2f * MathF.Sin( theta ));
+				var centreDir = tOut - tIn;
+				if ( centreDir.LengthSquared < 1e-12f )
+					continue;
+				centreDir = centreDir.Normal;
+				float extent;
+				if ( Profile.Index == 1 )
+				{
+					var f = totalLen > 1e-8f ? along / totalLen : 0f;
+					var hw = (Closed.Value ? Width.Clamped : Width.Clamped + (Width.Clamped * Taper.Clamped - Width.Clamped) * f) * 0.5f;
+					var ht = Thickness.Clamped * 0.5f;
+					// Safe upper bound over any band facing: a ring corner can reach
+					// sqrt(hw^2 + ht^2) from the path in the bend direction.
+					extent = MathF.Sqrt( hw * hw + ht * ht );
+				}
+				else
+				{
+					extent = Radius.Clamped;
+				}
+				if ( extent > 0f && radius <= extent )
+					Fail(
+						$"This spline folds at station {i}: the bend radius is {radius:0.##} but the tube reaches {extent:0.##} toward the centre of the bend.",
+						"On the inside of a bend, tube walls converge; when the bend radius drops below the tube radius, the tube passes through itself.",
+						"Straighten the spline",
+						"Shrink the radius, or turn Bend guard off to build it anyway" );
+			}
+		}
+
 		PolyMesh mesh;
 
 		if ( Profile.Index == 1 )
 		{
 			var width = Width.Clamped;
-			mesh = SplineBand.Build( path, Closed.Value, width, width * Taper.Clamped, Thickness.Clamped, Facing.Value, Twist.Value, Material.Clamped );
+			mesh = SplineBand.Build( path, Closed.Value, width, width * Taper.Clamped, Thickness.Clamped, Facing.Value, Twist.Value, Material.Clamped, frameMode: FrameMode.Index );
 		}
 		else
 		{
 			var radius = Radius.Clamped;
-			mesh = SplineTube.Build( path, Closed.Value, radius, radius * Taper.Clamped, Sides.Clamped, Twist.Value, Material.Clamped );
+			var profile = ParseRadiusProfile( RadiusProfile.Value );
+			if ( profile is null )
+			{
+				mesh = SplineTube.Build( path, Closed.Value, radius, radius * Taper.Clamped, Sides.Clamped, Twist.Value, Material.Clamped, frameMode: FrameMode.Index );
+			}
+			else
+			{
+				var totalLen = Spline3.Length( path, Closed.Value );
+				var along = 0f;
+				var radii = new List<float>( path.Count );
+				for ( var i = 0; i < path.Count; i++ )
+				{
+					if ( i > 0 )
+						along += (path[i] - path[i - 1]).Length;
+					var f = totalLen > 1e-8f ? along / totalLen : 0f;
+					var mult = ProfileAt( profile, f );
+					var taperMult = Closed.Value ? 1f : 1f + (Taper.Clamped - 1f) * f;
+					radii.Add( radius * mult * taperMult );
+				}
+				mesh = SplineTube.BuildWithRadiusProfile( path, Closed.Value, radii, Sides.Clamped, Twist.Value, Material.Clamped, FrameMode.Index );
+			}
 		}
 
 		ctx.Bodies.Add( new Body( ctx.NewBodyId(), Name, mesh ) );
+	}
+
+	/// <summary>Parse "t:×,t:×,…" into sorted (t, multiplier) pairs, or null when empty.
+	/// A bad pair fails with the offending text, the same way Sweep's taper does.</summary>
+	static List<(float T, float Mult)> ParseRadiusProfile( string text )
+	{
+		if ( string.IsNullOrWhiteSpace( text ) )
+			return null;
+		var pairs = new List<(float, float)>();
+		foreach ( var part in text.Split( ',' ) )
+		{
+			var kv = part.Split( ':' );
+			float t = 0f, m = 0f;
+			if ( kv.Length != 2 || !float.TryParse( kv[0].Trim(), out t ) || !float.TryParse( kv[1].Trim(), out m ) )
+				Fail(
+					$"Radius profile '{text}' is not t:mult pairs.",
+					"Each pair is a position along the path (0 at the start, 1 at the end) and a radius multiplier.",
+					"Write it like 0:1,0.5:0.5,1:1",
+					"Leave it empty for the plain end-taper tube" );
+			pairs.Add( (t, m) );
+		}
+		pairs.Sort( (a, b) => a.Item1.CompareTo( b.Item1 ) );
+		return pairs;
+	}
+
+	static float ProfileAt( List<(float T, float Mult)> pairs, float f )
+	{
+		if ( pairs.Count == 1 )
+			return pairs[0].Item2;
+		if ( f <= pairs[0].Item1 )
+			return pairs[0].Item2;
+		if ( f >= pairs[^1].Item1 )
+			return pairs[^1].Item2;
+		for ( var i = 0; i + 1 < pairs.Count; i++ )
+		{
+			if ( f >= pairs[i].Item1 && f <= pairs[i + 1].Item1 )
+			{
+				var span = pairs[i + 1].Item1 - pairs[i].Item1;
+				var local = span < 1e-9f ? 0f : (f - pairs[i].Item1) / span;
+				return pairs[i].Item2 + (pairs[i + 1].Item2 - pairs[i].Item2) * local;
+			}
+		}
+		return pairs[^1].Item2;
 	}
 }
 

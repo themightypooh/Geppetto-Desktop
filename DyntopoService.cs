@@ -137,7 +137,8 @@ public static class DyntopoService
 	/// </summary>
 	public static PolyMesh Subdivide( PolyMesh source, Options options )
 	{
-		Check( source, options is null ? 0f : options.Radius );
+		if ( options is null ) throw new ArgumentNullException( nameof( options ) );
+		Check( source, options.Radius );
 		CheckOptions( options );
 		var m = source.Clone();
 		RunDyntopo( m, options, options.Center, options.Radius );

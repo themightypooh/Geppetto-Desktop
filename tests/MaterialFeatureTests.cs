@@ -77,6 +77,7 @@ internal static class MaterialFeatureTests
             Check(a.SequenceEqual(b),"hashed alpha depends on draw order");
             int covered=0,total=0;
             for(int y=42;y<86;y++)for(int x=42;x<86;x++){total++;if(a[(y*128+x)*4]>1)covered++;}
+
             Check(covered>total*.4&&covered<total*.6,$"hashed alpha coverage {covered}/{total}");
             var masked=fixture.Draw(hashed with{AlphaMode=AlphaMode.Mask,AlphaCutoff=.6f});
             var opaque=fixture.Draw(hashed with{AlphaMode=AlphaMode.Opaque});

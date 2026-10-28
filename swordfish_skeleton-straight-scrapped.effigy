@@ -1,0 +1,138 @@
+effigy 1
+rollback 2147483647
+materiallook 0 color=#e6dcc0 rough=0.8 metal=0
+feature BlobFeature
+	id b4b200a5
+	name Rostrum
+	suppressed 0
+	visible 1
+	param Blend 2
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes capsule -30,0,0 -45,0,0 1.0; capsule -45,0,0 -58,0,0 0.4
+	param Smooth 2
+	param Voxel 0.35
+end
+feature BlobFeature
+	id aaf8a2ce
+	name LowerJaw
+	suppressed 0
+	visible 1
+	param Blend 2
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes capsule -30,-2,0 -48,-2,0 0.6
+	param Smooth 2
+	param Voxel 0.35
+end
+feature BlobFeature
+	id a87a1321
+	name Skull
+	suppressed 0
+	visible 1
+	param Blend 2
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes capsule -32,0,0 -22,0,0 4.0; sphere -28,1,0 2.0
+	param Smooth 2
+	param Voxel 0.35
+end
+feature BlobFeature
+	id dcb3312b
+	name Spine
+	suppressed 0
+	visible 1
+	param Blend 2
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes capsule -30,0,0 -10,0,0 1.5; capsule -10,0,0 10,0,0 1.8; capsule 10,0,0 30,0,0 1.2; capsule 30,0,0 42,0,0 0.7
+	param Smooth 2
+	param Voxel 0.35
+end
+feature BlobFeature
+	id 2c338450
+	name Ribs
+	suppressed 0
+	visible 1
+	param Blend 2
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes capsule -20,3,0 -20,-5,0 0.35; capsule -15,3,0 -15,-5,0 0.35; capsule -10,3,0 -10,-5,0 0.35; capsule -5,3,0 -5,-5,0 0.35; capsule 0,3,0 0,-5,0 0.35; capsule 5,3,0 5,-5,0 0.35; capsule 10,3,0 10,-5,0 0.35
+	param Smooth 2
+	param Voxel 0.35
+end
+feature BlobFeature
+	id 07fa7ce5
+	name DorsalRays
+	suppressed 0
+	visible 1
+	param Blend 2
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes capsule -18,3,0 -16,12,0 0.4; capsule -14,3,0 -12,13,0 0.4; capsule -10,3,0 -8,12,0 0.4; capsule -6,3,0 -4,10,0 0.4
+	param Smooth 2
+	param Voxel 0.35
+end
+feature BlobFeature
+	id 107c867d
+	name PectoralRays
+	suppressed 0
+	visible 1
+	param Blend 2
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes capsule -22,-3,0 -18,-10,0 0.4; capsule -20,-3,0 -16,-11,0 0.4
+	param Smooth 2
+	param Voxel 0.35
+end
+feature BlobFeature
+	id 4b98ce7c
+	name AnalRays
+	suppressed 0
+	visible 1
+	param Blend 2
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes capsule 24,-2,0 28,-8,0 0.4
+	param Smooth 2
+	param Voxel 0.35
+end
+feature BlobFeature
+	id fb90daac
+	name CaudalRays
+	suppressed 0
+	visible 1
+	param Blend 2
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes capsule 42,0,0 55,11,0 0.5; capsule 42,0,0 55,-11,0 0.5; capsule 42,0,0 52,0,0 0.4
+	param Smooth 2
+	param Voxel 0.35
+end

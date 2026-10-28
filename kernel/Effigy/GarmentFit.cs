@@ -61,6 +61,11 @@ public sealed class GarmentRecipe
 		"T-shirt", "Long sleeve", "Tank top", "Trousers", "Shorts", "Beanie", "Gloves", "Socks", "Bodysuit",
 		// Appended, never inserted: a saved document stores the index.
 		"Jacket", "Vest", "Belt", "Boots",
+		// Appended, never inserted: a saved document stores the index.
+		"Dress", "Skirt", "Hood",
+		// Appended, never inserted: a saved document stores the index.
+		"Robe", "Hoodie", "Trenchcoat", "Greatcoat", "Cloak", "Scarf", "Cowl",
+		"CargoTrousers", "Overalls", "Balaclava", "Bracers", "Gauntlets", "Pauldrons",
 	};
 
 	/// <summary>The body is split down centre front into two fronts that can hang open - a jacket,
@@ -74,6 +79,22 @@ public sealed class GarmentRecipe
 	/// <summary>Holds its own shape - leather belts and boots - so it is fitted and thickened but
 	/// not draped or wrinkled.</summary>
 	public bool Rigid;
+
+	/// <summary>A skirt, dress or robe: below the hips the fitted shell is bridged by a flared
+	/// cone (see BridgeSkirt) instead of following each leg like trousers. Without this, slicing
+	/// the wearer by region wraps each leg separately and there is no skirt, only two tubes.</summary>
+	public bool Bridged;
+
+	/// <summary>Hem measured waist-to-ankle instead of waist-to-mid-thigh: long coats, cloaks,
+	/// dresses and robes. The hem still comes from the recipe length, 0 at the waist.</summary>
+	public bool LongHem;
+
+	/// <summary>Suppress the armholes a hanging sleeveless top normally gets: a cloak has no
+	/// armholes, the arms go under it.</summary>
+	public bool NoArmholes;
+
+	/// <summary>How much the skirt cone flares from bridge to hem: 0 a straight tube, 1 double width.</summary>
+	public float SkirtFlare;
 
 	/// <summary>Which sleeves or legs a recipe keeps. Sides are the body's own - left is +y, the
 	/// way Source measures it - so "Left only" is the wearer's left, not the viewer's.</summary>
@@ -208,6 +229,151 @@ public sealed class GarmentRecipe
 				r.Spans.Add( (BodyRegion.Foot, 0f, 1.01f, 0) );
 				r.Spans.Add( (BodyRegion.LowerLeg, 1f - Math.Max( 0.05f, length ), 1.01f, 0) );
 				break;
+
+			// A dress: a hanging bodice over a skirt cone. The bodice is a top (crew neck, hangs
+			// from the shoulders); the cone is the skirt. Length is the hem, waist to ankle.
+			case "Dress":
+				r.Hangs = true;
+				r.CrewNeck = true;
+				r.Bridged = true;
+				r.LongHem = true;
+				r.SkirtFlare = 0.55f;
+				r.HemLength = length;
+				if ( r.CrewNeck ) r.Spans.Add( (BodyRegion.Neck, 0f, 1f, 0) );
+				r.Spans.Add( (BodyRegion.Torso, neckline, 1f, 0) );
+				r.Spans.Add( (BodyRegion.Hips, 0f, 0.92f, 0) );
+				Arms( sleeve );
+				break;
+			// A skirt: the pelvis shell only. No leg spans on purpose - the cone in BridgeSkirt
+			// carries the hem below the hips and bridges across both legs. Length is the hem,
+			// waist (0) to ankle (1) via LongHem; a knee skirt is about 0.35.
+			case "Skirt":
+				r.Bridged = true;
+				r.LongHem = true;
+				r.SkirtFlare = 0.45f;
+				r.HemLength = length;
+				r.Spans.Add( (BodyRegion.Hips, 0f, 1f, 0) );
+				break;
+			// A robe: a dress that opens down the front, full length, long sleeves. The front
+			// split itself comes from GarmentFront when the feature asks for it.
+			case "Robe":
+				r.Hangs = true;
+				r.CrewNeck = true;
+				r.FrontOpening = true;
+				r.Bridged = true;
+				r.LongHem = true;
+				r.SkirtFlare = 0.55f;
+				r.HemLength = length;
+				if ( r.CrewNeck ) r.Spans.Add( (BodyRegion.Neck, 0f, 1f, 0) );
+				r.Spans.Add( (BodyRegion.Torso, neckline, 1f, 0) );
+				r.Spans.Add( (BodyRegion.Hips, 0f, 0.92f, 0) );
+				Arms( sleeve );
+				break;
+
+			// A hoodie: a long-sleeve top whose collar is a raised cowl, not a crew cut - the
+			// hood worn DOWN bunches round the neck and shoulders, which is what the full neck
+			// span reads as. A hood worn UP is not this: it needs front/back spans the recipe
+			// system does not have, so it is flagged, not faked.
+			case "Hoodie":
+				r.Hangs = true;
+				r.HemLength = length;
+				r.Spans.Add( (BodyRegion.Neck, 0f, 1f, 0) );
+				r.Spans.Add( (BodyRegion.Torso, neckline, 1f, 0) );
+				r.Spans.Add( (BodyRegion.Hips, 0f, Math.Min( length, 0.92f ), 0) );
+				Arms( sleeve );
+				break;
+
+			// Long coats: jackets with the hem carried to the knee (trench) or the ankle
+			// (greatcoat) instead of the waist-to-mid-thigh top measure.
+			case "Trenchcoat":
+			case "Greatcoat":
+				r.Hangs = true;
+				r.CrewNeck = true;
+				r.FrontOpening = true;
+				r.LongHem = true;
+				r.HemLength = length;
+				r.Spans.Add( (BodyRegion.Neck, 0f, 1f, 0) );
+				r.Spans.Add( (BodyRegion.Torso, neckline, 1f, 0) );
+				r.Spans.Add( (BodyRegion.Hips, 0f, 0.92f, 0) );
+				Arms( sleeve );
+				break;
+
+			// A cloak: a hanging drape with no sleeves and no armholes - the arms go under it,
+			// which is what NoArmholes buys. Open down the front like a robe.
+			case "Cloak":
+				r.Hangs = true;
+				r.CrewNeck = true;
+				r.FrontOpening = true;
+				r.NoArmholes = true;
+				r.LongHem = true;
+				r.HemLength = length;
+				r.Spans.Add( (BodyRegion.Neck, 0f, 1f, 0) );
+				r.Spans.Add( (BodyRegion.Torso, neckline, 1f, 0) );
+				r.Spans.Add( (BodyRegion.Hips, 0f, 0.92f, 0) );
+				break;
+
+			// A scarf: a wrap round the neck and the very top of the chest. Snug, no hang.
+			case "Scarf":
+				r.Spans.Add( (BodyRegion.Neck, 0f, 1f, 0) );
+				r.Spans.Add( (BodyRegion.Torso, 0f, 0.12f, 0) );
+				break;
+
+			// A cowl: a scarf that drapes - neck plus a hanging fall over the shoulders.
+			case "Cowl":
+				r.Hangs = true;
+				r.Spans.Add( (BodyRegion.Neck, 0f, 1f, 0) );
+				r.Spans.Add( (BodyRegion.Torso, 0f, 0.35f, 0) );
+				break;
+
+			// Cargo trousers: the trousers silhouette. The cargo is the pockets, and pockets are
+			// sewn-on details (a separate job), not a silhouette - so this is trousers until
+			// the detail agent gives it pockets.
+			case "CargoTrousers":
+				r.Spans.Add( (BodyRegion.Hips, 0f, 1f, 0) );
+				Legs( length );
+				break;
+
+			// Overalls: trousers plus a bib - the lower torso as a tube. Straps are not this:
+			// a strap is front-only and the span system has no front, so straps are flagged.
+			case "Overalls":
+				r.Spans.Add( (BodyRegion.Torso, 0.55f, 1f, 0) );
+				r.Spans.Add( (BodyRegion.Hips, 0f, 1f, 0) );
+				Legs( length );
+				break;
+
+			// A balaclava: the whole head plus the neck. It covers the face - eye holes need a
+			// face cut the span system cannot express, so they are flagged, not faked.
+			case "Balaclava":
+				r.Spans.Add( (BodyRegion.Head, 0f, 1.01f, 0) );
+				r.Spans.Add( (BodyRegion.Neck, 0f, 1f, 0) );
+				break;
+
+			// Bracers: rigid forearm guards. Rigid means fitted and thickened, not draped.
+			case "Bracers":
+				r.Rigid = true;
+				r.Spans.Add( (BodyRegion.LowerArm, 0.15f, 1f, sleeveSide) );
+				break;
+
+			// Gauntlets: bracers extended over the hand.
+			case "Gauntlets":
+				r.Rigid = true;
+				r.Spans.Add( (BodyRegion.LowerArm, 0.15f, 1f, sleeveSide) );
+				r.Spans.Add( (BodyRegion.Hand, 0f, 1.01f, sleeveSide) );
+				break;
+
+			// Pauldrons: rigid shoulder caps. The sleeve side picks left, right or both.
+			case "Pauldrons":
+				r.Rigid = true;
+				r.Spans.Add( (BodyRegion.UpperArm, 0f, 0.45f, sleeveSide) );
+				break;
+
+			// A hood: head and neck, plus a short torso yoke so it joins a top
+			// instead of floating as a separate cap.
+			case "Hood":
+				r.Spans.Add( (BodyRegion.Head, 0f, 1f, 0) );
+				r.Spans.Add( (BodyRegion.Neck, 0f, 1f, 0) );
+				r.Spans.Add( (BodyRegion.Torso, 0f, 0.25f, 0) );
+				break;
 		}
 
 		return r;
@@ -231,6 +397,22 @@ public sealed class GarmentRecipe
 		"Vest" => (0.15f, 0f),
 		"Belt" => (0.25f, 0f),
 		"Boots" => (0.45f, 0f),
+		"Dress" => (0.55f, 0.5f),
+		"Skirt" => (0.35f, 0f),
+		"Robe" => (0.9f, 1f),
+		"Hoodie" => (0.68f, 1f),
+		"Trenchcoat" => (0.55f, 1f),
+		"Greatcoat" => (0.85f, 1f),
+		"Cloak" => (0.8f, 0f),
+		"Scarf" => (0.5f, 0f),
+		"Cowl" => (0.5f, 0f),
+		"CargoTrousers" => (1f, 0f),
+		"Overalls" => (1f, 0f),
+		"Balaclava" => (1f, 0f),
+		"Bracers" => (0.5f, 0f),
+		"Gauntlets" => (0.5f, 0f),
+		"Pauldrons" => (0.5f, 0f),
+		"Hood" => (0.5f, 0f),
 		_ => (1f, 1f),
 	};
 
@@ -641,10 +823,22 @@ public static class GarmentFit
 		/// </summary>
 		public bool SelfCollision;
 
+		/// <summary>Friction for the drape solver, 0 slick to 1 gripping. Negative
+		/// keeps the fabric preset own friction; GarmentFeature surfaces this
+		/// as its Friction slider (-1 = preset).</summary>
+		public float Friction = -1f;
+
 		/// <summary>For a recipe with a front opening (jacket, vest): how the front is split, lapped,
 		/// hung open and lined. Null leaves the garment a closed tube, as before. See GarmentFront.</summary>
 		public GarmentFront.Options Front;
 	}
+
+	/// <summary>Diagnostic from the most recent <see cref="Fit"/> that covered
+	/// no face: per-region face counts, so a "covers nothing" failure says
+	/// which regions the body actually had faces in and which the recipe
+	/// wanted. Set only on the empty-fit path; read by GarmentFeature's
+	/// error. Rebuilds are single-threaded, so a static report is safe here.</summary>
+	public static string LastCoverReport;
 
 	public sealed class Result
 	{
@@ -653,6 +847,10 @@ public static class GarmentFit
 		public int DroppedInside;
 		public bool Solidified;
 		public string SolidifyProblem;
+
+		/// <summary>Why a bridged skirt cone was not built, when one was asked for. Null when
+		/// the bridge succeeded or was not asked for.</summary>
+		public string BridgeProblem;
 
 		/// <summary>The room left for the garments under this one, in inches, added to the fit's
 		/// offset. 0 with nothing under it. See Options.Inner.</summary>
@@ -685,6 +883,8 @@ public static class GarmentFit
 		var garment = result.Mesh;
 		var remap = new Dictionary<(int Body, int Vertex), int>();
 		var cutRemap = new Dictionary<(int Body, int A, int B, BodyRegion Region, int End), int>();
+		var locatedFaces = new Dictionary<BodyRegion, int>();
+		var coveredFaces = new Dictionary<BodyRegion, int>();
 
 		// A top's hem is a height, not a fraction of the hips' bone: waist to mid-thigh. Within the
 		// hips it is where the cut goes; below the hip joints the body splits into legs, so the cut
@@ -698,7 +898,10 @@ public static class GarmentFit
 			&& map.Chain( BodyRegion.UpperLeg, 1, out var hip, out var knee ) )
 		{
 			var midThigh = hip.z - (hip.z - knee.z) * 0.5f;
-			hemZ = waist.z + (midThigh - waist.z) * Math.Clamp( recipe.HemLength, 0f, 1f );
+			if ( recipe.LongHem && map.Chain( BodyRegion.LowerLeg, 1, out _, out var ankle ) )
+				hemZ = waist.z + (ankle.z - waist.z) * Math.Clamp( recipe.HemLength, 0f, 1f );
+			else
+				hemZ = waist.z + (midThigh - waist.z) * Math.Clamp( recipe.HemLength, 0f, 1f );
 
 			var t = (hipsTop.z - hemZ) / MathF.Max( hipsTop.z - hipsBottom.z, 1e-3f );
 			cutSpans = recipe.Spans.Select( sp => sp.Region == BodyRegion.Hips ? (sp.Region, sp.From, Math.Clamp( t, 0f, 0.92f ), sp.Side) : sp ).ToList();
@@ -716,7 +919,7 @@ public static class GarmentFit
 		var crew = recipe.CrewNeck ? CrewNeck.Measure( wearers, map, recipe, wearerRegions ) : null;
 
 		// A top with no sleeves has armholes to cut; one with sleeves is sewn on there instead.
-		var armholes = recipe.Hangs && !recipe.Spans.Any( sp => sp.Region == BodyRegion.UpperArm )
+		var armholes = recipe.Hangs && !recipe.NoArmholes && !recipe.Spans.Any( sp => sp.Region == BodyRegion.UpperArm )
 			? new[] { Armhole.Measure( map, 1 ), Armhole.Measure( map, -1 ) }.Where( h => h is not null ).ToArray()
 			: Array.Empty<Armhole>();
 
@@ -752,6 +955,7 @@ public static class GarmentFit
 
 				var centroid = body.FaceCentroid( face );
 				var (region, t) = map.Locate( centroid, only );
+				locatedFaces[region] = locatedFaces.TryGetValue( region, out var lc ) ? lc + 1 : 1;
 
 				// The side is the face's own position, not the bone's: +y is the body's left, the
 				// way Source measures it. Taken from the face rather than from the bone name so an
@@ -898,6 +1102,7 @@ public static class GarmentFit
 
 				garment.AddFace( indices, null, o.MaterialSlot );
 				result.SourceFaces++;
+				coveredFaces[region] = coveredFaces.TryGetValue( region, out var cc ) ? cc + 1 : 1;
 			}
 		}
 
@@ -908,9 +1113,19 @@ public static class GarmentFit
 			CloseSpecks( garment, o.MaterialSlot );
 
 		if ( garment.FaceCount == 0 )
+		{
+			var spans = string.Join( ", ", recipe.Spans.Select( s => $"{s.Region} {s.From:0.##}-{s.To:0.##}" ) );
+			var located = string.Join( ", ", locatedFaces.OrderBy( kv => kv.Key.ToString() ).Select( kv => $"{kv.Key}={kv.Value}" ) );
+			var covered = coveredFaces.Count == 0
+				? "none"
+				: string.Join( ", ", coveredFaces.OrderBy( kv => kv.Key.ToString() ).Select( kv => $"{kv.Key}={kv.Value}" ) );
+			LastCoverReport = $"Recipe '{recipe.Name}' spans: {spans}. Faces located by region: {located}. Faces the recipe covered: {covered}. A region with 0 located faces has no body surface near its bones; a region located but not covered falls outside the recipe's spans";
 			return null;
+		}
 
-		var extended = float.IsNaN( hemZ ) ? null : ExtendHem( garment, hemZ, o.MaterialSlot );
+		var extended = float.IsNaN( hemZ ) ? null : recipe.Bridged
+			? BridgeSkirt( garment, hemZ, recipe.SkirtFlare, map, o.MaterialSlot, result )
+			: ExtendHem( garment, hemZ, o.MaterialSlot );
 
 		var start = garment.Positions.ToArray();
 		var normals = garment.ComputeVertexNormals();
@@ -1171,6 +1386,161 @@ public static class GarmentFit
 	}
 
 	/// <summary>
+	/// </summary>
+	static void ClipSheetToHeight( PolyMesh garment, float z )
+	{
+		var cut = new Dictionary<(int, int), int>();
+		var kept = new List<(int[] Indices, int Material)>();
+
+		foreach ( var face in garment.Faces )
+		{
+			var idx = face.Indices;
+
+			if ( idx.Length < 3 )
+				continue;
+
+			var poly = new List<(int Vi, Vec3 P)>();
+
+			foreach ( var vi in idx )
+				poly.Add( (vi, garment.Positions[vi]) );
+
+			var clipped = new List<int>();
+
+			for ( var i = 0; i < poly.Count; i++ )
+			{
+				var cur = poly[i];
+				var nxt = poly[(i + 1) % poly.Count];
+				var inCur = cur.P.z >= z;
+				var inNxt = nxt.P.z >= z;
+
+				if ( inCur )
+					clipped.Add( cur.Vi );
+
+				if ( inCur == inNxt )
+					continue;
+
+				// Opposite sides of the plane, so the denominator cannot be zero.
+				var t = (z - cur.P.z) / (nxt.P.z - cur.P.z);
+				var point = cur.P + (nxt.P - cur.P) * t;
+				var key = cur.Vi < nxt.Vi ? (cur.Vi, nxt.Vi) : (nxt.Vi, cur.Vi);
+
+				if ( !cut.TryGetValue( key, out var ci ) )
+				{
+					ci = garment.AddVertex( point );
+					cut[key] = ci;
+				}
+
+				clipped.Add( ci );
+			}
+
+			if ( clipped.Count >= 3 )
+				kept.Add( (clipped.ToArray(), face.Material) );
+		}
+
+		garment.Faces.Clear();
+
+		foreach ( var (indices, material) in kept )
+			garment.AddFace( indices, null, material );
+	}
+
+	/// </summary>
+	static List<int> BridgeSkirt( PolyMesh garment, float hemZ, float flare, BodyRegions.Map map, int slot, Result result )
+	{
+		if ( !map.Chain( BodyRegion.Hips, 0, out var hipsTop, out var hipsBottom ) )
+		{
+			result.BridgeProblem = "no hips chain for the skirt axis";
+			return null;
+		}
+
+		// The hips chain is already levelled to a vertical line, so the axis is its x,y.
+		var axisX = hipsTop.x;
+		var axisY = hipsTop.y;
+		float bridgeZ = float.NaN;
+
+		for ( var step = 0; step <= 8; step++ )
+		{
+			var z = hipsBottom.z + step * 0.5f;
+			var trial = garment.Clone();
+			ClipSheetToHeight( trial, z );
+			var cut = GarmentTrim.OrderedBoundaryLoops( trial ).Where( l => l.Count >= 3
+				&& MathF.Abs( l.Average( i => trial.Positions[i].z ) - z ) < 0.6f ).ToList();
+
+			if ( cut.Count == 1 )
+			{
+				bridgeZ = z;
+				break;
+			}
+		}
+
+		if ( float.IsNaN( bridgeZ ) )
+		{
+			result.BridgeProblem = "no single-loop bridge height found from the hip joints up to 4 inches above them";
+			return null;
+		}
+
+		ClipSheetToHeight( garment, bridgeZ );
+		var loop = GarmentTrim.OrderedBoundaryLoops( garment ).FirstOrDefault( l => l.Count >= 3
+			&& MathF.Abs( l.Average( i => garment.Positions[i].z ) - bridgeZ ) < 0.6f );
+
+		if ( loop is null )
+		{
+			result.BridgeProblem = "bridge height found on trial but not on the real sheet";
+			return null;
+		}
+
+		var loopZ = loop.Average( i => garment.Positions[i].z );
+		var drop = loopZ - hemZ;
+
+		if ( drop < 0.3f )
+		{
+			result.BridgeProblem = "hem above the bridge height";
+			return null;
+		}
+
+		// Wind the new strip the way the face on the loop's edge is wound (same as ExtendHem).
+		var edgeFaces = garment.BuildEdgeFaces();
+		var forward = true;
+
+		if ( edgeFaces.TryGetValue( new EdgeKey( loop[0], loop[1] ), out var users ) && users.Count > 0 )
+		{
+			var f = garment.Faces[users[0]].Indices;
+			var at = Array.IndexOf( f, loop[0] );
+			forward = f[(at + 1) % f.Length] != loop[1];
+		}
+
+		var rings = Math.Max( 1, (int)MathF.Ceiling( drop / 0.75f ) );
+		var previous = loop.ToArray();
+		var added = new List<int>();
+
+		for ( var k = 1; k <= rings; k++ )
+		{
+			var t = k / (float)rings;
+			var scale = 1f + flare * t;
+			var ringZ = loopZ + (hemZ - loopZ) * t;
+			var ring = new int[previous.Length];
+
+			for ( var i = 0; i < loop.Count; i++ )
+			{
+				var point = garment.Positions[loop[i]];
+				ring[i] = garment.AddVertex( new Vec3( axisX + (point.x - axisX) * scale,
+					axisY + (point.y - axisY) * scale, ringZ ) );
+				added.Add( ring[i] );
+			}
+
+			for ( var i = 0; i < loop.Count; i++ )
+			{
+				var j = (i + 1) % loop.Count;
+				garment.AddFace( forward
+					? new[] { previous[i], previous[j], ring[j], ring[i] }
+					: new[] { previous[j], previous[i], ring[i], ring[j] }, null, slot );
+			}
+
+			previous = ring;
+		}
+
+		return added;
+	}
+
 	/// Carry a top's hem straight down to <paramref name="hemZ"/>, in rings, ending level. The
 	/// cut cannot go there - below the hip joints the skin is two legs - and a shirt does not
 	/// follow them: it falls past them as one tube, which the hang then sizes. Returns the new
@@ -2014,6 +2384,8 @@ public static class GarmentFit
 
 		sim.Thickness = MathF.Max( o.Clearance, 1e-3f );
 		sim.SelfCollision = o.SelfCollision;
+		if ( o.Friction >= 0f )
+			sim.Friction = Math.Clamp( o.Friction, 0f, 1f );
 
 		// Stiffness runs 0..1 and compliance runs rigid..slack over four decades, so the map is
 		// exponential: 1 -> 1e-7 (canvas), 0.5 -> 1e-5, 0 -> 1e-3 (jersey).
@@ -2840,7 +3212,7 @@ public static class ClothingDefinition
 				case BodyRegion.Hips:
 					// A shirt's hip span is the shirttail, not the groin. Claiming Groin and Waist
 					// for every recipe makes a top fight trousers, and stock jeans, for the slot.
-					if ( recipe.Name is "Trousers" or "Shorts" or "Bodysuit" )
+					if ( recipe.Name is "Trousers" or "Shorts" or "Bodysuit" or "Skirt" or "CargoTrousers" or "Overalls" or "Dress" or "Robe" )
 					{
 						Add( "Groin" );
 						Add( "Waist" );
@@ -2968,6 +3340,19 @@ public static class ClothingDefinition
 		"Vest" => "Gilet",
 		"Belt" => "Bottoms",
 		"Boots" => "Boots",
+		"Skirt" => "Bottoms",
+		"Dress" => "Fullbody",
+		"Robe" => "Fullbody",
+		"Hoodie" => "Shirt",
+		"Trenchcoat" => "Jacket",
+		"Greatcoat" => "Jacket",
+		"Cloak" => "Jacket",
+		"CargoTrousers" => "Trousers",
+		"Overalls" => "Fullbody",
+		"Balaclava" => "HatBeanie",
+		"Gauntlets" => "Gloves",
+		// Scarf, Cowl, Bracers, Pauldrons: the s&box enum has no neck or arm-guard category,
+		// so they keep the default rather than a guessed one.
 		_ => "Tops",
 	};
 

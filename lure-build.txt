@@ -1,0 +1,7 @@
+material 1 color=#e9e0c8 rough=0.7 metal=0
+material 2 color=#ffdf6b rough=0.7 metal=0
+add Inflate2D name=LureStalk3 rings="13.66,-8.42;15.16,-7.58;20.28,-3.94;29.08,-11.82;40.38,-21.02;45.46,-25.80;54.18,-32.01;55.40,-37.19;64.11,-37.63;67.61,-21.56;68.71,-8.20;69.72,-3.60;71.48,-4.00;70.49,-8.40;69.39,-21.84;65.49,-38.77;54.60,-38.81;52.82,-33.19;44.34,-27.20;39.22,-22.38;27.92,-13.18;19.72,-5.66;16.24,-9.02;14.54,-9.98" thickness=0.4 profile=Flat materialslot=1
+add Transform bodies=LureStalk3 translate=0,0,0.5
+add Inflate2D name=EscaTip3 rings="70.60,-3.80;71.50,-1.00;71.80,1.50;70.70,4.40;69.80,4.00;68.30,3.50;68.00,0.50;68.50,-2.50;70.60,-3.80" thickness=0.5 profile=Flat materialslot=2
+add Transform bodies=EscaTip3 translate=0,0,0.5
+save angler_trace.effigy

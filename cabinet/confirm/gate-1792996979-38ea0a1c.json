@@ -1,0 +1,20 @@
+{
+  "cancel_reason": "yes timeout (600s, no claim)",
+  "created_at": 1792996979.355594,
+  "id": "gate-1792996979-38ea0a1c",
+  "pane": "pane 1",
+  "preflight": {
+    "errors": [],
+    "first_geom_line": 2,
+    "first_shape": "Cylinder",
+    "lines": 3,
+    "materials_before_first": 1,
+    "ok": true,
+    "rotated_boxes": 0
+  },
+  "script": "/home/poo/gate-test/good.txt",
+  "script_hash": "ddbc7861f22aa2a22bb1ee344d45da7433d304933852caa584da8dfd70891b89",
+  "status": "expired",
+  "subject": "GATE TEST ONLY - answer NO, no model will run",
+  "worker": "gate-test"
+}

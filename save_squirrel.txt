@@ -1,0 +1,5 @@
+echo "Save details model"
+save squirrel.effigy
+
+echo "Render details pass"
+render out.png shade=clay views=4 size=512

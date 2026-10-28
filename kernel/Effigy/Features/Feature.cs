@@ -18,6 +18,9 @@ public sealed class ReferenceImage
 {
 	public string Path = "";
 	public string View = "front";
+	public string Tag = "";
+	public string Kind = "unknown";
+	public bool Calibrated = false;
 	public float Height = 72f;
 	public Vec2 Offset;
 	public float Depth = 0f;
@@ -26,7 +29,7 @@ public sealed class ReferenceImage
 
 	public ReferenceImage Clone() => new()
 	{
-		Path = Path, View = View, Height = Height, Offset = Offset, Depth = Depth, Opacity = Opacity, Visible = Visible,
+		Path = Path, View = View, Tag = Tag, Kind = Kind, Calibrated = Calibrated, Height = Height, Offset = Offset, Depth = Depth, Opacity = Opacity, Visible = Visible,
 	};
 }
 
@@ -266,6 +269,12 @@ public sealed class FeatureContext
 	/// upstream and rebuilding feeds the new geometry through without any wiring to keep in sync.</summary>
 	public Dictionary<string, Sketch> Sketches = new();
 
+	/// <summary>Sketch feature names by sketch feature id, published alongside Sketches so a consumer can log WHICH sketch it used by name, not just by id.</summary>
+	public Dictionary<string, string> SketchNames = new();
+
+	/// <summary>ParticleBake events published by ParticleBakeFeature, keyed by that feature's name, so a later ParticleBake in the same script can use them as its emitter (impacts:Name / rests:Name). Same arrangement as Sketches: a feature that has not run is not in here.</summary>
+	public Dictionary<string, List<ParticleBakeEvent>> ParticleBakes = new();
+
 	/// <summary>Splines published by SplineFeature, keyed by that feature's id, and the id of the
 	/// one published last — what a curve deform or a sweep means by "the spline" when it names
 	/// none. Same arrangement as Sketches, for the same reason.</summary>
@@ -319,6 +328,12 @@ public sealed class FeatureContext
 	/// <summary>Material slots a shell feature (fur) claimed earlier in this rebuild. A later
 	/// fabric must not bind the cloth weave onto them.</summary>
 	public readonly HashSet<int> ShellSlots = new();
+
+	/// <summary>Slot looks a feature wired during this rebuild (hair sheet maps, for
+	/// example). PartStudio merges these into MaterialLooks after the feature loop,
+	/// filling only fields the user did not set explicitly, so a `material` line
+	/// still wins and a sheet-wired slot is saved with the document.</summary>
+	public Dictionary<int, SlotLook> SlotLooks = new();
 
 	/// <summary>
 	/// This rebuild is a PREVIEW: somebody is dragging a slider and wants to see the shape move, not
@@ -415,6 +430,12 @@ public abstract class Feature
 	/// anywhere in a sketch used to fail every extrude that read it.
 	/// </summary>
 	public string Warning { get; internal set; }
+
+	/// <summary>Informational note from a feature's run (counts, triangle estimates), shown in the
+	/// headless build log alongside a warning. Unlike Warning it is NOT a diagnostic: setting it
+	/// never turns a feature yellow and never overwrites a real warning, so a feature can report
+	/// its emitted counts on every run, not only when it is already warning about something.</summary>
+	public string Note { get; internal set; }
 
 	/// <summary>
 	/// Structured form of Error or Warning. Null when the feature ran clean.
@@ -762,6 +783,7 @@ public abstract class Feature
 		Error = null;
 		Warning = null;
 		Diagnostic = null;
+		Note = null;
 
 		// Bodies made from here on belong to this feature and are named after it. Set before the
 		// Suppressed check is pointless; set here so every path into Execute is covered.
@@ -808,6 +830,8 @@ public abstract class Feature
 		throw new FeatureException( new FeatureDiagnostic( DiagnosticSeverity.Error, problem, cause, parameterLabel, suggested, remedies ) );
 
 	/// <summary>The feature built, but not from what was asked. Geometry stays; the dialog goes yellow.</summary>
+	protected void Info( string text ) => Note = Note is null ? text : Note + "; " + text;
+
 	protected void Warn( string problem, string cause, params string[] remedies ) =>
 		ApplyDiagnostic( new FeatureDiagnostic( DiagnosticSeverity.Warning, problem, cause, remedies: remedies ) );
 

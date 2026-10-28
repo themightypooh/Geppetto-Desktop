@@ -82,6 +82,64 @@ public static class QuadRemesh
 		/// <summary>Tangential smoothing passes over the final mesh, each followed by a
 		/// reprojection onto the source.</summary>
 		public int RelaxPasses = 10;
+
+		/// <summary>Retopo wave 3 (Gap 8): progress callback, invoked with a phase name at
+		/// each pipeline stage (split, field, curvature, orientation, position, extract,
+		/// cleanup, subdivide, relax). Null means no reporting. This is the hook a UI
+		/// progress bar and the published timings below hang off; without it a 500k-face
+		/// import remeshes in silence for however long it takes.</summary>
+		public Action<string> Progress;
+
+		/// <summary>Retopo wave 3 (Gap 8): cancel predicate, checked between pipeline stages
+		/// (not mid-stage — a stage is not interruptible without leaving a half-solved
+		/// field behind). Returning true aborts the run with an
+		/// <see cref="OperationCanceledException"/> the caller reports as a clean failure,
+		/// instead of a run that cannot be stopped at all.</summary>
+		public Func<bool> Cancel;
+
+		/// <summary>Retopo wave 3 (Gap 3): guide polylines in source-mesh coordinates.
+		/// A vertex near a guide has its orientation pinned along the guide instead of
+		/// following curvature or the smooth field — the loop-layout control a ring
+		/// around an eye, mouth, or joint needs. A closed ring repeats its first
+		/// point at the end. Empty means no guides.</summary>
+		public List<Vec3[]> Guides = new();
+
+		/// <summary>Retopo wave 3 (Gap 3): how hard a guide pins the field, 0..1 and
+		/// above. 1 beats any curvature pull (curvature tops out at
+		/// <see cref="CurvatureAlign"/>), so a guided vertex follows the guide.</summary>
+		public float GuideStrength = 1f;
+
+		/// <summary>Retopo wave 3 (Gap 3): how far from a guide a vertex still counts
+		/// as guided, in source units. 0 means one lattice step (the
+		/// <c>scale</c> of the run), so a guide pins about one row of vertices
+		/// either side of itself.</summary>
+		public float GuideRadius = 0f;
+	}
+
+	/// <summary>Parse guide text: polylines separated by '|', points by ';',
+	/// coordinates by ',' — "1,0,0;0,1,0;-1,0,0;0,-1,0;1,0,0" is one closed
+	/// ring. Bad numbers are skipped, not fatal: a guide that cannot be read
+		/// cannot steer anything, and failing the whole remesh over it would be
+		/// worse. Shared by the script verb and the Remesh feature.</summary>
+	public static List<Vec3[]> ParseGuides( string text )
+	{
+		var guides = new List<Vec3[]>();
+		if ( string.IsNullOrWhiteSpace( text ) ) return guides;
+		foreach ( var line in text.Split( '|' ) )
+		{
+			var pts = new List<Vec3>();
+			foreach ( var pt in line.Split( ';' ) )
+			{
+				var c = pt.Split( ',' );
+				if ( c.Length != 3 ) continue;
+				if ( !float.TryParse( c[0].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var x ) ) continue;
+				if ( !float.TryParse( c[1].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var y ) ) continue;
+				if ( !float.TryParse( c[2].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var z ) ) continue;
+				pts.Add( new Vec3( x, y, z ) );
+			}
+			if ( pts.Count >= 2 ) guides.Add( pts.ToArray() );
+		}
+		return guides;
 	}
 
 	/// <summary>The three numbers a quad mesh is judged by, measured rather than assumed.</summary>
@@ -286,6 +344,13 @@ public static class QuadRemesh
 
 	// --- the pipeline ------------------------------------------------------------------------
 
+	static void Report( Options options, string phase )
+	{
+		options.Progress?.Invoke( phase );
+		if ( options.Cancel?.Invoke() == true )
+			throw new OperationCanceledException( $"Quad remesh cancelled at {phase}" );
+	}
+
 	/// <summary>One remesh of one (possibly half) surface. <paramref name="seam"/> &gt;= 0 means
 	/// the x = 0 border is a mirror seam and its vertices are held on the plane.</summary>
 	static PolyMesh Solve( PolyMesh input, int targetFaces, Options options, float seam )
@@ -309,6 +374,8 @@ public static class QuadRemesh
 		while ( MeanEdge( positions, tris ) > scale * 0.4f && tris.Length / 3 < 2_000_000 )
 			(positions, tris) = Split( positions, tris );
 
+		Report( options, "split" );
+
 		var reference = new PolyMesh( positions, Enumerable.Range( 0, tris.Length / 3 )
 			.Select( t => new Face( new[] { tris[t * 3], tris[t * 3 + 1], tris[t * 3 + 2] } ) ) );
 		var tree = MeshBVH.Build( reference );
@@ -329,15 +396,28 @@ public static class QuadRemesh
 		foreach ( var level in levels )
 			level.Colour();
 
+		Report( options, "field" );
 		Curvature( levels, scale, options.AlignToCurvature ? options.CurvatureAlign : 0f );
+		Report( options, "curvature" );
+		if ( options.Guides is { Count: > 0 } )
+		{
+			ApplyGuides( levels, scale, options );
+			Report( options, "guides" );
+		}
 		SolveOrientation( levels );
+		Report( options, "orientation" );
 		SolvePosition( levels, scale );
+		Report( options, "position" );
 
 		var extracted = Extract( fine, scale, seam );
+		Report( options, "extract" );
 		Cleanup( extracted );
+		Report( options, "cleanup" );
 
 		var quads = Subdivide( extracted );
+		Report( options, "subdivide" );
 		Relax( quads, reference, tree, scale, options.RelaxPasses, seam );
+		Report( options, "relax" );
 
 		return quads.ToMesh();
 	}
@@ -924,6 +1004,52 @@ public static class QuadRemesh
 		if ( MathF.Abs( s11 ) > best ) { a = a1; b = b1; dot = s11; }
 
 		return (a, dot < 0f ? -b : b);
+	}
+
+	/// <summary>Retopo wave 3 (Gap 3): pin the orientation field along guide
+	/// polylines. Applied at every level (each level has its own vertex
+	/// positions, all in source coordinates), so the coarse levels that seed
+	/// the field already follow the guide and the fine levels are not left
+	/// fighting them. A vertex within GuideRadius (default: one lattice
+		/// step) of a segment takes that segment's direction, laid in its
+		/// tangent plane, at GuideStrength pull — stronger than any curvature
+		/// pull, so the guide wins where it applies and changes nothing
+		/// elsewhere. Border vertices keep their border direction: the
+		/// orientation solve holds them regardless of Dir/Pull.</summary>
+	static void ApplyGuides( List<Level> levels, float scale, Options options )
+	{
+		var radius = options.GuideRadius > 0f ? options.GuideRadius : scale;
+		var radiusSq = radius * radius;
+		foreach ( var level in levels )
+		{
+			for ( var i = 0; i < level.Count; i++ )
+			{
+				var p = level.V[i];
+				var bestD = float.MaxValue;
+				var bestDir = default( Vec3 );
+				var found = false;
+				foreach ( var guide in options.Guides )
+				{
+					for ( var g = 0; g + 1 < guide.Length; g++ )
+					{
+						var a = guide[g];
+						var b = guide[g + 1];
+						var ab = b - a;
+						var lenSq = ab.LengthSquared;
+						if ( lenSq <= 0f ) continue;
+						var t = Math.Clamp( Vec3.Dot( p - a, ab ) / lenSq, 0f, 1f );
+						var closest = a + ab * t;
+						var d = (p - closest).LengthSquared;
+						if ( d < bestD ) { bestD = d; bestDir = ab; found = true; }
+					}
+				}
+				if ( found && bestD <= radiusSq )
+				{
+					level.Dir[i] = Tangent( bestDir, level.N[i] );
+					if ( options.GuideStrength > level.Pull[i] ) level.Pull[i] = options.GuideStrength;
+				}
+			}
+		}
 	}
 
 	static void SolveOrientation( List<Level> levels )

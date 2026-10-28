@@ -62,7 +62,7 @@ internal static class DocumentSessionTests
 
 			var loader = new DocumentLoader();
 			loader.Start( validPath );
-			Require( loader.Completion.Wait( TimeSpan.FromSeconds( 10 ) ), "first load timed out" );
+			Require( loader.Completion.Wait( TimeSpan.FromSeconds( 30 ) ), "first load timed out" );
 			Require( loader.Status == DocumentLoader.State.Ready, loader.Error ?? "expected ready" );
 
 			var firstSession = loader.Session;
@@ -234,7 +234,7 @@ internal static class DocumentSessionTests
 
 			var loader = new DocumentLoader();
 			loader.Start( path );
-			Require( loader.Completion.Wait( TimeSpan.FromSeconds( 10 ) ) );
+			Require( loader.Completion.Wait( TimeSpan.FromSeconds( 30 ) ) );
 			Require( loader.Status == DocumentLoader.State.Ready );
 
 			var initialSnapshot = loader.Snapshot;

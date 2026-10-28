@@ -60,6 +60,9 @@ public static class PaintTextureSet
 		if ( paint.HeightMap is { } height )
 			images.Add( new Image { Suffix = "normal", Rgba = HeightToNormal( height, bumpStrength ), Width = height.Width, Height = height.Height } );
 
+		if ( paint.HeightMap is { } heightAo )
+			images.Add( new Image { Suffix = "ao", Rgba = HeightToAo( heightAo ), Width = heightAo.Width, Height = heightAo.Height } );
+
 		return images;
 	}
 
@@ -110,6 +113,46 @@ public static class PaintTextureSet
 		return result;
 	}
 
+	/// <summary>
+	/// AO from the same painted height that yields the normal map (P3):
+	/// a texel darker than its blurred neighbourhood is a dent, and dents
+	/// get AO. This is the principled fix for "pore pits do NOT read
+	/// under even light" — height/normal alone do not read there, AO
+	/// does. Absolute low height darkens slightly too. Grey RGBA, alpha
+	/// 255, linear (the slot pipeline samples AO as linear).
+	/// </summary>
+	public static byte[] HeightToAo( PaintCanvas height )
+	{
+		if ( height is null )
+			throw new ArgumentNullException( nameof( height ) );
+
+		var w = height.Width;
+		var h = height.Height;
+		var b = (byte)MathF.Round( PaintChannels.Base( PaintChannel.Height ) * 255f );
+		var opaque = new byte[w * h * 4];
+		height.BakeOpaque( opaque, b, b, b );
+
+		float H( int x, int y ) => opaque[(Math.Clamp( y, 0, h - 1 ) * w + Math.Clamp( x, 0, w - 1 )) * 4] / 255f;
+
+		var result = new byte[w * h * 4];
+		for ( var y = 0; y < h; y++ )
+			for ( var x = 0; x < w; x++ )
+			{
+				var sum = 0f;
+				for ( var dy = -1; dy <= 1; dy++ )
+					for ( var dx = -1; dx <= 1; dx++ )
+						sum += H( x + dx, y + dy );
+				var blur = sum / 9f;
+				var h0 = H( x, y );
+				var cavity = Math.Clamp( blur - h0, 0f, 1f );
+				var a = Math.Clamp( 1f - 0.70f * cavity - 0.15f * (1f - h0), 0.35f, 1f );
+				var g = (byte)Math.Clamp( MathF.Round( a * 255f ), 0f, 255f );
+				var o = (y * w + x) * 4;
+				result[o] = g; result[o + 1] = g; result[o + 2] = g; result[o + 3] = 255;
+			}
+		return result;
+	}
+
 	static byte Encode( float v ) => (byte)Math.Clamp( MathF.Round( (v * 0.5f + 0.5f) * 255f ), 0f, 255f );
 
 	/// <summary>
@@ -146,6 +189,9 @@ public static class PaintTextureSet
 
 		sb.Append( "\n\t//---- Normal ----\n" );
 		sb.Append( $"\tTextureNormal \"{(images.TryGetValue( "normal", out var normal ) ? normal : "materials/default/default_normal.tga")}\"\n" );
+
+		if ( images.TryGetValue( "ao", out var ao ) )
+			sb.Append( "\n\t//---- Ambient Occlusion ----\n" + $"\tTextureAmbientOcclusion \"{ao}\"\n" );
 
 		sb.Append( "\n\t//---- Roughness ----\n" );
 		sb.Append( $"\tTextureRoughness \"{(images.TryGetValue( "rough", out var rough ) ? rough : "materials/default/default_rough.tga")}\"\n" );

@@ -1,0 +1,837 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using System.Text;
+
+namespace Effigy;
+
+/// <summary>
+/// Mesh repair and validation, implemented from
+/// ~/workspace/agent-research-repair/FINDINGS.md (proposals P1-P10).
+///
+/// What "clean" means here is the watertight layer, kept separate from the
+/// craft layer (quad %, edge CV, symmetry) that TopologyReport already
+/// measures: a clean mesh is closed, edge- and vertex-manifold, has no
+/// degenerate or duplicate faces, does not cross itself, has outward
+/// windings proven by signed volume per shell, and carries UVs where the
+/// target needs them. Craft misses are warnings, never hard fails, except
+/// where the gate table in the findings says otherwise.
+///
+/// The gate is configurable per target and default-permissive: nothing
+/// here blocks an existing workflow unless the caller asks for strict.
+/// </summary>
+public enum RepairTarget { Game, Character, Print }
+
+public sealed class RepairCheck
+{
+	public string Name = "";
+	/// <summary>PASS, FAIL, WARN, or SKIP (not applicable to this target).</summary>
+	public string Status = "PASS";
+	public string Detail = "";
+}
+
+public sealed class RepairReport
+{
+	public string Body = "";
+	public string TargetName = "";
+	public List<RepairCheck> Checks = new();
+	public int BoundaryEdges, NonManifoldEdges, NonManifoldVertices;
+	public int Degenerate, DuplicateFaces, SelfIntersections = -1;
+	public int Shells;
+	public List<float> ShellVolumes = new();
+	public int Euler;
+	public int UvMissingFaces;
+	public float MinWall = float.NaN;
+	public Vec3 MinWallAt;
+	public bool HasWallSample;
+	public float QuadPercent, EdgeCv, AspectP90, SkewMean, SkewMax, TriMinAngle, SymmetryPct = float.NaN;
+	public int LoopsMin = -1;
+
+	public bool Passed => Checks.All( c => c.Status != "FAIL" );
+	public List<string> HardFails => Checks.Where( c => c.Status == "FAIL" ).Select( c => c.Name ).ToList();
+
+	void Add( string name, string status, string detail ) => Checks.Add( new RepairCheck { Name = name, Status = status, Detail = detail } );
+
+	public void Describe( List<string> log )
+	{
+		log.Add( $"{Body}: validate target={TargetName} — {(Passed ? "PASS" : "FAIL")}" );
+		foreach ( var c in Checks )
+			log.Add( $"  [{c.Status}] {c.Name}: {c.Detail}" );
+		log.Add( $"{Body}: validate verdict: {(Passed ? "PASS" : "FAIL" + (HardFails.Count > 0 ? $" (hard fails: {string.Join( ", ", HardFails )})" : ""))}" );
+	}
+}
+
+public static class MeshRepair
+{
+	public static RepairTarget ParseTarget( string s ) => (s ?? "game").Trim().ToLowerInvariant() switch
+	{
+		"character" or "char" or "rigged" => RepairTarget.Character,
+		"print" or "stl" or "3dprint" => RepairTarget.Print,
+		_ => RepairTarget.Game,
+	};
+
+	public static string TargetName( RepairTarget t ) => t switch
+	{
+		RepairTarget.Character => "character",
+		RepairTarget.Print => "print",
+		_ => "game",
+	};
+
+	// ---------------------------------------------------------------- validate (P1, P2, P9, P10)
+
+	public static RepairReport Validate( PolyMesh mesh, string name, RepairTarget target,
+		int expectedShells = 1, int expectedGenus = -1, float minWall = 0f, Skeleton rig = null )
+	{
+		var r = new RepairReport { Body = name ?? "body", TargetName = TargetName( target ) };
+		if ( mesh is null || mesh.FaceCount == 0 )
+		{
+			r.Checks.Add( new RepairCheck { Name = "has faces", Status = "FAIL", Detail = "no faces to validate" } );
+			return r;
+		}
+
+		var baseCheck = MeshValidator.Validate( mesh );
+		r.BoundaryEdges = baseCheck.BoundaryEdges;
+		r.NonManifoldEdges = baseCheck.NonManifoldEdges;
+		var topo = TopologyReport.Measure( mesh, name, rig );
+		r.Degenerate = topo.Degenerate;
+		r.QuadPercent = topo.QuadPercent;
+		r.EdgeCv = topo.EdgeCv;
+		r.AspectP90 = topo.AspectP90;
+		r.SkewMean = topo.SkewMean;
+		r.SkewMax = topo.SkewMax;
+		r.TriMinAngle = topo.TriMinAngle;
+		r.SymmetryPct = float.IsNaN( topo.SymmetryHausdorff ) || topo.Diagonal <= 0f
+			? float.NaN : 100f * topo.SymmetryHausdorff / topo.Diagonal;
+
+		var nmVerts = NonManifoldVertexList( mesh );
+		r.NonManifoldVertices = nmVerts.Count;
+		var shells = ShellFaces( mesh );
+		r.Shells = shells.Count;
+		r.ShellVolumes = shells.Select( s => SignedVolume( mesh, s ) ).ToList();
+		r.Euler = MeshValidator.EulerCharacteristic( mesh );
+		r.DuplicateFaces = DuplicateFaceCount( mesh );
+		r.UvMissingFaces = mesh.Faces.Count( f => f.UVs.Length != f.Count || f.UVs.All( uv => uv.x == 0f && uv.y == 0f ) );
+
+		// Self-intersection: BVH-backed, skipped (warn) on very large meshes.
+		var triCount = mesh.Faces.Sum( f => Math.Max( 0, f.Count - 2 ) );
+		if ( triCount > 30000 )
+			r.SelfIntersections = -1;
+		else
+		{
+			try { r.SelfIntersections = MeshClash.Self( TriangleSet.From( mesh ) ).Crossings; }
+			catch { r.SelfIntersections = -1; }
+		}
+
+		// Wall thickness, sampled, only meaningful on a closed mesh.
+		if ( r.BoundaryEdges == 0 && r.NonManifoldEdges == 0 )
+		{
+			var (wall, at, found) = MinWallThickness( mesh );
+			r.HasWallSample = found;
+			if ( found ) { r.MinWall = wall; r.MinWallAt = at; }
+		}
+
+		var isPrint = target == RepairTarget.Print;
+		var isChar = target == RepairTarget.Character;
+
+		AddCheck( r, "boundary edges", r.BoundaryEdges, 0, "hard",
+			$"{r.BoundaryEdges} boundary edges; target 0" );
+		AddCheck( r, "non-manifold edges", r.NonManifoldEdges, 0, "hard",
+			$"{r.NonManifoldEdges} non-manifold edges; target 0" );
+		AddCheck( r, "non-manifold vertices", r.NonManifoldVertices, 0, "hard",
+			r.NonManifoldVertices == 0 ? "all vertices are one fan"
+			: $"non-manifold vertices: {string.Join( ", ", nmVerts.Take( 8 ) )}{(nmVerts.Count > 8 ? $" (+{nmVerts.Count - 8} more)" : "")}" );
+		AddCheck( r, "degenerate faces", r.Degenerate, 0, "hard",
+			$"{r.Degenerate} degenerate faces; target 0" );
+		AddCheck( r, "duplicate faces", r.DuplicateFaces, 0, "hard",
+			$"{r.DuplicateFaces} duplicate faces; target 0" );
+		if ( r.SelfIntersections < 0 )
+			r.Checks.Add( new RepairCheck { Name = "self-intersections", Status = "WARN", Detail = "check skipped (mesh too large or clash failed); not proven clean" } );
+		else
+			AddCheck( r, "self-intersections", r.SelfIntersections, 0, "hard",
+				$"{r.SelfIntersections} self-intersecting triangle pairs; target 0" );
+
+		// Shells: warn for game, hard fail for character/print (findings §4).
+		r.Checks.Add( new RepairCheck
+		{
+			Name = "shell count",
+			Status = r.Shells == expectedShells ? "PASS" : (isPrint || isChar ? "FAIL" : "WARN"),
+			Detail = $"{r.Shells} shell(s); expected {expectedShells}" + (r.ShellVolumes.Count > 0
+				? $"; signed volumes: {string.Join( ", ", r.ShellVolumes.Select( v => v.ToString( "0.###", CultureInfo.InvariantCulture ) ) )}" : ""),
+		} );
+
+		// Signed volume per shell: every closed shell must be positive (outward).
+		var inward = r.ShellVolumes.Where( v => v < 0f ).Count();
+		r.Checks.Add( new RepairCheck
+		{
+			Name = "normals outward (signed volume)",
+			Status = inward == 0 ? "PASS" : "FAIL",
+			Detail = inward == 0 ? "every shell has positive signed volume"
+				: $"{inward} shell(s) with negative signed volume (inward winding)",
+		} );
+
+		// UV completeness: hard fail for textured targets, warn for print.
+		r.Checks.Add( new RepairCheck
+		{
+			Name = "UV completeness",
+			Status = r.UvMissingFaces == 0 ? "PASS" : (isPrint ? "WARN" : "FAIL"),
+			Detail = r.UvMissingFaces == 0 ? "every face carries UVs"
+				: $"{r.UvMissingFaces} face(s) with missing or all-zero UVs",
+		} );
+
+		// Euler / genus: warn only, never a hard fail — a gate that hard-codes
+		// chi = 2 falsely fails every torus, handle, and mug.
+		var genusNote = r.BoundaryEdges == 0 && (2 - r.Euler) % 2 == 0 && r.Euler <= 2
+			? $" (implied genus {(2 - r.Euler) / 2})" : "";
+		if ( expectedGenus >= 0 )
+		{
+			var expectedChi = 2 - 2 * expectedGenus;
+			r.Checks.Add( new RepairCheck
+			{
+				Name = "euler characteristic",
+				Status = r.Euler == expectedChi ? "PASS" : "WARN",
+				Detail = $"chi = {r.Euler}; expected {expectedChi} for genus {expectedGenus}{genusNote}",
+			} );
+		}
+		else
+			r.Checks.Add( new RepairCheck { Name = "euler characteristic", Status = "PASS", Detail = $"chi = {r.Euler}{genusNote}" } );
+
+		// Craft layer: warnings only, per the findings table.
+		r.Checks.Add( new RepairCheck
+		{
+			Name = "quad percentage",
+			Status = topo.QuadPercent >= 85f || topo.Faces == 0 ? "PASS" : "WARN",
+			Detail = $"{topo.QuadPercent:0.#}% quads, {topo.Ngons} n-gons; target >= 85% quads, 0 n-gons",
+		} );
+		r.Checks.Add( new RepairCheck
+		{
+			Name = "edge evenness / quad shape",
+			Status = topo.EdgeCv < 0.4f && (topo.Quads == 0 || topo.AspectP90 <= 3f) ? "PASS" : "WARN",
+			Detail = $"edge CV {topo.EdgeCv:0.###} (target < 0.4), quad aspect p90 {topo.AspectP90:0.###} (target <= 3)",
+		} );
+		if ( topo.Triangles > 0 )
+			r.Checks.Add( new RepairCheck
+			{
+				Name = "triangle quality",
+				Status = float.IsNaN( topo.TriMinAngle ) || topo.TriMinAngle >= 15f ? "PASS" : "WARN",
+				Detail = $"minimum triangle angle {topo.TriMinAngle:0.#} deg; target >= 15 deg",
+			} );
+		if ( !float.IsNaN( r.SymmetryPct ) )
+			r.Checks.Add( new RepairCheck
+			{
+				Name = "symmetry",
+				Status = r.SymmetryPct <= 0.5f ? "PASS" : "WARN",
+				Detail = $"symmetry error {r.SymmetryPct:0.###}% of diagonal; target <= 0.5%",
+			} );
+
+		// Wall thickness: print only, and only when the caller sets a threshold.
+		if ( isPrint )
+		{
+			if ( minWall > 0f && r.HasWallSample )
+				r.Checks.Add( new RepairCheck
+				{
+					Name = "wall thickness",
+					Status = r.MinWall >= minWall ? "PASS" : "FAIL",
+					Detail = $"minimum wall {r.MinWall:0.###} at {r.MinWallAt}; required >= {minWall:0.###}",
+				} );
+			else if ( r.HasWallSample )
+				r.Checks.Add( new RepairCheck { Name = "wall thickness", Status = "PASS", Detail = $"minimum wall sampled {r.MinWall:0.###} at {r.MinWallAt} (no threshold set, informational only)" } );
+			else
+				r.Checks.Add( new RepairCheck { Name = "wall thickness", Status = "WARN", Detail = "no wall sample (mesh is open or has no inward hit)" } );
+		}
+		else
+			r.Checks.Add( new RepairCheck { Name = "wall thickness", Status = "SKIP", Detail = "ignored for this target" } );
+
+		// Loops per joint: character only, and only with a rig.
+		if ( isChar )
+		{
+			if ( rig is null || topo.Joints.Count == 0 )
+				r.Checks.Add( new RepairCheck { Name = "loops per joint", Status = "WARN", Detail = "no rig / no joints measured, loops unchecked" } );
+			else
+			{
+				r.LoopsMin = topo.Joints.Min( j => j.Loops );
+				r.Checks.Add( new RepairCheck
+				{
+					Name = "loops per joint",
+					Status = r.LoopsMin >= 3 ? "PASS" : "FAIL",
+					Detail = $"fewest loops at a joint: {r.LoopsMin}; target >= 3",
+				} );
+			}
+		}
+		else
+			r.Checks.Add( new RepairCheck { Name = "loops per joint", Status = "SKIP", Detail = "ignored for this target" } );
+
+		return r;
+	}
+
+	static void AddCheck( RepairReport r, string name, int value, int targetValue, string severity, string detail )
+		=> r.Checks.Add( new RepairCheck { Name = name, Status = value == targetValue ? "PASS" : (severity == "hard" ? "FAIL" : "WARN"), Detail = detail } );
+
+	// ---------------------------------------------------------------- structure (P2)
+
+	/// <summary>Face-index groups connected by shared edges.</summary>
+	public static List<List<int>> ShellFaces( PolyMesh mesh )
+	{
+		var edgeFaces = mesh.BuildEdgeFaces();
+		var faceAdj = new List<int>[mesh.FaceCount];
+		for ( var i = 0; i < faceAdj.Length; i++ ) faceAdj[i] = new List<int>();
+		foreach ( var faces in edgeFaces.Values )
+			for ( var a = 0; a < faces.Count; a++ )
+				for ( var b = a + 1; b < faces.Count; b++ )
+				{
+					faceAdj[faces[a]].Add( faces[b] );
+					faceAdj[faces[b]].Add( faces[a] );
+				}
+		var seen = new bool[mesh.FaceCount];
+		var shells = new List<List<int>>();
+		for ( var s = 0; s < mesh.FaceCount; s++ )
+		{
+			if ( seen[s] ) continue;
+			var shell = new List<int>();
+			var stack = new Stack<int>();
+			stack.Push( s ); seen[s] = true;
+			while ( stack.Count > 0 )
+			{
+				var f = stack.Pop(); shell.Add( f );
+				foreach ( var n in faceAdj[f] )
+					if ( !seen[n] ) { seen[n] = true; stack.Push( n ); }
+			}
+			shells.Add( shell );
+		}
+		return shells;
+	}
+
+	/// <summary>Vertices whose incident faces split into more than one fan
+	/// when walked across edges incident to the vertex (the bowtie test).
+	/// Edge-manifoldness alone passes a bowtie; this does not.</summary>
+	public static List<int> NonManifoldVertexList( PolyMesh mesh )
+	{
+		var incident = new List<int>[mesh.Positions.Count];
+		for ( var i = 0; i < incident.Length; i++ ) incident[i] = new List<int>();
+		for ( var fi = 0; fi < mesh.FaceCount; fi++ )
+			foreach ( var vi in mesh.Faces[fi].Indices )
+				if ( vi >= 0 && vi < incident.Length ) incident[vi].Add( fi );
+
+		var bad = new List<int>();
+		for ( var v = 0; v < incident.Length; v++ )
+		{
+			var faces = incident[v];
+			if ( faces.Count <= 1 ) continue;
+			// Two incident faces are in the same fan if they share an edge
+			// incident to v, i.e. they share another vertex u and both
+			// contain the edge (v, u).
+			var adj = new Dictionary<int, List<int>>();
+			foreach ( var f in faces ) adj[f] = new List<int>();
+			for ( var a = 0; a < faces.Count; a++ )
+				for ( var b = a + 1; b < faces.Count; b++ )
+				{
+					var fa = mesh.Faces[faces[a]].Indices;
+					var fb = mesh.Faces[faces[b]].Indices;
+					var shared = fa.Intersect( fb ).Where( u => u != v ).Any();
+					if ( shared )
+					{
+						adj[faces[a]].Add( faces[b] );
+						adj[faces[b]].Add( faces[a] );
+					}
+				}
+			var seen = new HashSet<int>();
+			var components = 0;
+			foreach ( var f in faces )
+			{
+				if ( seen.Contains( f ) ) continue;
+				components++;
+				var stack = new Stack<int>(); stack.Push( f ); seen.Add( f );
+				while ( stack.Count > 0 )
+					foreach ( var n in adj[stack.Pop()] )
+						if ( seen.Add( n ) ) stack.Push( n );
+			}
+			if ( components > 1 ) bad.Add( v );
+		}
+		return bad;
+	}
+
+	public static int DuplicateFaceCount( PolyMesh mesh )
+	{
+		var seen = new HashSet<string>();
+		var dups = 0;
+		foreach ( var f in mesh.Faces )
+		{
+			var key = string.Join( ",", f.Indices.OrderBy( i => i ) );
+			if ( !seen.Add( key ) ) dups++;
+		}
+		return dups;
+	}
+
+	public static float SignedVolume( PolyMesh mesh, IEnumerable<int> faces )
+	{
+		double vol = 0;
+		foreach ( var fi in faces )
+		{
+			var idx = mesh.Faces[fi].Indices;
+			for ( var k = 1; k + 1 < idx.Length; k++ )
+			{
+				var a = mesh.Positions[idx[0]];
+				var b = mesh.Positions[idx[k]];
+				var c = mesh.Positions[idx[k + 1]];
+				vol += Vec3.Dot( a, Vec3.Cross( b, c ) ) / 6.0;
+			}
+		}
+		return (float)vol;
+	}
+
+	/// <summary>Sampled wall thickness: from each sampled face centroid,
+	/// ray inward and take the nearest hit on a face that shares no vertex
+	/// with the source face. For a hollow shell that is the wall; for a
+	/// solid it is roughly the diameter, which is why a solid reports
+	/// "no thin wall" rather than a false thin value — the gate only
+	/// fails when a threshold was set and the sample is below it.</summary>
+	public static (float min, Vec3 at, bool found) MinWallThickness( PolyMesh mesh, int maxSamples = 512 )
+	{
+		var faces = mesh.Faces;
+		if ( faces.Count == 0 ) return (float.NaN, new Vec3(), false);
+		var stride = Math.Max( 1, faces.Count / maxSamples );
+		float best = float.MaxValue;
+		Vec3 bestAt = new();
+		var found = false;
+		for ( var fi = 0; fi < faces.Count; fi += stride )
+		{
+			var f = faces[fi];
+			if ( f.Count < 3 ) continue;
+			var n = mesh.FaceNormal( f ).Normal;
+			if ( n.x == 0f && n.y == 0f && n.z == 0f ) continue;
+			var c = new Vec3();
+			foreach ( var vi in f.Indices ) c += mesh.Positions[vi];
+			c = new Vec3( c.x / f.Count, c.y / f.Count, c.z / f.Count );
+			var origin = new Vec3( c.x - n.x * 1e-3f, c.y - n.y * 1e-3f, c.z - n.z * 1e-3f );
+			var dir = new Vec3( -n.x, -n.y, -n.z );
+			var own = new HashSet<int>( f.Indices );
+			for ( var gj = 0; gj < faces.Count; gj++ )
+			{
+				if ( gj == fi ) continue;
+				var g = faces[gj];
+				if ( g.Indices.Any( vi => own.Contains( vi ) ) ) continue;
+				if ( RayTriangle( origin, dir, mesh, g, out var t ) && t > 1e-4f && t < best )
+				{
+					best = t; bestAt = c; found = true;
+				}
+			}
+		}
+		return (best, bestAt, found);
+	}
+
+	static bool RayTriangle( Vec3 origin, Vec3 dir, PolyMesh mesh, Face face, out float t )
+	{
+		t = 0f;
+		// Fan-triangulate; the nearest hit over the fan is the face hit.
+		var idx = face.Indices;
+		var hit = false;
+		for ( var k = 1; k + 1 < idx.Length; k++ )
+		{
+			var a = mesh.Positions[idx[0]];
+			var b = mesh.Positions[idx[k]];
+			var c = mesh.Positions[idx[k + 1]];
+			var e1 = b - a;
+			var e2 = c - a;
+			var p = Vec3.Cross( dir, e2 );
+			var det = Vec3.Dot( e1, p );
+			if ( MathF.Abs( det ) < 1e-9f ) continue;
+			var inv = 1f / det;
+			var tv = origin - a;
+			var u = Vec3.Dot( tv, p ) * inv;
+			if ( u < 0f || u > 1f ) continue;
+			var q = Vec3.Cross( tv, e1 );
+			var v = Vec3.Dot( dir, q ) * inv;
+			if ( v < 0f || u + v > 1f ) continue;
+			var tt = Vec3.Dot( e2, q ) * inv;
+			if ( tt > 1e-4f && (!hit || tt < t) ) { t = tt; hit = true; }
+		}
+		return hit;
+	}
+
+	// ---------------------------------------------------------------- repairs (P3, P4, P5, P7, P8, P10)
+
+	/// <summary>Delete zero-area and repeated-corner faces, then compact
+	/// unused vertices. Returns the number of faces removed.</summary>
+	public static int RemoveDegenerate( PolyMesh mesh )
+	{
+		var keep = new List<Face>();
+		var removed = 0;
+		foreach ( var f in mesh.Faces )
+		{
+			var bad = f.Count < 3 || f.Indices.Distinct().Count() != f.Count;
+			if ( !bad )
+			{
+				var area = mesh.FaceArea( f );
+				if ( area <= 1e-12f ) bad = true;
+			}
+			if ( bad ) removed++;
+			else keep.Add( f );
+		}
+		if ( removed == 0 ) return 0;
+		mesh.Faces.Clear();
+		mesh.Faces.AddRange( keep );
+		CompactVertices( mesh );
+		return removed;
+	}
+
+	public static void CompactVertices( PolyMesh mesh )
+	{
+		var used = new HashSet<int>();
+		foreach ( var f in mesh.Faces ) used.UnionWith( f.Indices );
+		if ( used.Count == mesh.Positions.Count ) return;
+		var remap = new int[mesh.Positions.Count];
+		var newPos = new List<Vec3>();
+		for ( var i = 0; i < mesh.Positions.Count; i++ )
+			if ( used.Contains( i ) ) { remap[i] = newPos.Count; newPos.Add( mesh.Positions[i] ); }
+			else remap[i] = -1;
+		foreach ( var f in mesh.Faces )
+			for ( var k = 0; k < f.Indices.Length; k++ ) f.Indices[k] = remap[f.Indices[k]];
+		mesh.Positions.Clear();
+		mesh.Positions.AddRange( newPos );
+	}
+
+	/// <summary>Flip every shell whose signed volume is negative, wholesale,
+	/// so each shell winds outward. Returns one line per shell.</summary>
+	public static List<string> FlipShellsByVolume( PolyMesh mesh )
+	{
+		var lines = new List<string>();
+		var shells = ShellFaces( mesh );
+		for ( var si = 0; si < shells.Count; si++ )
+		{
+			var before = SignedVolume( mesh, shells[si] );
+			var flipped = false;
+			if ( before < 0f )
+			{
+				foreach ( var fi in shells[si] )
+				{
+					var f = mesh.Faces[fi];
+					Array.Reverse( f.Indices );
+					Array.Reverse( f.UVs );
+				}
+				flipped = true;
+			}
+			var after = SignedVolume( mesh, shells[si] );
+			lines.Add( $"shell {si}: signed volume {before:0.###} -> {after:0.###}{(flipped ? " (flipped)" : "")}" );
+		}
+		return lines;
+	}
+
+	// Boundary rings: vertex -> next vertex along the boundary, plus the
+	// owner face's material and its UV at the starting vertex.
+	static (List<List<int>> rings, Dictionary<int, int> materialOf, Dictionary<int, Vec2> uvOf) BoundaryRings( PolyMesh mesh )
+	{
+		var nextOf = new Dictionary<int, int>();
+		var materialOf = new Dictionary<int, int>();
+		var uvOf = new Dictionary<int, Vec2>();
+		foreach ( var (key, owners) in mesh.BuildEdgeFaces() )
+		{
+			if ( owners.Count != 1 ) continue;
+			var owner = mesh.Faces[owners[0]];
+			var idx = owner.Indices;
+			var ia = Array.IndexOf( idx, key.A );
+			var next = ia >= 0 && idx[(ia + 1) % idx.Length] == key.B;
+			var from = next ? key.B : key.A;
+			var to = next ? key.A : key.B;
+			nextOf[from] = to;
+			materialOf[from] = owner.Material;
+			if ( ia >= 0 )
+			{
+				var corner = next ? Array.IndexOf( idx, from ) : ia;
+				if ( corner >= 0 && corner < owner.UVs.Length ) uvOf[from] = owner.UVs[corner];
+			}
+		}
+		var rings = new List<List<int>>();
+		var seen = new HashSet<int>();
+		foreach ( var start in new List<int>( nextOf.Keys ) )
+		{
+			if ( seen.Contains( start ) ) continue;
+			var ring = new List<int>();
+			var at = start;
+			var ok = true;
+			do
+			{
+				if ( !seen.Add( at ) || !nextOf.TryGetValue( at, out var nx ) ) { ok = false; break; }
+				ring.Add( at );
+				at = nx;
+			} while ( at != start && ring.Count <= nextOf.Count );
+			if ( ok && at == start && ring.Count >= 3 ) rings.Add( ring );
+		}
+		return (rings, materialOf, uvOf);
+	}
+
+	/// <summary>Hole filling v2: ear-clipping triangulation for simple
+	/// (including concave) rings, with a planarity check that refuses a
+	/// hole it cannot fill flat, and interpolated UVs on every patch
+	/// face. Rings larger than maxSides, non-planar rings, and rings
+	/// that fail ear clipping are reported, not silently fanned.</summary>
+	public static (int closed, List<string> unfilled) FillHolesV2( PolyMesh mesh, int maxSides = 64 )
+	{
+		var (rings, materialOf, uvOf) = BoundaryRings( mesh );
+		var closed = 0;
+		var unfilled = new List<string>();
+		foreach ( var ring in rings )
+		{
+			if ( ring.Count > maxSides )
+			{
+				unfilled.Add( $"ring of {ring.Count} sides exceeds maxSides {maxSides}" );
+				continue;
+			}
+			var (tris, why) = EarClipRing( mesh, ring );
+			if ( tris is null )
+			{
+				unfilled.Add( why ?? $"ring of {ring.Count} sides could not be triangulated" );
+				continue;
+			}
+			var mat = materialOf.TryGetValue( ring[0], out var m ) ? m : 0;
+			foreach ( var (a, b, c) in tris )
+			{
+				var uvs = new[]
+				{
+					uvOf.TryGetValue( a, out var ua ) ? ua : new Vec2(),
+					uvOf.TryGetValue( b, out var ub ) ? ub : new Vec2(),
+					uvOf.TryGetValue( c, out var uc ) ? uc : new Vec2(),
+				};
+				mesh.Faces.Add( new Face( new[] { a, b, c }, uvs, mat ) );
+			}
+			closed++;
+		}
+		return (closed, unfilled);
+	}
+
+	static (List<(int, int, int)> tris, string why) EarClipRing( PolyMesh mesh, List<int> ring )
+	{
+		// Newell normal + planarity check.
+		var n = new Vec3();
+		var centroid = new Vec3();
+		for ( var i = 0; i < ring.Count; i++ )
+		{
+			var p = mesh.Positions[ring[i]];
+			var q = mesh.Positions[ring[(i + 1) % ring.Count]];
+			centroid += p;
+			n += Vec3.Cross( p, q );
+		}
+		centroid = new Vec3( centroid.x / ring.Count, centroid.y / ring.Count, centroid.z / ring.Count );
+		var nLen = MathF.Sqrt( n.x * n.x + n.y * n.y + n.z * n.z );
+		if ( nLen < 1e-9f ) return (null, $"ring of {ring.Count} sides has no usable plane normal");
+		var nn = new Vec3( n.x / nLen, n.y / nLen, n.z / nLen );
+		float diameter = 0f;
+		foreach ( var vi in ring )
+		{
+			var d = mesh.Positions[vi] - centroid;
+			diameter = MathF.Max( diameter, MathF.Sqrt( d.x * d.x + d.y * d.y + d.z * d.z ) );
+		}
+		foreach ( var vi in ring )
+		{
+			var d = mesh.Positions[vi] - centroid;
+			if ( MathF.Abs( Vec3.Dot( d, nn ) ) > 0.05f * MathF.Max( diameter, 1e-6f ) )
+				return (null, $"ring of {ring.Count} sides is non-planar (deviation over 5% of size); left open rather than folded");
+		}
+		// 2D basis in the ring plane.
+		var e0 = mesh.Positions[ring[1]] - mesh.Positions[ring[0]];
+		var eLen = MathF.Sqrt( e0.x * e0.x + e0.y * e0.y + e0.z * e0.z );
+		if ( eLen < 1e-9f ) return (null, $"ring of {ring.Count} sides has a zero-length edge");
+		var u = new Vec3( e0.x / eLen, e0.y / eLen, e0.z / eLen );
+		var v = Vec3.Cross( nn, u );
+		var pts = ring.Select( vi =>
+		{
+			var d = mesh.Positions[vi] - centroid;
+			return (x: Vec3.Dot( d, u ), y: Vec3.Dot( d, v ));
+		} ).ToList();
+		float area2 = 0f;
+		for ( var i = 0; i < pts.Count; i++ )
+		{
+			var (x1, y1) = pts[i];
+			var (x2, y2) = pts[(i + 1) % pts.Count];
+			area2 += x1 * y2 - x2 * y1;
+		}
+		if ( MathF.Abs( area2 ) < 1e-12f ) return (null, $"ring of {ring.Count} sides has zero area");
+		var sign = area2 >= 0f ? 1f : -1f;
+
+		var remaining = new List<int>( ring );
+		var remainingPts = new List<(float x, float y)>( pts );
+		var tris = new List<(int, int, int)>();
+		var guard = 0;
+		while ( remaining.Count > 3 )
+		{
+			if ( ++guard > remaining.Count * remaining.Count + 10 )
+				return (null, $"ring of {ring.Count} sides failed ear clipping (no ear found)");
+			var found = false;
+			for ( var i = 0; i < remaining.Count; i++ )
+			{
+				var prev = remainingPts[(i + remaining.Count - 1) % remaining.Count];
+				var cur = remainingPts[i];
+				var next = remainingPts[(i + 1) % remaining.Count];
+				var cross = (cur.x - prev.x) * (next.y - cur.y) - (cur.y - prev.y) * (next.x - cur.x);
+				if ( cross * sign <= 0f ) continue; // reflex, not an ear tip
+				var inside = false;
+				for ( var j = 0; j < remaining.Count; j++ )
+				{
+					if ( j == (i + remaining.Count - 1) % remaining.Count || j == i || j == (i + 1) % remaining.Count ) continue;
+					if ( PointInTriangle( remainingPts[j], prev, cur, next ) ) { inside = true; break; }
+				}
+				if ( inside ) continue;
+				tris.Add( (remaining[(i + remaining.Count - 1) % remaining.Count], remaining[i], remaining[(i + 1) % remaining.Count]) );
+				remaining.RemoveAt( i );
+				remainingPts.RemoveAt( i );
+				found = true;
+				break;
+			}
+			if ( !found ) return (null, $"ring of {ring.Count} sides failed ear clipping (no ear found)");
+		}
+		tris.Add( (remaining[0], remaining[1], remaining[2]) );
+		return (tris, null);
+	}
+
+	static bool PointInTriangle( (float x, float y) p, (float x, float y) a, (float x, float y) b, (float x, float y) c )
+	{
+		var d1 = (p.x - b.x) * (a.y - b.y) - (a.x - b.x) * (p.y - b.y);
+		var d2 = (p.x - c.x) * (b.y - c.y) - (b.x - c.x) * (p.y - c.y);
+		var d3 = (p.x - a.x) * (c.y - a.y) - (c.x - a.x) * (p.y - a.y);
+		var hasNeg = d1 < -1e-9f || d2 < -1e-9f || d3 < -1e-9f;
+		var hasPos = d1 > 1e-9f || d2 > 1e-9f || d3 > 1e-9f;
+		return !(hasNeg && hasPos);
+	}
+
+	/// <summary>Staged, scale-relative welding (P7). Stages are
+	/// diagonal x 1e-6, diagonal x 1e-5, then the absolute cap. Welding
+	/// stops once boundary edges reach 0, or once a stage that previously
+	/// reduced them stops reducing them further. Returns report lines;
+	/// the first line is the summary.</summary>
+	public static List<string> WeldStaged( PolyMesh mesh, float cap )
+	{
+		var lines = new List<string>();
+		var session = new MeshEditSession( mesh );
+		var (min, max) = ModelMeasure.Bounds( session.Mesh );
+		var diagVec = max - min;
+		var diag = MathF.Sqrt( diagVec.x * diagVec.x + diagVec.y * diagVec.y + diagVec.z * diagVec.z );
+		var stages = new[] { diag * 1e-6f, diag * 1e-5f, MathF.Max( cap, diag * 1e-4f ) };
+		var totalMerged = 0;
+		var lastBoundary = BoundaryCount( session.Mesh );
+		var decreasedBefore = false;
+		for ( var si = 0; si < stages.Length; si++ )
+		{
+			var beforeVerts = session.Mesh.VertexCount;
+			var beforeBoundary = lastBoundary;
+			session.MergeByDistance( stages[si] );
+			var merged = beforeVerts - session.Mesh.VertexCount;
+			totalMerged += merged;
+			var boundary = BoundaryCount( session.Mesh );
+			lines.Add( $"stage {si + 1} tolerance {stages[si]:0.#####}: merged {merged} vertices, boundary edges {beforeBoundary} -> {boundary}" );
+			if ( boundary == 0 ) { lastBoundary = boundary; break; }
+			if ( decreasedBefore && boundary >= beforeBoundary ) break;
+			if ( boundary < beforeBoundary ) decreasedBefore = true;
+			lastBoundary = boundary;
+		}
+		// Write the session mesh back into the caller's mesh.
+		var result = session.Mesh;
+		mesh.Positions.Clear();
+		mesh.Positions.AddRange( result.Positions );
+		mesh.Faces.Clear();
+		mesh.Faces.AddRange( result.Faces );
+		lines.Insert( 0, $"doubles: staged weld merged {totalMerged} vertices (cap {cap:0.###}, diagonal {diag:0.###})" );
+		return lines;
+	}
+
+	static int BoundaryCount( PolyMesh mesh )
+		=> mesh.BuildEdgeFaces().Values.Count( owners => owners.Count == 1 );
+
+	/// <summary>Box-project UVs onto faces that carry none (all-zero UVs).
+	/// Returns the number of faces fixed.</summary>
+	public static int BoxProjectUvs( PolyMesh mesh )
+	{
+		var (min, max) = ModelMeasure.Bounds( mesh );
+		var size = max - min;
+		var fixed_ = 0;
+		foreach ( var f in mesh.Faces )
+		{
+			if ( !f.UVs.All( uv => uv.x == 0f && uv.y == 0f ) ) continue;
+			var n = mesh.FaceNormal( f ).Normal;
+			var ax = MathF.Abs( n.x ); var ay = MathF.Abs( n.y ); var az = MathF.Abs( n.z );
+			for ( var k = 0; k < f.Count; k++ )
+			{
+				var p = mesh.Positions[f.Indices[k]];
+				float u, v;
+				if ( ax >= ay && ax >= az ) { u = size.y > 0f ? (p.y - min.y) / size.y : 0f; v = size.z > 0f ? (p.z - min.z) / size.z : 0f; }
+				else if ( ay >= ax && ay >= az ) { u = size.x > 0f ? (p.x - min.x) / size.x : 0f; v = size.z > 0f ? (p.z - min.z) / size.z : 0f; }
+				else { u = size.x > 0f ? (p.x - min.x) / size.x : 0f; v = size.y > 0f ? (p.y - min.y) / size.y : 0f; }
+				f.UVs[k] = new Vec2( u, v );
+			}
+			fixed_++;
+		}
+		return fixed_;
+	}
+
+	/// <summary>Make-manifold fallback (P8): rebuild the body as a closed
+	/// shell through the existing voxel remesh path (SdfMesh +
+	/// SurfaceNets, the same machinery RemeshFeature Voxel mode uses),
+	/// and report the worst sampled deviation from the original so the
+	/// caller can judge how much shape was lost. Returns false and
+	/// leaves the mesh untouched when the voxel skin is empty.</summary>
+	public static (bool ok, float deviation, string note) ManifoldFallback( PolyMesh mesh, float voxel )
+	{
+		if ( voxel <= 0f ) return (false, 0f, "voxel size must be positive");
+		var original = mesh.Clone();
+		var field = new SdfMesh( mesh, voxel * 3f );
+		var result = SurfaceNets.Mesh( field, voxel );
+		if ( result.Mesh is null || result.Mesh.FaceCount == 0 )
+			return (false, 0f, "voxel remesh produced no faces; mesh left untouched");
+		// Deviation: worst distance from sampled original vertices to the
+		// new skin (brute force; fixtures and repair targets are small).
+		var stride = Math.Max( 1, original.Positions.Count / 512 );
+		float worst = 0f;
+		for ( var i = 0; i < original.Positions.Count; i += stride )
+			worst = MathF.Max( worst, PointToMeshDistance( original.Positions[i], result.Mesh ) );
+		mesh.Positions.Clear();
+		mesh.Positions.AddRange( result.Mesh.Positions );
+		mesh.Faces.Clear();
+		mesh.Faces.AddRange( result.Mesh.Faces );
+		return (true, worst, $"voxel {voxel:0.###}: {result.Mesh.FaceCount} faces, worst sampled deviation {worst:0.###}" );
+	}
+
+	static float PointToMeshDistance( Vec3 p, PolyMesh mesh )
+	{
+		float best = float.MaxValue;
+		foreach ( var f in mesh.Faces )
+		{
+			var idx = f.Indices;
+			for ( var k = 1; k + 1 < idx.Length; k++ )
+				best = MathF.Min( best, PointToTriangleDistance( p, mesh.Positions[idx[0]], mesh.Positions[idx[k]], mesh.Positions[idx[k + 1]] ) );
+		}
+		return best;
+	}
+
+	static float PointToTriangleDistance( Vec3 p, Vec3 a, Vec3 b, Vec3 c )
+	{
+		// Closest point on triangle (Ericson, Real-Time Collision Detection).
+		var ab = b - a; var ac = c - a; var ap = p - a;
+		var d1 = Vec3.Dot( ab, ap ); var d2 = Vec3.Dot( ac, ap );
+		if ( d1 <= 0f && d2 <= 0f ) return (p - a).Length;
+		var bp = p - b;
+		var d3 = Vec3.Dot( ab, bp ); var d4 = Vec3.Dot( ac, bp );
+		if ( d3 >= 0f && d4 <= d3 ) return (p - b).Length;
+		var vc = d1 * d4 - d3 * d2;
+		if ( vc <= 0f && d1 >= 0f && d3 <= 0f )
+		{
+			var v = d1 / (d1 - d3);
+			return (p - (a + ab * v)).Length;
+		}
+		var cp = p - c;
+		var d5 = Vec3.Dot( ab, cp ); var d6 = Vec3.Dot( ac, cp );
+		if ( d6 >= 0f && d5 <= d6 ) return (p - c).Length;
+		var vb = d5 * d2 - d1 * d6;
+		if ( vb <= 0f && d2 >= 0f && d6 <= 0f )
+		{
+			var w = d2 / (d2 - d6);
+			return (p - (a + ac * w)).Length;
+		}
+		var va = d3 * d6 - d5 * d4;
+		if ( va <= 0f && (d4 - d3) >= 0f && (d5 - d6) >= 0f )
+		{
+			var w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+			return (p - (b + (c - b) * w)).Length;
+		}
+		var denom = 1f / (va + vb + vc);
+		var vv = vb * denom; var ww = vc * denom;
+		return (p - (a + ab * vv + ac * ww)).Length;
+	}
+}

@@ -1,0 +1,50 @@
+effigy 1
+rollback 2147483647
+materiallook 0 color=#c8ccd0 rough=0.3 metal=0.9
+materiallook 1 color=#b8322a rough=0.6 metal=0.1
+materiallook 2 color=#2a2420 rough=0.9 metal=0
+feature BlobFeature
+	id 50109f78
+	name CanL
+	suppressed 0
+	visible 1
+	param Blend 0.01
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes cylinder -1.8,0,0 -1.8,0,1.4 0.7 r=0.05 mat=0; torus -1.8,0,1.4 0.7 0.06 mat=0; torus -1.8,0,0 0.7 0.06 mat=0; cylinder -1.8,0,0.45 -1.8,0,0.95 0.72 r=0.02 mat=1
+	param Smooth 2
+	param Voxel 0.03
+end
+feature BlobFeature
+	id b8838d80
+	name CanR
+	suppressed 0
+	visible 1
+	param Blend 0.01
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes cylinder 1.8,0,0 1.8,0,1.4 0.7 r=0.05 mat=0; torus 1.8,0,1.4 0.7 0.06 mat=0; torus 1.8,0,0 0.7 0.06 mat=0; cylinder 1.8,0,0.45 1.8,0,0.95 0.72 r=0.02 mat=1
+	param Smooth 2
+	param Voxel 0.03
+end
+feature BlobFeature
+	id b43f9ba6
+	name String
+	suppressed 0
+	visible 1
+	param Blend 0.01
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes cylinder -1.1,0,0.7 1.1,0,0.7 0.03 mat=2
+	param Smooth 2
+	param Voxel 0.02
+end

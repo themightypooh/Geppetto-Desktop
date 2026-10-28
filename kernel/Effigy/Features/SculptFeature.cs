@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 
@@ -64,7 +65,17 @@ public sealed class SculptFeature : Feature
 	/// </summary>
 	public readonly IntParam Levels = new( "Multires levels", 0, 0, 5 );
 
-	public override IReadOnlyList<IParam> Parameters => new IParam[] { Bodies, Reproject, Levels };
+	/// <summary>
+	/// Restore the cage bounds after the sculpt levels are evaluated. Sculpt levels smooth
+	/// (Catmull-Clark), which shrinks the cage toward its limit surface — the same shrink a
+	/// plain Subdivide shows. With this on, the evaluated mesh is rescaled per axis about the
+	/// cage centre back to the cage bounds, so the SIZE is preserved exactly. The smoothed
+	/// silhouette is kept: rounded corners stay rounded, only the size comes back. Off by
+	/// default, so every existing sculpt rebuilds exactly as before.
+	/// </summary>
+	public readonly BoolParam Preserve = new( "Preserve size", false );
+
+	public override IReadOnlyList<IParam> Parameters => new IParam[] { Bodies, Reproject, Levels, Preserve };
 
 	MultiresSculpt _sculpt;
 
@@ -189,7 +200,57 @@ public sealed class SculptFeature : Feature
 		_byBody.Remove( body );
 		_byBody.Add( body, _sculpt );
 
+		var cage = _sculpt.Cage;
+
 		body.Mesh = _sculpt.Evaluate( _sculpt.TopLevel );
+
+		if ( Preserve.Value && Levels.Clamped > 0 )
+		{
+			// Bounds restore only: per-axis rescale about the cage centre. An axis whose cage
+			// or output extent is ~0 (a flat sheet) is left alone rather than divided by ~0.
+			Vec3 Min( PolyMesh mesh )
+			{
+				var lo = new Vec3( float.MaxValue, float.MaxValue, float.MaxValue );
+
+				foreach ( var p in mesh.Positions )
+					lo = new Vec3( MathF.Min( lo.x, p.x ), MathF.Min( lo.y, p.y ), MathF.Min( lo.z, p.z ) );
+
+				return lo;
+			}
+
+			Vec3 Max( PolyMesh mesh )
+			{
+				var hi = new Vec3( float.MinValue, float.MinValue, float.MinValue );
+
+				foreach ( var p in mesh.Positions )
+					hi = new Vec3( MathF.Max( hi.x, p.x ), MathF.Max( hi.y, p.y ), MathF.Max( hi.z, p.z ) );
+
+				return hi;
+			}
+
+			var cageLo = Min( cage );
+			var cageHi = Max( cage );
+			var outLo = Min( body.Mesh );
+			var outHi = Max( body.Mesh );
+			var centre = (cageLo + cageHi) * 0.5f;
+			var sx = cageHi.x - cageLo.x > 1e-6f && outHi.x - outLo.x > 1e-6f ? (cageHi.x - cageLo.x) / (outHi.x - outLo.x) : 1f;
+			var sy = cageHi.y - cageLo.y > 1e-6f && outHi.y - outLo.y > 1e-6f ? (cageHi.y - cageLo.y) / (outHi.y - outLo.y) : 1f;
+			var sz = cageHi.z - cageLo.z > 1e-6f && outHi.z - outLo.z > 1e-6f ? (cageHi.z - cageLo.z) / (outHi.z - outLo.z) : 1f;
+
+			for ( var i = 0; i < body.Mesh.Positions.Count; i++ )
+			{
+				var p = body.Mesh.Positions[i];
+				body.Mesh.Positions[i] = new Vec3(
+					centre.x + (p.x - centre.x) * sx,
+					centre.y + (p.y - centre.y) * sy,
+					centre.z + (p.z - centre.z) * sz );
+			}
+
+			Warn(
+				"Preserve size restored the cage bounds",
+				"Sculpt levels smooth (Catmull-Clark), which shrinks the cage; the output was rescaled per axis about the cage centre back to the cage bounds. The smoothed silhouette (rounded corners) is kept — only the size is restored.",
+				"Turn Preserve size off to keep the smoothed size" );
+		}
 
 		// Last, so that a failure above leaves the feature stale and the next rebuild tries again.
 		_builtRevision = _sculpt.Revision;

@@ -1,0 +1,873 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
+namespace Effigy;
+
+// Rigging wave 3: wiring + deformation quality + control/correction, from
+// ~/workspace/agent-research-rigging/FINDINGS.md proposals P1-P10.
+//
+// ARCHITECTURE NOTE (read before extending): s&box runtime skinning is LBS with
+// 4 weights and no dual quaternions (CorrectiveMorph.cs, citing skinning_cs.shader).
+// DualQuaternionSkinning here is therefore a viewport-preview and bake-to-corrective
+// tool ONLY. It is never a runtime replacement, and BakeCorrective is the path by
+// which a DQS shape reaches the game: as an angle-exact morph under LBS.
+
+/// <summary>A dual quaternion: a rotation (Real) plus a translation encoded in Dual.
+/// For a rigid transform with rotation q and translation t: Dual = 0.5 * (0,t) * q.
+/// Normalised by |Real|; a zero Real normalises to identity rather than NaN.</summary>
+public readonly struct DualQuat
+{
+	public readonly Quat Real;
+	public readonly Quat Dual;
+
+	public DualQuat( Quat real, Quat dual ) { Real = real; Dual = dual; }
+
+	public static DualQuat FromXform( Xform t )
+	{
+		var q = Quat.FromXform( t );
+		var tq = new Quat( t.Origin.x, t.Origin.y, t.Origin.z, 0f );
+		var d = tq * q;
+		return new DualQuat( q, new Quat( d.x * 0.5f, d.y * 0.5f, d.z * 0.5f, d.w * 0.5f ) );
+	}
+
+	public DualQuat Normalized
+	{
+		get
+		{
+			var len = MathF.Sqrt( Real.x * Real.x + Real.y * Real.y + Real.z * Real.z + Real.w * Real.w );
+			if ( len < 1e-9f ) return new DualQuat( Quat.Identity, new Quat( 0, 0, 0, 0 ) );
+			return new DualQuat(
+				new Quat( Real.x / len, Real.y / len, Real.z / len, Real.w / len ),
+				new Quat( Dual.x / len, Dual.y / len, Dual.z / len, Dual.w / len ) );
+		}
+	}
+
+	/// <summary>Translation part: 2 * (Dual * conj(Real)) as a vector.</summary>
+	public Vec3 Translation
+	{
+		get
+		{
+			var d = Dual * Real.Inverse;
+			return new Vec3( 2f * d.x, 2f * d.y, 2f * d.z );
+		}
+	}
+
+	public Vec3 TransformPoint( Vec3 p ) => Real.Rotate( p ) + Translation;
+}
+
+/// <summary>Dual-quaternion skinning: preview + bake only, never runtime (see file header).
+/// Scaled bones fall back to LBS per vertex, loudly: scale has no dual-quaternion
+/// representation, and silently dropping it would deform a scaled hierarchy wrong.</summary>
+public static class DualQuaternionSkinning
+{
+	public static Vec3[] Deform( IReadOnlyList<Vec3> positions, SkinWeights weights,
+		IReadOnlyList<Xform> bindWorld, IReadOnlyList<Xform> poseWorld,
+		out List<int> scaledBones, out int scaledVertices )
+	{
+		if ( positions is null ) throw new ArgumentNullException( nameof( positions ) );
+		if ( weights is null ) throw new ArgumentNullException( nameof( weights ) );
+		if ( bindWorld is null ) throw new ArgumentNullException( nameof( bindWorld ) );
+		if ( poseWorld is null ) throw new ArgumentNullException( nameof( poseWorld ) );
+
+		var n = bindWorld.Count;
+		var skin = new Xform[n];
+		var dq = new DualQuat[n];
+		var scaled = new bool[n];
+		scaledBones = new List<int>();
+
+		for ( var b = 0; b < n; b++ )
+		{
+			skin[b] = poseWorld[b] * bindWorld[b].Inverse;
+			var s = Quat.ScaleOf( skin[b] );
+			if ( MathF.Abs( s.x - 1f ) > 0.02f || MathF.Abs( s.y - 1f ) > 0.02f || MathF.Abs( s.z - 1f ) > 0.02f )
+			{
+				scaled[b] = true;
+				scaledBones.Add( b );
+			}
+			dq[b] = DualQuat.FromXform( skin[b] );
+		}
+
+		scaledVertices = 0;
+		var result = new Vec3[positions.Count];
+
+		for ( var v = 0; v < positions.Count; v++ )
+		{
+			var w = weights[v];
+			if ( w is null || w.Length == 0 ) { result[v] = positions[v]; continue; }
+
+			if ( w.Any( bw => bw.Bone >= 0 && bw.Bone < n && scaled[bw.Bone] ) )
+			{
+				// Scaled influence: LBS for this vertex, counted, never silently DQS.
+				scaledVertices++;
+				var acc = Vec3.Zero;
+				foreach ( var bw in w )
+					if ( bw.Bone >= 0 && bw.Bone < n ) acc += skin[bw.Bone].TransformPoint( positions[v] ) * bw.Weight;
+				result[v] = acc;
+				continue;
+			}
+
+			// Blend, flipping antipodal dual quaternions so the blend takes the short path.
+			Quat accR = default, accD = default;
+			var first = true;
+			Quat firstR = default;
+			foreach ( var bw in w )
+			{
+				if ( bw.Bone < 0 || bw.Bone >= n || bw.Weight <= 0f ) continue;
+				var d = dq[bw.Bone];
+				if ( first ) { firstR = d.Real; first = false; }
+				else if ( d.Real.x * firstR.x + d.Real.y * firstR.y + d.Real.z * firstR.z + d.Real.w * firstR.w < 0f )
+					d = new DualQuat( new Quat( -d.Real.x, -d.Real.y, -d.Real.z, -d.Real.w ),
+						new Quat( -d.Dual.x, -d.Dual.y, -d.Dual.z, -d.Dual.w ) );
+				accR = new Quat( accR.x + d.Real.x * bw.Weight, accR.y + d.Real.y * bw.Weight, accR.z + d.Real.z * bw.Weight, accR.w + d.Real.w * bw.Weight );
+				accD = new Quat( accD.x + d.Dual.x * bw.Weight, accD.y + d.Dual.y * bw.Weight, accD.z + d.Dual.z * bw.Weight, accD.w + d.Dual.w * bw.Weight );
+			}
+			result[v] = new DualQuat( accR, accD ).Normalized.TransformPoint( positions[v] );
+		}
+		return result;
+	}
+
+	/// <summary>The DQS-minus-LBS delta at one pose: the morph that, added under LBS,
+	/// reproduces the DQS shape at that pose. This is how a DQS preview reaches the game.</summary>
+	public static Vec3[] BakeCorrective( IReadOnlyList<Vec3> positions, SkinWeights weights,
+		IReadOnlyList<Xform> bindWorld, IReadOnlyList<Xform> poseWorld )
+	{
+		var lbs = SkinBinder.Deform( positions, weights, bindWorld, poseWorld );
+		var dqs = Deform( positions, weights, bindWorld, poseWorld, out _, out _ );
+		var deltas = new Vec3[positions.Count];
+		for ( var i = 0; i < deltas.Length; i++ ) deltas[i] = dqs[i] - lbs[i];
+		return deltas;
+	}
+}
+
+/// <summary>BendyBone wired into deforming: a flagged bone's weight is spread across
+/// its B-Bone segment transforms by position along the bone, instead of landing on
+/// one rigid skin matrix and kinking at the joint. Unflagged bones deform exactly
+/// as SkinBinder.Deform does.</summary>
+public static class BendyDeform
+{
+	public static Vec3[] Deform( IReadOnlyList<Vec3> positions, SkinWeights weights,
+		IReadOnlyList<Xform> bindWorld, IReadOnlyList<Xform> poseWorld,
+		Skeleton skeleton, int bendyBone, BendyBoneSettings settings )
+	{
+		if ( skeleton is null ) throw new ArgumentNullException( nameof( skeleton ) );
+		if ( bendyBone < 0 || bendyBone >= skeleton.Count ) throw new ArgumentOutOfRangeException( nameof( bendyBone ) );
+		settings ??= new BendyBoneSettings();
+		if ( settings.Segments < 1 ) throw new ArgumentOutOfRangeException( nameof( settings ), "A B-Bone needs at least 1 segment" );
+
+		var n = bindWorld.Count;
+		var skin = new Xform[n];
+		for ( var b = 0; b < n; b++ ) skin[b] = poseWorld[b] * bindWorld[b].Inverse;
+
+		// Bind ends: rigid in bind, so head and tail rotations are the same.
+		var (bindHead, bindTail, bindRot, _) = BendyBone.BindEnds( skeleton, bendyBone );
+		var bindAxis = (bindTail - bindHead);
+		var bindLen = bindAxis.Length;
+		if ( bindLen < 1e-6f ) return SkinBinder.Deform( positions, weights, bindWorld, poseWorld );
+		bindAxis = bindAxis.Normal;
+
+		// Posed ends: head from the posed world; the tail is the child bone's head
+		// (the joint the B-Bone spans to) with the child's rotation, or the rigidly
+		// posed bind tail for a leaf. Never a guessed local axis: bones are built
+		// head-to-tail in world space, not along one fixed local axis.
+		var poseHead = poseWorld[bendyBone].Origin;
+		var poseHeadRot = Quat.FromXform( poseWorld[bendyBone] );
+		var poseTailRot = poseHeadRot;
+		Vec3? poseTail = null;
+		foreach ( var c in skeleton.Children( bendyBone ) )
+		{
+			if ( Skeleton.IsAuxiliaryBone( skeleton.Bones[c].Name ) ) continue;
+			poseTail = poseWorld[c].Origin;
+			poseTailRot = Quat.FromXform( poseWorld[c] );
+			break;
+		}
+		var poseTailPos = poseTail ?? skin[bendyBone].TransformPoint( bindTail );
+
+		var bindSegs = BendyBone.Evaluate( bindHead, bindTail, bindRot, bindRot, settings );
+		var poseSegs = BendyBone.Evaluate( poseHead, poseTailPos, poseHeadRot, poseTailRot, settings );
+		var segAlong = new float[settings.Segments];
+		for ( var i = 0; i < bindSegs.Length; i++ )
+			segAlong[i] = Vec3.Dot( bindSegs[i].Position - bindHead, bindAxis ) / bindLen;
+
+		var segSkin = new Xform[settings.Segments];
+		for ( var i = 0; i < bindSegs.Length; i++ )
+			segSkin[i] = poseSegs[i].Rotation.ToXform( poseSegs[i].Position )
+				* bindSegs[i].Rotation.ToXform( bindSegs[i].Position ).Inverse;
+
+		var result = new Vec3[positions.Count];
+		for ( var v = 0; v < positions.Count; v++ )
+		{
+			var p = positions[v];
+			var w = weights[v];
+			if ( w is null || w.Length == 0 ) { result[v] = p; continue; }
+			var acc = Vec3.Zero;
+			foreach ( var bw in w )
+			{
+				if ( bw.Bone < 0 || bw.Bone >= n || bw.Weight <= 0f ) continue;
+				if ( bw.Bone != bendyBone )
+				{
+					acc += skin[bw.Bone].TransformPoint( p ) * bw.Weight;
+					continue;
+				}
+				var along = Math.Clamp( Vec3.Dot( p - bindHead, bindAxis ) / bindLen, 0f, 1f );
+				// Triangular kernel over segment centres, normalised so the bone's
+				// total weight is preserved exactly.
+				var kernel = new float[settings.Segments];
+				var spacing = settings.Segments > 1 ? 1f / (settings.Segments - 1) : 1f;
+				var total = 0f;
+				for ( var i = 0; i < kernel.Length; i++ )
+				{
+					kernel[i] = MathF.Max( 0f, 1f - MathF.Abs( along - segAlong[i] ) / MathF.Max( spacing, 1e-6f ) );
+					total += kernel[i];
+				}
+				if ( total <= 1e-9f )
+				{
+					var nearest = 0;
+					for ( var i = 1; i < segAlong.Length; i++ )
+						if ( MathF.Abs( along - segAlong[i] ) < MathF.Abs( along - segAlong[nearest] ) ) nearest = i;
+					kernel[nearest] = 1f;
+					total = 1f;
+				}
+				for ( var i = 0; i < kernel.Length; i++ )
+					if ( kernel[i] > 0f ) acc += segSkin[i].TransformPoint( p ) * (bw.Weight * kernel[i] / total);
+			}
+			result[v] = acc;
+		}
+		return result;
+	}
+
+	/// <summary>Orientation turn across the posed B-Bone: total head-to-tail angle,
+	/// and the largest single orientation step between consecutive segments
+	/// (including the end caps). A kinked rigid joint puts ~all of the turn in one
+	/// step; a bendy bone spreads it over its segments.</summary>
+	public static (float TotalTurn, float MaxStep) KinkMetric( Skeleton skeleton, IReadOnlyList<Xform> poseWorld, int bendyBone, BendyBoneSettings settings )
+	{
+		settings ??= new BendyBoneSettings();
+		var (bindHead, bindTail, _, _) = BendyBone.BindEnds( skeleton, bendyBone );
+		var poseHead = poseWorld[bendyBone].Origin;
+		var poseHeadRot = Quat.FromXform( poseWorld[bendyBone] );
+		var poseTailRot = poseHeadRot;
+		Vec3? poseTail = null;
+		foreach ( var c in skeleton.Children( bendyBone ) )
+		{
+			if ( Skeleton.IsAuxiliaryBone( skeleton.Bones[c].Name ) ) continue;
+			poseTail = poseWorld[c].Origin;
+			poseTailRot = Quat.FromXform( poseWorld[c] );
+			break;
+		}
+		var poseTailPos = poseTail ?? (poseHead + poseHeadRot.Rotate( bindTail - bindHead ));
+		var segs = BendyBone.Evaluate( poseHead, poseTailPos, poseHeadRot, poseTailRot, settings );
+		// Orientation steps, not centreline chords: a B-Bone's centreline bulges
+		// (its Bezier handles swing past the end tangents), so chord angles sum to
+		// MORE than the joint angle and mislead. Segment orientations are slerped
+		// head-to-tail by construction, so their steps are the honest spread.
+		float Angle( Quat a, Quat b )
+		{
+			var dot = Math.Clamp( a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w, -1f, 1f );
+			return MathF.Acos( MathF.Abs( dot ) ) * 2f * 180f / MathF.PI;
+		}
+		var rots = new List<Quat> { poseHeadRot };
+		foreach ( var s in segs ) rots.Add( s.Rotation );
+		rots.Add( poseTailRot );
+		var total = Angle( poseHeadRot, poseTailRot );
+		var max = 0f;
+		for ( var i = 0; i + 1 < rots.Count; i++ ) max = MathF.Max( max, Angle( rots[i], rots[i + 1] ) );
+		return (total, max);
+	}
+}
+
+/// <summary>Twist spreading for explicitly declared stations, beside the Citizen
+/// _twist&lt;n&gt; discovery that TwistWeights.Spread already does. Stations are
+/// (along-bone fraction, bone index) per parent bone; the parent itself is always
+/// the last station, at its own tail. Runs before any paint layer, so hand-painted
+/// vertices still overrule it — callers must apply paint after this, as Bind does.</summary>
+public static class TwistStations
+{
+	public static int SpreadWithStations( PolyMesh mesh, Skeleton skeleton,
+		IReadOnlyDictionary<int, List<(float Along, int Bone)>> stations, bool eased )
+	{
+		ArgumentNullException.ThrowIfNull( mesh );
+		ArgumentNullException.ThrowIfNull( skeleton );
+		ArgumentNullException.ThrowIfNull( stations );
+		if ( !mesh.IsRigged ) return 0;
+
+		// Resolve each parent's full station list, sorted, parent last.
+		var full = new Dictionary<int, List<(float Along, int Bone)>>();
+		foreach ( var (parent, list) in stations )
+		{
+			if ( parent < 0 || parent >= skeleton.Count ) continue;
+			var resolved = list.Where( s => s.Bone >= 0 && s.Bone < skeleton.Count ).ToList();
+			float extent;
+			if ( skeleton.TryBodySpan( parent, out var head, out var tail ) )
+				extent = Vec3.Dot( tail - head, skeleton.BoneDirection( parent ) );
+			else
+				extent = (skeleton.TailWorld( parent ) - skeleton.HeadWorld( parent )).Length;
+			if ( extent <= 1e-6f ) extent = 1f;
+			resolved.Add( (extent, parent) );
+			// Stations given as fractions (0..1) are scaled by the extent; absolute
+			// along values (already in model units) are left alone.
+			resolved = resolved.Select( s => (s.Along <= 1f && s.Bone != parent ? s.Along * extent : s.Along, s.Bone) ).ToList();
+			resolved.Sort( ( a, b ) => a.Along.CompareTo( b.Along ) );
+			full[parent] = resolved;
+		}
+		if ( full.Count == 0 ) return 0;
+
+		var changed = 0;
+		for ( var v = 0; v < mesh.VertexCount; v++ )
+		{
+			var weights = mesh.Skin[v];
+			if ( weights.Length == 0 || !weights.Any( w => full.ContainsKey( w.Bone ) ) ) continue;
+			var spread = new Dictionary<int, float>();
+			foreach ( var w in weights )
+			{
+				if ( !full.TryGetValue( w.Bone, out var list ) )
+				{
+					spread[w.Bone] = spread.GetValueOrDefault( w.Bone ) + w.Weight;
+					continue;
+				}
+				var bone = skeleton.WorldBind( w.Bone );
+				var along = Vec3.Dot( mesh.Positions[v] - bone.Origin, skeleton.BoneDirection( w.Bone ) );
+				foreach ( var (to, share) in Split( list, along, eased ) )
+					spread[to] = spread.GetValueOrDefault( to ) + w.Weight * share;
+			}
+			mesh.Skin[v] = spread.Where( kv => kv.Value > 1e-5f )
+				.Select( kv => new BoneWeight( kv.Key, kv.Value ) )
+				.OrderByDescending( w => w.Weight ).ToArray();
+			changed++;
+		}
+		return changed;
+	}
+
+	static IEnumerable<(int Bone, float Share)> Split( List<(float Along, int Bone)> list, float along, bool eased )
+	{
+		if ( along <= list[0].Along ) { yield return (list[0].Bone, 1f); yield break; }
+		if ( along >= list[^1].Along ) { yield return (list[^1].Bone, 1f); yield break; }
+		for ( var i = 0; i + 1 < list.Count; i++ )
+		{
+			if ( along < list[i].Along || along > list[i + 1].Along ) continue;
+			var span = list[i + 1].Along - list[i].Along;
+			var t = span > 1e-9f ? (along - list[i].Along) / span : 0f;
+			if ( eased ) t = t * t * (3f - 2f * t);
+			yield return (list[i].Bone, 1f - t);
+			yield return (list[i + 1].Bone, t);
+			yield break;
+		}
+		yield return (list[0].Bone, 1f);
+	}
+}
+
+/// <summary>IK/FK three-chain math on world transforms, built on the existing solvers
+/// (TwoBoneIk for the IK chain; no new solver). FK world = bind world. IK world =
+/// TwoBoneIk.Apply. Blend = position lerp + rotation slerp per chain bone. Snap =
+/// local rotations that reproduce the other chain's joints exactly, verified by
+/// rebuilding world transforms from those locals.</summary>
+public static class IkFk
+{
+	public static Xform[] WorldFromLocals( Skeleton skeleton, IReadOnlyList<Xform> locals )
+	{
+		var world = new Xform[skeleton.Count];
+		for ( var i = 0; i < skeleton.Count; i++ )
+		{
+			var parent = skeleton.Bones[i].Parent;
+			world[i] = parent >= 0 ? world[parent] * locals[i] : locals[i];
+		}
+		return world;
+	}
+
+	public static Xform[] BindWorld( Skeleton skeleton )
+	{
+		var world = new Xform[skeleton.Count];
+		for ( var i = 0; i < skeleton.Count; i++ ) world[i] = skeleton.WorldBind( i );
+		return world;
+	}
+
+	/// <summary>World transforms with the chain (root, mid, end) solved to target/pole;
+	/// every other bone stays at bind world. Null when the chain is degenerate.</summary>
+	public static Xform[] IkWorld( Skeleton skeleton, int root, int mid, int end, Vec3 target, Vec3 pole, float softness = 0f )
+	{
+		var world = BindWorld( skeleton );
+		return TwoBoneIk.Apply( skeleton, world, end, target, pole, softness );
+	}
+
+	public static Xform[] BlendWorld( IReadOnlyList<Xform> fk, IReadOnlyList<Xform> ik, float blend, params int[] chain )
+	{
+		blend = Math.Clamp( blend, 0f, 1f );
+		var result = fk.ToArray();
+		foreach ( var b in chain )
+		{
+			if ( b < 0 || b >= fk.Count || b >= ik.Count ) continue;
+			var pos = Vec3.Lerp( fk[b].Origin, ik[b].Origin, blend );
+			var rot = Quat.Slerp( Quat.FromXform( fk[b] ), Quat.FromXform( ik[b] ), blend );
+			result[b] = rot.ToXform( pos, Quat.ScaleOf( fk[b] ) );
+		}
+		return result;
+	}
+
+	/// <summary>Local transforms for the chain bones that reproduce <paramref name="desired"/>
+	/// world transforms exactly (parents outside the chain use bind world). Returns null
+	/// if any desired transform is singular.</summary>
+	public static Xform[] SnapLocals( Skeleton skeleton, IReadOnlyList<Xform> bindWorld, IReadOnlyList<Xform> desired, params int[] chain )
+	{
+		var locals = new Xform[skeleton.Count];
+		for ( var i = 0; i < skeleton.Count; i++ ) locals[i] = skeleton.Bones[i].Local;
+		var posed = new Xform[skeleton.Count];
+		for ( var i = 0; i < skeleton.Count; i++ )
+		{
+			var parent = skeleton.Bones[i].Parent;
+			Xform parentWorld;
+			if ( parent < 0 ) parentWorld = Xform.Identity;
+			else if ( chain.Contains( parent ) ) parentWorld = posed[parent];
+			else parentWorld = bindWorld[parent];
+			if ( chain.Contains( i ) )
+			{
+				try { locals[i] = parentWorld.Inverse * desired[i]; }
+				catch ( InvalidOperationException ) { return null; }
+				posed[i] = desired[i];
+			}
+			else
+			{
+				posed[i] = parent < 0 ? locals[i] : parentWorld * locals[i];
+			}
+		}
+		return locals;
+	}
+
+	/// <summary>Rotation taking unit vector a onto unit vector b (identity when parallel,
+	/// any perpendicular axis when opposite). Used for snap angle checks, not as a solver.</summary>
+	public static Quat RotationFromTo( Vec3 a, Vec3 b )
+	{
+		var na = a.Normal;
+		var nb = b.Normal;
+		var dot = Math.Clamp( Vec3.Dot( na, nb ), -1f, 1f );
+		if ( dot > 0.999999f ) return Quat.Identity;
+		if ( dot < -0.999999f )
+		{
+			var perp = Vec3.Cross( na, MathF.Abs( na.y ) < 0.9f ? new Vec3( 0, 1, 0 ) : new Vec3( 1, 0, 0 ) ).Normal;
+			return Quat.FromAxisAngle( perp, MathF.PI );
+		}
+		var axis = Vec3.Cross( na, nb ).Normal;
+		return Quat.FromAxisAngle( axis, MathF.Acos( dot ) );
+	}
+
+	/// <summary>Default pole for a chain from its FK pose: the mid joint pushed out of
+	/// the root-end line by its own offset, so knees point forward and elbows back
+	/// relative to the pose as authored, not to an arbitrary world axis.</summary>
+	public static Vec3 DefaultPole( Vec3 root, Vec3 mid, Vec3 end )
+	{
+		var line = end - root;
+		var len2 = line.LengthSquared;
+		if ( len2 < 1e-9f ) return mid;
+		var t = Math.Clamp( Vec3.Dot( mid - root, line ) / len2, 0f, 1f );
+		var closest = root + line * t;
+		var off = mid - closest;
+		return off.Length < 1e-6f ? mid + new Vec3( 0, 0, 1 ) : mid + off;
+	}
+}
+
+/// <summary>Pose-space interpolation: N sculpted poses, each a point in pose-parameter
+/// space (e.g. [raise, rotate] in degrees) with a bind-space morph, blended by
+/// Gaussian RBF similarity to the current pose and normalised. AND-combination poses
+/// ("up AND out") are samples in the same space, not a separate rule — a pose far
+/// from a combination sample does not fire it, which is what the multiply rule in
+/// MorphDriver approximates for two drivers and RBF generalises to N poses.</summary>
+public static class PoseInterpolator
+{
+	public sealed class Sample
+	{
+		public float[] Pose = Array.Empty<float>();
+		public Vec3[] Deltas = Array.Empty<Vec3>();
+	}
+
+	public static float[] Weights( IReadOnlyList<Sample> samples, float[] current, float falloff )
+	{
+		if ( samples is null || samples.Count == 0 ) return Array.Empty<float>();
+		if ( falloff <= 0f ) throw new ArgumentOutOfRangeException( nameof( falloff ), "RBF falloff must be positive" );
+		var raw = new float[samples.Count];
+		var total = 0f;
+		for ( var i = 0; i < samples.Count; i++ )
+		{
+			var d2 = 0f;
+			var p = samples[i].Pose;
+			for ( var k = 0; k < Math.Max( p.Length, current.Length ); k++ )
+			{
+				var a = k < p.Length ? p[k] : 0f;
+				var b = k < current.Length ? current[k] : 0f;
+				d2 += (a - b) * (a - b);
+			}
+			raw[i] = MathF.Exp( -d2 / (falloff * falloff) );
+			total += raw[i];
+		}
+		if ( total <= 1e-9f ) return raw;
+		for ( var i = 0; i < raw.Length; i++ ) raw[i] /= total;
+		return raw;
+	}
+
+	public static Vec3[] Blend( IReadOnlyList<Sample> samples, float[] weights, int vertexCount )
+	{
+		var result = new Vec3[vertexCount];
+		for ( var i = 0; i < samples.Count && i < weights.Length; i++ )
+		{
+			if ( weights[i] <= 0f ) continue;
+			var d = samples[i].Deltas;
+			for ( var v = 0; v < vertexCount && v < d.Length; v++ ) result[v] += d[v] * weights[i];
+		}
+		return result;
+	}
+}
+
+/// <summary>Stale-corrective guard: a corrective built from one weight set must not
+/// silently survive a weight edit. The fingerprint quantises weights to 0.001, so
+/// floating-point rebuild noise does not flag, while any real paint or rebind does.</summary>
+public static class CorrectiveStaleness
+{
+	public static long Fingerprint( SkinWeights weights )
+	{
+		if ( weights is null ) return 0;
+		unchecked
+		{
+			long hash = 1469598103934665603L;
+			void Mix( long v ) => hash = (hash ^ v) * 1099511628211L;
+			Mix( weights.Count );
+			for ( var v = 0; v < weights.Count; v++ )
+			{
+				var w = weights.Vertices[v];
+				if ( w is null ) continue;
+				Mix( w.Length );
+				foreach ( var bw in w.OrderBy( x => x.Bone ) )
+				{
+					Mix( bw.Bone );
+					Mix( (long)MathF.Round( bw.Weight * 1000f ) );
+				}
+			}
+			return hash;
+		}
+	}
+
+	public static (bool Stale, int Changed) Check( SkinWeights current, long fingerprint )
+	{
+		if ( current is null ) return (fingerprint != 0, 0);
+		// Changed count needs a reference set; callers that keep one use CheckAgainst.
+		return (Fingerprint( current ) != fingerprint, -1);
+	}
+
+	public static (bool Stale, int Changed) CheckAgainst( SkinWeights current, SkinWeights reference )
+	{
+		if ( current is null || reference is null ) return (true, -1);
+		var changed = 0;
+		var n = Math.Min( current.Count, reference.Count );
+		for ( var v = 0; v < n; v++ )
+		{
+			var a = current.Vertices[v] ?? Array.Empty<BoneWeight>();
+			var b = reference.Vertices[v] ?? Array.Empty<BoneWeight>();
+			if ( a.Length != b.Length ) { changed++; continue; }
+			var diff = false;
+			foreach ( var bw in a )
+			{
+				var match = b.FirstOrDefault( x => x.Bone == bw.Bone );
+				if ( MathF.Abs( match.Weight - bw.Weight ) > 0.001f ) { diff = true; break; }
+			}
+			if ( diff ) changed++;
+		}
+		if ( current.Count != reference.Count ) changed += Math.Abs( current.Count - reference.Count );
+		return (changed > 0, changed);
+	}
+}
+
+/// <summary>Collapse-risk heatmap from the export (pruned, 4-weight) set: predicted
+/// in-plane scale s(w) at a bend, per vertex, using CorrectiveMorph's own formula.
+/// Loss = 1 - s(w). A joint ring at w=1/2 reads 29% loss at 90° and 66% at 140°,
+/// which is the number the artist should paint against, not a repaint of the limb.</summary>
+public static class CollapseHeatmap
+{
+	public static float[] LossPerVertex( SkinWeights weights, Skeleton rig, int bone, float degrees )
+	{
+		if ( weights is null ) throw new ArgumentNullException( nameof( weights ) );
+		if ( rig is null ) throw new ArgumentNullException( nameof( rig ) );
+		var pruned = new SkinWeights( weights.Count );
+		for ( var v = 0; v < weights.Count; v++ ) pruned.Vertices[v] = SkinWeights.Prune( weights.Vertices[v], 4 );
+		var subtree = CorrectiveMorph.Subtree( rig, bone );
+		var bend = CorrectiveMorph.BendWeights( pruned, subtree, weights.Count );
+		var radians = MathF.Abs( degrees ) * MathF.PI / 180f;
+		var loss = new float[weights.Count];
+		for ( var v = 0; v < loss.Length; v++ )
+		{
+			var w = bend[v];
+			var s2 = (1f - w) * (1f - w) + w * w + 2f * w * (1f - w) * MathF.Cos( radians );
+			loss[v] = 1f - MathF.Sqrt( MathF.Max( s2, 0f ) );
+		}
+		return loss;
+	}
+
+	public static (float Worst, float Mean, int Over25) Summarize( float[] loss )
+	{
+		if ( loss is null || loss.Length == 0 ) return (0f, 0f, 0);
+		var worst = 0f;
+		var sum = 0f;
+		var over = 0;
+		foreach ( var l in loss ) { worst = MathF.Max( worst, l ); sum += l; if ( l > 0.25f ) over++; }
+		return (worst, sum / loss.Length, over);
+	}
+}
+
+/// <summary>One-click Fix weights: prune to the engine's influence count, renormalise
+/// (Prune does both), smooth over the surface, and report exactly what changed —
+/// including the worst weight the export would have discarded, measured BEFORE
+/// pruning, because after pruning that number is gone.</summary>
+public static class FixWeights
+{
+	public sealed class Report
+	{
+		public int Over;
+		public float WorstDiscarded;
+		public int WorstVertex;
+		public int Changed;
+		public override string ToString() =>
+			$"{Over} vertices over the influence limit, worst discarded {WorstDiscarded:P1} at vertex {WorstVertex}, {Changed} vertices changed by prune+smooth";
+	}
+
+	public static (SkinWeights Fixed, Report Report) Run( PolyMesh mesh, SkinWeights weights, int max = 4, int smoothPasses = 2 )
+	{
+		if ( mesh is null ) throw new ArgumentNullException( nameof( mesh ) );
+		if ( weights is null ) throw new ArgumentNullException( nameof( weights ) );
+		var (over, worst, at) = weights.CapLoss( max );
+		var pruned = new SkinWeights( weights.Count );
+		for ( var v = 0; v < weights.Count; v++ ) pruned.Vertices[v] = SkinWeights.Prune( weights.Vertices[v], max );
+		var fixedWeights = smoothPasses > 0 ? SkinBinder.SmoothWeights( mesh, pruned, smoothPasses ) : pruned;
+		var changed = 0;
+		for ( var v = 0; v < weights.Count && v < fixedWeights.Count; v++ )
+		{
+			var a = weights.Vertices[v] ?? Array.Empty<BoneWeight>();
+			var b = fixedWeights.Vertices[v] ?? Array.Empty<BoneWeight>();
+			var diff = a.Length != b.Length;
+			if ( !diff )
+				foreach ( var bw in a )
+					if ( MathF.Abs( b.FirstOrDefault( x => x.Bone == bw.Bone ).Weight - bw.Weight ) > 0.001f ) { diff = true; break; }
+			if ( diff ) changed++;
+		}
+		return (fixedWeights, new Report { Over = over, WorstDiscarded = worst, WorstVertex = at, Changed = changed });
+	}
+}
+
+/// <summary>Delta mush: smooth the deformed positions over mesh adjacency, then add
+/// back the bind pose's own detail (bind minus smoothed bind) scaled by
+/// <paramref name="detail"/>. Detail 1 keeps all bind detail on the smoothed deform
+/// (the standard formulation); detail 0 is a pure smooth. Never changes the bind
+/// pose itself, and scoped per body by the caller — applied globally it washes out
+/// fingers and faces, which is why there is no global toggle here.</summary>
+public static class DeltaMush
+{
+	public static Vec3[] Apply( IReadOnlyList<Vec3> bind, IReadOnlyList<Vec3> deformed, PolyMesh mesh, int iterations, float detail )
+	{
+		if ( bind is null ) throw new ArgumentNullException( nameof( bind ) );
+		if ( deformed is null ) throw new ArgumentNullException( nameof( deformed ) );
+		if ( mesh is null ) throw new ArgumentNullException( nameof( mesh ) );
+		var neighbours = new List<int>[mesh.VertexCount];
+		for ( var i = 0; i < neighbours.Length; i++ ) neighbours[i] = new List<int>();
+		foreach ( var face in mesh.Faces )
+		{
+			if ( face?.Indices is null ) continue;
+			foreach ( var a in face.Indices )
+			{
+				if ( a < 0 || a >= neighbours.Length ) continue;
+				foreach ( var b in face.Indices )
+					if ( b != a && b >= 0 && b < neighbours.Length && !neighbours[a].Contains( b ) ) neighbours[a].Add( b );
+			}
+		}
+		Vec3[] Smooth( IReadOnlyList<Vec3> src )
+		{
+			var cur = src.ToArray();
+			for ( var it = 0; it < iterations; it++ )
+			{
+				var next = new Vec3[cur.Length];
+				for ( var v = 0; v < cur.Length; v++ )
+				{
+					if ( neighbours[v].Count == 0 ) { next[v] = cur[v]; continue; }
+					var acc = Vec3.Zero;
+					foreach ( var nb in neighbours[v] ) acc += cur[nb];
+					next[v] = acc * (1f / neighbours[v].Count);
+				}
+				cur = next;
+			}
+			return cur;
+		}
+		var smoothBind = Smooth( bind );
+		var smoothDeformed = Smooth( deformed );
+		var result = new Vec3[bind.Count];
+		for ( var v = 0; v < result.Length; v++ )
+			result[v] = smoothDeformed[v] + (bind[v] - smoothBind[v]) * detail;
+		return result;
+	}
+}
+
+/// <summary>Shoulder/hip fan bones as rig content: bones fanning from a parent
+/// (clavicle/hip) toward a limb, weighted across the cap region by whoever binds
+/// after they are added. These are DEFORM bones, not helpers — they are meant to
+/// carry cap weight — so callers must bind after adding them and check the weight
+/// range (rigcheck reports it). A fan bone that took weight from outside the cap
+/// is weight theft, and the acceptance report is the point, not the bones.</summary>
+public static class FanBones
+{
+	public static List<int> AddFan( Skeleton rig, int parentBone, int limbBone, int count, string prefix )
+	{
+		if ( rig is null ) throw new ArgumentNullException( nameof( rig ) );
+		if ( parentBone < 0 || parentBone >= rig.Count ) throw new ArgumentOutOfRangeException( nameof( parentBone ) );
+		if ( limbBone < 0 || limbBone >= rig.Count ) throw new ArgumentOutOfRangeException( nameof( limbBone ) );
+		if ( count < 1 ) throw new ArgumentOutOfRangeException( nameof( count ), "A fan needs at least 1 bone" );
+		var head = rig.HeadWorld( parentBone );
+		var parentDir = rig.BoneDirection( parentBone );
+		var limbDir = rig.BoneDirection( limbBone );
+		var limbLen = (rig.TailWorld( limbBone ) - rig.HeadWorld( limbBone )).Length;
+		if ( limbLen < 1e-6f ) limbLen = 1f;
+		var added = new List<int>();
+		for ( var i = 0; i < count; i++ )
+		{
+			var t = (i + 1f) / (count + 1f);
+			var dir = (parentDir * (1f - t) + limbDir * t).Normal;
+			if ( dir.LengthSquared < 1e-9f ) dir = limbDir;
+			var tail = head + dir * (limbLen * 0.6f);
+			added.Add( rig.AddBoneFromPoints( $"{prefix}_fan{i}", parentBone, head, tail ) );
+		}
+		return added;
+	}
+}
+
+/// <summary>Muscle/bulge helper (P8's optional half): a bend-angle-driven scale on a
+/// bone, applied perpendicular to the bone axis about the bone's head, at pose time
+/// only. It never changes the bind pose or the skin weights: the scale is a pose
+/// transform, so the runtime still skins LBS and the bulge is a preview/bake value
+/// like DQS. Scale rises with the bend angle up to a peak, then holds — it does
+/// not shrink back past the peak, which would read as the muscle deflating.</summary>
+public static class BulgeBones
+{
+	public static float ScaleFor( float angleDeg, float maxBulge, float peakDeg )
+	{
+		if ( maxBulge <= 0f || peakDeg <= 0f ) return 1f;
+		var t = Math.Clamp( MathF.Abs( angleDeg ) / peakDeg, 0f, 1f );
+		return 1f + maxBulge * MathF.Sin( t * MathF.PI / 2f );
+	}
+
+	public static Xform[] ScaledPose( IReadOnlyList<Xform> poseWorld, Skeleton rig, int bone, float scale )
+	{
+		if ( poseWorld is null ) throw new ArgumentNullException( nameof( poseWorld ) );
+		if ( rig is null ) throw new ArgumentNullException( nameof( rig ) );
+		var copy = poseWorld.ToArray();
+		if ( bone < 0 || bone >= rig.Count || MathF.Abs( scale - 1f ) < 1e-6f ) return copy;
+		// Scale about the POSED head, perpendicular to the POSED axis: the bind
+		// head/axis are wrong once the bone has moved or rotated. The posed axis
+		// is the bone's LOCAL +Y (the B-Bone convention: head rotation maps local
+		// +Y to the bone direction), NOT the bind world direction rotated by the
+		// full world orientation — that mixes frames and measures the wrong line.
+		var head = poseWorld[bone].Origin;
+		var axis = Quat.FromXform( poseWorld[bone] ).Rotate( new Vec3( 0, 1, 0 ) );
+		var t = poseWorld[bone];
+		Vec3 ScaleVec( Vec3 v )
+		{
+			var along = Vec3.Dot( v, axis );
+			return axis * along + (v - axis * along) * scale;
+		}
+		copy[bone] = new Xform( ScaleVec( t.X ), ScaleVec( t.Y ), ScaleVec( t.Z ), head + ScaleVec( t.Origin - head ) );
+		return copy;
+	}
+}
+
+/// <summary>NLA verification, not new NLA features: synthetic timelines exercising
+/// the ordering rules the findings left unverified — Replace over Additive on one
+/// bone, a muted strip contributing nothing, a masked strip, and a strip outside
+/// its span. IK-under-blend and foot planting are NOT claimed here: strips drive
+/// Bone tracks only (NlaTrack's own docstring), so there is no IK target in a
+/// strip to test, and foot height is a property of the action, not of blending.
+/// Those two items are documented as not-applicable, not passed.</summary>
+public static class NlaVerification
+{
+	static RigAnimFile Clip( string bone, float from, float to )
+	{
+		var clip = new RigAnimFile { FrameRate = 30 };
+		var track = new RigTrack { Kind = RigTrackKind.Bone, Name = bone };
+		track.Keys.Add( new RigKey { Frame = 0, Local = new RigPose( new Vec3( from, 0, 0 ), Quat.Identity, Vec3.One ) } );
+		track.Keys.Add( new RigKey { Frame = 10, Local = new RigPose( new Vec3( to, 0, 0 ), Quat.Identity, Vec3.One ) } );
+		clip.Tracks.Add( track );
+		return clip;
+	}
+
+	public static List<string> Run()
+	{
+		var notes = new List<string>();
+
+		// 1. Replace over Additive, same bone, same frame.
+		var timeline = new NlaTimeline { Base = Clip( "Arm", 0, 0 ) };
+		timeline.Strips.Add( new NlaStrip { Name = "add", Action = Clip( "Arm", 0, 10 ), Start = 0, End = 10, Weight = 1f, Mode = NlaBlendMode.Additive } );
+		timeline.Strips.Add( new NlaStrip { Name = "replace", Action = Clip( "Arm", 0, 20 ), Start = 0, End = 10, Weight = 0.5f, Mode = NlaBlendMode.Replace } );
+		var pose = timeline.Evaluate( 10 )["Arm"];
+		// Additive first: base 0 + (10-0) = 10; then Replace at weight 0.5 lerps 10 -> 20 = 15.
+		notes.Add( MathF.Abs( pose.Position.x - 15f ) < 0.01f
+			? "PASS Replace-over-Additive: bone at 15 at frame 10 (additive 10, then replace 0.5 toward 20)"
+			: $"FAIL Replace-over-Additive: bone at {pose.Position.x} at frame 10, expected 15" );
+
+		// 2. Muted strip contributes nothing.
+		var muted = new NlaTimeline { Base = Clip( "Arm", 0, 0 ) };
+		muted.Strips.Add( new NlaStrip { Name = "muted", Action = Clip( "Arm", 0, 99 ), Start = 0, End = 10, Weight = 1f, Mode = NlaBlendMode.Replace, Muted = true } );
+		var m = muted.Evaluate( 10 )["Arm"];
+		notes.Add( MathF.Abs( m.Position.x ) < 0.01f ? "PASS muted strip: bone stays at base 0" : $"FAIL muted strip: bone at {m.Position.x}, expected 0" );
+
+		// 3. Masked strip does not touch an unmasked bone.
+		var masked = new NlaTimeline { Base = Clip( "Arm", 0, 0 ) };
+		var strip = new NlaStrip { Name = "masked", Action = Clip( "Arm", 0, 50 ), Start = 0, End = 10, Weight = 1f, Mode = NlaBlendMode.Replace };
+		strip.Mask.Add( "Leg_*" );
+		masked.Strips.Add( strip );
+		var mk = masked.Evaluate( 10 )["Arm"];
+		notes.Add( MathF.Abs( mk.Position.x ) < 0.01f ? "PASS mask: unmasked bone stays at base 0" : $"FAIL mask: bone at {mk.Position.x}, expected 0" );
+
+		// 4. Outside its span, a strip contributes nothing.
+		var outside = new NlaTimeline { Base = Clip( "Arm", 0, 0 ) };
+		outside.Strips.Add( new NlaStrip { Name = "late", Action = Clip( "Arm", 0, 50 ), Start = 20, End = 30, Weight = 1f, Mode = NlaBlendMode.Replace } );
+		var o = outside.Evaluate( 10 )["Arm"];
+		notes.Add( MathF.Abs( o.Position.x ) < 0.01f ? "PASS out-of-span strip: bone stays at base 0" : $"FAIL out-of-span strip: bone at {o.Position.x}, expected 0" );
+
+		// 5. Root-motion / foot planting: not properties of NLA blending.
+		notes.Add( "NOT-APPLICABLE root-motion vs in-place playback and foot planting during blends: those are properties of the action content, not of strip evaluation; no NLA rule to pass or fail here." );
+		notes.Add( "NOT-APPLICABLE IK targets under a blend: strips drive Bone tracks only (NlaTrack docstring), so a strip cannot carry an IK target for the solver to fight." );
+		notes.Add( "NOTE retargeted clip + twist-spread double roll: prevented by construction — TwistWeights runs before paint and spreads weight, it does not drive twist bones; a clip driving twist bones at full roll on spread weights is an authoring error the weight-range report in rigcheck surfaces, not something evaluation can detect." );
+		return notes;
+	}
+}
+
+/// <summary>Posed world transforms for a hinge bend: the bending bone's whole subtree
+/// rotated about the joint head, everything else at bind. The single place bend
+/// tests (heatmap, DQS, bendy, delta mush) get a pose from, so they agree.</summary>
+public static class PoseHelper
+{
+	public static Xform[] BendPose( Skeleton rig, int bone, Vec3 axis, float degrees )
+	{
+		var bind = new Xform[rig.Count];
+		for ( var i = 0; i < rig.Count; i++ ) bind[i] = rig.WorldBind( i );
+		var joint = rig.HeadWorld( bone );
+		var rot = Xform.RotateAbout( joint, axis.Normal, degrees * MathF.PI / 180f );
+		var subtree = CorrectiveMorph.Subtree( rig, bone );
+		var pose = new Xform[rig.Count];
+		for ( var i = 0; i < rig.Count; i++ ) pose[i] = subtree[i] ? rot * bind[i] : bind[i];
+		return pose;
+	}
+
+	public static Xform[] BindWorld( Skeleton rig )
+	{
+		var world = new Xform[rig.Count];
+		for ( var i = 0; i < rig.Count; i++ ) world[i] = rig.WorldBind( i );
+		return world;
+	}
+
+	/// <summary>Cross-section radius of a vertex set about an axis through a point:
+	/// mean distance from the axis. Used to compare LBS vs DQS vs bendy at a joint ring.</summary>
+	public static float RingRadius( IReadOnlyList<Vec3> positions, Vec3 centre, Vec3 axis )
+	{
+		if ( positions is null || positions.Count == 0 ) return 0f;
+		var a = axis.Normal;
+		var sum = 0f;
+		foreach ( var p in positions )
+		{
+			var off = p - centre;
+			var along = Vec3.Dot( off, a );
+			sum += (off - a * along).Length;
+		}
+		return sum / positions.Count;
+	}
+}

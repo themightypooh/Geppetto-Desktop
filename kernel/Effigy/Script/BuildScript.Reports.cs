@@ -12,6 +12,8 @@ namespace Effigy;
 ///
 ///   clearance [A B] [min=0.02]                         the gap between two bodies, or the volume they
 ///                                                         share and how deep; no names = every pair
+///   noclip [A B]                                       like clearance, but a gate: any pair sharing
+///                                                         volume stops the run; no names = every pair
 ///   topology [Body|all] [poles=12]                       face kinds, poles, edge evenness, quad shape,
 ///                                                         manifold, symmetry, loops per joint
 ///   section Body|all z=10,20,30 | x=… | y=… | along=Bone [at=0,0.5,1]
@@ -95,6 +97,63 @@ public static partial class BuildScript
 		foreach ( var (a, b) in pairs )
 			r.Log.Add( Clearance.Measure( Ready( a ), Ready( b ) ).Describe( min ) );
 
+		return true;
+	}
+
+	const string NoClipUsage = "noclip [A B] — fail when any two bodies share volume; no names checks every pair";
+
+	static bool NoClip( PartStudio studio, List<string> args, Result r )
+	{
+		// A gate, not a report. `clearance` describes overlaps and lets the script run on;
+		// noclip runs the same measurement and stops the run on any shared volume, so the
+		// production path cannot silently ship a clipped model the way the buoy shipped.
+		// Surface-grown features share volume by design — barnacles sunk into a hull trip
+		// this — so gate the pairs that must be clean by naming them, and leave embedded
+		// pairs to `clearance` until an allowlist exists. No AutoFix here; that is later work.
+		var named = args.Where( a => !a.Contains( '=' ) ).ToList();
+
+		if ( args.Any( a => a.Contains( '=' ) ) )
+			return Fail( r, $"noclip takes body names only, no options. {NoClipUsage}" );
+
+		var pairs = new List<(Body, Body)>();
+
+		if ( named.Count == 0 )
+		{
+			var bodies = studio.Bodies.Where( b => b.Mesh is { FaceCount: > 0 } && b.Visible && !b.IsReference ).ToList();
+
+			for ( var i = 0; i < bodies.Count; i++ )
+				for ( var j = i + 1; j < bodies.Count; j++ )
+					pairs.Add( (bodies[i], bodies[j]) );
+
+			if ( pairs.Count == 0 )
+				return Fail( r, "noclip needs two bodies with faces; the model has fewer." );
+		}
+		else if ( named.Count == 2 )
+		{
+			if ( !Targets( studio, named[0], out var a, out var whyA ) || a.Count != 1 ) return Fail( r, whyA ?? $"name one body, not all. {NoClipUsage}" );
+			if ( !Targets( studio, named[1], out var b, out var whyB ) || b.Count != 1 ) return Fail( r, whyB ?? $"name one body, not all. {NoClipUsage}" );
+			if ( a[0] == b[0] ) return Fail( r, $"noclip between {named[0]} and itself means nothing; name two bodies. {NoClipUsage}" );
+			pairs.Add( (a[0], b[0]) );
+		}
+		else
+			return Fail( r, NoClipUsage );
+
+		var prepared = new Dictionary<Body, Clearance.Prepared>();
+		Clearance.Prepared Ready( Body b ) => prepared.TryGetValue( b, out var pr ) ? pr : prepared[b] = new Clearance.Prepared( b.Name ?? b.Id, b.Mesh );
+
+		var bad = new List<string>();
+		foreach ( var (a, b) in pairs )
+		{
+			var reading = Clearance.Measure( Ready( a ), Ready( b ) );
+			r.Log.Add( reading.Describe() );
+			if ( reading.Overlaps )
+				bad.Add( reading.Describe() );
+		}
+
+		if ( bad.Count > 0 )
+			return Fail( r, $"noclip: {bad.Count} overlapping pair(s) — rule #1, no clipping:\n{string.Join( "\n", bad )}" );
+
+		r.Log.Add( $"noclip: no inter-body overlaps — {pairs.Count} pair(s) checked, all clear." );
 		return true;
 	}
 
@@ -292,10 +351,20 @@ public static partial class BuildScript
 	{
 		var opts = Pairs( args );
 		var outDir = opts.TryGetValue( "out", out var o ) ? Resolve( baseDir, o ) : null;
+		var bodies = studio.Bodies;
+		string bodyName = null;
+
+		if ( opts.TryGetValue( "body", out var bn ) && !string.IsNullOrWhiteSpace( bn ) )
+		{
+			if ( !Targets( studio, bn, out var targeted, out var why ) )
+				return Fail( r, why );
+			bodies = targeted;
+			bodyName = bn;
+		}
 		var scores = new List<(string View, float Overlap)>();
 		const int size = 256;
 
-		foreach ( var (viewName, file) in opts.Where( kv => kv.Key != "out" ) )
+		foreach ( var (viewName, file) in opts.Where( kv => kv.Key != "out" && kv.Key != "body" ) )
 		{
 			var view = RenderView.Named( viewName );
 			if ( view is null )
@@ -307,10 +376,12 @@ public static partial class BuildScript
 
 			var (w, h, rgb, alpha) = Raster.LoadPng( refPath );
 			var reference = ReferenceMatch.ReferenceSilhouette( w, h, rgb, alpha, size, out var aspect );
-			var match = ReferenceMatch.Compare( studio.Bodies, view, reference, aspect, size );
+			var match = ReferenceMatch.Compare( bodies, view, reference, aspect, size );
 
 			foreach ( var line in match.Report.Split( '\n' ) )
-				r.Log.Add( $"{viewName}: {line}" );
+				// Report's first line already starts with the view name; prefixing it again
+				// printed "front: front: …". Prefix only lines that lack it.
+				r.Log.Add( line.StartsWith( viewName + ":", StringComparison.Ordinal ) ? line : $"{viewName}: {line}" );
 
 			scores.Add( (viewName, match.Overlap) );
 
@@ -327,7 +398,9 @@ public static partial class BuildScript
 			return Fail( r, "match needs at least one view=reference.png: match front=ref_front.png side=ref_side.png [out=dir]" );
 
 		var worst = scores.OrderBy( s => s.Overlap ).First();
-		r.Log.Add( $"combined: overlap {scores.Average( s => s.Overlap ):0.###} over {scores.Count} view{(scores.Count == 1 ? "" : "s")}; worst {worst.View} {worst.Overlap:0.###} (1 is a perfect match, 0.8 recognisably the same thing)" );
+		r.Log.Add( bodyName is null
+			? $"combined: overlap {scores.Average( s => s.Overlap ):0.###} over {scores.Count} view{(scores.Count == 1 ? "" : "s")} ; worst {worst.View} {worst.Overlap:0.###} (1 is a perfect match, 0.8 recognisably the same thing)"
+			: $"combined (body '{bodyName}'): overlap {scores.Average( s => s.Overlap ):0.###} over {scores.Count} view{(scores.Count == 1 ? "" : "s")} ; worst {worst.View} {worst.Overlap:0.###} (1 is a perfect match, 0.8 recognisably the same thing)" );
 		return true;
 	}
 

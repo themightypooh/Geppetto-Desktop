@@ -1,0 +1,2 @@
+echo "Eye repair: Sphere uses radius and scale, so this retains the small oval rather than changing the eye design."
+add Primitive name=EyeL shape=Sphere radius=0.5 scale=0.34,0.22,0.31 position=1.76,0.45,1.88 materialslot=3

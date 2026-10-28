@@ -1,0 +1,61 @@
+{"event": "intent_filed", "first_geom_line": 2, "id": "gate-1792996822-38c4d672", "lines": 3, "subject": "test widget", "t": 1792996822.2618008, "worker": "test1"}
+{"event": "intent_no", "id": "gate-1792996822-38c4d672", "subject": "test widget", "t": 1792996830.9728281}
+{"event": "intent_filed", "first_geom_line": 2, "id": "gate-1792996831-06875c06", "lines": 3, "subject": "test widget 2", "t": 1792996831.044913, "worker": "test1"}
+{"event": "intent_yes", "id": "gate-1792996831-06875c06", "subject": "test widget 2", "t": 1792996831.1228046}
+{"event": "run_start", "id": "gate-1792996831-06875c06", "script_hash": "ddbc7861f22aa2a22bb1ee344d45da7433d304933852caa584da8dfd70891b89", "subject": "test widget 2", "t": 1792996831.159667}
+{"event": "intent_filed", "first_geom_line": 2, "id": "gate-1792996831-d3614ee6", "lines": 3, "subject": "test widget 3", "t": 1792996831.2347884, "worker": "test1"}
+{"event": "intent_yes", "id": "gate-1792996831-d3614ee6", "subject": "test widget 3", "t": 1792996831.3114371}
+{"event": "intent_filed", "first_geom_line": 2, "id": "gate-1792996831-e8564444", "lines": 3, "subject": "expire test", "t": 1792996831.3839638, "worker": "test1"}
+{"event": "intent_expired", "id": "gate-1792996831-e8564444", "subject": "expire test", "t": 1792996831.4738739}
+{"event": "intent_filed", "first_geom_line": 2, "id": "gate-1792996979-38ea0a1c", "lines": 3, "subject": "GATE TEST ONLY - answer NO, no model will run", "t": 1792996979.3557594, "worker": "gate-test"}
+{"event": "intent_yes", "id": "gate-1792996979-38ea0a1c", "subject": "GATE TEST ONLY - answer NO, no model will run", "t": 1792996984.0063958}
+{"event": "intent_filed", "first_geom_line": 3, "id": "gate-1792997215-6f1786a6", "lines": 22, "subject": "peen with hair boll", "t": 1792997215.8330328, "worker": "muse-main"}
+{"event": "intent_yes", "id": "gate-1792997215-6f1786a6", "subject": "peen with hair boll", "t": 1792997221.2058976}
+{"event": "run_start", "id": "gate-1792997215-6f1786a6", "script_hash": "c3bdaf0e8a8850c43b9478a2ed7aad40ee2c624667ee7505bb6b0ffb903e263d", "subject": "peen with hair boll", "t": 1792997290.4492807}
+{"event": "intent_filed", "first_geom_line": 3, "id": "gate-1792997560-99fcf30f", "lines": 30, "subject": "peen v2 from photo", "t": 1792997560.153801, "worker": "muse-main"}
+{"event": "intent_no", "id": "gate-1792997560-99fcf30f", "subject": "peen v2 from photo", "t": 1792997579.0640283}
+{"event": "intent_expired", "id": "gate-1792996831-d3614ee6", "subject": "test widget 3", "t": 1793000224.2927508}
+{"event": "intent_expired", "id": "gate-1792996979-38ea0a1c", "subject": "GATE TEST ONLY - answer NO, no model will run", "t": 1793000224.2941356}
+{"event": "intent_failed", "id": "gate-1792996831-06875c06", "reason": "register timeout (10s, no run registered)", "t": 1793001128.457735}
+{"event": "intent_failed", "id": "gate-1792997215-6f1786a6", "reason": "register timeout (10s, no run registered)", "t": 1793001128.4594083}
+{"event": "intent_filed", "first_geom_line": 9, "id": "gate-1793004377-cd2d111b", "lines": 66, "pane": "1", "subject": "blonde hologram woman, black tank, navy pleated skirt, arms out, full body", "t": 1793004378.019633, "worker": "subagent-holo-joi"}
+{"event": "intent_yes", "id": "gate-1793004377-cd2d111b", "subject": "blonde hologram woman, black tank, navy pleated skirt, arms out, full body", "t": 1793004383.244867}
+{"event": "launch_dispatched", "id": "gate-1793004377-cd2d111b", "t": 1793004383.5277004}
+{"event": "run_start", "id": "gate-1793004377-cd2d111b", "script_hash": "667ccd6be0ff179666a54980f6a9a978a06428f4fd717f39c93d03e215046e20", "session": "72d53e0b-8689-4d94-bbc5-de86f9c15afb", "subject": "blonde hologram woman, black tank, navy pleated skirt, arms out, full body", "t": 1793004384.7680798, "worker": "subagent-holo-joi"}
+{"event": "run_registered", "id": "gate-1793004377-cd2d111b", "pid": 4096114, "run": "/home/poo/.local/share/geppetto/research/script-holo-joi-20261026-044624-4096082", "t": 1793004384.8544867}
+{"event": "intent_placed", "id": "gate-1793004377-cd2d111b", "pane": "1", "run": "/home/poo/.local/share/geppetto/research/script-holo-joi-20261026-044624-4096082", "t": 1793004385.2810886}
+{"event": "first_frame", "id": "gate-1793004377-cd2d111b", "pane": "1", "run": "/home/poo/.local/share/geppetto/research/script-holo-joi-20261026-044624-4096082", "t": 1793004390.3617284}
+{"event": "intent_filed", "first_geom_line": 9, "id": "gate-1793005032-20ad6c44", "lines": 65, "pane": "2", "subject": "blonde woman, separate shirt, pants, socks, undies and bra, arcade character method, full body", "t": 1793005033.4089103, "worker": "subagent-her-separate-arcade"}
+{"event": "intent_no", "id": "gate-1793005032-20ad6c44", "subject": "blonde woman, separate shirt, pants, socks, undies and bra, arcade character method, full body", "t": 1793005042.003374}
+{"event": "intent_filed", "first_geom_line": 9, "id": "gate-1793005313-006c4829", "lines": 65, "pane": "2", "subject": "blonde woman, separate shirt, pants, socks, undies and bra, arcade character method, full body", "t": 1793005314.4291506, "worker": "subagent-her-separate-paneonly"}
+{"event": "intent_yes", "id": "gate-1793005313-006c4829", "subject": "blonde woman, separate shirt, pants, socks, undies and bra, arcade character method, full body", "t": 1793005317.6281228}
+{"event": "intent_filed", "first_geom_line": 9, "id": "gate-1793005758-4598dfae", "lines": 65, "pane": "2", "subject": "blonde woman, separate shirt, pants, socks, undies and bra, arcade character method, full body", "t": 1793005759.239374, "worker": "subagent-her-separate-attempt3"}
+{"event": "intent_yes", "id": "gate-1793005758-4598dfae", "subject": "blonde woman, separate shirt, pants, socks, undies and bra, arcade character method, full body", "t": 1793005763.997024}
+{"event": "intent_filed", "first_geom_line": 9, "id": "gate-1793006290-6d96374e", "lines": 65, "pane": "2", "subject": "blonde woman, separate shirt, pants, socks, undies and bra, arcade character method, full body", "t": 1793006290.749453, "worker": "subagent-her-separate-attempt4"}
+{"event": "intent_yes", "id": "gate-1793006290-6d96374e", "subject": "blonde woman, separate shirt, pants, socks, undies and bra, arcade character method, full body", "t": 1793006311.4390516}
+{"event": "launch_dispatched", "id": "gate-1793006290-6d96374e", "t": 1793006311.4403772}
+{"event": "run_start", "id": "gate-1793006290-6d96374e", "script_hash": "ed41a2c857d229557b531aae0b27cbc9d139d4bb24e4f797118a4a2739cc593a", "session": "efae35e2-ef00-4411-85ac-438925c99245", "subject": "blonde woman, separate shirt, pants, socks, undies and bra, arcade character method, full body", "t": 1793006311.7803445, "worker": "subagent-her-separate-attempt4"}
+{"event": "run_registered", "id": "gate-1793006290-6d96374e", "pid": 4149599, "run": "/home/poo/.local/share/geppetto/research/script-her-separate-20261026-051831-4149582", "t": 1793006311.8703814}
+{"event": "intent_placed", "id": "gate-1793006290-6d96374e", "pane": "2", "run": "/home/poo/.local/share/geppetto/research/script-her-separate-20261026-051831-4149582", "t": 1793006312.419998}
+{"event": "first_frame", "id": "gate-1793006290-6d96374e", "pane": "2", "run": "/home/poo/.local/share/geppetto/research/script-her-separate-20261026-051831-4149582", "t": 1793006314.6663597}
+{"event": "intent_filed", "first_geom_line": 2, "id": "gate-1793053004-e8481292", "lines": 22, "pane": "2", "subject": "yo get the mf barraciuda and pirahnana models in mf fishy flop projct", "t": 1793053004.2783194, "worker": "grok-fishyflop"}
+{"event": "intent_yes", "id": "gate-1793053004-e8481292", "subject": "yo get the mf barraciuda and pirahnana models in mf fishy flop projct", "t": 1793053006.4446967}
+{"event": "launch_dispatched", "id": "gate-1793053004-e8481292", "t": 1793053006.6782606}
+{"event": "run_start", "id": "gate-1793053004-e8481292", "script_hash": "fb2416e8fc633a864b93b3c62b5cbc42156ca242943015812f951abed6c6c28c", "session": "grok-20261026-fishyflop", "subject": "yo get the mf barraciuda and pirahnana models in mf fishy flop projct", "t": 1793053006.9616094, "worker": "grok-fishyflop"}
+{"event": "run_registered", "id": "gate-1793053004-e8481292", "pid": 52407, "run": "/home/poo/.local/share/geppetto/research/script-export_piranha-20261026-181646-52390", "t": 1793053007.045599}
+{"event": "intent_placed", "id": "gate-1793053004-e8481292", "pane": "2", "run": "/home/poo/.local/share/geppetto/research/script-export_piranha-20261026-181646-52390", "t": 1793053008.5764356}
+{"event": "first_frame", "id": "gate-1793053004-e8481292", "pane": "2", "run": "/home/poo/.local/share/geppetto/research/script-export_piranha-20261026-181646-52390", "t": 1793053010.6962004}
+{"event": "intent_filed", "first_geom_line": 2, "id": "gate-1793053142-fdc06097", "lines": 22, "pane": "2", "subject": "yo get the mf barraciuda and pirahnana models in mf fishy flop projct", "t": 1793053142.655115, "worker": "grok-fishyflop"}
+{"event": "intent_yes", "id": "gate-1793053142-fdc06097", "subject": "yo get the mf barraciuda and pirahnana models in mf fishy flop projct", "t": 1793053145.070101}
+{"event": "launch_dispatched", "id": "gate-1793053142-fdc06097", "t": 1793053145.3530374}
+{"event": "run_start", "id": "gate-1793053142-fdc06097", "script_hash": "d18fc54c0a7708f20516e3b8ae6565e243807588282c4b69e2aef3efcdfc9e47", "session": "grok-20261026-fishyflop", "subject": "yo get the mf barraciuda and pirahnana models in mf fishy flop projct", "t": 1793053145.632825, "worker": "grok-fishyflop"}
+{"event": "run_registered", "id": "gate-1793053142-fdc06097", "pid": 54097, "run": "/home/poo/.local/share/geppetto/research/script-export_piranha-20261026-181905-54080", "t": 1793053145.716224}
+{"event": "intent_placed", "id": "gate-1793053142-fdc06097", "pane": "2", "run": "/home/poo/.local/share/geppetto/research/script-export_piranha-20261026-181905-54080", "t": 1793053146.8293686}
+{"event": "first_frame", "id": "gate-1793053142-fdc06097", "pane": "2", "run": "/home/poo/.local/share/geppetto/research/script-export_piranha-20261026-181905-54080", "t": 1793053148.9456854}
+{"event": "intent_filed", "first_geom_line": 2, "id": "gate-1793053973-c7d25cb6", "lines": 24, "pane": "3", "subject": "yo get the mf barraciuda and pirahnana models in mf fishy flop projct", "t": 1793053973.8604531, "worker": "grok-fishyflop"}
+{"event": "intent_yes", "id": "gate-1793053973-c7d25cb6", "subject": "yo get the mf barraciuda and pirahnana models in mf fishy flop projct", "t": 1793053976.399796}
+{"event": "launch_dispatched", "id": "gate-1793053973-c7d25cb6", "t": 1793053976.6272545}
+{"event": "run_start", "id": "gate-1793053973-c7d25cb6", "script_hash": "9a40e9aac268a913cadf09bb79bdbeae227c2cd1f132b2cbf62a7821020e927e", "session": "grok-20261026-fishyflop", "subject": "yo get the mf barraciuda and pirahnana models in mf fishy flop projct", "t": 1793053976.913345, "worker": "grok-fishyflop"}
+{"event": "run_registered", "id": "gate-1793053973-c7d25cb6", "pid": 62873, "run": "/home/poo/.local/share/geppetto/research/script-export_piranha-20261026-183256-62855", "t": 1793053976.9971669}
+{"event": "intent_placed", "id": "gate-1793053973-c7d25cb6", "pane": "3", "run": "/home/poo/.local/share/geppetto/research/script-export_piranha-20261026-183256-62855", "t": 1793053978.4989448}
+{"event": "first_frame", "id": "gate-1793053973-c7d25cb6", "pane": "3", "run": "/home/poo/.local/share/geppetto/research/script-export_piranha-20261026-183256-62855", "t": 1793053980.6133144}

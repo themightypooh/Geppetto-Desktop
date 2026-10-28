@@ -27,8 +27,34 @@ namespace Marionette.Desktop;
 /// their own. A mark-fired rate emitter has no end notification, so it
 /// keeps running until its caller disables it, exactly like a direct
 /// <see cref="ParticleSystem.TriggerCue"/> call; prefer burst presets for
-/// marks. Non-preset names (camera cuts, prop attaches) are ignored, and
-/// morph/sound notifications are ignored entirely.
+/// marks. Non-preset names (camera cuts, prop attaches) are ignored.
+/// P34 (cue-bridge event extensions) — lane 4's file, extended, lane 4's
+/// behaviour unchanged for the kinds lane 4 already handled (Mark, Event /
+/// EventStart, EventEnd). Uncovered kinds, enumerated from
+/// TimelineEventKind in code (EventStart is the same value as Event, and
+/// MorphEventStart is the same value as MorphEvent, so there are six
+/// distinct values, not eight):
+/// - Sound: FIRES, exactly like a mark. A sound cue is instantaneous, like
+///   a mark, and its name resolves through the same ResolveName path, so a
+///   sound named for a preset (e.g. a footstep sound named fx:water_splash)
+///   fires that preset. Its origin key is its BoneOrigin when one is set
+///   (a hand, mouth, or foot bone), otherwise its name, exactly as lane 4
+///   keys marks on their name. A sound has no end notification, so a rate
+///   emitter fired by a sound is NOT tracked — it keeps running until its
+///   caller disables it, like a mark-fired rate emitter. Origin-less sounds
+///   are skipped silently, never positioned by guesswork, same as lane 4.
+/// - MorphEvent / MorphEventStart: DELIBERATE SKIP, counted separately in
+///   SkippedDeliberateCount. A morph event is continuous face/body shape
+///   state (a morph target held at a weight over a frame range), not a cue:
+///   its name identifies a morph target, not a particle preset, and it
+///   carries no bone and no position at all. Firing on a name coincidence
+///   would put FX on a face change, and there is no origin to resolve
+///   except the morph name itself — which is the guesswork lane 4 forbids.
+///   Even a preset-named morph is therefore skipped, not fired.
+/// - MorphEventEnd: DELIBERATE SKIP, counted the same way. Nothing is
+///   tracked under a morph event (see above), so there is nothing to stop;
+///   the end notification must not disable emitters tracked under a RigEvent
+///   or any other object, and must not crash.
 /// </summary>
 public sealed class ParticleCueBridge
 {
@@ -46,6 +72,9 @@ public sealed class ParticleCueBridge
 
 	/// <summary>Notifications ignored because their name is no particle preset.</summary>
 	public int SkippedUnknownCount { get; private set; }
+
+	/// <summary>Notifications deliberately skipped by kind (morph start/end, P34), never fired.</summary>
+	public int SkippedDeliberateCount { get; private set; }
 
 	/// <summary>Rate emitters currently tracked for a RigEvent end.</summary>
 	public int LoopingCount
@@ -85,25 +114,46 @@ public sealed class ParticleCueBridge
 					_looping.Remove( ended );
 				}
 				return;
+			case TimelineEventKind.MorphEvent:
+				// MorphEventStart is the same enum value as MorphEvent.
+				// Deliberate skip (P34): a morph is shape state, not a cue,
+				// and carries no bone or position. Counted separately so a
+				// preset-named morph is visibly skipped, never fired.
+				SkippedDeliberateCount++;
+				return;
+			case TimelineEventKind.MorphEventEnd:
+				// Deliberate skip (P34): nothing is tracked under a morph
+				// event, so there is nothing to stop, and this must not
+				// touch emitters tracked under a RigEvent.
+				SkippedDeliberateCount++;
+				return;
 			case TimelineEventKind.Mark:
 			case TimelineEventKind.Event:
+			case TimelineEventKind.Sound:
+				// EventStart is the same enum value as Event, so it is
+				// covered by the Event case exactly as lane 4 handled it.
 				break;
 			default:
 				return;
 		}
 		var preset = ParticleEmitterPresets.ResolveName( notification.Name );
 		if ( preset is null ) { SkippedUnknownCount++; return; }
-		// Events key on their attach bone; marks have no bone, so they key on
-		// the cue name itself. Either way the resolver, not this bridge,
-		// decides what that key means in world space.
-		string key = notification.Event?.AttachBone is { Length: > 0 } bone ? bone : notification.Name;
+		// Events key on their attach bone; sounds key on their bone origin
+		// when one is set; marks (and bone-less sounds) key on the cue name
+		// itself. Either way the resolver, not this bridge, decides what
+		// that key means in world space.
+		string key = notification.Event?.AttachBone is { Length: > 0 } bone ? bone
+			: notification.SoundEvent?.BoneOrigin is { Length: > 0 } boneOrigin ? boneOrigin
+			: notification.Name;
 		var origin = _originResolver?.Invoke( key );
 		if ( origin is null ) { SkippedNoOriginCount++; return; }
 		var emitter = _trigger( preset, origin.Value, null );
 		if ( emitter is null ) return;
 		FiredCount++;
 		// Only a RigEvent start gives us an end to stop at, and only a rate
-		// emitter needs stopping.
+		// emitter needs stopping. Sound and mark firings have no end, so
+		// their rate emitters are left running for the caller to disable,
+		// exactly like lane 4's mark rule.
 		if ( notification.Kind == TimelineEventKind.Event && notification.Event is { } evt && emitter.Rate > 0 )
 		{
 			if ( !_looping.TryGetValue( evt, out var list ) ) _looping[evt] = list = new List<ParticleEmitter>();

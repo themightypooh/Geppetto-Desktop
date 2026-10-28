@@ -1,0 +1,39 @@
+effigy 1
+rollback 2147483647
+feature Inflate2DFeature
+	id 0ace5e6e
+	name Base
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings 0,0;10,0;10,10;0,10
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.8
+end
+feature Inflate2DFeature
+	id 8d07be75
+	name Rim
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings 2,2;8,2;8,8;2,8|3,3;7,3;7,7;3,7
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.6
+end
+feature TransformFeature
+	id 71a7e773
+	name Transform 1
+	suppressed 0
+	visible 1
+	bodies Bodies 8d07be75b0
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Translate 0 0 0.8
+end

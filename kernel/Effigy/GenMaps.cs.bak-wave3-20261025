@@ -1,0 +1,362 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+
+namespace Effigy;
+
+/// <summary>
+/// Procedural map-set generator (textures wave: P1 generator, P5 presets,
+/// P6 direction, P8 tileable mode).
+///
+/// THE PITFALL, BUILT IN, NOT DOCUMENTED AWAY: noise is never written
+/// straight into the normal slot. One height field is built first, and
+/// the normal map is derived from it by central differences with the
+/// same green convention as PaintTextureSet.HeightToNormal (green
+/// negated, so a generated dent lights like a painted dent). Height
+/// alone does not read under even light, so every set also ships AO
+/// (from height concavity) and roughness variation — a pore/grain set
+/// without those two is half a fix, and this generator refuses to
+/// produce one: albedo, rough, metal, normal, AO and detail-normal
+/// are always written together, at one square size (the SlotLook
+/// resampling constraint: all maps in a set share one size).
+///
+/// DETERMINISM: every field is seeded. Same preset, seed, size,
+/// scale and direction rebuilds byte-identical maps. Tileable mode
+/// (the default) samples periodic noise, so a UV-space map tiles
+/// without a seam line; tileable=0 uses the non-periodic Noise3 /
+/// SurfaceDetail Worley path and logs a seam warning, because that
+/// path WILL show a seam at the tile boundary in UV space (the
+/// triplanar renderer sidesteps it, a plain UV texture does not).
+/// Colour space, per channel, matching ShadedRender: albedo bytes
+/// are sRGB, rough/metal/AO bytes are linear greys, normal bytes
+/// are a tangent-space normal. No gamma is applied to the linear
+/// channels on the way out.
+/// </summary>
+public static class GenMaps
+{
+	public sealed class Result
+	{
+		public List<string> Written = new();
+		public List<string> Log = new();
+	}
+
+	public static readonly string[] Presets = { "skin", "fabric", "leather", "metal", "wood", "stone" };
+
+	public static Result Generate( string folder, string baseName, string preset, int size, int seed,
+		float scale, float directionDeg, float bump, bool tileable )
+	{
+		preset = (preset ?? "skin").ToLowerInvariant();
+		if ( Array.IndexOf( Presets, preset ) < 0 )
+			throw new ArgumentException( $"genmaps preset={preset} is not a preset. Use one of: {string.Join( ", ", Presets )}" );
+
+		size = Math.Clamp( size, 64, 2048 );
+		scale = Math.Clamp( scale, 0.25f, 64f );
+		bump = Math.Clamp( bump, 0f, 8f );
+
+		Directory.CreateDirectory( folder );
+		var noise3 = tileable ? null : new Noise3( seed );
+		var rad = directionDeg * MathF.PI / 180f;
+		var cos = MathF.Cos( rad );
+		var sin = MathF.Sin( rad );
+
+		// --- noise fields -------------------------------------------------
+		float Fbm( float u, float v, int octaves )
+		{
+			if ( tileable ) return PeriodicFbm( u * scale, v * scale, octaves, seed );
+			var f = noise3.Fbm( new Vec3( u * scale, v * scale, seed * 0.371f ), octaves );
+			return Math.Clamp( 0.5f + f, 0f, 1f );
+		}
+		float FbmShifted( float u, float v, int octaves ) => Fbm( u + 13.7f, v + 7.1f, octaves );
+		(float F1, float F2) Worley( float u, float v )
+		{
+			if ( tileable ) return PeriodicWorley( u * scale, v * scale, seed );
+			return SurfaceDetail.Worley( new Vec3( u * scale, v * scale, seed * 0.13f ), seed );
+		}
+
+		var height = new float[size * size];
+		var albedo = new byte[size * size * 4];
+		var rough = new byte[size * size * 4];
+		var metal = new byte[size * size * 4];
+
+		// Preset constants: base albedo (sRGB 0..1), base roughness, metalness.
+		var (br, bg, bb, baseRough, baseMetal) = preset switch
+		{
+			"skin" => (0.78f, 0.52f, 0.40f, 0.55f, 0f),
+			"fabric" => (0.45f, 0.48f, 0.52f, 0.90f, 0f),
+			"leather" => (0.42f, 0.28f, 0.18f, 0.70f, 0.05f),
+			"metal" => (0.55f, 0.56f, 0.58f, 0.35f, 0.90f),
+			"wood" => (0.48f, 0.32f, 0.20f, 0.60f, 0f),
+			_ => (0.55f, 0.55f, 0.54f, 0.95f, 0.02f),
+		};
+
+		for ( var y = 0; y < size; y++ )
+		{
+			for ( var x = 0; x < size; x++ )
+			{
+				var u = (x + 0.5f) / size;
+				var v = (y + 0.5f) / size;
+				// P6 direction: rotate the sampling coordinates, so weave
+				// axes, brushed streaks and wood bands follow the angle
+				// instead of reading as isotropic static.
+				var cu = u - 0.5f;
+				var cv = v - 0.5f;
+				var ru = 0.5f + cu * cos - cv * sin;
+				var rv = 0.5f + cu * sin + cv * cos;
+
+				var f = Fbm( u, v, 4 );
+				var mottle = FbmShifted( u, v, 3 );
+				float h, pore = 0f, crack = 0f, streak = 0f, rVar = 0f;
+
+				switch ( preset )
+				{
+					case "skin":
+					{
+						var (f1, _) = Worley( u, v );
+						pore = Math.Clamp( 1.3f - f1 * 2.2f, 0f, 1f );
+						var crease = 1f - MathF.Abs( 2f * mottle - 1f );
+						h = 0.5f + 0.16f * (f - 0.5f) * 2f - 0.22f * pore + 0.05f * (crease - 0.5f) * 2f;
+						rVar = 0.25f * pore - 0.10f * (mottle - 0.5f) * 2f;
+						break;
+					}
+					case "fabric":
+					{
+						var weave = MathF.Sin( ru * MathF.PI * 2f * 12f ) * MathF.Sin( rv * MathF.PI * 2f * 12f );
+						h = 0.5f + 0.18f * weave + 0.08f * (f - 0.5f) * 2f;
+						rVar = 0.08f * (mottle - 0.5f) * 2f;
+						break;
+					}
+					case "leather":
+					{
+						var (f1, f2) = Worley( u, v );
+						crack = Math.Clamp( 1f - (f2 - f1) * 3f, 0f, 1f );
+						h = 0.5f + 0.20f * (f - 0.5f) * 2f - 0.18f * crack;
+						rVar = 0.15f * (mottle - 0.5f) * 2f;
+						break;
+					}
+					case "metal":
+					{
+						// Anisotropic streaks: FBM stretched along the rotated
+						// u axis (direction), so the grain runs one way.
+						streak = Fbm( ru, rv * 0.125f, 4 );
+						var fine = Fbm( u * 4f, v * 4f, 2 );
+						h = 0.5f + 0.12f * (streak - 0.5f) * 2f + 0.05f * (fine - 0.5f) * 2f;
+						rVar = 0.25f * MathF.Abs( streak - 0.5f ) * 2f;
+						break;
+					}
+					case "wood":
+					{
+						var band = MathF.Sin( (ru + 0.40f * (f - 0.5f) * 2f) * MathF.PI * 2f * (2f * scale) );
+						h = 0.5f + 0.18f * band + 0.08f * (f - 0.5f) * 2f;
+						rVar = 0.15f * (mottle - 0.5f) * 2f;
+						break;
+					}
+					default: // stone
+					{
+						var (f1, f2) = Worley( u, v );
+						crack = Math.Clamp( 1f - (f2 - f1) * 4f, 0f, 1f );
+						h = 0.5f + 0.25f * (f - 0.5f) * 2f - 0.20f * crack;
+						rVar = 0.05f * (mottle - 0.5f) * 2f;
+						break;
+					}
+				}
+
+				h = Math.Clamp( h, 0f, 1f );
+				var o = (y * size + x);
+				height[o] = h;
+
+				// Albedo: base colour, mottled, tinted by height so dents
+				// read even before the normal/AO are sampled.
+				var tint = 0.82f + 0.36f * mottle;
+				var ht = 0.90f + 0.20f * h;
+				albedo[o * 4] = ToByte( br * tint * ht );
+				albedo[o * 4 + 1] = ToByte( bg * tint * ht );
+				albedo[o * 4 + 2] = ToByte( bb * tint * ht );
+				albedo[o * 4 + 3] = 255;
+
+				var rv2 = Math.Clamp( baseRough + rVar, 0.03f, 1f );
+				var rb = ToByte( rv2 );
+				rough[o * 4] = rb; rough[o * 4 + 1] = rb; rough[o * 4 + 2] = rb; rough[o * 4 + 3] = 255;
+
+				var mb = ToByte( baseMetal );
+				metal[o * 4] = mb; metal[o * 4 + 1] = mb; metal[o * 4 + 2] = mb; metal[o * 4 + 3] = 255;
+			}
+		}
+
+		// Normal from height (same convention as PaintTextureSet.HeightToNormal),
+		// and a fine detail normal at 4x frequency (skin: the pore field itself).
+		var normal = HeightToNormalArray( height, size, bump );
+		var fineH = new float[size * size];
+		for ( var y = 0; y < size; y++ )
+			for ( var x = 0; x < size; x++ )
+			{
+				var u = (x + 0.5f) / size;
+				var v = (y + 0.5f) / size;
+				fineH[y * size + x] = preset == "skin"
+					? Math.Clamp( 0.5f - 0.5f * Math.Clamp( 1.3f - Worley( u, v ).F1 * 2.2f, 0f, 1f ), 0f, 1f )
+					: Fbm( u * 4f, v * 4f, 3 );
+			}
+		var detailNormal = HeightToNormalArray( fineH, size, bump );
+
+		// AO from height concavity (P3's function, reused here): a texel
+		// darker than its blurred neighbourhood is a dent, and dents get
+		// AO — this is what makes pores read under even light.
+		var ao = new byte[size * size * 4];
+		for ( var y = 0; y < size; y++ )
+			for ( var x = 0; x < size; x++ )
+			{
+				var sum = 0f;
+				var n = 0;
+				for ( var dy = -1; dy <= 1; dy++ )
+					for ( var dx = -1; dx <= 1; dx++ )
+					{
+						var xx = Math.Clamp( x + dx, 0, size - 1 );
+						var yy = Math.Clamp( y + dy, 0, size - 1 );
+						sum += height[yy * size + xx];
+						n++;
+					}
+				var blur = sum / n;
+				var h0 = height[y * size + x];
+				var cavity = Math.Clamp( blur - h0, 0f, 1f );
+				var a = Math.Clamp( 1f - 0.70f * cavity - 0.15f * (1f - h0), 0.35f, 1f );
+				var b = ToByte( a );
+				var o = (y * size + x) * 4;
+				ao[o] = b; ao[o + 1] = b; ao[o + 2] = b; ao[o + 3] = 255;
+			}
+
+		var result = new Result();
+		void Write( string suffix, byte[] rgba )
+		{
+			var path = Path.Combine( folder, $"{baseName}_{suffix}.png" );
+			PngWriter.WriteFileRgba( path, rgba, size, size );
+			result.Written.Add( path );
+		}
+		Write( "albedo", albedo );
+		Write( "rough", rough );
+		Write( "metal", metal );
+		Write( "normal", normal );
+		Write( "ao", ao );
+		Write( "detailnormal", detailNormal );
+
+		var vmatPath = Path.Combine( folder, $"{baseName}.vmat" );
+		File.WriteAllText( vmatPath,
+			"// THIS FILE IS AUTO-GENERATED by genmaps\n\nLayer0\n{\n\tshader \"complex.vfx\"\n" +
+			$"\tTextureColor \"{baseName}_albedo.png\"\n" +
+			$"\tTextureNormal \"{baseName}_normal.png\"\n" +
+			$"\tTextureRoughness \"{baseName}_rough.png\"\n" +
+			$"\tTextureMetalness \"{baseName}_metal.png\"\n" +
+			$"\tTextureAmbientOcclusion \"{baseName}_ao.png\"\n}}\n" );
+		result.Written.Add( vmatPath );
+
+		string P( string suffix ) => Path.Combine( folder, $"{baseName}_{suffix}.png" ).Replace( '\\', '/' );
+		var slotPath = Path.Combine( folder, $"{baseName}_slot.txt" );
+		File.WriteAllText( slotPath,
+			$"material 0 albedo={P( "albedo" )} normal={P( "normal" )} ao={P( "ao" )} " +
+			$"roughmap={P( "rough" )} metalmap={P( "metal" )} detailnormal={P( "detailnormal" )} detailstrength=1\n" );
+		result.Written.Add( slotPath );
+
+		result.Log.Add( $"genmaps preset={preset} size={size} seed={seed} scale={scale} direction={directionDeg} bump={bump} tileable={(tileable ? 1 : 0)}: wrote {result.Written.Count} files" );
+		if ( !tileable )
+			result.Log.Add( "genmaps warning: tileable=0 uses non-periodic noise — a UV-space map from this set WILL show a seam at the tile boundary. Use tileable=1, or render it through the triplanar path." );
+		return result;
+	}
+
+	static byte ToByte( float v ) => (byte)Math.Clamp( MathF.Round( v * 255f ), 0f, 255f );
+
+	/// <summary>Height field to tangent-space normal RGBA, green negated
+	/// exactly as PaintTextureSet.HeightToNormal does.</summary>
+	static byte[] HeightToNormalArray( float[] height, int size, float strength )
+	{
+		var result = new byte[size * size * 4];
+		float H( int x, int y ) => height[Math.Clamp( y, 0, size - 1 ) * size + Math.Clamp( x, 0, size - 1 )];
+		for ( var y = 0; y < size; y++ )
+			for ( var x = 0; x < size; x++ )
+			{
+				var du = (H( x + 1, y ) - H( x - 1, y )) * 0.5f;
+				var dv = (H( x, y + 1 ) - H( x, y - 1 )) * 0.5f;
+				var n = new Vec3( -strength * du, -strength * dv, 1f ).Normal;
+				var o = (y * size + x) * 4;
+				result[o] = ToByte( n.x * 0.5f + 0.5f );
+				result[o + 1] = ToByte( -n.y * 0.5f + 0.5f );
+				result[o + 2] = ToByte( n.z * 0.5f + 0.5f );
+				result[o + 3] = 255;
+			}
+		return result;
+	}
+
+	// --- periodic (tileable) noise --------------------------------------
+	static float PeriodicFbm( float u, float v, int octaves, int seed )
+	{
+		var sum = 0f;
+		var amp = 1f;
+		var norm = 0f;
+		var period = 4;
+		for ( var o = 0; o < octaves; o++ )
+		{
+			sum += PeriodicValueNoise( u, v, period, seed + o * 101 ) * amp;
+			norm += amp;
+			amp *= 0.5f;
+			period *= 2;
+		}
+		return sum / MathF.Max( norm, 1e-6f );
+	}
+
+	static float PeriodicValueNoise( float u, float v, int period, int seed )
+	{
+		var xi = (int)MathF.Floor( u );
+		var yi = (int)MathF.Floor( v );
+		var xf = u - xi;
+		var yf = v - yi;
+		var sx = xf * xf * (3f - 2f * xf);
+		var sy = yf * yf * (3f - 2f * yf);
+		int W( int i ) => ((i % period) + period) % period;
+		var a = Hash01( seed, W( xi ), W( yi ) );
+		var b = Hash01( seed, W( xi + 1 ), W( yi ) );
+		var c = Hash01( seed, W( xi ), W( yi + 1 ) );
+		var d = Hash01( seed, W( xi + 1 ), W( yi + 1 ) );
+		return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy;
+	}
+
+	static float Hash01( int seed, int x, int y )
+	{
+		unchecked
+		{
+			var h = (uint)(seed * 374761393 + x * 668265263 + y * 2147483647);
+			h ^= h >> 13;
+			h *= 1274126177u;
+			h ^= h >> 16;
+			return (h & 0x7FFFFFFF) / 2147483647f;
+		}
+	}
+
+	static (float F1, float F2) PeriodicWorley( float u, float v, int seed )
+	{
+		const int period = 4;
+		var cx = (int)MathF.Floor( u );
+		var cy = (int)MathF.Floor( v );
+		var f1 = float.MaxValue;
+		var f2 = float.MaxValue;
+		for ( var dx = -1; dx <= 1; dx++ )
+			for ( var dy = -1; dy <= 1; dy++ )
+			{
+				var cellX = cx + dx;
+				var cellY = cy + dy;
+				var jx = Hash01( seed, ((cellX % period) + period) % period, ((cellY % period) + period) % period );
+				var jy = Hash01( seed + 7919, ((cellX % period) + period) % period, ((cellY % period) + period) % period );
+				var px = cellX + 0.08f + 0.84f * jx;
+				var py = cellY + 0.08f + 0.84f * jy;
+				var ddx = WrapDelta( px - u, period );
+				var ddy = WrapDelta( py - v, period );
+				var d = MathF.Sqrt( ddx * ddx + ddy * ddy );
+				if ( d < f1 ) { f2 = f1; f1 = d; }
+				else if ( d < f2 ) f2 = d;
+			}
+		return (f1, f2);
+	}
+
+	static float WrapDelta( float d, int period )
+	{
+		while ( d > period / 2f ) d -= period;
+		while ( d < -period / 2f ) d += period;
+		return d;
+	}
+}

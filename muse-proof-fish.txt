@@ -1,0 +1,19 @@
+echo "Proof fish: spline body and fin tools, not a box fish, built live for the pane"
+echo "Body: spline tube head to tail, thick at the head tapering to the tail, so the silhouette reads as a fish"
+material 0 color=#2a7a8a rough=0.55 metal=0.05
+add Spline name=Body points=6,0,0;2,0,0;-2,0,0;-6,0,0 radius=2.5 endradius×=0.35 sides=16 materialslot=0
+echo "Dorsal fin: fin tool with rays and web, along the top, for the back silhouette"
+material 1 color=#e8a020 rough=0.6 metal=0.05
+add Fin name=Dorsal root=3,0,1.8;0,0,2.4;-3,0,1.6 tip=2,0,4.5;0,0,5.2;-2,0,4.2 thickness=0.2,0.05 rays=8 ridge=0.06 webdip=0.72 curve=0.15 subdiv=2 materialslot=1
+echo "Tail fin: fin fan at the tail end, so the rear reads as a caudal fin, not a cut tube"
+add Fin name=Caudal root=-6,0,-1.2;-6,0,1.2 tip=-9.5,0,-2.8;-9.5,0,2.8 thickness=0.15,0.05 rays=10 ridge=0.06 webdip=0.72 curve=0.15 subdiv=2 materialslot=1
+echo "Pectoral fins: side fins for the fish to read from the front and side"
+add Fin name=PectoralL root=4,1.8,-0.8;2,2.2,-0.8 tip=3,4.5,-1.2;1,4.8,-1.2 thickness=0.15,0.05 rays=6 ridge=0.06 webdip=0.72 curve=0.15 subdiv=2 materialslot=1
+add Fin name=PectoralR root=4,-1.8,-0.8;2,-2.2,-0.8 tip=3,-4.5,-1.2;1,-4.8,-1.2 thickness=0.15,0.05 rays=6 ridge=0.06 webdip=0.72 curve=0.15 subdiv=2 materialslot=1
+echo "Eyes: spheres set into the sides of the head, a landmark that proves the head end"
+material 2 color=#101010 rough=0.3 metal=0.1
+add Primitive name=EyeL shape=Sphere radius=0.8 position=5,2.1,0.6 materialslot=2
+add Primitive name=EyeR shape=Sphere radius=0.8 position=5,-2.1,0.6 materialslot=2
+echo "Skin: grain detail over the spline body, so the body is not just a flat colour"
+add Detail bodies=Body pass=Grain size=0.5 depth=0.05 busy=0.4
+save muse-proof-fish.effigy

@@ -1,0 +1,192 @@
+"""Read Roundtable choices without importing its UI or changing its seat settings."""
+import ast
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(os.environ.get('GEPPETTO_ROUNDTABLE', str(Path.home() / 'Desktop/model-roundtable')))
+HUB = Path(os.environ.get('MODEL_HUB_NATIVE', str(Path.home() / 'Projects/model-hub-native')))
+NATIVE_SHIM = Path(__file__).resolve().with_name('provider_cli.py')
+
+
+def opencode_models():
+    """Read enabled V2 models, with the plain CLI catalogue as a fallback."""
+    exe = shutil.which('opencode')
+    if not exe:
+        return []
+    try:
+        result = subprocess.run([exe, 'api', 'get', '/api/model'], capture_output=True,
+                                text=True, timeout=8)
+        if result.returncode == 0:
+            data = json.loads(result.stdout)['data']
+            found = []
+            for model in data:
+                if not model.get('enabled', True):
+                    continue
+                mid = model['providerID'] + '/' + model['id']
+                found.append(mid)
+                found.extend(mid + '#' + variant['id'] for variant in model.get('variants', []))
+            return list(dict.fromkeys(found))
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+        pass
+    try:
+        result = subprocess.run([exe, 'models'], capture_output=True, text=True, timeout=8)
+        if result.returncode == 0:
+            return list(dict.fromkeys(line.strip() for line in result.stdout.splitlines()
+                                     if re.fullmatch(r'[\w.-]+/\S+', line.strip())))
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return []
+
+
+def constants(path):
+    result = {}
+    try:
+        tree = ast.parse(path.read_text())
+        for node in tree.body:
+            if isinstance(node, ast.Assign):
+                try:
+                    value = ast.literal_eval(node.value)
+                except (ValueError, TypeError):
+                    if not isinstance(node.value, ast.Dict):
+                        continue
+                    value = {}
+                    for key, item in zip(node.value.keys, node.value.values):
+                        try:
+                            value[ast.literal_eval(key)] = ast.literal_eval(item)
+                        except (ValueError, TypeError):
+                            pass
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        result[target.id] = value
+    except (OSError, SyntaxError):
+        pass
+    return result
+
+
+def choices(discover=True):
+    cfg = constants(ROOT / 'app.py')
+    families = {f: cfg.get(f.upper() + '_MODELS', []) for f in ('claude', 'codex', 'grok')}
+    families['codex'] = list(dict.fromkeys([''] + list(families['codex'])))
+    families['opencode'] = [''] + (opencode_models() if discover else [])
+    if cfg:
+        families['zoobie'] = ['zoobie']
+    shim = HUB / 'hub_seat.py'
+    if cfg and shim.is_file():
+        families.update(cfg.get('HUB_MODELS', {}))
+        families['antigravity'] = cfg.get('AGY_MODELS_FALLBACK', [''])
+        hidden = set(os.environ.get('MODEL_HUB_HIDE', 'muse').split(','))
+        for family in hidden:
+            families.pop(family, None)
+        if discover and shutil.which('agy'):
+            try:
+                r = subprocess.run(['agy', 'models'], capture_output=True, text=True, timeout=5)
+                found = [line.split()[0] for line in r.stdout.splitlines()
+                         if line.strip() and not line.lower().startswith(('fetching', 'available'))]
+                if r.returncode == 0 and found:
+                    families['antigravity'] = [''] + found[:30]
+            except (OSError, subprocess.SubprocessError):
+                pass
+    out = []
+
+    def record(family, model, identity=None, name=None, persona=None):
+        if family in ('claude', 'grok'):
+            kind = family + '-cli'
+            ready = bool(shutil.which(family))
+        elif family == 'zoobie':
+            kind = 'roundtable-cli'
+            ready = (ROOT / 'zoobie_seat.py').is_file()
+        elif family in ('codex', 'opencode'):
+            kind = 'roundtable-cli'
+            ready = NATIVE_SHIM.is_file() and bool(shutil.which(family))
+        else:
+            kind = 'roundtable-cli'
+            ready = shim.is_file()
+            program = {'antigravity': 'agy', 'cursor': 'cursor-agent'}.get(family, family)
+            if family in ('codex', 'opencode', 'antigravity', 'cursor', 'muse'):
+                ready = ready and bool(shutil.which(program))
+        label = (name + ' · ' if name else '') + family.title() + ' · ' + (model or 'CLI default')
+        if family == 'opencode' and model.endswith('-free'):
+            label += ' · free tier (quota applies)'
+        elif 'beam' in (model or '').lower() and not (model or '').endswith('-free'):
+            label += ' · paid'
+        if family == 'zoobie':
+            label += ' · manual file bridge'
+        r = dict(id=identity or f'roundtable/{family}/{model or "default"}', label=label,
+                 kind=kind, model=model, endpoint='cli', family=family,
+                 group='Roundtable seats' if name else family.title(), available=ready,
+                 research=False, vision=False,
+                 capabilities=['chat'] if family == 'zoobie' else ['tools'],
+                 bridge=str(NATIVE_SHIM if family in ('codex', 'opencode') else
+                            ROOT / 'zoobie_seat.py' if family == 'zoobie' else shim))
+        if not ready:
+            r['label'] += ' · CLI not installed'
+        if persona and persona.is_file():
+            r['system_file'] = str(persona)
+        return r
+
+    for family, models in families.items():
+        if not isinstance(models, (list, tuple)):
+            continue
+        for model in models:
+            if isinstance(model, str):
+                out.append(record(family, model))
+    # --- Muse bridge seat (this Muse session, via file bridge, not the muse CLI) ---
+    # The built-in 'muse' family is hidden by default (MODEL_HUB_HIDE=muse) and its
+    # local muse CLI still returns a 402 billing error (2026-10-24), so unhiding it
+    # alone does not work. This separate bridge record uses cabinet/muse_seat.py,
+    # modelled on zoobie_seat.py: prompt to a requests file, Muse answers (and edits
+    # in the request's workspace) to a responses file. Model id is deliberately
+    # 'muse-bridge' (not '') so chat.py's duplicate filter (kind + model) does not
+    # drop it as a duplicate of another roundtable-cli '' model. Capabilities are
+    # chat + plan + build for v2: Build is enabled only because muse_seat.py now
+    # forwards the BuildTurn receipt env (GEPPETTO_BUILD_RECEIPTS/TOKEN) to the
+    # responder, and the responder must run a real geppetto-live build script
+    # with those env vars exported, so geppetto-live itself calls
+    # build_execution.record() and produces a valid receipt. A text-only reply
+    # in Build mode still produces no receipt and is rejected by checked_stream.
+    _muse_bridge = Path(__file__).resolve().with_name('muse_seat.py')
+    out.append(dict(id='roundtable/muse/muse-bridge',
+                    label='Muse · Muse (this chat) · file bridge',
+                    kind='roundtable-cli', model='muse-bridge', endpoint='cli',
+                    family='muse', group='Muse', available=_muse_bridge.is_file(),
+                    research=False, vision=False,
+                    capabilities=['chat', 'plan', 'build'],
+                    bridge=str(_muse_bridge)))
+    try:
+        seats = json.loads((ROOT / 'roundtable-data/seats.json').read_text())
+        names = seats.get('_names', {})
+        for seat, selection in seats.items():
+            if seat.startswith('_') or not isinstance(selection, dict):
+                continue
+            family = selection.get('cli') or ('opencode' if seat == 'OpenCode' else seat.lower())
+            if family not in families:
+                continue
+            out.append(record(family, selection.get('model', ''), f'roundtable/seat/{seat}',
+                              names.get(seat, seat), ROOT / 'roundtable-data/personas' / (seat + '.md')))
+    except (OSError, ValueError, TypeError):
+        pass
+    return out
+
+
+def command(model, act=True, effort=None):
+    """Native providers use our bundled shim; optional seats retain their bridges.
+
+    effort is only passed to the bundled shim (Codex/OpenCode), never to a
+    hub seat: hub seats have their own effort handling and this must not
+    change their arguments. None means inherit the user's own setting.
+    """
+    if model['family'] == 'zoobie':
+        return [sys.executable, model['bridge']]
+    provider = {'antigravity': 'agy', 'openai-compat': 'openai'}.get(model['family'], model['family'])
+    bridge = str(NATIVE_SHIM) if provider in ('codex', 'opencode') else model['bridge']
+    cmd = [sys.executable, bridge, '--provider', provider, '--model', model['model']]
+    if act:
+        cmd.append('--act')
+    if bridge == str(NATIVE_SHIM) and effort:
+        cmd += ['--effort', effort]
+    return cmd

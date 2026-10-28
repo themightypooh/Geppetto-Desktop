@@ -91,6 +91,46 @@ public static class FurShells
 		return added;
 	}
 
+	/// <summary>Fin cards at the silhouette: one vertical card per boundary edge
+	/// (an edge used by exactly one selected face), rising Length along the edge's
+	/// average vertex normal with droop sag at the tip. Shells alone read as a
+	/// hard cut-out edge in profile; fins break that edge. Returns faces added.</summary>
+	public static int GrowFins( PolyMesh mesh, IReadOnlyCollection<int> faces, float length, float droop, int materialSlot )
+	{
+		if ( faces.Count == 0 || length <= 0f ) return 0;
+		var normals = mesh.ComputeVertexNormals();
+		var edgeUse = new Dictionary<(int, int), int>();
+		foreach ( var fi in faces )
+		{
+			var f = mesh.Faces[fi];
+			for ( var k = 0; k < f.Indices.Length; k++ )
+			{
+				var a = f.Indices[k]; var b = f.Indices[(k + 1) % f.Indices.Length];
+				var key = a < b ? (a, b) : (b, a);
+				edgeUse[key] = edgeUse.TryGetValue( key, out var n ) ? n + 1 : 1;
+			}
+		}
+		var hadColors = mesh.HasVertexColors;
+		var colors = hadColors ? new List<Vec4>( mesh.VertexColors ) : null;
+		var added = 0;
+		foreach ( var (edge, use) in edgeUse )
+		{
+			if ( use != 1 ) continue;
+			var (a, b) = edge;
+			var na = normals[a]; var nb = normals[b];
+			var sag = length * Math.Clamp( droop, 0f, 1f );
+			var topA = mesh.Positions[a] + na * length + new Vec3( 0, 0, -sag );
+			var topB = mesh.Positions[b] + nb * length + new Vec3( 0, 0, -sag );
+			var ia = mesh.AddVertex( mesh.Positions[a] ); var ib = mesh.AddVertex( mesh.Positions[b] );
+			var ita = mesh.AddVertex( topA ); var itb = mesh.AddVertex( topB );
+			if ( colors is not null ) { colors.Add( new Vec4( 0f, 1f, 1f, 1f ) ); colors.Add( new Vec4( 0f, 1f, 1f, 1f ) ); colors.Add( new Vec4( 1f, 1f, 1f, 1f ) ); colors.Add( new Vec4( 1f, 1f, 1f, 1f ) ); }
+			mesh.AddFace( new[] { ia, ib, itb, ita }, new[] { new Vec2( 0, 0 ), new Vec2( 1, 0 ), new Vec2( 1, 1 ), new Vec2( 0, 1 ) }, materialSlot );
+			added++;
+		}
+		if ( colors is not null ) mesh.VertexColors = colors.ToArray();
+		return added;
+	}
+
 	/// <summary>Faces within <paramref name="width"/> of an opening - a collar, a cuff, a hem.</summary>
 	public static List<int> TrimFaces( PolyMesh mesh, float width )
 	{
@@ -162,7 +202,11 @@ public static class FurMaterial
 	/// Strand noise: mostly dark with bright specks, a few pixels across, so the tip shells keep thin
 	/// strands. <paramref name="clump"/> 0..1 groups neighbouring strands into tufts.
 	/// </summary>
-	public static byte[] NoiseRgba( int seed, float clump )
+	public static byte[] NoiseRgba( int seed, float clump ) => NoiseRgba( seed, clump, 0 );
+
+	/// <summary>Per-layer noise: <paramref name="layer"/> shifts the hash seed, so
+	/// stacked shells do not read as photocopies of one noise texture.</summary>
+	public static byte[] NoiseRgba( int seed, float clump, int layer )
 	{
 		var size = NoiseSize;
 		var rgba = new byte[size * size * 4];
@@ -172,8 +216,8 @@ public static class FurMaterial
 		{
 			for ( var x = 0; x < size; x++ )
 			{
-				var strand = Hash( x, y, seed );
-				var tuft = Value( x / 16f, y / 16f, seed + 7 );
+				var strand = Hash( x, y, seed + layer * 7919 );
+				var tuft = Value( x / 16f, y / 16f, seed + layer * 7919 + 7 );
 				var v = strand * (1f - clump) + strand * tuft * clump * 1.6f;
 				var b = (byte)Math.Clamp( (int)(v * 255f), 0, 255 );
 				var o = (y * size + x) * 4;

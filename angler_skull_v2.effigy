@@ -1,0 +1,462 @@
+effigy 1
+rollback 2147483647
+materiallook 0 color=#e9e0c8 rough=0.7 metal=0
+feature Inflate2DFeature
+	id 83367624
+	name Cranium
+	suppressed 0
+	visible 1
+	param Bevel 0
+	param Profile 0
+	param Rings -44,2;-44,5;-40,7;-34,9;-26,10;-18,10;-12,9;-6,7;-4,4;-4,-1;-8,-3;-16,-3;-24,-3;-32,-2;-40,-1|-20.5,2;-22,5.5;-25,6;-28,5.5;-29,2;-28,-1;-25,-2;-22,-1
+	param Scale 1
+	param Slot 0
+	param Symmetry 0
+	param Thickness 0.6
+end
+feature Inflate2DFeature
+	id d43d04f5
+	name LowerJaw
+	suppressed 0
+	visible 1
+	param Bevel 0
+	param Profile 0
+	param Rings -44,-8;-38,-10;-28,-11;-16,-10;-8,-7;-8,-5;-16,-8;-28,-9;-38,-8
+	param Scale 1
+	param Slot 0
+	param Symmetry 0
+	param Thickness 0.6
+end
+feature Inflate2DFeature
+	id 7f656daf
+	name Operculum
+	suppressed 0
+	visible 1
+	param Bevel 0
+	param Profile 0
+	param Rings -5,-3;-5,5;-1,5;-1,-3
+	param Scale 1
+	param Slot 0
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature PrimitiveFeature
+	id 0e7933ff
+	name JawJoint
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position -10 -6.5 0
+	param Radius 0.8
+	param RotationAngle 90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 6
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 5
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id b0c67596
+	name SnoutSpike1
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position -41 8.5 0
+	param Radius 0.4
+	param RotationAngle 90
+	param RotationAxis -0.416 0.909 0
+	param Scale 1 1 1
+	param Segments 6
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 7.2
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 722ad7a8
+	name SnoutSpike2
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position -39 5.5 0
+	param Radius 0.4
+	param RotationAngle 90
+	param RotationAxis -0.159 0.987 0
+	param Scale 1 1 1
+	param Segments 6
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 6.3
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id f3ede01d
+	name UpperTooth1
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position -42 -2.5 0
+	param Radius 0.25
+	param RotationAngle 90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 4
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 1.3
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 917aae53
+	name UpperTooth2
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position -39 -2.5 0
+	param Radius 0.25
+	param RotationAngle 90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 4
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 1.3
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 8044d900
+	name UpperTooth3
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position -36 -2.5 0
+	param Radius 0.25
+	param RotationAngle 90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 4
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 1.3
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 3137ff20
+	name UpperTooth4
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position -33 -2.5 0
+	param Radius 0.25
+	param RotationAngle 90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 4
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 1.3
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 9a3d08eb
+	name UpperTooth5
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position -30 -2.5 0
+	param Radius 0.25
+	param RotationAngle 90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 4
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 1.3
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id a3a66771
+	name UpperTooth6
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position -27 -2.5 0
+	param Radius 0.25
+	param RotationAngle 90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 4
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 1.3
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 11c06a50
+	name UpperTooth7
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position -24 -2.5 0
+	param Radius 0.25
+	param RotationAngle 90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 4
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 1.3
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id aa5bea19
+	name UpperTooth8
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position -21 -2.5 0
+	param Radius 0.25
+	param RotationAngle 90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 4
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 1.3
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 9c05b663
+	name UpperTooth9
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position -18 -2.5 0
+	param Radius 0.25
+	param RotationAngle 90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 4
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 1.3
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 717f9407
+	name LowerTooth1
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position -40 -8.2 0
+	param Radius 0.25
+	param RotationAngle -90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 4
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 1.2
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id e5cc16cf
+	name LowerTooth2
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position -37 -8.2 0
+	param Radius 0.25
+	param RotationAngle -90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 4
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 1.2
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id f3b3471d
+	name LowerTooth3
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position -34 -8.2 0
+	param Radius 0.25
+	param RotationAngle -90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 4
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 1.2
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id a1a30aa0
+	name LowerTooth4
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position -31 -8.2 0
+	param Radius 0.25
+	param RotationAngle -90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 4
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 1.2
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 03338ada
+	name LowerTooth5
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position -28 -8.2 0
+	param Radius 0.25
+	param RotationAngle -90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 4
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 1.2
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id dd0964b8
+	name LowerTooth6
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position -25 -8.2 0
+	param Radius 0.25
+	param RotationAngle -90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 4
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 1.2
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id f08029f0
+	name LowerTooth7
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position -22 -8.2 0
+	param Radius 0.25
+	param RotationAngle -90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 4
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 1.2
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 2783745d
+	name LowerTooth8
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position -19 -8.2 0
+	param Radius 0.25
+	param RotationAngle -90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 4
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 1.2
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 1f4e6af1
+	name LowerTooth9
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position -16 -8.2 0
+	param Radius 0.25
+	param RotationAngle -90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 4
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 1.2
+	param UniformScale 0
+end

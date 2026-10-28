@@ -1,0 +1,718 @@
+// The CLAUDE card: talk to Claude Code from the chest (host.py -> claude_link.py, a Claude Code
+// session of its own working in this checkout). Its replies and every tool it runs scroll past
+// here; a tool that needs your OK waits on ALLOW / DENY. PAUSE holds it at its next tool call and
+// pauses the runs it started; STOP cuts the turn off, refuses its next tool and cancels its runs.
+// Folded it is just the title, the keys and the line you type in, so the model stays in view.
+import QtQuick
+import QtQuick.Controls as C
+
+Item {
+    id: card
+    property bool open: false
+    property bool folded: false
+    property real maxHeight: 420
+    property real bigHeight: 700
+    property bool big: false                // BIG: wider and taller, to read everything it does
+    property var expanded: ({})             // log rows opened by a click (full output, all of a thought)
+    property int spinStep: 0
+    readonly property string spin: "◐◓◑◒"[spinStep % 4]
+    Timer { interval: 150; repeat: true; running: card.visible && card.busy; onTriggered: card.spinStep++ }
+    // COMIC POP (2026-10-25): bubble pops in from the walkie, no fade.
+    transformOrigin: Item.Left
+    PropertyAnimation { id: popAnim; target: card; property: "scale"; from: 0.85; to: 1; duration: 220; easing.type: Easing.OutBack }
+    onOpenChanged: if (open) popAnim.start()
+    function toggle(i) { const e = Object.assign({}, expanded); e[i] = !e[i]; expanded = e }
+    signal closed()
+
+    readonly property var messages: host.claudeMessages
+    readonly property string status: host.claudeStatus
+    readonly property string ask: host.claudeAsk
+    readonly property bool busy: status === "working" || status === "starting" || status === "paused"
+    readonly property string phase: messages ? messages.phase : ""
+
+    readonly property color steel: "#ffffff"
+    readonly property color steelHi: "#ffd21f"
+    readonly property color steelLo: "#fff8e0"
+    readonly property color edge: "#000000"
+    readonly property color lit: "#e5382e"
+    readonly property color text: "#000000"
+    readonly property color dim: "#555555"
+    readonly property color bad: "#e5382e"
+    readonly property color you: "#0057b8"
+    readonly property string mono: "DejaVu Sans"
+    readonly property string uiFont: "DejaVu Sans"
+    property string modelSearch: ""
+    property var collapsedGroups: ({})
+    function toggleGroup(group) { if (group === "__pinned") return; const c = Object.assign({}, collapsedGroups); c[group] = !c[group]; collapsedGroups = c }
+    // Muse bridge + current model are pinned first, so they are never buried in a
+    // collapsed provider group. Everything else keeps its original catalogue order
+    // and group, so no provider, model or seat is removed or reordered away.
+    readonly property bool isMuseBridge: modelRecord && modelRecord.family === "muse"
+    function switchToMuse() {
+        for (const m of (host.chatModels || [])) {
+            if (m.id === "roundtable/muse/muse-bridge") { host.setClaudeModel(m.id); return true }
+        }
+        return false
+    }
+    readonly property var pickerRows: {
+        const query = modelSearch.trim().toLowerCase();
+        const searching = query.length > 0;
+        const all = (host.chatModels || []).filter(m => {
+            if (!searching) return true;
+            const hay = (m.label + " " + m.id + " " + (m.group || "")).toLowerCase();
+            return hay.indexOf(query) >= 0;
+        });
+        // Favorites first (2026-10-25): starred models, in starred order,
+        // so your usual picks need no scrolling through 252 models.
+        // Favorites never duplicate below: pinned and rest skip them.
+        const favIds = host.favoriteModels || [];
+        const favs = [];
+        for (const fid of favIds) {
+            for (const m of all) if (m.id === fid) { favs.push(m); break }
+        }
+        const seen = {};
+        for (const m of favs) seen[m.id] = true;
+        const pinned = [];
+        for (const m of all) {
+            if (m.family === "muse" || m.id === host.claudeModel) { if (!seen[m.id]) { pinned.push(m); seen[m.id] = true } }
+        }
+        const rest = all.filter(m => !seen[m.id]);
+        const rows = [];
+        if (favs.length > 0) {
+            rows.push({ kind: "group", group: "__favorites", collapsed: false, pinnedLabel: "★ Favorites" });
+            for (const m of favs) rows.push({ kind: "model", model: m });
+        }
+        if (pinned.length > 0) {
+            rows.push({ kind: "group", group: "__pinned", collapsed: false, pinnedLabel: host.claudeModel ? "★ Pinned · Muse + current" : "★ Pinned · Muse" });
+            for (const m of pinned) rows.push({ kind: "model", model: m });
+        }
+        let last = "";
+        for (const m of rest) {
+            const group = m.group || "Models";
+            if (group !== last) {
+                rows.push({ kind: "group", group: group, collapsed: !!collapsedGroups[group] && !searching });
+                last = group;
+            }
+            if (searching || !collapsedGroups[group])
+                rows.push({ kind: "model", model: m });
+        }
+        return rows;
+    }
+
+    width: big ? 600 : 420
+    height: folded ? head.y + head.height + 8 + pick.height + 8 + phaseLine.height + 4 + strip.height + 4 + (ask ? askRow.height + 4 : 0) + inputRow.height + 8 + actionsRow.height + 12 : big ? bigHeight : maxHeight
+    Behavior on width { NumberAnimation { duration: 120 } }
+    visible: open
+    opacity: open ? 1 : 0
+    Behavior on height { NumberAnimation { duration: 120 } }
+
+    property string sendError: ""
+    function send() {
+        const t = field.text.trim();
+        if (t === "") return;
+        if (typeof host.claudeSend !== "function") {
+            // @Slot regression: claudeSend is not exposed to QML, so calling it
+            // would silently do nothing. Keep the text, unfold, show why.
+            card.sendError = "Send broken: claudeSend not exposed (missing @Slot) - text kept, nothing sent";
+            card.folded = false;
+            return;
+        }
+        card.sendError = "";
+        if (host.claudeSend(t)) field.text = "";
+        else card.folded = false;   // failure is now visible: status line says why, log/research overlay is shown
+    }
+    function focusInput() { field.forceActiveFocus() }
+    function prefill(t) { field.text = t; focusInput() }   // the guide's example ideas land here, ready to send — never auto-sent
+    signal pictureClicked(string path)
+
+    Canvas {
+        id: bubbleCanvas
+        anchors.fill: parent
+        onWidthChanged: requestPaint()
+        onHeightChanged: requestPaint()
+        onPaint: {
+            var ctx = getContext("2d");
+            ctx.clearRect(0, 0, width, height);
+            var bx = 48, by = 6, bw = width - 60, bh = height - 12;
+            // tail: three circles on the left, pointing at the walkie speaker
+            var ty = height * 0.62;
+            var circles = [[38, ty, 18], [20, ty + 22, 12], [8, ty + 42, 7]];
+            for (var i = 0; i < circles.length; i++) {
+                ctx.beginPath(); ctx.arc(circles[i][0], circles[i][1], circles[i][2], 0, Math.PI * 2);
+                ctx.fillStyle = "#fff8e0"; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = "#000000"; ctx.stroke();
+            }
+            // body: big rounded bubble, cream paper, thick black ink
+            ctx.beginPath();
+            var r = 28;
+            ctx.moveTo(bx + r, by); ctx.lineTo(bx + bw - r, by); ctx.arc(bx + bw - r, by + r, r, -Math.PI/2, 0);
+            ctx.lineTo(bx + bw, by + bh - r); ctx.arc(bx + bw - r, by + bh - r, r, 0, Math.PI/2);
+            ctx.lineTo(bx + r, by + bh); ctx.arc(bx + r, by + bh - r, r, Math.PI/2, Math.PI);
+            ctx.lineTo(bx, by + r); ctx.arc(bx + r, by + r, r, Math.PI, Math.PI*1.5);
+            ctx.closePath();
+            ctx.fillStyle = "#fff8e0"; ctx.fill(); ctx.lineWidth = 4; ctx.strokeStyle = "#000000"; ctx.stroke();
+            // header banner: yellow, black outline, title sits on it
+            ctx.fillStyle = "#ffd21f"; ctx.fillRect(bx + 14, 14, bw - 28, 38);
+            ctx.lineWidth = 3; ctx.strokeStyle = "#000000"; ctx.strokeRect(bx + 14, 14, bw - 28, 38);
+            // halftone dots, bottom-right corner, comic dithering
+            ctx.fillStyle = "rgba(0,0,0,0.35)";
+            for (var dx = 0; dx < 5; dx++) for (var dy = 0; dy < 3; dy++) {
+                ctx.beginPath(); ctx.arc(bx + bw - 90 + dx * 14, by + bh - 50 + dy * 14, 2.5, 0, Math.PI * 2); ctx.fill();
+            }
+        }
+    }
+    // ---- who's working strip (pinned): title, full model label, status, session keys --------
+    // Mode controls are a separate row below, so session keys and mode no longer blur together.
+    Item {
+        id: head
+        x: 60; y: 14; width: parent.width - 72; height: 100
+        Rectangle {
+            id: lamp
+            y: 8; width: 7; height: 7; radius: 0
+            color: card.status === "working" || card.status === "starting" ? card.lit
+                 : card.status === "paused" ? "#e8d36a" : card.status === "stopped" ? card.bad
+                 : card.status === "offline" ? card.dim : "#7fc77a"
+            SequentialAnimation on opacity {
+                running: card.status === "working" || card.status === "starting"; loops: Animation.Infinite
+                NumberAnimation { to: 0.3; duration: 500 } NumberAnimation { to: 1; duration: 500 }
+                onRunningChanged: if (!running) lamp.opacity = 1
+            }
+        }
+        Text {
+            x: 18; y: 0
+            width: parent.width - closeKey.width - 30; elide: Text.ElideRight
+            text: card.modelRecord ? (card.folded ? "▸ " : "▾ ") + card.who : "Choose your provider"
+            color: card.text; font.family: card.uiFont; font.bold: true; font.pixelSize: 20; font.capitalization: Font.AllUppercase
+            MouseArea {
+                id: titleMouse
+                anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                // Research prompt must stay visible: folding would hide it while Send is still blocked.
+                onClicked: { if (host.claudeResearchPrompt) card.folded = false; else card.folded = !card.folded }
+            }
+            C.ToolTip.visible: titleMouse.containsMouse
+            C.ToolTip.text: (card.modelRecord ? card.modelRecord.label : "Choose your provider") + " · " + card.status
+        }
+        Text {
+            x: 18; y: 24; width: parent.width - 22
+            text: card.ask ? "APPROVAL REQUIRED" : card.status.toUpperCase()
+            color: card.ask ? card.lit : card.dim; font.family: card.uiFont; font.pixelSize: 11; font.bold: true
+            elide: Text.ElideRight
+        }
+        CardKey { id: closeKey; anchors.right: parent.right; text: "×"; tip: "Close chat"; onClicked: card.closed() }
+        Row {
+            y: 56; spacing: 8
+            Text {
+                text: "MODE:"; color: card.text; font.family: card.uiFont; font.pixelSize: 12; font.bold: true
+                anchors.verticalCenter: parent.verticalCenter
+            }
+            // Build/Plan is a mode, not an action, so it is a slider switch,
+            // not two buttons: one pill track, an amber thumb that slides
+            // to the active side, dark text on the thumb, dim text off it.
+            // Halves keep the old objectNames, so the mode test still clicks them.
+            Item {
+                id: modeToggle
+                width: 160; height: 28
+                readonly property bool buildActive: host.claudeMode === "build"
+                Rectangle { anchors.fill: parent; radius: 0; color: card.steel; border.color: "#000000"; border.width: 3 }
+                Rectangle {
+                    width: (parent.width - 4) / 2; height: parent.height - 4; y: 2
+                    x: modeToggle.buildActive ? 2 : parent.width - width - 2
+                     radius: 0; color: card.lit; border.color: "#000000"; border.width: 2
+                    Behavior on x { NumberAnimation { duration: 120 } }
+                }
+                Text {
+                    x: 0; width: parent.width / 2; height: parent.height
+                    verticalAlignment: Text.AlignVCenter; horizontalAlignment: Text.AlignHCenter
+                    text: "BUILD"; color: modeToggle.buildActive ? "#ffffff" : (host.claudeBuildSupported ? card.text : card.dim)
+                    font.family: card.uiFont; font.pixelSize: 12; font.weight: Font.Bold
+                }
+                Text {
+                    x: parent.width / 2; width: parent.width / 2; height: parent.height
+                    verticalAlignment: Text.AlignVCenter; horizontalAlignment: Text.AlignHCenter
+                    text: "PLAN"; color: modeToggle.buildActive ? (host.claudeModeSupported ? card.text : card.dim) : "#ffffff"
+                    font.family: card.uiFont; font.pixelSize: 12; font.weight: Font.Bold
+                }
+                Item {
+                    objectName: "claudeBuildMode"
+                    x: 0; width: parent.width / 2; height: parent.height
+                    enabled: !card.busy && host.claudeBuildSupported
+                    signal clicked()
+                    onClicked: host.setClaudeMode("build")
+                    MouseArea { id: buildHalfMouse; anchors.fill: parent; hoverEnabled: true; enabled: parent.enabled; cursorShape: Qt.PointingHandCursor; onClicked: parent.clicked() }
+                    C.ToolTip.visible: buildHalfMouse.containsMouse
+                    C.ToolTip.text: host.claudeBuildSupported ? "Execute tools and edits; a printed script cannot complete a build" : "This connection has no execution tools. Plan remains available."
+                }
+                Item {
+                    objectName: "claudePlanMode"
+                    x: parent.width / 2; width: parent.width / 2; height: parent.height
+                    enabled: !card.busy && host.claudeModeSupported
+                    signal clicked()
+                    onClicked: host.setClaudeMode("plan")
+                    MouseArea { id: planHalfMouse; anchors.fill: parent; hoverEnabled: true; enabled: parent.enabled; cursorShape: Qt.PointingHandCursor; onClicked: parent.clicked() }
+                    C.ToolTip.visible: planHalfMouse.containsMouse
+                    C.ToolTip.text: "Read-only research and planning; no workspace edits"
+                }
+            }
+            CardKey {
+                objectName: "claudeResearchOptions"; text: "Research…"; enabled: !card.busy
+                onClicked: { card.folded = false; host.requestClaudeResearch() }
+                tip: "Choose what this chat may look up. Nothing is sent until you confirm."
+            }
+        }
+        // Send errors only: no mode description, no tracker pipeline text.
+        Text {
+            x: 0; y: 86; width: parent.width
+            visible: card.sendError !== ""
+            text: card.sendError
+            color: card.bad; font.family: card.uiFont; font.pixelSize: 10
+            elide: Text.ElideRight
+        }
+    }
+
+    // ---- which model you are talking to: every model the chest knows (the chat's catalogue) --
+    // A Claude model is the Claude Code session (tools, ALLOW/DENY, PAUSE); Grok, a local model or
+    // an API model answers here too, through the chat's wiring.
+    readonly property var modelRecord: {
+        var ms = host.chatModels || [];
+        for (var i = 0; i < ms.length; ++i) if (ms[i].id === host.claudeModel) return ms[i];
+        // Fallback only: if the seat is the Muse bridge but its catalogue record
+        // is temporarily missing, use the last known bridge record instead of
+        // null (which would silently switch the UI to Claude: who="Claude",
+        // isClaude=true, isMuseBridge=false, losing tracker/placeholder).
+        if (host.claudeModel === "roundtable/muse/muse-bridge") return { id: "roundtable/muse/muse-bridge", label: "Muse · Muse (this chat) · file bridge", kind: "roundtable-cli", model: "muse-bridge", family: "muse", group: "Muse" };
+        return null;
+    }
+    readonly property string who: modelRecord ? modelRecord.label.split(" · ")[0] : ""
+    readonly property bool isClaude: !modelRecord || modelRecord.kind === "claude-cli"
+    readonly property bool chatOnly: modelRecord && modelRecord.kind !== "claude-cli" && modelRecord.kind !== "grok-cli"
+        && !(modelRecord.kind === "roundtable-cli" && ["codex", "opencode", "antigravity"].indexOf(modelRecord.family) >= 0)
+    property Item popupParent: card
+    function showPopup() { modelPopup.open() }
+    // ---- model selector, directly below the head (no separate search bar above it) ----
+    Item {
+        id: pick
+        objectName: "claudeModelPick"
+        x: 60; y: head.y + head.height + 8; width: parent.width - 72; height: 40
+        readonly property string currentText: card.modelRecord ? card.modelRecord.label : ""
+        Rectangle { anchors.fill: parent; color: card.steel; radius: 0; border.width: 3; border.color: pickMouse.containsMouse ? card.lit : "#000000" }
+        Text {
+            anchors.fill: parent; anchors.leftMargin: 10; anchors.rightMargin: 26
+            text: card.modelRecord ? card.modelRecord.label : (host.catalogueBusy ? "finding models…" : "Choose your provider.")
+            color: card.text; font.family: card.uiFont; font.pixelSize: 13; font.bold: true
+            verticalAlignment: Text.AlignVCenter; elide: Text.ElideMiddle
+        }
+        Text { x: parent.width - 22; anchors.verticalCenter: parent.verticalCenter; text: modelPopup.visible ? "▴" : "▾"; color: card.dim; font.pixelSize: 12 }
+        MouseArea {
+            id: pickMouse
+            anchors.fill: parent; hoverEnabled: true; enabled: !card.busy && (host.chatModels || []).length > 0
+            cursorShape: Qt.PointingHandCursor
+            onClicked: { if (modelPopup.visible) modelPopup.close(); else { card.modelSearch = ""; modelPopup.open() } }
+        }
+        C.ToolTip.visible: pickMouse.containsMouse
+        C.ToolTip.text: (card.modelRecord ? card.modelRecord.label : "No model") + (card.busy ? "\nModel selection unlocks when this turn finishes." : "\nChoose a model or Roundtable seat")
+        C.Popup {
+            id: modelPopup
+            objectName: "claudeModelPickPopup"
+            parent: card.popupParent
+            x: Math.max(0, Math.min(parent.width - width, pick.mapToItem(parent, 0, 0).x))
+            y: Math.max(0, Math.min(parent.height - height, pick.mapToItem(parent, 0, pick.height).y))
+            width: pick.width
+            height: Math.max(80, Math.min(parent.height - 16, 380))
+            padding: 10
+            onOpened: { searchField.forceActiveFocus() }
+            contentItem: Item {
+                C.TextField {
+                    id: searchField
+                    objectName: "claudeModelSearch"
+                    width: parent.width; height: 34
+                    placeholderText: "Search models, providers or seats…"
+                    color: card.text; placeholderTextColor: card.dim
+                    font.family: card.uiFont; font.pixelSize: 11
+                    text: card.modelSearch
+                    onTextEdited: card.modelSearch = text
+                    background: Rectangle { color: card.steelLo; border.color: searchField.activeFocus ? card.lit : "#000000"; border.width: 2; radius: 0 }
+                }
+                ListView {
+                    id: modelList
+                    objectName: "claudeModelResults"
+                    anchors.top: searchField.bottom; anchors.topMargin: 8
+                    anchors.bottom: providerFooter.top; anchors.bottomMargin: 8; width: parent.width
+                    clip: true; boundsBehavior: Flickable.StopAtBounds
+                    model: modelPopup.visible ? card.pickerRows : []
+                    delegate: rowDelegate
+                    C.ScrollBar.vertical: C.ScrollBar {}
+                    Text {
+                        visible: modelList.count === 0; width: parent.width
+                        text: card.modelSearch.trim() !== "" ? "No matching models"
+                             : host.catalogueBusy ? "Finding models…"
+                             : "No providers found on this machine.\nGeppetto uses YOUR providers — if you are already signed in to one, it appears here automatically.\nOtherwise sign in, then Refresh:\nClaude — run `claude` in a terminal and log in\nGrok — run `grok` and log in\nOllama — start Ollama\nOr add your own in ~/.config/geppetto/chat-models.json"
+                        color: card.dim
+                        font.family: card.uiFont; font.pixelSize: 11
+                        wrapMode: Text.Wrap; topPadding: 20
+                    }
+                }
+                Item {
+                    id: providerFooter
+                    anchors.bottom: parent.bottom; width: parent.width; height: 36
+                    CardKey {
+                        id: providerRefresh
+                        anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+                        text: "Refresh providers"; onClicked: host.refreshChat()
+                        tip: "Re-discover providers on this machine after you sign in"
+                    }
+                    Text {
+                        anchors.left: providerRefresh.right; anchors.leftMargin: 8; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                        text: "Your logins, on this machine — nothing shared"; color: card.dim; font.family: card.uiFont; font.pixelSize: 10; elide: Text.ElideRight
+                    }
+                }
+            }
+            background: Rectangle { color: card.steel; border.color: "#000000"; border.width: 3; radius: 0 }
+        }
+        Component {
+            id: rowDelegate
+            C.ItemDelegate {
+            required property var modelData
+            required property int index
+            readonly property bool header: modelData.kind === "group"
+            readonly property var model: header ? null : modelData.model
+            width: modelList.width
+            height: header ? 28 : 34
+            enabled: header || model.available !== false
+            highlighted: !header && (hovered || model.id === host.claudeModel)
+            onClicked: {
+                if (header) { card.toggleGroup(modelData.group); return }
+                host.setClaudeModel(model.id); modelPopup.close()
+            }
+            contentItem: Text {
+                width: parent.width
+                leftPadding: header ? 2 : 14
+                rightPadding: header ? 2 : 34
+                text: header
+                    ? (modelData.pinnedLabel ? modelData.pinnedLabel
+                       : ((modelData.collapsed ? "▸  " : "▾  ") + modelData.group))
+                    : model.label
+                color: header ? card.lit : (model.available === false ? card.dim : card.text)
+                font.family: card.uiFont
+                font.pixelSize: header ? 10 : 12
+                font.bold: header || model.id === host.claudeModel
+                font.capitalization: header ? Font.AllUppercase : Font.MixedCase
+                verticalAlignment: Text.AlignVCenter
+                elide: Text.ElideRight
+            }
+            // Star, right of every model row: tap it to favorite / unfavorite.
+            // It does not select the model — the row itself still does that.
+            Item {
+                visible: !header
+                anchors.right: parent.right; anchors.rightMargin: 4; anchors.verticalCenter: parent.verticalCenter
+                width: 28; height: 28; z: 2
+                Text {
+                    anchors.centerIn: parent
+                    text: (host.favoriteModels || []).indexOf(model.id) >= 0 ? "★" : "☆"
+                    color: (host.favoriteModels || []).indexOf(model.id) >= 0 ? card.lit : card.dim
+                    font.pixelSize: 16
+                }
+                MouseArea {
+                    anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                    onClicked: host.toggleFavorite(model.id)
+                }
+            }
+            C.ToolTip.visible: hovered && !header
+            C.ToolTip.text: header ? "" : model.label + "\n" + model.id
+            background: Rectangle {
+                radius: 0
+                color: header ? "transparent" : (parent.highlighted ? card.steelHi : "transparent")
+            }
+            }
+        }
+    }
+
+    Text {
+        id: phaseLine
+        x: 60; y: pick.y + pick.height + 8; width: parent.width - 72
+        height: visible ? implicitHeight + 16 : 0
+        visible: card.busy && card.phase !== ""
+        text: card.phase === "researching" ? "Researching · gathering references" : "Modeling · research complete"
+        color: card.lit; font.family: card.uiFont; font.pixelSize: 11
+        leftPadding: 10; rightPadding: 10; topPadding: 8
+        wrapMode: Text.Wrap
+        Rectangle { anchors.fill: parent; z: -1; color: "#ffd21f"; radius: 0; border.color: "#000000"; border.width: 2 }
+    }
+
+    // ---- pictures it looked at or showed you, newest right; a click pops one large again ----
+    ListView {
+        id: strip
+        objectName: "claudeStrip"
+        readonly property real space: count > 0 ? height + 4 : 0
+        x: 60; y: phaseLine.y + phaseLine.height + 4
+        width: parent.width - 72; height: count > 0 ? 40 : 0
+        visible: count > 0
+        orientation: ListView.Horizontal; spacing: 3; clip: true
+        model: host.claudePictures
+        onCountChanged: positionViewAtEnd()
+        delegate: Rectangle {
+            required property string modelData
+            width: 52; height: 40; color: card.edge; border.color: card.steelHi; border.width: 1
+            Image {
+                anchors.fill: parent; anchors.margins: 1
+                source: "file://" + parent.modelData; fillMode: Image.PreserveAspectCrop
+                sourceSize.width: 104; asynchronous: true; cache: false
+            }
+            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: card.pictureClicked(parent.modelData) }
+        }
+    }
+
+    // ---- the conversation ------------------------------------------------------------------
+    Rectangle {
+        id: researchConsent
+        objectName: "claudeResearchConsent"
+        x: log.x; y: log.y; width: log.width; height: log.height
+        z: 2; visible: host.claudeResearchPrompt && !card.folded
+        color: card.steel; border.color: "#000000"; border.width: 3; radius: 0
+        onVisibleChanged: if (visible) {
+            researchPapers.checked = host.claudeResearch.papers === true;
+            researchPhotos.checked = host.claudeResearch.photos === true;
+            researchModels.checked = host.claudeResearch.models === true;
+        }
+        C.ScrollView {
+            anchors { left: parent.left; right: parent.right; top: parent.top; bottom: consentActions.top; margins: 12 }
+            clip: true; contentWidth: availableWidth
+            Column {
+                id: consentBody
+                width: parent.width; spacing: 8
+                Text {
+                    width: parent.width; text: "May I research this asset?"
+                    color: card.text; font.family: card.uiFont; font.pixelSize: 14; font.bold: true; wrapMode: Text.Wrap
+                }
+                Text {
+                    width: parent.width; text: "Optional · only for this chat · nothing selected by default"
+                    color: card.dim; font.family: card.uiFont; font.pixelSize: 11; wrapMode: Text.Wrap
+                }
+                ResearchChoice { id: researchPapers; objectName: "researchPapers"; text: "Research papers" }
+                ResearchChoice { id: researchPhotos; objectName: "researchPhotos"; text: "Licensed reference photos" }
+                ResearchChoice { id: researchModels; objectName: "researchModels"; text: "CC0 / public-domain reference models" }
+                Text {
+                    width: parent.width; text: "Verify sources and licences; record credit requirements. References are for study. Downloads are untrusted—no scripts or model imports without separate approval. These choices guide the agent; they are not a security sandbox."
+                    color: card.dim; font.family: card.uiFont; font.pixelSize: 11; wrapMode: Text.Wrap
+                }
+            }
+        }
+        Flow {
+            id: consentActions
+            x: 12; width: parent.width - 24; anchors.bottom: parent.bottom; anchors.bottomMargin: 12
+            spacing: 6
+            CardKey {
+                objectName: "researchApply"; text: field.text.trim() ? "Apply & send" : "Apply choices"; hot: true
+                onClicked: { host.setClaudeResearch(researchPapers.checked, researchPhotos.checked, researchModels.checked); if (field.text.trim()) card.send() }
+            }
+            CardKey {
+                objectName: "researchSkip"; text: field.text.trim() ? "Skip & send" : "Skip research"
+                onClicked: { host.setClaudeResearch(false, false, false); if (field.text.trim()) card.send() }
+            }
+        }
+    }
+    ListView {
+        id: log
+        objectName: "claudeLog"
+        visible: !card.folded && !host.claudeResearchPrompt
+        x: 60; y: strip.y + strip.space
+        width: parent.width - 72
+        height: Math.max(0, parent.height - y - inputRow.height - actionsRow.height - (card.ask ? askRow.height + 8 : 0) - 36)
+        clip: true; spacing: 10
+        boundsBehavior: Flickable.StopAtBounds
+        model: card.messages
+        // follow the newest line while it streams in; scroll up to read back and it stops following
+        property bool follow: true
+        onMovementEnded: follow = atYEnd
+        function followEnd() { if (follow && !moving) positionViewAtEnd() }
+        onCountChanged: Qt.callLater(followEnd)
+        onContentHeightChanged: Qt.callLater(followEnd)
+        Connections {
+            target: card.messages
+            function onUpdated() { Qt.callLater(log.followEnd) }
+        }
+        onHeightChanged: if (follow) positionViewAtEnd()
+        C.ScrollBar.vertical: C.ScrollBar { policy: C.ScrollBar.AsNeeded }
+        delegate: Item {
+            id: row
+            required property var modelData
+            required property int index
+            readonly property string role: modelData.role
+            readonly property bool open: card.expanded[index] === true
+            width: log.width - 8
+            height: col.implicitHeight
+            Rectangle {     // subagent work hangs off a rail
+                visible: !!row.modelData.sub; x: 1; width: 2; height: parent.height; color: card.steelHi
+            }
+            Column {
+                id: col
+                x: row.modelData.sub ? 8 : 0; width: parent.width - x; spacing: 1
+                Text {
+                    width: parent.width
+                    wrapMode: Text.Wrap
+                    visible: row.role !== "out"
+                    textFormat: row.role === "claude" && !row.modelData.live ? Text.MarkdownText : Text.PlainText
+                    text: row.role === "you" ? "› " + row.modelData.text
+                        : row.role === "tool" ? (row.modelData.done ? (row.modelData.error ? "✗ " : "✓ ") : card.spin + " ") + row.modelData.text
+                        : row.role === "ask" ? "? " + row.modelData.text
+                        : row.role === "think" ? row.modelData.text + (row.modelData.live ? " " + card.spin : "")
+                        : row.modelData.text + (row.modelData.live ? "▍" : "")
+                    color: row.role === "you" ? card.you : row.role === "claude" ? card.text
+                         : row.role === "ask" ? card.lit : row.role === "tool" ? (row.modelData.error ? card.bad : row.modelData.done ? "#2e7d32" : card.lit)
+                         : row.role === "note" && /^(refused|denied|stopped|claude exited)/.test(row.modelData.text) ? card.bad : card.dim
+                    font.family: card.mono; font.italic: row.role === "think"
+                    font.bold: row.role === "tool" || row.role === "claude" || row.role === "you"
+                    font.pixelSize: row.role === "claude" || row.role === "you" ? 14 : row.role === "think" ? 11 : 12
+                    maximumLineCount: row.role === "think" && !row.open && !row.modelData.live ? 3 : 100000
+                    elide: Text.ElideRight
+                    onLinkActivated: link => Qt.openUrlExternally(link)
+                    MouseArea { anchors.fill: parent; enabled: row.role === "think"; onClicked: card.toggle(row.index) }
+                }
+                Text {      // the command, the edit, the file: what the tool was told to do
+                    visible: row.role === "tool" && !!row.modelData.detail
+                    x: 12; width: parent.width - 12
+                    wrapMode: Text.WrapAnywhere
+                    text: row.modelData.detail || ""
+                    color: "#555555"; font.family: card.mono; font.pixelSize: 10
+                }
+                Rectangle {     // what came back: click to see all of it
+                    visible: row.role === "out"
+                    x: 12; width: parent.width - 12
+                    height: outText.implicitHeight + 6
+                    color: "#ffffff"; radius: 0
+                    border.color: row.modelData.error ? card.bad : "#000000"; border.width: 2
+                    Text {
+                        id: outText
+                        x: 4; y: 3; width: parent.width - 8
+                        wrapMode: Text.WrapAnywhere
+                        text: row.open && row.modelData.full ? row.modelData.full : row.modelData.text
+                        color: row.modelData.error ? card.bad : "#000000"
+                        font.family: card.mono; font.pixelSize: 10
+                    }
+                    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: card.toggle(row.index) }
+                }
+            }
+        }
+    }
+
+    // ---- a tool waiting on your OK -----------------------------------------------------------
+    Rectangle {
+        id: askRow
+        visible: card.ask !== ""
+        x: 60; width: parent.width - 72; height: askText.implicitHeight + 32
+        anchors.bottom: inputRow.top; anchors.bottomMargin: 4
+        color: card.steel; border.color: card.lit; border.width: 3; radius: 0
+        Text {
+            id: askText
+            x: 5; y: 4; width: parent.width - 10; wrapMode: Text.Wrap; maximumLineCount: 4; elide: Text.ElideRight
+            text: "wants to run: " + card.ask
+            color: card.lit; font.family: card.mono; font.pixelSize: 10
+        }
+        Row {
+            anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.margins: 4; spacing: 3
+            CardKey { objectName: "claudeAllow"; text: "ALLOW"; hot: true; onClicked: host.claudeAnswer(true) }
+            CardKey { objectName: "claudeDeny"; text: "DENY"; onClicked: host.claudeAnswer(false) }
+        }
+    }
+
+    // ---- what you type ------------------------------------------------------------------------
+    Rectangle {
+        id: inputRow
+        x: 60; width: parent.width - 72; height: Math.min(100, Math.max(44, field.contentHeight + 20))
+        anchors.bottom: actionsRow.top; anchors.bottomMargin: 8
+        radius: 0
+        color: card.steel; border.color: field.activeFocus ? card.lit : "#000000"; border.width: 3
+        Flickable {
+            id: fieldFlick
+            anchors.fill: parent; anchors.leftMargin: 10; anchors.rightMargin: sendKey.width + 16
+            anchors.topMargin: 10; anchors.bottomMargin: 8
+            contentHeight: field.contentHeight; clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            TextEdit {
+                id: field
+                objectName: "claudeInput"
+                width: fieldFlick.width
+                wrapMode: TextEdit.Wrap
+                color: card.text
+                selectionColor: card.lit
+                font.family: card.uiFont; font.pixelSize: 12
+                selectByMouse: true
+                // Enter sends, Shift+Enter makes a new line; Escape gives the keys back to the viewport
+                Keys.onReturnPressed: event => { if (event.modifiers & Qt.ShiftModifier) event.accepted = false; else card.send() }
+                Keys.onEnterPressed: card.send()
+                Keys.onEscapePressed: field.focus = false
+                onCursorRectangleChanged: if (cursorRectangle.y + cursorRectangle.height > fieldFlick.contentY + fieldFlick.height)
+                                              fieldFlick.contentY = cursorRectangle.y + cursorRectangle.height - fieldFlick.height
+            }
+            Text {
+                visible: field.text === "" && !field.activeFocus
+                text: !card.modelRecord ? "Choose your provider above, then ask…"
+                     : card.busy ? "add something while it works…" : card.isMuseBridge ? "ask Muse…" : card.chatOnly ? "ask " + card.who + "…" : "tell " + card.who + " what to make…"
+                width: parent.width; elide: Text.ElideRight
+                color: card.dim; font.family: card.uiFont; font.pixelSize: 11
+            }
+        }
+        CardKey {
+            id: sendKey
+            anchors.right: parent.right; anchors.rightMargin: 7; anchors.verticalCenter: parent.verticalCenter
+            text: "SEND!"; hot: field.text.trim() !== ""
+            enabled: field.text.trim() !== "" && !card.busy && card.modelRecord !== null
+            onClicked: card.send()
+        }
+    }
+
+    // Comic actions live at the BOTTOM now, not the top — new layout, not the old panel.
+    Row {
+        id: actionsRow
+        x: 60; width: parent.width - 72
+        anchors.bottom: parent.bottom; anchors.bottomMargin: 12
+        spacing: 8
+        CardKey {
+            objectName: "claudePause"
+            text: card.status === "paused" ? "Resume" : "Pause"; hot: card.status === "paused"
+            enabled: card.isClaude && (card.status === "working" || card.status === "paused")
+            onClicked: host.claudePause()
+            tip: "hold Claude at its next tool call and pause the runs it started"
+        }
+        CardKey {
+            objectName: "claudeStop"
+            text: "Stop"; danger: true
+            enabled: card.busy || card.ask !== ""
+            onClicked: host.claudeStop()
+            tip: "stop Claude now and cancel the runs it started"
+        }
+        CardKey {
+            text: "New chat"; enabled: !card.busy
+            onClicked: { card.expanded = {}; host.claudeNew() }
+            tip: "start a fresh conversation"
+        }
+        CardKey { objectName: "claudeBig"; text: card.big ? "Compact" : "Expand"; hot: card.big; onClicked: card.big = !card.big; tip: "a bigger card to read everything it does" }
+    }
+
+    component CardKey: Rectangle {
+        id: ck
+        property string text: ""
+        property string tip: ""
+        property bool hot: false
+        property bool danger: false
+        signal clicked()
+        width: Math.max(32, t.implicitWidth + 24); height: Math.max(32, t.implicitHeight + 12); radius: 0
+        opacity: enabled ? 1 : 0.4
+        color: ckm.pressed ? card.steelHi : ckm.containsMouse ? "#fff8e0" : (danger && enabled ? card.lit : hot && enabled ? card.steelHi : card.steel)
+        border.color: "#000000"
+        border.width: 3
+        Text { id: t; anchors.centerIn: parent; text: ck.text; color: ck.danger ? "#ffffff" : "#000000"; font.family: card.uiFont; font.pixelSize: 12; font.weight: Font.Bold; font.capitalization: Font.AllUppercase }
+        MouseArea { id: ckm; anchors.fill: parent; hoverEnabled: true; enabled: ck.enabled; cursorShape: Qt.PointingHandCursor; onClicked: ck.clicked() }
+        C.ToolTip.visible: ck.tip !== "" && ckm.containsMouse
+        C.ToolTip.delay: 500
+        C.ToolTip.text: ck.tip
+    }
+    component ResearchChoice: C.CheckBox {
+        id: choice
+        width: consentBody.width
+        contentItem: Text {
+            text: choice.text
+            leftPadding: (choice.indicator ? choice.indicator.width : 24) + choice.spacing + 4
+            color: card.text; font.family: card.uiFont; font.pixelSize: 12
+            verticalAlignment: Text.AlignVCenter; wrapMode: Text.Wrap
+        }
+    }
+}

@@ -1,0 +1,107 @@
+# Walkie-talkie, CAD rebuild v4. NO Blob, NO voxel, NO mesh sculpt.
+# Hard-surface rules from research: blockout primitives first, proportions
+# before detail; every real edge gets a small chamfer (light catches it,
+# razor edges read fake); parts are separate rigid solids assembled with
+# overlap, like a manufactured radio, not one fused blob.
+# Front face is -Y, Z is up. No belt clip, no wrist strap.
+# PTT on the left side, grip on the right, so nothing clips into anything.
+material 0 color=#e8b417 rough=0.45 metal=0.1
+material 1 color=#22242a rough=0.6 metal=0.1
+material 2 color=#c22a22 rough=0.5 metal=0.1
+material 3 color=#aeb5b9 rough=0.27 metal=0.9
+material 4 color=#151d1a rough=0.25 metal=0 emit=#122b26
+material 8 color=#6b7d6e rough=0.7 metal=0 emit=#1a241e
+material 5 color=#ffb020 rough=0.3 metal=0.1
+material 6 color=#3a3d41 rough=0.6 metal=0.1
+material 7 color=#e8e8e8 rough=0.5 metal=0.1
+echo case
+add Primitive name=Body shape=Box width=1.7 depth=0.65 height=2.8 position=0,0,1.4 materialslot=0
+add Chamfer name=CaseChamfer bodies=Body width=0.06
+add Primitive name=TopCap shape=Box width=1.7 depth=0.65 height=0.25 position=0,0,2.85 materialslot=1
+add Chamfer name=CapChamfer bodies=TopCap width=0.04
+echo top knobs: base ring, knob, top disc, thin marker ridge
+add Primitive name=VolBase shape=Cylinder radius=0.26 height=0.08 position=-0.5,0,2.99 segments=32 materialslot=1
+add Primitive name=VolKnob shape=Cylinder radius=0.22 height=0.24 position=-0.5,0,3.13 segments=32 materialslot=1
+add Primitive name=VolTop shape=Cylinder radius=0.18 height=0.04 position=-0.5,0,3.26 segments=32 materialslot=6
+add Primitive name=VolMarker shape=Box width=0.06 depth=0.3 height=0.015 position=-0.5,0,3.2825 materialslot=7
+add Primitive name=ChanBase shape=Cylinder radius=0.2 height=0.08 position=0.05,0,2.99 segments=32 materialslot=6
+add Primitive name=ChanKnob shape=Cylinder radius=0.17 height=0.2 position=0.05,0,3.11 segments=32 materialslot=6
+add Primitive name=ChanTop shape=Cylinder radius=0.14 height=0.04 position=0.05,0,3.22 segments=32 materialslot=1
+add Primitive name=ChanMarker shape=Box width=0.05 depth=0.24 height=0.015 position=0.05,0,3.245 materialslot=7
+echo antenna: collar, lower rod, coil collars, upper rod, tip
+add Primitive name=AntCollar shape=Cylinder radius=0.15 height=0.3 position=0.62,0,3.1 segments=32 materialslot=1
+add Primitive name=AntRodLow shape=Cylinder radius=0.07 height=0.75 position=0.62,0,3.6 segments=24 materialslot=1
+add Primitive name=Coil1 shape=Cylinder radius=0.1 height=0.05 position=0.62,0,3.95 segments=24 materialslot=6
+add Primitive name=Coil2 shape=Cylinder radius=0.1 height=0.05 position=0.62,0,4.08 segments=24 materialslot=6
+add Primitive name=Coil3 shape=Cylinder radius=0.1 height=0.05 position=0.62,0,4.21 segments=24 materialslot=6
+add Primitive name=AntRodUp shape=Cylinder radius=0.05 height=0.7 position=0.62,0,4.55 segments=24 materialslot=1
+add Primitive name=AntTip shape=Sphere radius=0.09 position=0.62,0,4.95 materialslot=2
+echo screen: bezel as 4 rails, screen recessed 0.01 behind bezel front
+add Primitive name=BezelTop shape=Box width=1.05 depth=0.06 height=0.06 position=0,-0.33,2.67 materialslot=1
+add Primitive name=BezelBottom shape=Box width=1.05 depth=0.06 height=0.06 position=0,-0.33,2.17 materialslot=1
+add Primitive name=BezelLeft shape=Box width=0.06 depth=0.06 height=0.5 position=-0.495,-0.33,2.42 materialslot=1
+add Primitive name=BezelRight shape=Box width=0.06 depth=0.06 height=0.5 position=0.495,-0.33,2.42 materialslot=1
+add Primitive name=Screen shape=Box width=0.95 depth=0.03 height=0.44 position=0,-0.335,2.42 materialslot=4
+echo LCD: muted sage panel, dark 7-seg channel 12, signal bars, battery icon
+add Primitive name=LCD shape=Box width=0.85 depth=0.01 height=0.36 position=0,-0.348,2.42 materialslot=8
+add Primitive name=Dig1Up shape=Box width=0.04 depth=0.01 height=0.09 position=-0.22,-0.354,2.525 materialslot=1
+add Primitive name=Dig1Low shape=Box width=0.04 depth=0.01 height=0.09 position=-0.22,-0.354,2.435 materialslot=1
+add Primitive name=Dig2Top shape=Box width=0.12 depth=0.01 height=0.04 position=-0.05,-0.354,2.57 materialslot=1
+add Primitive name=Dig2UpR shape=Box width=0.04 depth=0.01 height=0.09 position=-0.01,-0.354,2.525 materialslot=1
+add Primitive name=Dig2Mid shape=Box width=0.12 depth=0.01 height=0.04 position=-0.05,-0.354,2.48 materialslot=1
+add Primitive name=Dig2LowL shape=Box width=0.04 depth=0.01 height=0.09 position=-0.09,-0.354,2.435 materialslot=1
+add Primitive name=Dig2Bot shape=Box width=0.12 depth=0.01 height=0.04 position=-0.05,-0.354,2.39 materialslot=1
+add Primitive name=Sig1 shape=Box width=0.03 depth=0.01 height=0.06 position=0.18,-0.354,2.31 materialslot=1
+add Primitive name=Sig2 shape=Box width=0.03 depth=0.01 height=0.09 position=0.23,-0.354,2.325 materialslot=1
+add Primitive name=Sig3 shape=Box width=0.03 depth=0.01 height=0.12 position=0.28,-0.354,2.34 materialslot=1
+add Primitive name=Sig4 shape=Box width=0.03 depth=0.01 height=0.15 position=0.33,-0.354,2.355 materialslot=1
+add Primitive name=BattTop shape=Box width=0.14 depth=0.01 height=0.015 position=0.22,-0.354,2.585 materialslot=1
+add Primitive name=BattBot shape=Box width=0.14 depth=0.01 height=0.015 position=0.22,-0.354,2.515 materialslot=1
+add Primitive name=BattLeft shape=Box width=0.015 depth=0.01 height=0.07 position=0.155,-0.354,2.55 materialslot=1
+add Primitive name=BattRight shape=Box width=0.015 depth=0.01 height=0.07 position=0.285,-0.354,2.55 materialslot=1
+add Primitive name=BattTip shape=Box width=0.015 depth=0.01 height=0.03 position=0.30,-0.354,2.55 materialslot=1
+add Primitive name=BattFill1 shape=Box width=0.02 depth=0.01 height=0.04 position=0.18,-0.354,2.55 materialslot=1
+add Primitive name=BattFill2 shape=Box width=0.02 depth=0.01 height=0.04 position=0.22,-0.354,2.55 materialslot=1
+echo LED and front buttons, cylinders along Y
+add Primitive name=LED shape=Cylinder radius=0.06 height=0.04 position=0.55,-0.34,2.08 rotationaxis=1,0,0 rotation=90 segments=24 materialslot=5
+add Primitive name=BtnBlack shape=Cylinder radius=0.09 height=0.04 position=-0.3,-0.34,2.08 rotationaxis=1,0,0 rotation=90 segments=24 materialslot=1
+add Primitive name=BtnRed shape=Cylinder radius=0.09 height=0.04 position=0,-0.34,2.08 rotationaxis=1,0,0 rotation=90 segments=24 materialslot=2
+echo speaker: dark cavity behind 5 slats, gaps are real gaps
+add Primitive name=Cavity shape=Box width=1.0 depth=0.02 height=0.95 position=0,-0.325,1.4 materialslot=1
+add Primitive name=Slat1 shape=Box width=1.15 depth=0.05 height=0.12 position=0,-0.34,1.8 materialslot=1
+add Primitive name=Slat2 shape=Box width=1.15 depth=0.05 height=0.12 position=0,-0.34,1.6 materialslot=1
+add Primitive name=Slat3 shape=Box width=1.15 depth=0.05 height=0.12 position=0,-0.34,1.4 materialslot=1
+add Primitive name=Slat4 shape=Box width=1.15 depth=0.05 height=0.12 position=0,-0.34,1.2 materialslot=1
+add Primitive name=Slat5 shape=Box width=1.15 depth=0.05 height=0.12 position=0,-0.34,1.0 materialslot=1
+echo mic plate and call button
+add Primitive name=Mic shape=Box width=0.6 depth=0.04 height=0.12 position=0,-0.335,0.82 materialslot=1
+add Primitive name=Call shape=Box width=0.6 depth=0.08 height=0.35 position=0,-0.34,0.55 materialslot=2
+echo front screws, cylinders along Y
+add Primitive name=ScrewFL shape=Cylinder radius=0.05 height=0.03 position=-0.7,-0.335,0.25 rotationaxis=1,0,0 rotation=90 segments=16 materialslot=3
+add Primitive name=ScrewFR shape=Cylinder radius=0.05 height=0.03 position=0.7,-0.335,0.25 rotationaxis=1,0,0 rotation=90 segments=16 materialslot=3
+add Primitive name=ScrewTL shape=Cylinder radius=0.05 height=0.03 position=-0.7,-0.335,2.62 rotationaxis=1,0,0 rotation=90 segments=16 materialslot=3
+add Primitive name=ScrewTR shape=Cylinder radius=0.05 height=0.03 position=0.7,-0.335,2.62 rotationaxis=1,0,0 rotation=90 segments=16 materialslot=3
+echo PTT left side with ridges
+add Primitive name=PTT shape=Box width=0.08 depth=0.55 height=1.1 position=-0.88,0,1.15 materialslot=2
+add Primitive name=PTTRidge1 shape=Box width=0.04 depth=0.55 height=0.08 position=-0.93,0,0.85 materialslot=1
+add Primitive name=PTTRidge2 shape=Box width=0.04 depth=0.55 height=0.08 position=-0.93,0,1.15 materialslot=1
+add Primitive name=PTTRidge3 shape=Box width=0.04 depth=0.55 height=0.08 position=-0.93,0,1.45 materialslot=1
+echo grip right side with ridges
+add Primitive name=Grip shape=Box width=0.07 depth=0.5 height=1.8 position=0.875,0,1.4 materialslot=1
+add Primitive name=GripRidge1 shape=Box width=0.04 depth=0.55 height=0.08 position=0.92,0,0.8 materialslot=6
+add Primitive name=GripRidge2 shape=Box width=0.04 depth=0.55 height=0.08 position=0.92,0,1.2 materialslot=6
+add Primitive name=GripRidge3 shape=Box width=0.04 depth=0.55 height=0.08 position=0.92,0,1.6 materialslot=6
+add Primitive name=GripRidge4 shape=Box width=0.04 depth=0.55 height=0.08 position=0.92,0,2.0 materialslot=6
+echo accessory jack left above PTT, USB right below grip
+add Primitive name=Jack shape=Cylinder radius=0.12 height=0.06 position=-0.87,0.1,2.0 rotationaxis=0,1,0 rotation=90 segments=24 materialslot=3
+add Primitive name=JackHole shape=Cylinder radius=0.06 height=0.01 position=-0.9,0.1,2.0 rotationaxis=0,1,0 rotation=90 segments=16 materialslot=1
+add Primitive name=USB shape=Box width=0.03 depth=0.3 height=0.15 position=0.86,-0.1,0.3 materialslot=1
+echo battery back with latch and screws
+add Primitive name=Battery shape=Box width=1.4 depth=0.1 height=1.9 position=0,0.35,1.25 materialslot=6
+add Primitive name=Latch shape=Box width=0.4 depth=0.06 height=0.25 position=0,0.41,2.05 materialslot=1
+add Primitive name=BattScrewL shape=Cylinder radius=0.05 height=0.03 position=-0.5,0.405,0.6 rotationaxis=1,0,0 rotation=90 segments=16 materialslot=3
+add Primitive name=BattScrewR shape=Cylinder radius=0.05 height=0.03 position=0.5,0.405,0.6 rotationaxis=1,0,0 rotation=90 segments=16 materialslot=3
+describe
+turnaround out shade=material size=512 views=front,quarter,side,back name=walkie_cad
+save walkie_cad.effigy
+export out name=walkie_cad

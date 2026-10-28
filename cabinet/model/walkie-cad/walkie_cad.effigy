@@ -1,0 +1,1469 @@
+effigy 1
+rollback 2147483647
+materiallook 0 color=#e8b417 rough=0.45 metal=0.1
+materiallook 1 color=#22242a rough=0.6 metal=0.1
+materiallook 2 color=#c22a22 rough=0.5 metal=0.1
+materiallook 3 color=#aeb5b9 rough=0.27 metal=0.9
+materiallook 4 color=#151d1a rough=0.25 metal=0 emit=#122b26
+materiallook 5 color=#ffb020 rough=0.3 metal=0.1
+materiallook 6 color=#3a3d41 rough=0.6 metal=0.1
+materiallook 7 color=#e8e8e8 rough=0.5 metal=0.1
+materiallook 8 color=#6b7d6e rough=0.7 metal=0 emit=#1a241e
+feature PrimitiveFeature
+	id 8e271cbd
+	name Body
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position 0 0 1.4
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 1.7
+	param SizeY 0.65
+	param SizeZ 2.8
+	param UniformScale 0
+end
+feature ChamferFeature
+	id d82bf9d1
+	name CaseChamfer
+	suppressed 0
+	visible 1
+	param AngleThreshold 15
+	bodies Bodies 8e271cbdb0
+	param Width 0.06
+end
+feature PrimitiveFeature
+	id 708f18b8
+	name TopCap
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 0 0 2.85
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 1.7
+	param SizeY 0.65
+	param SizeZ 0.25
+	param UniformScale 0
+end
+feature ChamferFeature
+	id 8dbf31ac
+	name CapChamfer
+	suppressed 0
+	visible 1
+	param AngleThreshold 15
+	bodies Bodies 708f18b8b0
+	param Width 0.04
+end
+feature PrimitiveFeature
+	id 87ab82bc
+	name VolBase
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -0.5 0 2.99
+	param Radius 0.26
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 32
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 0.08
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 2ffb965b
+	name VolKnob
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -0.5 0 3.13
+	param Radius 0.22
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 32
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 0.24
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id f49a922d
+	name VolTop
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 6
+	param Position -0.5 0 3.26
+	param Radius 0.18
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 32
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 0.04
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 5ed1144f
+	name VolMarker
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 7
+	param Position -0.5 0 3.2825
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.06
+	param SizeY 0.3
+	param SizeZ 0.015
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id ce3eda59
+	name ChanBase
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 6
+	param Position 0.05 0 2.99
+	param Radius 0.2
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 32
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 0.08
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id e6476a45
+	name ChanKnob
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 6
+	param Position 0.05 0 3.11
+	param Radius 0.17
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 32
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 0.2
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 789e8a30
+	name ChanTop
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 0.05 0 3.22
+	param Radius 0.14
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 32
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 0.04
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id acd43769
+	name ChanMarker
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 7
+	param Position 0.05 0 3.245
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.05
+	param SizeY 0.24
+	param SizeZ 0.015
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 54c3b0b8
+	name AntCollar
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 0.62 0 3.1
+	param Radius 0.15
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 32
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 0.3
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 7c549b32
+	name AntRodLow
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 0.62 0 3.6
+	param Radius 0.07
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 24
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 0.75
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 8d035a39
+	name Coil1
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 6
+	param Position 0.62 0 3.95
+	param Radius 0.1
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 24
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 0.05
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 819262f6
+	name Coil2
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 6
+	param Position 0.62 0 4.08
+	param Radius 0.1
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 24
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 0.05
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id c0c45998
+	name Coil3
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 6
+	param Position 0.62 0 4.21
+	param Radius 0.1
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 24
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 0.05
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 27b0415d
+	name AntRodUp
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 0.62 0 4.55
+	param Radius 0.05
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 24
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 0.7
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 421e9694
+	name AntTip
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 2
+	param Position 0.62 0 4.95
+	param Radius 0.09
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 2
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 1
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id a36e9ed9
+	name BezelTop
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 0 -0.33 2.67
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 1.05
+	param SizeY 0.06
+	param SizeZ 0.06
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 014f854f
+	name BezelBottom
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 0 -0.33 2.17
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 1.05
+	param SizeY 0.06
+	param SizeZ 0.06
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 72fd3ce4
+	name BezelLeft
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -0.495 -0.33 2.42
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.06
+	param SizeY 0.06
+	param SizeZ 0.5
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 1c6f4a8c
+	name BezelRight
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 0.495 -0.33 2.42
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.06
+	param SizeY 0.06
+	param SizeZ 0.5
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 2f3c182d
+	name Screen
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 4
+	param Position 0 -0.335 2.42
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.95
+	param SizeY 0.03
+	param SizeZ 0.44
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 42e7d12d
+	name LCD
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 8
+	param Position 0 -0.348 2.42
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.85
+	param SizeY 0.01
+	param SizeZ 0.36
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 04c1ea12
+	name Dig1Up
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -0.22 -0.354 2.525
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.04
+	param SizeY 0.01
+	param SizeZ 0.09
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id c3653149
+	name Dig1Low
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -0.22 -0.354 2.435
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.04
+	param SizeY 0.01
+	param SizeZ 0.09
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 8f6faed1
+	name Dig2Top
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -0.05 -0.354 2.57
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.12
+	param SizeY 0.01
+	param SizeZ 0.04
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 37401e59
+	name Dig2UpR
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -0.01 -0.354 2.525
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.04
+	param SizeY 0.01
+	param SizeZ 0.09
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id d845c2a3
+	name Dig2Mid
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -0.05 -0.354 2.48
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.12
+	param SizeY 0.01
+	param SizeZ 0.04
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 2e3d985f
+	name Dig2LowL
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -0.09 -0.354 2.435
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.04
+	param SizeY 0.01
+	param SizeZ 0.09
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id bdcc2595
+	name Dig2Bot
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -0.05 -0.354 2.39
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.12
+	param SizeY 0.01
+	param SizeZ 0.04
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 345c116b
+	name Sig1
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 0.18 -0.354 2.31
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.03
+	param SizeY 0.01
+	param SizeZ 0.06
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id e1bbf179
+	name Sig2
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 0.23 -0.354 2.325
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.03
+	param SizeY 0.01
+	param SizeZ 0.09
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id c345c12d
+	name Sig3
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 0.28 -0.354 2.34
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.03
+	param SizeY 0.01
+	param SizeZ 0.12
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id e6dc3882
+	name Sig4
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 0.33 -0.354 2.355
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.03
+	param SizeY 0.01
+	param SizeZ 0.15
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 37cc9d82
+	name BattTop
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 0.22 -0.354 2.585
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.14
+	param SizeY 0.01
+	param SizeZ 0.015
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 5c690042
+	name BattBot
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 0.22 -0.354 2.515
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.14
+	param SizeY 0.01
+	param SizeZ 0.015
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 7cad48f6
+	name BattLeft
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 0.155 -0.354 2.55
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.015
+	param SizeY 0.01
+	param SizeZ 0.07
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 78a46cf1
+	name BattRight
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 0.285 -0.354 2.55
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.015
+	param SizeY 0.01
+	param SizeZ 0.07
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 1df6dba4
+	name BattTip
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 0.3 -0.354 2.55
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.015
+	param SizeY 0.01
+	param SizeZ 0.03
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id accd090e
+	name BattFill1
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 0.18 -0.354 2.55
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.02
+	param SizeY 0.01
+	param SizeZ 0.04
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id a7c36d9b
+	name BattFill2
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 0.22 -0.354 2.55
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.02
+	param SizeY 0.01
+	param SizeZ 0.04
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id db7d6fd8
+	name LED
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 5
+	param Position 0.55 -0.34 2.08
+	param Radius 0.06
+	param RotationAngle 90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 24
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 0.04
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id c371388f
+	name BtnBlack
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -0.3 -0.34 2.08
+	param Radius 0.09
+	param RotationAngle 90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 24
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 0.04
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 2b0a9d96
+	name BtnRed
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 2
+	param Position 0 -0.34 2.08
+	param Radius 0.09
+	param RotationAngle 90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 24
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 0.04
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id a3015aa8
+	name Cavity
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 0 -0.325 1.4
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 1
+	param SizeY 0.02
+	param SizeZ 0.95
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id a510d210
+	name Slat1
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 0 -0.34 1.8
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 1.15
+	param SizeY 0.05
+	param SizeZ 0.12
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id f535d2f4
+	name Slat2
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 0 -0.34 1.6
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 1.15
+	param SizeY 0.05
+	param SizeZ 0.12
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 9f0deb90
+	name Slat3
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 0 -0.34 1.4
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 1.15
+	param SizeY 0.05
+	param SizeZ 0.12
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id c99aae43
+	name Slat4
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 0 -0.34 1.2
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 1.15
+	param SizeY 0.05
+	param SizeZ 0.12
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 9c49790e
+	name Slat5
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 0 -0.34 1
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 1.15
+	param SizeY 0.05
+	param SizeZ 0.12
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 7b0f5ea8
+	name Mic
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 0 -0.335 0.82
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.6
+	param SizeY 0.04
+	param SizeZ 0.12
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id caca72aa
+	name Call
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 2
+	param Position 0 -0.34 0.55
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.6
+	param SizeY 0.08
+	param SizeZ 0.35
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 7c5f4606
+	name ScrewFL
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 3
+	param Position -0.7 -0.335 0.25
+	param Radius 0.05
+	param RotationAngle 90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 0.03
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 752fb150
+	name ScrewFR
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 3
+	param Position 0.7 -0.335 0.25
+	param Radius 0.05
+	param RotationAngle 90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 0.03
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id bc55bd8a
+	name ScrewTL
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 3
+	param Position -0.7 -0.335 2.62
+	param Radius 0.05
+	param RotationAngle 90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 0.03
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 9acbdfdb
+	name ScrewTR
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 3
+	param Position 0.7 -0.335 2.62
+	param Radius 0.05
+	param RotationAngle 90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 0.03
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id f4e9a7ae
+	name PTT
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 2
+	param Position -0.88 0 1.15
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.08
+	param SizeY 0.55
+	param SizeZ 1.1
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id ed866740
+	name PTTRidge1
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -0.93 0 0.85
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.04
+	param SizeY 0.55
+	param SizeZ 0.08
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 32a256ef
+	name PTTRidge2
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -0.93 0 1.15
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.04
+	param SizeY 0.55
+	param SizeZ 0.08
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id faa7b25c
+	name PTTRidge3
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -0.93 0 1.45
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.04
+	param SizeY 0.55
+	param SizeZ 0.08
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 5baef86f
+	name Grip
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 0.875 0 1.4
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.07
+	param SizeY 0.5
+	param SizeZ 1.8
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id f4b1a87c
+	name GripRidge1
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 6
+	param Position 0.92 0 0.8
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.04
+	param SizeY 0.55
+	param SizeZ 0.08
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id dfc1c32c
+	name GripRidge2
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 6
+	param Position 0.92 0 1.2
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.04
+	param SizeY 0.55
+	param SizeZ 0.08
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id d007eeba
+	name GripRidge3
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 6
+	param Position 0.92 0 1.6
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.04
+	param SizeY 0.55
+	param SizeZ 0.08
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 134d374f
+	name GripRidge4
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 6
+	param Position 0.92 0 2
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.04
+	param SizeY 0.55
+	param SizeZ 0.08
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 09fd380e
+	name Jack
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 3
+	param Position -0.87 0.1 2
+	param Radius 0.12
+	param RotationAngle 90
+	param RotationAxis 0 1 0
+	param Scale 1 1 1
+	param Segments 24
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 0.06
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 78238808
+	name JackHole
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -0.9 0.1 2
+	param Radius 0.06
+	param RotationAngle 90
+	param RotationAxis 0 1 0
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 0.01
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id f19275b3
+	name USB
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 0.86 -0.1 0.3
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.03
+	param SizeY 0.3
+	param SizeZ 0.15
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id a085d89b
+	name Battery
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 6
+	param Position 0 0.35 1.25
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 1.4
+	param SizeY 0.1
+	param SizeZ 1.9
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 631c8c5d
+	name Latch
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 0 0.41 2.05
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.4
+	param SizeY 0.06
+	param SizeZ 0.25
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 6e2eb962
+	name BattScrewL
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 3
+	param Position -0.5 0.405 0.6
+	param Radius 0.05
+	param RotationAngle 90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 0.03
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id ef884116
+	name BattScrewR
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 3
+	param Position 0.5 0.405 0.6
+	param Radius 0.05
+	param RotationAngle 90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 0.03
+	param UniformScale 0
+end

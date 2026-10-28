@@ -9,8 +9,9 @@ public static partial class BuildScript
 {
 	const string BakeUsage = "bake Low High[,High2…] folder | bake * folder — [size=1024] "
 		+ "[maps=normal,ao,curvature,cavity,height,thickness,bentnormal,objectnormal,position,id|all|everything] "
-		+ "[cage=0|distance|CageBody] [distance=0] [round=0] [ss=1] [bits=8|16] [id=material|body] [green=gl|dx] [flipv=0] "
-		+ "[vmat=0|1] [shader=complex|skin] [preset=Body|Head|Mouth|Wet flesh] [k=1] [color=] [rough=] [metal=] [name=] [assets=]";
+		+ "[cage=0|distance|CageBody] [cagegen=0.2|Name:0.1] [distance=0] [round=0] [thickdist=0] [thickrays=32] [ss=1] [bits=8|16] [id=material|body] [green=gl|dx] [flipv=0] "
+		+ "[vmat=0|1] [shader=complex|skin] [preset=Body|Head|Mouth|Wet flesh] [k=1] [color=] [rough=] [metal=] [name=] [assets=] "
+		+ "[cagegen=0.2|auto] [cageauto=1] [skew=0..1] [skewedge=deg] [unwrap=1] [slot=N] [report=1] [mirror=1] [preview=1] [pairs=Name,Name] [curvatureworld=1]";
 
 	/// <summary>
 	/// `bake`: high detail onto a low body's UVs, as PNG maps and optionally a .vmat.
@@ -22,12 +23,37 @@ public static partial class BuildScript
 	///                               sharing an atlas come out as one texture.
 	///   cage=                       a number pushes the rays' start out that far; a body name uses
 	///                               that body as the cage mesh (a pushed-out copy of the low body).
+///   cagegen=                     generate each pair's cage mesh from its own low body
+///                               (inflated along averaged normals, see BakeCage): one distance
+///                               for all pairs (cagegen=0.2), or per pair (cagegen=Arm:0.1,
+///                               Leg:0.3, or a default plus overrides). An authored cage
+///                               (X_cage body, or cage= body) always wins for its pair.
+///                               cagegen= cannot combine with a scalar cage= distance.
+///   thickdist=0                 thickness white-point in model units: the grey map reads
+///                               white at this depth or more (0 = a quarter of the sculpt's
+///                               diagonal, the baker's default). thickrays=32 sets the inward
+///                               rays per texel (the baker floors it at 4).
 	///   bits=16                     height, normal, bent normal, object normal and position as 16-bit PNGs.
 	///   round=0                     rounded-edge radius in model units: a texel near a hard edge
 	///                               blends the neighbour face normal, reading as a baked fillet along
 	///                               sharp hard-surface edges without a subdivided high source. 0
 	///                               (default) bakes the sculpt normals exactly, so a hard low edge stays hard.
 	///   id=body                     the ID map colours by high body instead of material slot.
+	///   cagegen= / cageauto=        P1: generate a cage per pair with BakeCage.Inflate instead of
+	///                               a hand-built cage body; cagegen=auto estimates each pair's
+	///                               distance from its proud detail. Takes precedence over X_cage.
+	///   skew= / skewedge=           P2: blend ray direction toward the low face normal (0..1);
+	///                               skewedge=deg turns the blend fully on past that hard-edge angle.
+	///   unwrap=1                    P5: unwrap lows that fail the UV gate into one atlas first.
+	///   slot=N                      P5: write the baked normal/ao into material slot N and log
+	///                               the equivalent material lines.
+	///   report=1                    P4: also write a _miss.png (white hit, black missed).
+	///   mirror=1                    P7: allow mirrored (overlapping) UVs; last-wins, valid only
+	///                               for symmetric detail, and logged as such.
+	///   preview=1                   P8: bake at 256 for a fast look before the full-size bake.
+	///   pairs=Name,Name             P8: bake only the named pairs (by-name bakes).
+	///   curvatureworld=1            P6: also write curvature3d, derived from object-space
+	///                               normals in 3D, so UV seams cannot draw lines in it.
 	///   shader=skin preset= k=      the vmat is s&amp;box's skin shader with a preset; k is translucency
 	///                               (1 real skin, 3-10 gel-like flesh) for the transmission mask, which
 	///                               is written when thickness is baked. A baked bent normal is bound.
@@ -40,7 +66,11 @@ public static partial class BuildScript
 		var byName = args[0] == "*";
 		var opts = Pairs( args.Skip( byName ? 2 : 3 ) );
 		var dir = Resolve( baseDir, args[byName ? 1 : 2] );
-		var size = (int)Number( opts.GetValueOrDefault( "size", "1024" ) );
+		var preview = Truthy( opts.GetValueOrDefault( "preview", "0" ) );
+		var size = preview ? 256 : (int)Number( opts.GetValueOrDefault( "size", "1024" ) );
+
+		if ( preview )
+			r.Log.Add( "bake: preview=1: baking at 256 for a fast look, not the requested size." );
 
 		if ( size < 1 || size > 8192 )
 			return Fail( r, $"size={size}: a map is 1 to 8192 texels a side." );
@@ -48,7 +78,9 @@ public static partial class BuildScript
 		if ( !BakeMapList( opts.GetValueOrDefault( "maps", "normal,ao" ), out var maps, out var whyMaps ) )
 			return Fail( r, whyMaps );
 
-		var bits = (int)Number( opts.GetValueOrDefault( "bits", "8" ) );
+		// P9: 16-bit by default for hero sizes, unless bits= says otherwise: 8-bit
+		// height banding on smooth curves is visible and no supersampling fixes it.
+		var bits = opts.TryGetValue( "bits", out var bitsText ) ? (int)Number( bitsText ) : (size >= 2048 ? 16 : 8);
 
 		if ( bits != 8 && bits != 16 )
 			return Fail( r, $"bits={bits}: a bake is written at 8 or 16 bits." );
@@ -57,6 +89,16 @@ public static partial class BuildScript
 
 		if ( round < 0f )
 			return Fail( r, $"round={roundText}: a rounded-edge radius is 0 or above, in model units." );
+
+		var thickDist = opts.TryGetValue( "thickdist", out var thickDistText ) ? Number( thickDistText ) : 0f;
+
+		if ( thickDist < 0f )
+			return Fail( r, $"thickdist={thickDistText}: the thickness white-point is 0 or above, in model units (0 = a quarter of the sculpt's diagonal)." );
+
+		var thickRays = (int)Number( opts.GetValueOrDefault( "thickrays", "32" ) );
+
+		if ( thickRays < 1 )
+			return Fail( r, $"thickrays={opts.GetValueOrDefault( "thickrays", "32" )}: at least 1 inward ray per texel (the baker floors it at 4)." );
 
 		var idBy = opts.GetValueOrDefault( "id", "material" ).Trim().ToLowerInvariant();
 
@@ -129,11 +171,101 @@ public static partial class BuildScript
 			name = Safe( opts.GetValueOrDefault( "name", low.Name ?? low.Id ) );
 		}
 
+		// P8: bake only the named pairs, if pairs= says so.
+		if ( opts.TryGetValue( "pairs", out var pairsText ) )
+		{
+			var wanted = pairsText.Split( ',', StringSplitOptions.RemoveEmptyEntries ).Select( s => s.Trim() ).ToList();
+			var kept = pairs.Where( pr => wanted.Any( w => w.Equals( pr.Name, StringComparison.OrdinalIgnoreCase ) || w.Equals( pr.LowName, StringComparison.OrdinalIgnoreCase ) ) ).ToList();
+
+			if ( kept.Count == 0 )
+				return Fail( r, $"pairs={pairsText}: no pair matches that name. Pairs: {string.Join( ", ", pairs.Select( pr => pr.Name ) )}." );
+
+			pairs = kept;
+			r.Log.Add( $"bake: pairs=: baking only {string.Join( ", ", pairs.Select( pr => pr.Name ) )}; other islands in this run's maps are unfilled, not preserved from an earlier bake." );
+		}
+
+		// P1: generated cages, taking precedence over a hand-built cage body.
+		var cagegenGiven = opts.TryGetValue( "cagegen", out var cagegenText );
+		var cageauto = Truthy( opts.GetValueOrDefault( "cageauto", "0" ) ) || (cagegenGiven && cagegenText.Trim().Equals( "auto", StringComparison.OrdinalIgnoreCase ) );
+		float? cageDefault = null;
+		Dictionary<string, float> cagePerPair = null;
+
+		if ( cagegenGiven && !cageauto && !BakeCage.TryParseDistances( cagegenText, out cageDefault, out cagePerPair, out var cageWhy ) )
+			return Fail( r, cageWhy );
+
+		if ( cagegenGiven || cageauto )
+		{
+			foreach ( var pr in pairs )
+			{
+				float cageDist;
+
+				if ( cagePerPair is not null && BakeCage.DistanceFor( pr.Name, cageDefault, cagePerPair ) is { } named )
+				{
+					cageDist = named;
+				}
+				else if ( cageauto )
+				{
+					var combined = BakePairs.Combine( pr.Highs.Select( h => h.Mesh ).ToList(), out _ );
+					cageDist = BakeCage.EstimateDistance( pr.Low, combined );
+				}
+				else if ( cageDefault is { } dflt )
+				{
+					cageDist = dflt;
+				}
+				else
+				{
+					continue;
+				}
+
+				if ( pr.Cage is not null )
+					r.Log.Add( $"bake: cagegen overrides the hand-built cage for {pr.Name}." );
+
+				// P3: validate and shrink before baking, rather than baking wrong quietly.
+				var cage = BakeCage.InflateValidated( pr.Low, cageDist, out var applied, out var flagged );
+				pr.Cage = cage;
+				pr.CageName = $"cagegen {applied:0.####}";
+
+				if ( flagged > 0 )
+					r.Log.Add( $"bake: warning: cage for {pr.Name} still has {flagged} vertices past half their shortest edge at distance {applied:0.####} after shrinking; rays there may start on the wrong side." );
+				else if ( applied != cageDist )
+					r.Log.Add( $"bake: cage for {pr.Name} shrank from {cageDist:0.####} to {applied:0.####} after validation." );
+			}
+		}
+
+		// P10: thickness on an open sheet is meaningless — warn, still write the map.
+		if ( maps.HasFlag( BakeMaps.Thickness ) )
+		{
+			foreach ( var pr in pairs )
+			{
+				var combined = BakePairs.Combine( pr.Highs.Select( h => h.Mesh ).ToList(), out _ );
+				var open = NormalBake.CountOpenEdges( combined );
+
+				if ( open > 0 )
+					r.Log.Add( $"bake: warning: high for {pr.Name} has {open} open edges, so its thickness map is not a closed-volume thickness — useful as a mask at most, not as a transmission measure." );
+			}
+		}
+
 		// Refused up front, with the reason: an overlapping bake does not fail, it writes a map that
 		// is wrong wherever two faces share texels. A by-name bake is checked as ONE atlas.
 		var coverage = NormalBake.Measure( pairs.Select( p => p.Low ) );
 
-		if ( !coverage.CanBake )
+		// P5: unwrap first instead of refusing for missing UVs.
+		if ( !coverage.CanBake && Truthy( opts.GetValueOrDefault( "unwrap", "0" ) ) )
+		{
+			var report = UVUnwrap.UnwrapAll( pairs.Select( pr => pr.Low ).ToList(), 66f, 0.01f, mode: UnwrapMode.Angle );
+			r.Log.Add( $"bake: unwrap=1: unwrapped {pairs.Count} low(s) into one atlas ({report})." );
+			coverage = NormalBake.Measure( pairs.Select( p => p.Low ) );
+		}
+
+		// P7: mirrored UVs are allowed only when asked for, and only when nothing
+		// escapes the square — overlapping texels then bake last-wins, which is
+		// only correct for symmetric detail.
+		var mirrorAllowed = Truthy( opts.GetValueOrDefault( "mirror", "0" ) ) && coverage.CoveredTexels > 0 && coverage.FacesOutsideTheSquare == 0;
+
+		if ( mirrorAllowed && !coverage.CanBake )
+			r.Log.Add( "bake: warning: mirror=1: baking mirrored (overlapping) UVs last-wins. Only valid for symmetric detail; asymmetric detail will bake the wrong side onto shared texels." );
+
+		if ( !coverage.CanBake && !mirrorAllowed )
 		{
 			var lows = string.Join( ", ", pairs.Select( p => p.LowName ) );
 			return Fail( r, $"{lows} cannot carry a bake: {coverage.Problem} "
@@ -141,17 +273,43 @@ public static partial class BuildScript
 				+ $"Unwrap it first: add UVProject bodies={pairs[0].LowName} mode=Unwrap" );
 		}
 
+		var skew = opts.TryGetValue( "skew", out var skewText ) ? Number( skewText ) : 0f;
+
+		if ( skew < 0f || skew > 1f )
+			return Fail( r, $"skew={skewText}: skew is 0 (averaged normals, today's behaviour) to 1 (fully the low face normal)." );
+
+		var skewEdge = opts.TryGetValue( "skewedge", out var skewEdgeText ) ? Number( skewEdgeText ) : 0f;
+
+		if ( skewEdge < 0f )
+			return Fail( r, $"skewedge={skewEdgeText}: a hard-edge angle is 0 (off) or above, in degrees." );
+
+		var curvatureWorld = Truthy( opts.GetValueOrDefault( "curvatureworld", "0" ) );
+
+		if ( curvatureWorld )
+			maps |= BakeMaps.ObjectNormal | BakeMaps.Position;
+
+		// P9: padding scales with size unless padding= is explicit: 4 texels at
+		// 1K is proportionally 4x thinner at 4K, and mipmaps show the seams sooner.
+		var padding = opts.TryGetValue( "padding", out var paddingText ) ? (int)Number( paddingText )
+			: size >= 8192 ? 32 : size >= 4096 ? 16 : size >= 2048 ? 8 : 4;
+
 		var options = new BakeOptions
 		{
 			Cage = cageDistance,
+			Skew = skew,
+			SkewEdgeAngle = skewEdge,
+			CurvatureWorld = curvatureWorld,
+			ReportMiss = Truthy( opts.GetValueOrDefault( "report", "0" ) ),
 			MaxDistance = opts.TryGetValue( "distance", out var distance ) ? Number( distance ) : 0f,
 			Supersample = (int)Number( opts.GetValueOrDefault( "ss", "1" ) ),
 			FlipGreen = opts.GetValueOrDefault( "green", "gl" ).Equals( "dx", StringComparison.OrdinalIgnoreCase ),
 			AoRays = (int)Number( opts.GetValueOrDefault( "rays", "64" ) ),
 			AoDistance = opts.TryGetValue( "aodistance", out var aoDistance ) ? Number( aoDistance ) : 0f,
-			Padding = (int)Number( opts.GetValueOrDefault( "padding", "4" ) ),
+			Padding = padding,
 			BevelRadius = round,
 			SixteenBit = bits == 16,
+			ThicknessDistance = thickDist,
+			ThicknessRays = thickRays,
 		};
 
 		Directory.CreateDirectory( dir );
@@ -168,14 +326,54 @@ public static partial class BuildScript
 			r.Log.Add( $"baked {mapName} {map.Width}x{map.Height}{(map.Rgb16 is not null ? " 16-bit" : "")} to {path}" );
 		}
 
+		if ( options.ReportMiss && set.MissMap is not null )
+		{
+			var missPath = Path.Combine( dir, $"{name}_miss.png" );
+			PngWriter.WriteFile( missPath, set.MissMap, flipV );
+			r.Written.Add( missPath );
+			r.Log.Add( $"baked miss map (white hit, black missed) to {missPath}" );
+		}
+
+		// P5: wire the baked maps into a material slot so the model previews with
+		// them immediately, and log the equivalent material lines for other scripts.
+		if ( opts.TryGetValue( "slot", out var slotText ) && int.TryParse( slotText, out var slot ) && slot >= 0 )
+		{
+			var lookPairs = new Dictionary<string, string>( StringComparer.OrdinalIgnoreCase );
+
+			if ( written.TryGetValue( "normal", out var normalPath ) ) lookPairs["normal"] = normalPath;
+			if ( written.TryGetValue( "ao", out var aoPath ) ) lookPairs["ao"] = aoPath;
+
+			if ( lookPairs.Count > 0 )
+			{
+				var look = SlotLook.Parse( lookPairs, studio.MaterialLooks.GetValueOrDefault( slot ), out var lookError );
+
+				if ( look is null )
+					return Fail( r, $"slot={slot}: {lookError}" );
+
+				studio.MaterialLooks[slot] = look;
+				studio.MarkDirty( 0 );
+				r.Log.Add( $"slot {slot} looks {look.Describe()}" );
+				r.Log.Add( "material lines for other scripts: " + string.Join( " ", lookPairs.Select( kv => $"material {slot} {kv.Key}={kv.Value}" ) ) );
+			}
+		}
+
 		foreach ( var p in pairs )
 			r.Log.Add( $"bake: {p.LowName} from {string.Join( ", ", p.Highs.Select( h => h.Name ) )}" + (p.Cage is not null ? $", cage {p.CageName}" : "") );
 
 		foreach ( var line in set.Report.Split( '\n' ) )
 			r.Log.Add( $"bake: {line}" );
 
+		if ( cagegenGiven || cageauto )
+		{
+			foreach ( var g in set.GroupMiss )
+			{
+				if ( g.Samples > 0 && (float)(g.Samples - g.Hits) / g.Samples > 0.02f )
+					r.Log.Add( $"bake: warning: cagegen distance for {g.Name} may be too small: {(float)(g.Samples - g.Hits) / g.Samples:P0} of its texels missed." );
+			}
+		}
+
 		r.Log.Add( $"bake: {(options.FlipGreen ? "DirectX" : "OpenGL")} green, v = 0 at the {(flipV ? "bottom" : "top")}, "
-			+ (pairs.Any( p => p.Cage is not null ) ? "cage mesh" : options.Cage > 0f ? $"cage {N( options.Cage )}" : "no cage")
+			+ (pairs.Any( p => p.CageName is not null && ( p.CageName.StartsWith( "auto:", StringComparison.Ordinal ) || p.CageName.StartsWith( "cagegen ", StringComparison.Ordinal ) ) ) ? "auto cage" : pairs.Any( p => p.Cage is not null ) ? "cage mesh" : options.Cage > 0f ? $"cage {N( options.Cage )}" : "no cage")
 			+ $", {options.Supersample}x{options.Supersample} samples per texel" + (options.BevelRadius > 0f ? $", round {N( options.BevelRadius )}" : "") + (pairs.Count > 1 ? $", {pairs.Count} pairs baked apart" : "") );
 
 		if ( !Truthy( opts.GetValueOrDefault( "vmat", "0" ) ) )

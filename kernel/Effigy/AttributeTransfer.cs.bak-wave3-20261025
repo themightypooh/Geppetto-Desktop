@@ -1,0 +1,333 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
+namespace Effigy;
+
+/// <summary>
+/// Attribute transfer after a topology change: the piece that turns a quad remesh into a usable
+/// game asset instead of a bare shape.
+///
+/// A remesh builds new vertices, so nothing that lived on the old ones comes across by index:
+/// UVs, skin weights, morphs and vertex colours are all orphaned, and the result used to be one
+/// material with no UVs and no rig. This projects every attribute through the surface instead:
+/// for each new vertex, the nearest point on the source (via <see cref="MeshBVH"/>) is found, the
+/// triangle it lands in is recovered from the same ear-clipped triangulation the BVH uses, and
+/// the attribute is interpolated with that triangle's barycentric weights. Weights are blended
+/// with <see cref="SkinWeights.Blend"/> so they stay a partition of unity; morphs are projected
+/// as positions (interpolated morph target minus the new base position), so a morph keeps its
+/// name and its shape instead of being dropped for a vertex-count mismatch.
+///
+/// UVs are per corner, not per vertex, because seams are the whole point of per-corner UVs: a
+/// corner takes its UV from the source face whose normal best matches its own target face, among
+/// the faces incident to its nearest source vertex, so the two sides of a seam do not smear into
+/// each other. Materials are per face: a target face takes the material of the source face under
+/// its centroid, the same nearest-part rule Voxel mode already uses, instead of collapsing
+/// everything to the first material.
+///
+/// Fallback, never silent zeroes: a vertex the BVH cannot reach (a hole, a search radius
+/// exhausted) copies its nearest source vertex outright and is counted in
+/// <see cref="Result.Fallbacks"/>. The old direct-copy paths are kept for the equal-count case
+/// in the script verb, because a copy is exact and a projection is approximate.
+/// </summary>
+public static class AttributeTransfer
+{
+	public sealed class Options
+	{
+		public bool Weights = true;
+		public bool Uvs = true;
+		public bool Morphs = true;
+		public bool Colours = true;
+		public bool Emission = true;
+		public bool Materials = true;
+		public bool Uv2 = true;
+	}
+
+	public sealed class Result
+	{
+		public int Vertices;
+		public int VerticesReached;
+		public int Fallbacks;
+		public int Faces;
+		public int FacesWithUvs;
+		public List<string> Morphs = new();
+		public List<string> Notes = new();
+
+		public override string ToString() =>
+			$"attributes: {VerticesReached}/{Vertices} vertices projected ({Fallbacks} nearest-vertex fallbacks), "
+			+ $"UVs on {FacesWithUvs}/{Faces} faces, morphs: {(Morphs.Count == 0 ? "none" : string.Join( ", ", Morphs ))}";
+	}
+
+	struct Hit
+	{
+		public int Face;
+		public int[] TriVerts; // source vertex indices of the hit triangle
+		public float[] W;      // barycentric weights, same order as TriVerts
+		public float Distance;
+		public bool Reached;
+	}
+
+	public static Result Transfer( PolyMesh source, PolyMesh target, Options options = null )
+	{
+		options ??= new Options();
+		var result = new Result { Vertices = target.Positions.Count, Faces = target.Faces.Count };
+
+		if ( source is null || target is null || source.FaceCount == 0 || target.Positions.Count == 0 )
+		{
+			result.Notes.Add( "no source surface or no target vertices: nothing transferred" );
+			return result;
+		}
+
+		var bvh = MeshBVH.Build( source );
+		var diagonal = MathF.Max( source.BoundsDiagonal, 1e-6f );
+		var maxDistance = diagonal * 2f + 1f;
+
+		// Vertex -> source faces, for the seam-aware UV pick.
+		var vertexFaces = new Dictionary<int, List<int>>();
+		for ( var fi = 0; fi < source.Faces.Count; fi++ )
+			foreach ( var vi in source.Faces[fi].Indices )
+			{
+				if ( !vertexFaces.TryGetValue( vi, out var list ) ) vertexFaces[vi] = list = new List<int>();
+				list.Add( fi );
+			}
+
+		var hits = new Hit[target.Positions.Count];
+		for ( var v = 0; v < target.Positions.Count; v++ )
+		{
+			var p = target.Positions[v];
+			var meshHit = bvh.NearestSurface( source, p, maxDistance );
+			if ( meshHit is { } hit && hit.FaceIndex >= 0 && hit.FaceIndex < source.Faces.Count )
+			{
+				hits[v] = ProjectOntoFace( source, hit.FaceIndex, p );
+				hits[v].Distance = hit.Distance;
+				hits[v].Reached = true;
+				result.VerticesReached++;
+			}
+			else
+			{
+				// Fallback: nearest source vertex outright, counted, never a zero.
+				var best = 0;
+				var bestD = float.MaxValue;
+				for ( var s = 0; s < source.Positions.Count; s++ )
+				{
+					var d = (source.Positions[s] - p).LengthSquared;
+					if ( d < bestD ) { bestD = d; best = s; }
+				}
+				hits[v] = new Hit { Face = -1, TriVerts = new[] { best }, W = new[] { 1f }, Distance = MathF.Sqrt( bestD ), Reached = false };
+				result.Fallbacks++;
+			}
+		}
+
+		if ( options.Weights && source.IsRigged )
+		{
+			var skin = new SkinWeights( target.Positions.Count );
+			for ( var v = 0; v < target.Positions.Count; v++ )
+			{
+				var h = hits[v];
+				var terms = new List<(BoneWeight[], float)>();
+				for ( var i = 0; i < h.TriVerts.Length; i++ )
+				{
+					var sv = h.TriVerts[i];
+					if ( sv >= 0 && sv < source.Skin.Count ) terms.Add( (source.Skin[sv], h.W[i]) );
+				}
+				skin[v] = SkinWeights.Blend( terms );
+			}
+			target.Skin = skin;
+		}
+
+		if ( options.Colours && source.HasVertexColors )
+		{
+			var colours = new Vec4[target.Positions.Count];
+			for ( var v = 0; v < target.Positions.Count; v++ )
+			{
+				var h = hits[v];
+				var acc = new Vec4( 0, 0, 0, 0 );
+				for ( var i = 0; i < h.TriVerts.Length; i++ )
+					acc += source.VertexColors[h.TriVerts[i]] * h.W[i];
+				colours[v] = acc;
+			}
+			target.VertexColors = colours;
+		}
+
+		if ( options.Emission && source.HasVertexEmission )
+		{
+			var emission = new Vec3[target.Positions.Count];
+			for ( var v = 0; v < target.Positions.Count; v++ )
+			{
+				var h = hits[v];
+				var acc = Vec3.Zero;
+				for ( var i = 0; i < h.TriVerts.Length; i++ )
+					acc += source.VertexEmission[h.TriVerts[i]] * h.W[i];
+				emission[v] = acc;
+			}
+			target.VertexEmission = emission;
+		}
+
+		if ( options.Uv2 && source.HasUV2 )
+		{
+			var uv2 = new List<Vec2>( target.Positions.Count );
+			for ( var v = 0; v < target.Positions.Count; v++ )
+			{
+				var h = hits[v];
+				var acc = Vec2.Zero;
+				for ( var i = 0; i < h.TriVerts.Length; i++ )
+				{
+					var sv = h.TriVerts[i];
+					acc += (sv >= 0 && sv < source.UV2.Count ? source.UV2[sv] : Vec2.Zero) * h.W[i];
+				}
+				uv2.Add( acc );
+			}
+			target.UV2 = uv2;
+			target.FaceUV2 = null;
+		}
+
+		if ( options.Morphs )
+		{
+			foreach ( var morph in source.ValidMorphs )
+			{
+				var deltas = new Vec3[target.Positions.Count];
+				for ( var v = 0; v < target.Positions.Count; v++ )
+				{
+					var h = hits[v];
+					var interpTarget = Vec3.Zero;
+					for ( var i = 0; i < h.TriVerts.Length; i++ )
+					{
+						var sv = h.TriVerts[i];
+						interpTarget += (source.Positions[sv] + morph.Deltas[sv]) * h.W[i];
+					}
+					deltas[v] = interpTarget - target.Positions[v];
+				}
+				target.Morphs.RemoveAll( m => m?.Name == morph.Name );
+				target.Morphs.Add( new MeshMorph { Name = morph.Name, Deltas = deltas, Driver = morph.Driver?.Clone() } );
+				result.Morphs.Add( morph.Name );
+			}
+		}
+
+		if ( options.Uvs || options.Materials )
+		{
+			for ( var fi = 0; fi < target.Faces.Count; fi++ )
+			{
+				var face = target.Faces[fi];
+				if ( options.Materials )
+				{
+					var centroid = Vec3.Zero;
+					foreach ( var vi in face.Indices ) centroid += target.Positions[vi];
+					centroid /= Math.Max( 1, face.Count );
+					var hit = bvh.NearestSurface( source, centroid, maxDistance );
+					if ( hit is { } ch && ch.FaceIndex >= 0 && ch.FaceIndex < source.Faces.Count )
+						face.Material = source.Faces[ch.FaceIndex].Material;
+				}
+				if ( options.Uvs )
+				{
+					var targetNormal = target.FaceNormal( face );
+					var uvs = new Vec2[face.Count];
+					var anyUv = false;
+					for ( var c = 0; c < face.Count; c++ )
+					{
+						var vi = face.Indices[c];
+						var h = hits[vi];
+						// Seam-aware re-pick: among source faces incident to the nearest
+						// source vertex, take the one whose normal best matches this
+						// target face, if it is about as close as the BVH hit.
+						var picked = PickSeamFace( source, vertexFaces, target.Positions[vi], h, targetNormal, diagonal );
+						var srcFace = source.Faces[picked.Face];
+						var acc = Vec2.Zero;
+						for ( var i = 0; i < picked.TriVerts.Length; i++ )
+						{
+							var corner = Array.IndexOf( srcFace.Indices, picked.TriVerts[i] );
+							var uv = corner >= 0 && corner < srcFace.UVs.Length ? srcFace.UVs[corner] : Vec2.Zero;
+							acc += uv * picked.W[i];
+						}
+						uvs[c] = acc;
+						if ( acc.x != 0f || acc.y != 0f ) anyUv = true;
+					}
+					face.UVs = uvs;
+					if ( anyUv ) result.FacesWithUvs++;
+				}
+			}
+		}
+
+		if ( result.Fallbacks > 0 )
+			result.Notes.Add( $"{result.Fallbacks} vertices fell back to nearest-vertex copy (holes or thin parts)" );
+		return result;
+	}
+
+	/// <summary>Project point p onto source face fi, using the ear-clipped triangulation the BVH
+	/// itself uses, and return the hit triangle's vertices with barycentric weights.</summary>
+	static Hit ProjectOntoFace( PolyMesh source, int fi, Vec3 p )
+	{
+		var face = source.Faces[fi];
+		var corners = new List<Vec3>( face.Count );
+		foreach ( var vi in face.Indices ) corners.Add( source.Positions[vi] );
+		var tris = Triangulate.Face( corners );
+		var bestTri = (0, 1, 2);
+		var bestDist = float.MaxValue;
+		var bestPoint = corners[0];
+		foreach ( var (a, b, c) in tris )
+		{
+			var closest = MeshBVH.ClosestTriangle( p, corners[a], corners[b], corners[c] );
+			var d = (closest - p).LengthSquared;
+			if ( d < bestDist ) { bestDist = d; bestTri = (a, b, c); bestPoint = closest; }
+		}
+		var (w0, w1, w2) = Barycentric( bestPoint, corners[bestTri.Item1], corners[bestTri.Item2], corners[bestTri.Item3] );
+		return new Hit
+		{
+			Face = fi,
+			TriVerts = new[] { face.Indices[bestTri.Item1], face.Indices[bestTri.Item2], face.Indices[bestTri.Item3] },
+			W = new[] { w0, w1, w2 },
+			Distance = MathF.Sqrt( bestDist ),
+		};
+	}
+
+	static Hit PickSeamFace( PolyMesh source, Dictionary<int, List<int>> vertexFaces, Vec3 p, Hit hit, Vec3 targetNormal, float diagonal )
+	{
+		if ( hit.TriVerts is null || hit.TriVerts.Length == 0 || targetNormal.LengthSquared < 1e-12f )
+			return hit;
+		// Nearest source vertex of the hit triangle.
+		var nearest = hit.TriVerts[0];
+		var nearestD = float.MaxValue;
+		foreach ( var sv in hit.TriVerts )
+		{
+			var d = (source.Positions[sv] - p).LengthSquared;
+			if ( d < nearestD ) { nearestD = d; nearest = sv; }
+		}
+		if ( !vertexFaces.TryGetValue( nearest, out var candidates ) )
+			return hit;
+		var best = hit;
+		var bestDot = Vec3.Dot( source.FaceNormal( source.Faces[hit.Face] ), targetNormal );
+		var tolerance = hit.Distance + diagonal * 0.01f;
+		foreach ( var fi in candidates )
+		{
+			if ( fi == hit.Face ) continue;
+			var normal = source.FaceNormal( source.Faces[fi] );
+			var dot = Vec3.Dot( normal, targetNormal );
+			if ( dot <= bestDot ) continue;
+			var cand = ProjectOntoFace( source, fi, p );
+			if ( cand.Distance <= tolerance ) { best = cand; bestDot = dot; }
+		}
+		return best;
+	}
+
+	static (float, float, float) Barycentric( Vec3 p, Vec3 a, Vec3 b, Vec3 c )
+	{
+		var v0 = b - a;
+		var v1 = c - a;
+		var v2 = p - a;
+		var d00 = Vec3.Dot( v0, v0 );
+		var d01 = Vec3.Dot( v0, v1 );
+		var d11 = Vec3.Dot( v1, v1 );
+		var d20 = Vec3.Dot( v2, v0 );
+		var d21 = Vec3.Dot( v2, v1 );
+		var denom = d00 * d11 - d01 * d01;
+		if ( MathF.Abs( denom ) < 1e-12f )
+			return (1f, 0f, 0f);
+		var v = (d11 * d20 - d01 * d21) / denom;
+		var w = (d00 * d21 - d01 * d20) / denom;
+		var u = 1f - v - w;
+		// Clamp to the triangle: a closest point outside it still gets a sane blend.
+		u = MathF.Max( 0f, u ); v = MathF.Max( 0f, v ); w = MathF.Max( 0f, w );
+		var sum = u + v + w;
+		if ( sum <= 0f ) return (1f, 0f, 0f);
+		return (u / sum, v / sum, w / sum);
+	}
+}

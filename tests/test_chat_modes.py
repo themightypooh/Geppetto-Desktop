@@ -19,7 +19,7 @@ class VisibleModeTests(unittest.TestCase):
     def tearDownClass(cls):
         fixture.CardTests.tearDownClass()
 
-    def test_visible_controls_route_both_modes_and_lock_during_work(self):
+    def test_build_only_panel_routes_repeated_turns_and_locks_during_work(self):
         import host
         ui = self.ui
         h = ui.host
@@ -30,24 +30,32 @@ class VisibleModeTests(unittest.TestCase):
                      model='test', label='Codex test', available=True)
         h._chat_models = [model]
         h.setClaudeModel(model['id'])
-        ui.root.setProperty('claudeOpen', True)
-        for mode, name in [('plan', 'claudePlanMode'), ('build', 'claudeBuildMode')]:
+        ui.root.setProperty('chatOpen', True)
+        self.assertIsNone(ui.find('claudePlanMode'))
+        self.assertIsNone(ui.find('claudeBuildMode'))
+        self.assertEqual(h.claudeMode, 'build')
+        for message in ('first message', 'second message'):
             ui.settle(.1)
-            ui.click(name)
-            self.assertEqual(h.claudeMode, mode)
             seen = []
             called = threading.Event()
+            release = threading.Event()
             def stream(*args, **kwargs):
                 seen.append(kwargs['mode'])
                 called.set()
+                if not release.wait(3):
+                    raise RuntimeError('fixture did not release provider')
                 yield 'mode verified'
             with patch.object(host.chatlib, 'stream', side_effect=stream), \
                  patch.object(host.chatlib, 'effigy_reference', return_value=''):
-                h.claudeSend('check mode')
-                self.assertTrue(called.wait(3))
-                self.assertEqual(seen, [mode])
-                h.setClaudeMode('build' if mode == 'plan' else 'plan')
-                self.assertEqual(h.claudeMode, mode)
+                try:
+                    self.assertTrue(h.claudeSend(message))
+                    self.assertTrue(called.wait(3))
+                    self.assertEqual(seen, ['build'])
+                    self.assertFalse(h.claudeSend('must not overlap'))
+                    h.setClaudeMode('plan')
+                    self.assertEqual(h.claudeMode, 'build')
+                finally:
+                    release.set()
                 ui.settle(.2)
             self.assertEqual(h.claude.status, 'idle')
         snap = os.environ.get('GEPPETTO_MODE_SNAP')

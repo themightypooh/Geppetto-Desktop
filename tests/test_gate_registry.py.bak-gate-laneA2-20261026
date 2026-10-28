@@ -1,0 +1,426 @@
+"""Lane A intent-registry tests (gate-protocol.md v1).
+
+These tests run against a temp-directory registry only. They never touch
+the real cabinet/confirm directory, never start the chest, never call a
+paid provider, and never open a viewer. The host is a fake: gate's
+_host_command is replaced with an in-memory slot table, so the tests
+prove registry logic (durable reservation, ownership, deadlines,
+restart behaviour), not host placement — that is Lane C's suite.
+"""
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import unittest
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from unittest.mock import patch
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "cabinet"))
+
+import gate  # noqa: E402
+
+SCRIPT = "add Primitive name=Body shape=Box materialslot=0\nsave model.effigy\n"
+
+
+class FakeHost:
+    """In-memory stand-in for the host socket's gate-* messages."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.slots = {}  # intent id -> pane
+
+    def __call__(self, *args):
+        cmd = args[0]
+        with self.lock:
+            if cmd == "gate-reserve":
+                iid, preferred = args[1], int(args[2])
+                if iid in self.slots:
+                    return str(self.slots[iid])
+                for n in list(range(preferred, 5)) + list(range(1, preferred)):
+                    if n not in self.slots.values():
+                        self.slots[iid] = n
+                        return str(n)
+                return "FULL"
+            if cmd == "gate-check":
+                return str(self.slots.get(args[1], 0))
+            if cmd == "gate-release":
+                self.slots.pop(args[1], None)
+                return "ok"
+            return ""
+
+
+class RegistryTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.confirm = self.root / "confirm"
+        self.old_dir, self.old_audit = gate.CONFIRM_DIR, gate.AUDIT
+        gate.CONFIRM_DIR = str(self.confirm)
+        gate.AUDIT = str(self.confirm / "audit.jsonl")
+        self.host = FakeHost()
+        self.patch = patch.object(gate, "_host_command", self.host)
+        self.patch.start()
+        self.script = self.root / "build.txt"
+        self.script.write_text(SCRIPT)
+        self.run_dir = self.root / "run1"
+        self.run_dir.mkdir()
+
+    def tearDown(self):
+        self.patch.stop()
+        gate.CONFIRM_DIR, gate.AUDIT = self.old_dir, self.old_audit
+        self.tmp.cleanup()
+
+    # -- helpers ------------------------------------------------------
+    def file(self, subject="test subject", worker="worker-a", pane="1", session="sess-1"):
+        return gate.file_intent(str(self.script), subject, worker, pane, "-", "", session)
+
+    def filed_yes(self, **kw):
+        intent, err = self.file(**kw)
+        self.assertIsNotNone(intent, err)
+        tok, err = gate.answer_intent(intent["id"], "yes")
+        self.assertIsNotNone(tok, err)
+        return intent
+
+    def intent_file(self, iid):
+        return json.loads((self.confirm / (iid + ".json")).read_text())
+
+    def token_file(self, iid):
+        return json.loads((self.confirm / (iid + ".token.json")).read_text())
+
+    def backdate(self, iid, **fields):
+        d = self.intent_file(iid)
+        d.update(fields)
+        (self.confirm / (iid + ".json")).write_text(json.dumps(d))
+
+    def backdate_token(self, iid, **fields):
+        t = self.token_file(iid)
+        t.update(fields)
+        (self.confirm / (iid + ".token.json")).write_text(json.dumps(t))
+
+    # -- filing / panes ------------------------------------------------
+    def test_file_assigns_requested_pane_and_persists(self):
+        intent, err = self.file(pane="3")
+        self.assertIsNotNone(intent, err)
+        self.assertEqual(intent["pane"], "3")
+        self.assertEqual(self.intent_file(intent["id"])["pane"], "3")
+        self.assertEqual(self.host.slots[intent["id"]], 3)
+
+    def test_file_wraps_to_next_pane(self):
+        first, _ = self.file(pane="1")
+        second, err = self.file(subject="second", pane="1")
+        self.assertIsNotNone(second, err)
+        self.assertEqual(second["pane"], "2")
+        self.assertNotEqual(first["id"], second["id"])
+
+    def test_four_slots_then_fifth_refused_immediately(self):
+        for i in range(4):
+            intent, err = self.file(subject=f"s{i}", pane="1")
+            self.assertIsNotNone(intent, err)
+        intent, err = self.file(subject="fifth", pane="1")
+        self.assertIsNone(intent)
+        self.assertIn("occupied", err)
+        # No fifth intent file was written.
+        self.assertEqual(len([p for p in self.confirm.glob("gate-*.json")
+                              if not p.name.endswith(".token.json")]), 4)
+
+    def test_chest_closed_filing_fails_with_no_intent(self):
+        with patch.object(gate, "_host_command", return_value=""):
+            intent, err = self.file()
+        self.assertIsNone(intent)
+        self.assertIn("closed", err)
+        self.assertEqual(list(self.confirm.glob("gate-*.json")), [])
+
+    def test_filing_validation(self):
+        self.assertIsNone(gate.file_intent(str(self.script), "s", "", "1", "-", "", "sess-1")[0])
+        self.assertIsNone(gate.file_intent(str(self.script), "", "worker-a", "1", "-", "", "sess-1")[0])
+        self.assertIsNone(gate.file_intent(str(self.script), "s", "worker-a", "9", "-", "", "sess-1")[0])
+        self.assertIsNone(gate.file_intent(str(self.script), "s", "worker-a", "1", "-", "", "bad session!")[0])
+
+    def test_concurrent_filing_gets_four_distinct_panes(self):
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            filed = list(pool.map(lambda i: self.file(subject=f"c{i}", pane="1"), range(4)))
+        panes = [intent["pane"] for intent, _ in filed]
+        self.assertEqual(len([i for i, _ in filed if i]), 4)
+        self.assertEqual(sorted(panes), ["1", "2", "3", "4"])
+
+    # -- answer --------------------------------------------------------
+    def test_duplicate_yes_is_error_and_token_unchanged(self):
+        intent = self.filed_yes()
+        before = self.token_file(intent["id"])
+        tok, err = gate.answer_intent(intent["id"], "yes")
+        self.assertIsNone(tok)
+        self.assertIn("no pending intent", err)
+        self.assertEqual(self.token_file(intent["id"])["yes_at"], before["yes_at"])
+
+    def test_no_releases_pane_and_cancels(self):
+        intent, _ = self.file()
+        tok, err = gate.answer_intent(intent["id"], "no")
+        self.assertIsNone(tok)
+        self.assertEqual(self.intent_file(intent["id"])["status"], "cancelled")
+        self.assertNotIn(intent["id"], self.host.slots)
+        again, err = self.file(pane=intent["pane"])
+        self.assertIsNotNone(again, err)
+        self.assertEqual(again["pane"], intent["pane"])
+
+    def test_answer_after_script_edit_is_refused(self):
+        intent, _ = self.file()
+        self.script.write_text(SCRIPT + "add Primitive name=Extra shape=Box materialslot=0\n")
+        tok, err = gate.answer_intent(intent["id"], "yes")
+        self.assertIsNone(tok)
+        self.assertIn("changed", err)
+
+    # -- claim / ownership ---------------------------------------------
+    def test_two_claimants_one_start_then_attach_same_run(self):
+        intent = self.filed_yes()
+        state, _ = gate.claim_token(intent["id"], str(self.script), "worker-a", "sess-1")
+        self.assertEqual(state, "START")
+        state, _ = gate.claim_token(intent["id"], str(self.script), "worker-a", "sess-1")
+        self.assertEqual(state, "WAIT")
+        self.assertTrue(gate.register_run(intent["id"], str(self.run_dir), os.getpid()))
+        state, run = gate.claim_token(intent["id"], str(self.script), "worker-a", "sess-1")
+        self.assertEqual((state, run), ("ATTACH", str(self.run_dir)))
+
+    def test_concurrent_claims_exactly_one_start(self):
+        intent = self.filed_yes()
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            results = list(pool.map(
+                lambda _: gate.claim_token(intent["id"], str(self.script), "worker-a", "sess-1"),
+                range(4)))
+        self.assertEqual(sum(s == "START" for s, _ in results), 1)
+        self.assertEqual(sum(s == "WAIT" for s, _ in results), 3)
+
+    def test_wrong_worker_and_wrong_session_claim_errors(self):
+        intent = self.filed_yes()
+        state, _ = gate.claim_token(intent["id"], str(self.script), "worker-b", "sess-1")
+        self.assertEqual(state, "ERROR")
+        state, _ = gate.claim_token(intent["id"], str(self.script), "worker-a", "sess-2")
+        self.assertEqual(state, "ERROR")
+        state, _ = gate.claim_token(intent["id"], str(self.script), "worker-a", "sess-1")
+        self.assertEqual(state, "START")
+
+    def test_session_binding_when_filed_empty(self):
+        intent, _ = self.file(session="")
+        gate.answer_intent(intent["id"], "yes")
+        state, _ = gate.claim_token(intent["id"], str(self.script), "worker-a", "sess-A")
+        self.assertEqual(state, "START")
+        self.assertTrue(gate.register_run(intent["id"], str(self.run_dir), os.getpid()))
+        # A different session can never attach to this intent's run.
+        state, _ = gate.claim_token(intent["id"], str(self.script), "worker-a", "sess-B")
+        self.assertEqual(state, "ERROR")
+        # The bound session, and the empty-session launcher, can.
+        state, _ = gate.claim_token(intent["id"], str(self.script), "worker-a", "sess-A")
+        self.assertEqual(state, "ATTACH")
+        state, _ = gate.claim_token(intent["id"], str(self.script), "worker-a", "")
+        self.assertEqual(state, "ATTACH")
+
+    def test_edited_script_claim_errors(self):
+        intent = self.filed_yes()
+        self.script.write_text(SCRIPT.replace("Box", "Cylinder radius=1"))
+        # Cylinder without the full preflight shape is beside the point:
+        # the hash alone must refuse the claim.
+        state, value = gate.claim_token(intent["id"], str(self.script), "worker-a", "sess-1")
+        self.assertEqual(state, "ERROR")
+        self.assertIn("changed", value)
+
+    def test_stale_token_claim_errors_and_expires(self):
+        intent = self.filed_yes()
+        self.backdate_token(intent["id"], yes_at=time.time() - gate.START_TIMEOUT_S - 1)
+        state, value = gate.claim_token(intent["id"], str(self.script), "worker-a", "sess-1")
+        self.assertEqual(state, "ERROR")
+        self.assertIn("expired", value)
+        self.assertEqual(self.intent_file(intent["id"])["status"], "expired")
+        self.assertNotIn(intent["id"], self.host.slots)
+
+    # -- register / placement / first frame ------------------------------
+    def test_register_dead_pid_fails_intent(self):
+        proc = subprocess.Popen([sys.executable, "-c", "pass"])
+        proc.wait()
+        intent = self.filed_yes()
+        gate.claim_token(intent["id"], str(self.script), "worker-a", "sess-1")
+        self.assertFalse(gate.register_run(intent["id"], str(self.run_dir), proc.pid))
+        self.assertEqual(self.intent_file(intent["id"])["status"], "failed")
+
+    def test_pid_death_before_register_becomes_failed_not_wait_forever(self):
+        intent = self.filed_yes()
+        gate.claim_token(intent["id"], str(self.script), "worker-a", "sess-1")
+        self.backdate_token(intent["id"], used_at=time.time() - gate.REGISTER_TIMEOUT_S - 1)
+        state, value = gate.claim_token(intent["id"], str(self.script), "worker-a", "sess-1")
+        self.assertEqual(state, "ERROR")
+        self.assertIn("not registered", value)
+        self.assertEqual(self.intent_file(intent["id"])["status"], "failed")
+
+    def test_validate_place_and_first_frame(self):
+        intent = self.filed_yes()
+        gate.claim_token(intent["id"], str(self.script), "worker-a", "sess-1")
+        gate.register_run(intent["id"], str(self.run_dir), os.getpid())
+        ok, _ = gate.validate_placement(intent["id"], str(self.root / "other"))
+        self.assertFalse(ok)
+        ok, _ = gate.validate_placement(intent["id"], str(self.run_dir))
+        self.assertTrue(ok)
+        self.assertTrue(gate.record_placement(intent["id"], str(self.run_dir)))
+        self.assertEqual(self.intent_file(intent["id"])["status"], "placed")
+        self.assertNotIn(intent["id"], self.host.slots)
+        self.assertTrue(gate.record_first_frame(intent["id"], str(self.run_dir)))
+        self.assertIsNotNone(self.intent_file(intent["id"])["first_frame_at"])
+        self.assertFalse(gate.record_first_frame(intent["id"], str(self.root / "other")))
+
+    def test_first_frame_deadline_fails(self):
+        intent = self.filed_yes()
+        gate.claim_token(intent["id"], str(self.script), "worker-a", "sess-1")
+        gate.register_run(intent["id"], str(self.run_dir), os.getpid())
+        self.backdate_token(intent["id"], registered_at=time.time() - gate.FIRST_FRAME_TIMEOUT_S - 1)
+        failed = gate.check_deadlines()
+        self.assertEqual([d["id"] for d in failed], [intent["id"]])
+        self.assertEqual(self.intent_file(intent["id"])["status"], "failed")
+
+    # -- expiry / cancel / restart ---------------------------------------
+    def test_pending_timeout_expires_and_frees_pane(self):
+        intent, _ = self.file()
+        self.backdate(intent["id"], created_at=time.time() - gate.TIMEOUT_S - 1)
+        expired = gate.expire_pending()
+        self.assertEqual([d["id"] for d in expired], [intent["id"]])
+        self.assertEqual(self.intent_file(intent["id"])["status"], "expired")
+        self.assertNotIn(intent["id"], self.host.slots)
+
+    def test_explicit_cancel_then_claim_errors(self):
+        intent = self.filed_yes()
+        d, err = gate.cancel_intent(intent["id"], "worker stopped")
+        self.assertEqual(err, "")
+        self.assertEqual(d["status"], "cancelled")
+        state, _ = gate.claim_token(intent["id"], str(self.script), "worker-a", "sess-1")
+        self.assertEqual(state, "ERROR")
+        # Cancelling again reports the terminal record, it does not resurrect.
+        d2, err2 = gate.cancel_intent(intent["id"])
+        self.assertEqual(d2["status"], "cancelled")
+        self.assertEqual(err2, "")
+
+    def test_chest_close_cancels_pending_and_closes_launched(self):
+        pending, _ = self.file()
+        launched = self.filed_yes()
+        gate.claim_token(launched["id"], str(self.script), "worker-a", "sess-1")
+        gate.register_run(launched["id"], str(self.run_dir), os.getpid())
+        gate.cancel_waiters()
+        self.assertEqual(self.intent_file(pending["id"])["status"], "cancelled")
+        self.assertEqual(self.intent_file(launched["id"])["status"], "closed")
+
+    def test_chest_close_cancels_claimed_unregistered_and_releases_panes(self):
+        # Lane F case B (old code: survived cancel_waiters, WAIT forever).
+        claimed = self.filed_yes()
+        gate.claim_token(claimed["id"], str(self.script), "worker-a", "sess-1")
+        yes_only = self.filed_yes(subject="yes only")
+        pending, _ = self.file(subject="pending")
+        cancelled = gate.cancel_waiters()
+        self.assertEqual(self.intent_file(claimed["id"])["status"], "cancelled")
+        self.assertEqual(self.intent_file(yes_only["id"])["status"], "cancelled")
+        self.assertEqual(self.intent_file(pending["id"])["status"], "cancelled")
+        # Lane F cases C/E: cancelled intents must not leak host slots.
+        self.assertNotIn(claimed["id"], self.host.slots)
+        self.assertNotIn(yes_only["id"], self.host.slots)
+        self.assertNotIn(pending["id"], self.host.slots)
+        self.assertEqual(len(cancelled), 3)
+        state, _ = gate.claim_token(claimed["id"], str(self.script), "worker-a", "sess-1")
+        self.assertEqual(state, "ERROR")
+
+    def test_dead_pid_launched_fails_and_attach_errors(self):
+        # Build a launched intent whose pid has since died, without
+        # going through register_run (which refuses dead pids at once).
+        proc = subprocess.Popen([sys.executable, "-c", "pass"])
+        proc.wait()
+        intent = self.filed_yes()
+        gate.claim_token(intent["id"], str(self.script), "worker-a", "sess-1")
+        tok = self.token_file(intent["id"])
+        tok.update(run=str(self.run_dir), pid=proc.pid, registered_at=time.time())
+        (self.confirm / (intent["id"] + ".token.json")).write_text(json.dumps(tok))
+        d = self.intent_file(intent["id"])
+        d["status"] = "launched"
+        (self.confirm / (intent["id"] + ".json")).write_text(json.dumps(d))
+        ok, _ = gate.validate_placement(intent["id"], str(self.run_dir))
+        self.assertFalse(ok)
+        failed = gate.check_deadlines()
+        self.assertEqual([x["id"] for x in failed], [intent["id"]])
+        self.assertEqual(self.intent_file(intent["id"])["status"], "failed")
+        state, _ = gate.claim_token(intent["id"], str(self.script), "worker-a", "sess-1")
+        self.assertEqual(state, "ERROR")
+
+    def test_restart_recovery_no_double_book_then_rehydrate(self):
+        first, _ = self.file(pane="1")
+        # Simulate a chest restart: host memory is gone, registry survives.
+        self.host.slots.clear()
+        second, err = self.file(subject="after restart", pane="1")
+        self.assertIsNone(second)
+        self.assertIn("durable registry", err)
+        # Reservations output is what Lane C rehydrates from.
+        reservations = gate.reservations_list()
+        self.assertEqual([(r["id"], r["pane"]) for r in reservations if r["reserving"]],
+                         [(first["id"], "1")])
+        # After rehydration, normal assignment resumes on the next pane.
+        for r in reservations:
+            if r["reserving"]:
+                self.host.slots[r["id"]] = int(r["pane"])
+        third, err = self.file(subject="after rehydrate", pane="1")
+        self.assertIsNotNone(third, err)
+        self.assertEqual(third["pane"], "2")
+
+    # -- corruption / identity --------------------------------------------
+    def test_invalid_id_never_opens_a_file(self):
+        self.assertIsNone(gate.load_intent("../../etc/passwd"))
+        state, _ = gate.claim_token("../../etc/passwd", str(self.script), "worker-a", "sess-1")
+        self.assertEqual(state, "ERROR")
+        self.assertFalse((self.root / "etc").exists())
+        self.assertIsNone(gate.intent_status("not-an-id"))
+
+    def test_corrupt_intent_file_is_skipped_not_trusted(self):
+        bad = self.confirm / "gate-1111111111-abcdef01.json"
+        self.confirm.mkdir(exist_ok=True)
+        bad.write_text("{not json")
+        good, _ = self.file()
+        self.assertEqual([d["id"] for d in gate.list_pending()], [good["id"]])
+        tok, err = gate.answer_intent("gate-1111111111-abcdef01", "yes")
+        self.assertIsNone(tok)
+        self.assertIn("no pending intent", err)
+
+    def test_launch_intent_passes_worker_and_session_flags(self):
+        # Protocol §5.6: launch_intent is the only authorised source of
+        # the host launcher's claim identity, transported as flags.
+        from unittest.mock import MagicMock
+        intent = self.filed_yes()
+        self.host.slots[intent["id"]] = int(intent["pane"])
+        with patch.object(gate.subprocess, "Popen", return_value=MagicMock()) as popen:
+            self.assertEqual(gate.launch_intent(intent["id"]), "")
+        argv = popen.call_args.args[0]
+        self.assertIn("--gate-token", argv)
+        self.assertIn("--gate-launch", argv)
+        self.assertIn("--gate-worker", argv)
+        self.assertEqual(argv[argv.index("--gate-worker") + 1], "worker-a")
+        self.assertIn("--gate-session", argv)
+        self.assertEqual(argv[argv.index("--gate-session") + 1], "sess-1")
+        # A legacy intent with no valid worker must not be dispatched
+        # with an invented worker.
+        legacy, _ = self.file(subject="legacy")
+        d = self.intent_file(legacy["id"])
+        d["worker"] = ""
+        (self.confirm / (legacy["id"] + ".json")).write_text(json.dumps(d))
+        gate.answer_intent(legacy["id"], "yes")
+        self.host.slots[legacy["id"]] = int(legacy["pane"])
+        with patch.object(gate.subprocess, "Popen", return_value=MagicMock()) as popen:
+            err = gate.launch_intent(legacy["id"])
+        self.assertIn("no valid worker", err)
+        popen.assert_not_called()
+
+    def test_status_and_reservations_shape(self):
+        intent = self.filed_yes()
+        status = gate.intent_status(intent["id"])
+        self.assertEqual(status["id"], intent["id"])
+        self.assertIn("deadlines", status)
+        self.assertIsNotNone(status["deadlines"]["start_expires_at"])
+        self.assertEqual(status["token"]["worker"], "worker-a")
+        self.assertTrue(any(r["id"] == intent["id"] for r in gate.reservations_list()))
+
+
+if __name__ == "__main__":
+    unittest.main()

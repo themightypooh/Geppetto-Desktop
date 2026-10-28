@@ -76,6 +76,12 @@ public static class DmxWriter
 	private const string Position = "position$0";
 	private const string Normal = "normal$0";
 	private const string TexCoord = "texcoord$0";
+	// Wave 3: a second UV channel is texcoord$1, the spelling this file's own
+	// comment already named. Only declared when the mesh actually carries UV2,
+	// so a mesh without it is byte-for-byte what it was before. Whether
+	// ModelDoc honours texcoord$1 still needs the in-engine compile test
+	// (no sbox-dev here); this only stops the data being silently dropped.
+	private const string TexCoord2 = "texcoord$1";
 	private const string Color = "color$0";
 	private const string Tangent = "tangent$0";
 	private const string BlendWeights = "blendweights$0";
@@ -427,6 +433,10 @@ public static class DmxWriter
 		w.OpenArray( "vertexFormat", "string_array" );
 		w.ArrayValue( Position );
 		w.ArrayValue( TexCoord );
+
+		if ( mesh.HasUV2 )
+			w.ArrayValue( TexCoord2 );
+
 		w.ArrayValue( Normal );
 
 		if ( cornerTangents is not null )
@@ -459,9 +469,11 @@ public static class DmxWriter
 		w.CloseArray();
 
 		var uvs = new List<Vec2>();
+		var uv2s = new List<Vec2>();
 		var positionIndices = new List<int>();
 		var normalIndices = new List<int>();
 		var uvIndices = new List<int>();
+		var uv2Indices = new List<int>();
 
 		for ( var fi = 0; fi < mesh.FaceCount; fi++ )
 		{
@@ -474,6 +486,8 @@ public static class DmxWriter
 
 				uvIndices.Add( uvs.Count );
 				uvs.Add( face.UVs is not null && c < face.UVs.Length ? face.UVs[c] : default );
+				uv2Indices.Add( uv2s.Count );
+				uv2s.Add( mesh.GetUV2( fi, c ) );
 			}
 		}
 
@@ -483,6 +497,18 @@ public static class DmxWriter
 			w.ArrayValue( DmxText.Vector2( uv ) );
 
 		w.CloseArray();
+
+		if ( mesh.HasUV2 )
+		{
+			w.OpenArray( TexCoord2, "vector2_array" );
+
+			foreach ( var uv in uv2s )
+				w.ArrayValue( DmxText.Vector2( uv ) );
+
+			w.CloseArray();
+
+			w.IntArray( TexCoord2 + "Indices", uv2Indices );
+		}
 
 		w.IntArray( Position + "Indices", positionIndices );
 		w.IntArray( Normal + "Indices", normalIndices );

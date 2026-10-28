@@ -306,6 +306,13 @@ public sealed class FoliageFeature : Feature
 		if ( BindRig.Value )
 			BindRigToStudio( ctx, mesh, vertBone );
 
+		// P7: same count/triangle logging as Scatter, no behaviour change.
+		var foliageTris = Decimate.TriangleCount( mesh );
+		Info( $"Foliage emitted {leaves.Count} leaf cards and {segs.Count} branch segments = {foliageTris} tris" );
+
+		if ( foliageTris > 200000 && Diagnostic is null )
+			Warn( $"Foliage emitted about {foliageTris} triangles.", "Large foliage gets heavy to edit, save and render.", "Lower Levels", "Lower Leaf cards" );
+
 		ctx.Bodies.Add( new Body( ctx.NewBodyId(), Name, mesh ) );
 	}
 

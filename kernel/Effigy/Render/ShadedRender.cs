@@ -77,6 +77,46 @@ public sealed class ShadeMaterial
 	public float Opacity = 1f;
 	/// <summary>Tint of ambient / occluded light (the light in shadow). White is no tint.</summary>
 	public Vec3 ShadowTint = Vec3.One;
+	/// <summary>Wave-5 hair shading: Marschner / Kajiya-Kay anisotropic fibre lobes. 0 is off:
+	/// the pixel shades exactly as before. 1 replaces the direct light with the fibre model
+	/// (<see cref="ShadedRender.HairLight"/>). Hair cards carry their strand direction in +u
+	/// (StrandSolver.BuildCards), so the fibre tangent is the triangle's UV tangent,
+	/// orthogonalised to the shading normal at the pixel.</summary>
+	public float HairAniso;
+	/// <summary>Shift of the primary (R) lobe along the fibre, Marschner-style, in tangent-shift
+	/// units: positive tilts the highlight toward the tip. The secondary lobe shifts the other way.</summary>
+	public float HairShift = 0.12f;
+	public float HairShift2 = -0.18f;
+	/// <summary>Tint of the secondary (TT transmission) lobe; null warms the albedo instead
+	/// (light through hair warms), or uses the subsurface tint when one is set.</summary>
+	public Vec3? HairTint2;
+	/// <summary>Width of the lobes: 0 is a tight streak, 1 a broad sheen. Drives both lobe exponents.</summary>
+	public float HairRoughness = 0.35f;
+	// Wave-3 PBR: generic anisotropy, sheen, live layer, SSS, specular/IOR, emission,
+	// height/detail maps. All default to the old behaviour (0 / null / keep), so a material
+	// that never sets them shades exactly as before.
+	public float Aniso;
+	public float AnisoRotation;
+	public byte[] AnisoMap;
+	public float Sheen;
+	public Vec3? SheenTint;
+	public float SheenRoughness = 0.5f;
+	public byte[] SheenMap;
+	public Vec3? LayerColor;
+	public float LayerRough = -1f, LayerMetal = -1f, LayerAmount = 0.5f;
+	public bool LayerMaskAo;
+	public float LayerMaskMin, LayerMaskMax = 1f;
+	public string LayerBlend = "normal";
+	public byte[] TransmissionMap;
+	public Vec3 ScatterDist = new( 0.5f, 0.5f, 0.5f );
+	public float SpecularTint;
+	public float Ior;
+	public float EmissionStrength = 1f;
+	public byte[] HeightMap;
+	public float HeightStrength = 1f;
+	public byte[] DetailNormalMap;
+	public float DetailScale = 0.5f;
+	public bool BurleyDiffuse;
 
 	public static ShadeMaterial Clay() => new() { UseVertexColours = false };
 	public static ShadeMaterial HardCandy() => new() { Roughness = 0.18f, Coat = 1f, CoatRoughness = 0.03f, Subsurface = 0.55f, ScatterDistance = 0.35f };
@@ -168,6 +208,8 @@ public sealed class ShadeScene
 	public float BloomRadius = 0.55f;
 	public float EmissiveBloom = 1f;
 	public ShadeTonemap Tonemap = ShadeTonemap.Legacy;
+	/// <summary>Diagnostic render pass requested by Turnaround (shaded, normal, ao, wireframe). Plumbed but not yet honoured by the renderer: renders still return the shaded image, and Turnaround's summary says so.</summary>
+	public string DebugPass = "shaded";
 	/// <summary>Darkens the frame's corners, 0..1.</summary>
 	public float Vignette;
 	/// <summary>The floor mirrors what stands on it (screen-space), 0..1, blurred by <see cref="FloorReflectionBlur"/>.</summary>
@@ -185,14 +227,24 @@ public sealed class ShadeScene
 	/// geometric specular antialiasing), so a highlight on a small round part does not sparkle.</summary>
 	public bool SpecularAa = true;
 
+	/// <summary>Soft particle pass: particle bodies (PolyMesh.IsParticle) are drawn back-to-front as blended discs in HDR instead of as opaque triangles. Set by render particles=soft.</summary>
+	public bool SoftParticles;
+
+	/// <summary>Depth range, in model units, over which a soft particle fades where it crosses a nearer surface. -1 (default) means 5% of the scene radius. 0 is a hard edge.</summary>
+	public float SoftDepth = -1f;
+
 	/// <summary>
 	/// Everything that makes a render read as a finished piece, on at once: the studio environment, bent-normal
 	/// AO with more samples and denoising, contact shadows, bloom, AgX, a vignette, a faint floor reflection and
 	/// the tent filter. Lights, materials, colours and exposure are left as they are. Returns the scene.
 	/// </summary>
-	public ShadeScene Portfolio()
+	public ShadeScene Portfolio() => Portfolio( true );
+
+	/// <summary>Portfolio() without forcing an environment: use when an explicit environment (or
+	/// none) was already chosen, so the preset's tonemap/AO/bloom still apply without overriding it.</summary>
+	public ShadeScene Portfolio( bool withEnvironment )
 	{
-		Environment ??= ShadeEnvironment.Studio();
+		if ( withEnvironment ) Environment ??= ShadeEnvironment.Studio();
 		AoSamples = Math.Max( AoSamples, 24 ); AoDenoise = true;
 		if ( ContactShadows == 0f ) ContactShadows = -1f;
 		if ( Bloom == 0f ) Bloom = 0.6f;
@@ -372,6 +424,52 @@ public static class ShadedRender
 		var W = width * ss;
 		var H = height * ss;
 
+		// --- soft particles: collected from particle meshes before flattening ---------------
+		// A particle face is one disc: its centre, its radius, and its colour /
+		// emission / alpha averaged over its corners, in the same linear terms the
+		// triangle path uses (vertex colours are sRGB, material albedo/emission
+		// are already linear). Faces, not triangles: a crossed quad is one disc.
+		var soft = new List<(Vec3 Centre, float Radius, float Depth, Vec3 Colour, Vec3 Emission, float Alpha)>();
+		if ( scene.SoftParticles )
+		{
+			foreach ( var (softMesh, softItemMaterial) in scene.Items )
+			{
+				if ( !softMesh.IsParticle ) continue;
+				scene.FaceMaterials.TryGetValue( softMesh, out var softByFace );
+				foreach ( var f in softMesh.Faces )
+				{
+					if ( f.Indices.Length < 3 ) continue;
+					var centre = Vec3.Zero;
+					foreach ( var idx in f.Indices ) centre += softMesh.Positions[idx];
+					centre = centre * (1f / f.Indices.Length);
+					var radius = 0f;
+					foreach ( var idx in f.Indices ) radius = MathF.Max( radius, (softMesh.Positions[idx] - centre).Length );
+					var material = softByFace is not null && softByFace.TryGetValue( f.Material, out var fm ) && fm is not null ? fm : softItemMaterial;
+					Vec3 colour;
+					float alpha;
+					if ( material.UseVertexColours && softMesh.HasVertexColors )
+					{
+						var c = Vec3.Zero; var a = 0f; var n = 0;
+						foreach ( var idx in f.Indices ) { var vc = softMesh.VertexColors[idx]; c += new Vec3( vc.x, vc.y, vc.z ); a += vc.w; n++; }
+						colour = n > 0 ? new Vec3( SrgbToLinear( c.x / n ), SrgbToLinear( c.y / n ), SrgbToLinear( c.z / n ) ) : material.Albedo;
+						alpha = n > 0 ? a / n : 1f;
+					}
+					else { colour = material.Albedo; alpha = 1f; }
+					var emission = Vec3.Zero;
+					var emitSource = material.VertexEmission is { } mv && mv.Length == softMesh.Positions.Count ? mv
+						: softMesh.HasVertexEmission ? softMesh.VertexEmission : null;
+					if ( emitSource is not null )
+					{
+						var e = Vec3.Zero; var n = 0;
+						foreach ( var idx in f.Indices ) { e += emitSource[idx]; n++; }
+						if ( n > 0 ) emission = new Vec3( SrgbToLinear( e.x / n ), SrgbToLinear( e.y / n ), SrgbToLinear( e.z / n ) );
+					}
+					emission += material.Emission;
+					soft.Add( (centre, radius, 0f, colour, emission, alpha) );
+				}
+			}
+		}
+
 		// --- one flat list of vertices and triangles over every mesh ---------------------------
 		var pos = new List<Vec3>(); var nrm = new List<Vec3>(); var col = new List<Vec3>(); var mat = new List<int>();
 		var vrough = new List<float>(); var vemit = new List<Vec3>();
@@ -389,6 +487,9 @@ public static class ShadedRender
 		for ( var item = 0; item < scene.Items.Count; item++ )
 		{
 			var (mesh, itemMaterial) = scene.Items[item];
+			// Soft particle meshes are drawn by the post-pass, never as opaque triangles:
+			// they must not write depth or hard-occlude what is behind them.
+			if ( scene.SoftParticles && mesh.IsParticle ) continue;
 			scene.FaceMaterials.TryGetValue( mesh, out var byFace );
 			// Normals over the whole mesh, so a material boundary is not a shading seam.
 			var normals = VertexNormals( mesh.Positions, mesh.Faces );
@@ -421,7 +522,7 @@ public static class ShadedRender
 					triItem.Add( item );
 					var tuv = f.UVs is { } uv && uv.Length == f.Indices.Length ? (uv[0], uv[k], uv[k + 1]) : default;
 					triUv.Add( tuv );
-					triTan.Add( material.NormalMap is null ? default
+					triTan.Add( material.NormalMap is null && material.HairAniso <= 0f && material.Aniso <= 0f && material.AnisoMap is null ? default
 						: Tangents( mesh.Positions[f.Indices[0]], mesh.Positions[f.Indices[k]], mesh.Positions[f.Indices[k + 1]], tuv.Item1, tuv.Item2, tuv.Item3 ) );
 				}
 			}
@@ -627,10 +728,13 @@ public static class ShadedRender
 				var i = y * W + x;
 				var dir = RayDir( x + 0.5f, y + 0.5f );
 				var bg = Vec3.Lerp( scene.BackgroundBottom, scene.BackgroundTop, Math.Clamp( 1f - (y + 0.5f) / H, 0f, 1f ) );
-				if ( kind[i] == 0 ) { hdr[i] = bg; continue; }
+				if ( kind[i] == 0 ) { hdr[i] = scene.DebugPass is "normal" or "ao" ? Vec3.Zero : bg; continue; }
+				if ( scene.DebugPass == "normal" ) { hdr[i] = wnrm[i] * 0.5f + new Vec3( 0.5f, 0.5f, 0.5f ); continue; }
+				if ( scene.DebugPass == "ao" ) { var g = ao[i]; hdr[i] = new Vec3( g, g, g ); continue; }
 
 				ShadeMaterial m; Vec3 albedo; float rough; var glow = Vec3.Zero;
 				var n = wnrm[i]; var occl = ao[i]; var metal = -1f;
+				var transmission = Vec3.One; var anisoAmt = 0f; var anisoAngle = 0f; var sheenAmt = 0f;
 				var p = wpos[i];
 				if ( kind[i] == 1 )
 				{
@@ -638,6 +742,7 @@ public static class ShadedRender
 					var (a, b, c) = tris[tri];
 					var w = bary[i];
 					m = materials[mat[a]];
+					transmission = Vec3.One; anisoAmt = m.Aniso; anisoAngle = m.AnisoRotation; sheenAmt = m.Sheen;
 					albedo = col[a] * w.x + col[b] * w.y + col[c] * w.z;
 					rough = vrough[a] * w.x + vrough[b] * w.y + vrough[c] * w.z;
 					glow = vemit[a] * w.x + vemit[b] * w.y + vemit[c] * w.z;
@@ -649,7 +754,7 @@ public static class ShadedRender
 						if ( tri3 && m.TriplanarScale > 0f )
 						{
 							var lod = MathF.Max( 0f, MathF.Log2( depth[i] / focal * m.MapSize / m.TriplanarScale ) );
-							Triplanar( m, p / m.TriplanarScale, n, lod, ref albedo, ref rough, ref metal, ref glow, ref occl, ref n );
+							Triplanar( m, p / m.TriplanarScale, n, lod, ref albedo, ref rough, ref metal, ref glow, ref occl, ref n, ref transmission );
 						}
 						else
 						{
@@ -661,9 +766,13 @@ public static class ShadedRender
 							var normalVar = 0f;
 							if ( m.AlbedoMap is { } am ) albedo = Mul( MapMips.Get( am, m.MapSize, MapKind.Srgb ).Sample( u, lod, wrap ), m.MapTint );
 							if ( m.RoughnessMap is { } rm ) rough = MapMips.Get( rm, m.MapSize, MapKind.Linear ).Sample( u, lod, wrap ).x;
-							if ( m.EmissionMap is { } em ) glow += MapMips.Get( em, m.MapSize, MapKind.Srgb ).Sample( u, lod, wrap );
+							if ( m.EmissionMap is { } em ) glow += MapMips.Get( em, m.MapSize, MapKind.Srgb ).Sample( u, lod, wrap ) * m.EmissionStrength;
 							if ( m.MetallicMap is { } mm ) metal = MapMips.Get( mm, m.MapSize, MapKind.Linear ).Sample( u, lod, wrap ).x;
 							if ( m.AoMap is { } om ) occl *= MapMips.Get( om, m.MapSize, MapKind.Linear ).Sample( u, lod, wrap ).x;
+							if ( m.AnisoMap is { } anm ) { var ap = MapMips.Get( anm, m.MapSize, MapKind.Linear ).Sample( u, lod, wrap ); anisoAmt = m.Aniso > 0f ? m.Aniso * ap.z : ap.z; anisoAngle = m.AnisoRotation + MathF.Atan2( ap.y - 0.5f, ap.x - 0.5f ) * 180f / MathF.PI; }
+							if ( m.SheenMap is { } shm ) { var sp = MapMips.Get( shm, m.MapSize, MapKind.Linear ).Sample( u, lod, wrap ).x; sheenAmt = m.Sheen > 0f ? m.Sheen * sp : sp; }
+							if ( m.TransmissionMap is { } trm ) transmission = MapMips.Get( trm, m.MapSize, MapKind.Linear ).Sample( u, lod, wrap );
+							var tg = Vec3.Zero; var bt = Vec3.Zero;
 							if ( m.NormalMap is { } nm )
 							{
 								// Tangent frame from the triangle's UVs, made square to the shading normal.
@@ -673,15 +782,31 @@ public static class ShadedRender
 								tn = new Vec3( tn.x * m.NormalStrength, tn.y * m.NormalStrength, tn.z );
 								if ( m.MapScale.x < 0f ) tn = new Vec3( -tn.x, tn.y, tn.z );
 								if ( m.MapScale.y < 0f ) tn = new Vec3( tn.x, -tn.y, tn.z );
-								var tg = (tt - n * Vec3.Dot( n, tt ));
+								tg = (tt - n * Vec3.Dot( n, tt ));
 								if ( tg.LengthSquared > 1e-10f )
 								{
 									tg = tg.Normal;
-									var bt = Vec3.Cross( n, tg );
+									bt = Vec3.Cross( n, tg );
 									if ( Vec3.Dot( bt, tb ) < 0f ) bt = -bt;
 									var bentN = (tg * tn.x + bt * tn.y + n * MathF.Max( tn.z, 0.05f )).Normal;
 									if ( bentN.LengthSquared > 0.5f ) n = bentN;
 								}
+							}
+							if ( m.HeightMap is { } hm && tg.LengthSquared > 1e-10f )
+							{
+								var tex = 1f / MathF.Max( m.MapSize, 1 );
+								float HAt( Vec2 uv ) => MapMips.Get( hm, m.MapSize, MapKind.Linear ).Sample( uv, lod, wrap ).x;
+								var hx = (HAt( new Vec2( u.x + tex, u.y ) ) - HAt( new Vec2( u.x - tex, u.y ) )) * m.HeightStrength;
+								var hy = (HAt( new Vec2( u.x, u.y + tex ) ) - HAt( new Vec2( u.x, u.y - tex ) )) * m.HeightStrength;
+								var hn = n - tg * hx - bt * hy;
+								if ( hn.LengthSquared > 0.5f ) n = hn.Normal;
+							}
+							if ( m.DetailNormalMap is { } dm && tg.LengthSquared > 1e-10f )
+							{
+								var dt = MapMips.Get( dm, m.MapSize, MapKind.Normal ).Sample( u, lod, wrap );
+								var dtn = new Vec3( dt.x, dt.y, MathF.Max( dt.z, 0.05f ) );
+								var dw = tg * dtn.x + bt * dtn.y + n * dtn.z;
+								if ( dw.LengthSquared > 1e-10f ) { dw = dw.Normal; var tang = dw - n * Vec3.Dot( dw, n ); var dn = n + tang * m.DetailScale; if ( dn.LengthSquared > 0.5f ) n = dn.Normal; }
 							}
 							if ( normalVar > 0f ) rough = ToksvigRoughness( rough, normalVar );
 						}
@@ -708,7 +833,44 @@ public static class ShadedRender
 							? frame.ContactShadow( p, wnrm[i], scene.Lights[li].Direction, Hash( x + 17, y + 31 ) ) : 1f;
 				else contact.Fill( 1f );
 
-				var colour = ShadePixel( scene, shadows, frame, m, albedo, rough, p, n, wnrm[i], bent is null ? n : BendLike( bent[i], wnrm[i], n ), -dir, occl, metal, contact ) + glow;
+				// Wave-3 live layer: a second look blended over the base, uniformly or by the
+				// occlusion channel (ao mask). Applied after maps, before shading, so it is live:
+				// changing layeramount changes the render with no re-bake.
+				if ( kind[i] == 1 && m.LayerColor.HasValue )
+				{
+					var mask = m.LayerMaskAo ? Smooth( m.LayerMaskMin, m.LayerMaskMax, occl ) : 1f;
+					var amt = Math.Clamp( m.LayerAmount * mask, 0f, 1f );
+					if ( amt > 0f )
+					{
+						var lc = m.LayerColor.Value;
+						albedo = m.LayerBlend switch { "multiply" => Mul( albedo, Vec3.Lerp( Vec3.One, lc, amt ) ), "overlay" => new Vec3( Overlay( albedo.x, lc.x, amt ), Overlay( albedo.y, lc.y, amt ), Overlay( albedo.z, lc.z, amt ) ), _ => Vec3.Lerp( albedo, lc, amt ) };
+						if ( m.LayerRough >= 0f ) rough = rough * (1f - amt) + m.LayerRough * amt;
+						if ( m.LayerMetal >= 0f ) { var baseMetal = metal >= 0f ? metal : m.Metallic; metal = baseMetal * (1f - amt) + m.LayerMetal * amt; }
+					}
+				}
+				var sheenTintLocal = m.SheenTint ?? albedo;
+				// Wave-5 hair shading: the fibre tangent is the triangle's UV tangent,
+				// made square to the shading normal. Zero when the material is not hair
+				// or the triangle has no usable UVs, which leaves the old path untouched.
+				var hairT = Vec3.Zero;
+				if ( kind[i] == 1 && m.HairAniso > 0f )
+				{
+					var (tt, _) = triTan[triId[i]];
+					var tg = tt - n * Vec3.Dot( n, tt );
+					if ( tg.LengthSquared > 1e-10f ) hairT = tg.Normal;
+				}
+				var anisoT = Vec3.Zero;
+				if ( kind[i] == 1 && anisoAmt > 0f )
+				{
+					var (tt2, _) = triTan[triId[i]];
+					var tg2 = tt2 - n * Vec3.Dot( n, tt2 );
+					if ( tg2.LengthSquared > 1e-10f )
+					{
+						anisoT = tg2.Normal;
+						if ( anisoAngle != 0f ) anisoT = RotateAround( anisoT, n, anisoAngle * MathF.PI / 180f );
+					}
+				}
+				var colour = ShadePixel( scene, shadows, frame, m, albedo, rough, p, n, wnrm[i], bent is null ? n : BendLike( bent[i], wnrm[i], n ), -dir, occl, metal, contact, hairT, anisoT, anisoAmt, sheenAmt, sheenTintLocal, transmission ) + glow;
 				if ( emitBuf is not null ) emitBuf[i] = glow;
 				if ( kind[i] == 2 )
 				{
@@ -719,6 +881,11 @@ public static class ShadedRender
 				// Wave-2 look wiring: Opacity < 1 dithers the supersample away (Bayer,
 				// the same stipple LookSpectrum.DitheredAlpha defines), so a translucent
 				// fin reads as stipple instead of a flat wash. The floor keeps its own colour.
+				if ( scene.DebugPass == "wireframe" && kind[i] == 1 )
+				{
+					var b = bary[i];
+					if ( MathF.Min( b.x, MathF.Min( b.y, b.z ) ) < 0.02f ) colour = new Vec3( 0.02f, 0.02f, 0.02f );
+				}
 				if ( kind[i] == 1 && m.Opacity < 1f && LookSpectrum.DitheredAlpha( m.Opacity, x, y ) <= 0f )
 					hdr[i] = bg;
 				else
@@ -727,6 +894,13 @@ public static class ShadedRender
 		} );
 
 		if ( scene.FloorReflection > 0f && scene.Floor ) FloorReflect( scene, frame, hdr, kind, wpos, sceneCentre, sceneRadius, RayDir, ss );
+
+		// Soft particles, back-to-front, in HDR before bloom: blended discs that
+		// fade where they cross a nearer surface, and never write depth, so they
+		// cannot hard-occlude anything behind them. Deliberately after the floor
+		// reflection, so soft particles are not reflected.
+		if ( scene.SoftParticles && soft.Count > 0 )
+			DrawSoftParticles( scene, hdr, emitBuf, depth, camera.Eye, fwd, right, up, focal, W, H, sceneRadius, soft );
 
 		// --- bloom, tonemap, gamma, downsample --------------------------------------------------
 		var bloom = scene.Bloom > 0f ? BuildBloom( scene, hdr, emitBuf, W, H, ss, width, height ) : null;
@@ -739,7 +913,7 @@ public static class ShadedRender
 		Parallel.For( 0, H, yy =>
 		{
 			for ( var xx = 0; xx < W; xx++ )
-				toned[yy * W + xx] = Tone( scene, hdr[yy * W + xx] * scene.Exposure, bloom, width, height, (xx + 0.5f) / ss, (yy + 0.5f) / ss );
+				toned[yy * W + xx] = scene.DebugPass is "normal" or "ao" ? hdr[yy * W + xx] : Tone( scene, hdr[yy * W + xx] * scene.Exposure, bloom, width, height, (xx + 0.5f) / ss, (yy + 0.5f) / ss );
 		} );
 		// Coverage AA: the edges from many cheap visibility samples, each coloured by a shaded pixel.
 		var resolved = coverage ? CoverageResolve.Resolve( new CoverageResolve.Frame
@@ -828,7 +1002,7 @@ public static class ShadedRender
 	}
 
 	/// <summary>Maps projected along the three axes and blended by the normal (Golus's whiteout blend for the normal map).</summary>
-	static void Triplanar( ShadeMaterial m, Vec3 p, Vec3 n0, float lod, ref Vec3 albedo, ref float rough, ref float metal, ref Vec3 glow, ref float occl, ref Vec3 n )
+	static void Triplanar( ShadeMaterial m, Vec3 p, Vec3 n0, float lod, ref Vec3 albedo, ref float rough, ref float metal, ref Vec3 glow, ref float occl, ref Vec3 n, ref Vec3 transmission )
 	{
 		var bw = new Vec3( MathF.Pow( MathF.Abs( n0.x ), 4f ), MathF.Pow( MathF.Abs( n0.y ), 4f ), MathF.Pow( MathF.Abs( n0.z ), 4f ) );
 		bw /= MathF.Max( bw.x + bw.y + bw.z, 1e-6f );
@@ -836,7 +1010,8 @@ public static class ShadedRender
 		Vec3 Tri( MapMips mm ) => mm.Sample( uvX, lod, true ) * bw.x + mm.Sample( uvY, lod, true ) * bw.y + mm.Sample( uvZ, lod, true ) * bw.z;
 		if ( m.AlbedoMap is { } am ) albedo = Mul( Tri( MapMips.Get( am, m.MapSize, MapKind.Srgb ) ), m.MapTint );
 		if ( m.RoughnessMap is { } rm ) rough = Tri( MapMips.Get( rm, m.MapSize, MapKind.Linear ) ).x;
-		if ( m.EmissionMap is { } em ) glow += Tri( MapMips.Get( em, m.MapSize, MapKind.Srgb ) );
+		if ( m.EmissionMap is { } em ) glow += Tri( MapMips.Get( em, m.MapSize, MapKind.Srgb ) ) * m.EmissionStrength;
+		if ( m.TransmissionMap is { } tm ) transmission = Tri( MapMips.Get( tm, m.MapSize, MapKind.Linear ) );
 		if ( m.MetallicMap is { } mt ) metal = Tri( MapMips.Get( mt, m.MapSize, MapKind.Linear ) ).x;
 		if ( m.AoMap is { } om ) occl *= Tri( MapMips.Get( om, m.MapSize, MapKind.Linear ) ).x;
 		if ( m.NormalMap is { } nm )
@@ -1021,6 +1196,69 @@ public static class ShadedRender
 
 	/// <summary>The glow, at output resolution: a bright pass (plus all emission) blurred over a mip pyramid
 	/// and summed, so the halo has a tight core and a long soft tail.</summary>
+	/// <summary>
+	/// Back-to-front blended soft particles, in HDR at supersampled resolution.
+	/// Each particle face is one disc: radial falloff (1 at the centre, 0 at the
+	/// rim, squared for a soft edge) times its life alpha times a depth fade.
+	/// The depth fade compares the scene depth at the pixel with the particle's
+	/// front face (centre minus radius): a wall cutting through the disc fades
+	/// it smoothly, a wall well in front hides it, a wall behind it or no surface
+	/// at all (depth MaxValue) leaves it untouched — so a free-floating particle
+	/// renders identically whatever softdepth is set. Nothing here writes depth.
+	/// Sequential, far to near: overlapping particles must blend in order, so
+	/// this pass is not parallelised.
+	/// </summary>
+	static void DrawSoftParticles( ShadeScene scene, Vec3[] hdr, Vec3[] emitBuf, float[] depth, Vec3 eye, Vec3 fwd, Vec3 right, Vec3 up, float focal, int W, int H, float sceneRadius, List<(Vec3 Centre, float Radius, float Depth, Vec3 Colour, Vec3 Emission, float Alpha)> particles )
+	{
+		const float near = 0.05f;
+		var softDepth = scene.SoftDepth < 0f ? sceneRadius * 0.05f : scene.SoftDepth;
+		var ordered = particles
+			.Select( p => (p.Centre, p.Radius, Depth: Vec3.Dot( p.Centre - eye, fwd ), p.Colour, p.Emission, p.Alpha) )
+			.Where( p => p.Depth > near )
+			.OrderByDescending( p => p.Depth )
+			.ToList();
+		foreach ( var p in ordered )
+		{
+			var d = p.Centre - eye;
+			var iz = 1f / MathF.Max( p.Depth, near );
+			var sx = W * 0.5f + Vec3.Dot( d, right ) * focal * iz;
+			var sy = H * 0.5f - Vec3.Dot( d, up ) * focal * iz;
+			var screenRadius = p.Radius * focal / p.Depth;
+			if ( screenRadius < 0.5f ) continue;
+			var x0 = Math.Max( 0, (int)MathF.Floor( sx - screenRadius ) );
+			var x1 = Math.Min( W - 1, (int)MathF.Ceiling( sx + screenRadius ) );
+			var y0 = Math.Max( 0, (int)MathF.Floor( sy - screenRadius ) );
+			var y1 = Math.Min( H - 1, (int)MathF.Ceiling( sy + screenRadius ) );
+			var colour = p.Colour + p.Emission;
+			for ( var y = y0; y <= y1; y++ )
+			{
+				for ( var x = x0; x <= x1; x++ )
+				{
+					var dx = (x + 0.5f - sx) / screenRadius;
+					var dy = (y + 0.5f - sy) / screenRadius;
+					var r2 = dx * dx + dy * dy;
+					if ( r2 >= 1f ) continue;
+					var radial = 1f - r2;
+					radial *= radial;
+					var i = y * W + x;
+					var sceneZ = depth[i];
+					float fade;
+					if ( sceneZ == float.MaxValue ) fade = 1f;
+					else
+					{
+						var front = p.Depth - p.Radius;
+						var diff = sceneZ - front;
+						fade = softDepth <= 0f ? (diff >= 0f ? 1f : 0f) : Smooth( 0f, softDepth, diff );
+					}
+					var a = Math.Clamp( p.Alpha * radial * fade, 0f, 1f );
+					if ( a <= 0f ) continue;
+					hdr[i] = hdr[i] * (1f - a) + colour * a;
+					if ( emitBuf is not null ) emitBuf[i] = emitBuf[i] * (1f - a) + p.Emission * a;
+				}
+			}
+		}
+	}
+
 	static Vec3[] BuildBloom( ShadeScene scene, Vec3[] hdr, Vec3[] emit, int W, int H, int ss, int w, int h )
 	{
 		var src = new Vec3[w * h];
@@ -1127,12 +1365,14 @@ public static class ShadedRender
 		return t < 1f ? Vec3.Lerp( Blue, Purple, t ) : t < 2f ? Vec3.Lerp( Purple, Green, t - 1f ) : Vec3.Lerp( Green, Gold, t - 2f );
 	}
 
-	static Vec3 ShadePixel( ShadeScene scene, ShadowMap[] shadows, Frame frame, ShadeMaterial m, Vec3 albedo, float roughness, Vec3 p, Vec3 n, Vec3 ngeo, Vec3 bentN, Vec3 v, float ao, float metallic, ReadOnlySpan<float> contact )
+	static Vec3 ShadePixel( ShadeScene scene, ShadowMap[] shadows, Frame frame, ShadeMaterial m, Vec3 albedo, float roughness, Vec3 p, Vec3 n, Vec3 ngeo, Vec3 bentN, Vec3 v, float ao, float metallic, ReadOnlySpan<float> contact, Vec3 hairT, Vec3 anisoT, float anisoAmt, float sheenAmt, Vec3 sheenTint, Vec3 transmission )
 	{
 		var metal = Math.Clamp( metallic >= 0f ? metallic : m.Metallic, 0f, 1f );
 		roughness = Math.Clamp( roughness, 0f, 1f );
 		var nv = MathF.Max( Vec3.Dot( n, v ), 1e-3f );
 		var f0 = Vec3.Lerp( new Vec3( m.Specular, m.Specular, m.Specular ), albedo, metal );
+		// Specular tint: pull F0's colour toward the albedo while keeping its average strength.
+		if ( m.SpecularTint > 0f ) { var avgF0 = (f0.x + f0.y + f0.z) / 3f; f0 = Vec3.Lerp( f0, albedo * avgF0, Math.Clamp( m.SpecularTint, 0f, 1f ) ); }
 		// The film tints what the surface reflects, never what it scatters: the base stays dark.
 		var film = Vec3.One;
 		if ( m.Iridescence > 0f )
@@ -1160,6 +1400,14 @@ public static class ShadedRender
 			// Diffuse, wrapped round the terminator by the subsurface amount.
 			var wrap = m.Subsurface * 0.5f;
 			var diff = MathF.Max( 0f, (nl + wrap) / (1f + wrap) );
+			if ( m.BurleyDiffuse )
+				{
+					var hv = l + v;
+					var vh2 = hv.LengthSquared > 1e-12f ? MathF.Pow( MathF.Max( Vec3.Dot( v, hv.Normal ), 0f ), 2f ) : 0f;
+					var f90 = 0.5f + 2f * roughness * vh2;
+					var nlC = MathF.Max( nl, 0f );
+					diff *= (1f + (f90 - 1f) * MathF.Pow( 1f - nlC, 5f )) * (1f + (f90 - 1f) * MathF.Pow( 1f - nv, 5f ));
+				}
 			// Wave-2 look wiring: cel bands step the diffuse term itself, so a toon
 			// material bands in the real renderer, not just in LookSpectrum.Shade.
 			if ( m.Toon > 0f ) diff = diff + (LookSpectrum.Quantize( diff, Math.Clamp( m.ToonBands, 2, 8 ) ) - diff) * m.Toon;
@@ -1167,9 +1415,13 @@ public static class ShadedRender
 			// Light that went in elsewhere and comes out here: strong where the part is thin.
 			if ( m.Subsurface > 0f )
 			{
-				var through = thickness < float.MaxValue ? MathF.Exp( -thickness / MathF.Max( 1e-3f, m.ScatterDistance ) ) : 0f;
+				// Per-channel scatter: red travels further than green/blue, so thin parts glow red.
+				// Transmission map (if any) scales the through-light per channel; thickness comes
+				// from the shadow map, exactly as the old scalar term used it.
+				var through = thickness < float.MaxValue ? new Vec3( MathF.Exp( -thickness / MathF.Max( 1e-3f, m.ScatterDist.x ) ), MathF.Exp( -thickness / MathF.Max( 1e-3f, m.ScatterDist.y ) ), MathF.Exp( -thickness / MathF.Max( 1e-3f, m.ScatterDist.z ) ) ) : Vec3.Zero;
+				through = Mul( through, transmission );
 				var back = MathF.Pow( MathF.Max( 0f, Vec3.Dot( v, -l ) ), 2f ) * 0.7f + 0.3f;
-				lit += Mul( Mul( tint, albedo ), radiance ) * (m.Subsurface * through * back * 0.45f);
+				lit += Mul( Mul( Mul( tint, albedo ), radiance ), through ) * (m.Subsurface * back * 0.45f);
 			}
 
 			if ( nl > 0f )
@@ -1180,8 +1432,29 @@ public static class ShadedRender
 				// A light with size widens the highlight: the roughness it sees is never below its size.
 				var rough = MathF.Max( roughness, light.Size * 0.6f );
 				var spec = Ggx( nh, nl, nv, rough );
+				if ( anisoAmt > 0f && anisoT.LengthSquared > 1e-10f )
+				{
+					// Anisotropic GGX: roughness split along tangent/bitangent, geometry term kept
+					// isotropic (documented approximation). Blended with the isotropic lobe by aniso.
+					var bt2 = Vec3.Cross( n, anisoT );
+					var th = Vec3.Dot( h, anisoT ); var bh = Vec3.Dot( h, bt2 );
+					var ax = MathF.Max( rough / MathF.Sqrt( 1f + anisoAmt ), 0.02f ); var ay = MathF.Max( rough * MathF.Sqrt( 1f + anisoAmt ), 0.02f );
+					var denom = (th * th) / (ax * ax) + (bh * bh) / (ay * ay) + nh * nh;
+					var dAniso = 1f / (MathF.PI * ax * ay * denom * denom);
+					var kA = ax * 0.5f;
+					var gA = nl / (nl * (1f - kA) + kA) * (nv / (nv * (1f - kA) + kA));
+					var specAniso = dAniso * gA / MathF.Max( 4f * nl * nv, 1e-4f );
+					spec = spec * (1f - anisoAmt) + specAniso * anisoAmt;
+				}
 				var F = Fresnel( f0, vh );
 				lit += Mul( F, radiance ) * (spec * nl * visible);
+				if ( sheenAmt > 0f )
+				{
+					// Sheen: grazing, forward-scattering rim, independent of metalness (cloth is
+					// dielectric, but the lobe itself is not killed by it). Roughness softens it.
+					var sheenTerm = sheenAmt * MathF.Pow( 1f - nv, 5f ) * MathF.Max( nl, 0f ) * visible * (1f - m.SheenRoughness * 0.5f);
+					lit += Mul( sheenTint, radiance ) * sheenTerm;
+				}
 				if ( m.Coat > 0f )
 				{
 					// The lacquer lies smooth over the detail: its highlight follows the surface, not the normal map.
@@ -1191,9 +1464,21 @@ public static class ShadedRender
 					lit = lit * (1f - coatF) + Mul( radiance, film ) * (cs * nlc * visible);
 				}
 			}
+			// Wave-5 hair shading: at HairAniso = 1 the direct light is the fibre
+			// model (Kajiya-Kay diffuse + dual Marschner lobes); at 0 this is a
+			// no-op, so every non-hair material shades exactly as before. The
+			// ambient / environment terms below are unchanged (stated limit).
+			if ( m.HairAniso > 0f && hairT.LengthSquared > 1e-10f )
+			{
+				var hair = HairLight( diffuseColour, hairT, n, l, v, radiance, visible,
+					Math.Clamp( m.HairAniso, 0f, 1f ), m.HairShift, m.HairShift2, m.HairTint2, m.HairRoughness );
+				lit = Vec3.Lerp( lit, hair, Math.Clamp( m.HairAniso, 0f, 1f ) );
+			}
 			result += lit;
 		}
 
+		if ( sheenAmt > 0f )
+			result += Mul( sheenTint, scene.SkyColour ) * (sheenAmt * MathF.Pow( 1f - nv, 5f ) * 0.25f * ao);
 		// Wave-2 look wiring, direct part only (ambient terms below keep their own tint).
 		if ( m.ToonRim > 0f && m.Toon > 0f )
 		{
@@ -1261,6 +1546,38 @@ public static class ShadedRender
 		glossEnv = Mul( glossEnv, film );
 		if ( m.Coat > 0f ) result = result * (1f - coatF) + glossEnv * (MathF.Max( coatF, 0.06f ) * m.Coat * MathF.Max( ao, 0.5f ));
 		return result;
+	}
+
+	/// <summary>Marschner / Kajiya-Kay fibre light, for one light, in linear space before tonemap.
+	/// A fibre is dark lit along its length and bright lit across it, so the diffuse term is
+	/// sin of the light/tangent angle (Kajiya-Kay), not the normal cosine. On top sit two
+	/// specular lobes, each a Kajiya-Kay highlight off a tangent tilted toward or away from the
+	/// normal (Marschner's shift): a tight primary (R) lobe and a wider, tinted transmission
+	/// (TT) lobe shifted the other way. <paramref name="t"/> is the unit fibre tangent,
+	/// <paramref name="n"/> the shading normal (used only to tilt the lobes).
+	/// Returns zero when <paramref name="aniso"/> is 0 or the tangent is degenerate.</summary>
+	public static Vec3 HairLight( Vec3 albedo, Vec3 t, Vec3 n, Vec3 l, Vec3 v, Vec3 radiance, float visible,
+		float aniso, float shift, float shift2, Vec3? tint2, float roughness )
+	{
+		if ( aniso <= 0f || t.LengthSquared < 1e-10f ) return Vec3.Zero;
+		var tl = Math.Clamp( Vec3.Dot( t, l ), -1f, 1f );
+		var sinL = MathF.Sqrt( MathF.Max( 0f, 1f - tl * tl ) );
+		var diff = Mul( albedo, radiance ) * (sinL * visible / MathF.PI * 3.1f);
+		var h = l + v;
+		h = h.LengthSquared > 1e-12f ? h.Normal : v;
+		float Lobe( float sh, float exp )
+		{
+			var ts = t + n * sh;
+				ts = ts.LengthSquared > 1e-12f ? ts.Normal : t;
+			var th = Math.Clamp( Vec3.Dot( ts, h ), -1f, 1f );
+			return MathF.Pow( MathF.Sqrt( MathF.Max( 0f, 1f - th * th ) ), exp );
+		}
+		var exp1 = Math.Clamp( 160f - 152f * Math.Clamp( roughness, 0f, 1f ), 8f, 160f );
+		var exp2 = MathF.Max( exp1 * 0.25f, 4f );
+		var tint = tint2 ?? Saturate( albedo, 1.25f );
+		var spec = radiance * (Lobe( shift, exp1 ) * 0.9f * visible);
+		var trans = Mul( tint, radiance ) * (Lobe( shift2, exp2 ) * 0.45f * visible);
+		return (diff + spec + trans) * aniso;
 	}
 
 	/// <summary>Lagarde's specular occlusion: AO darkens reflections less on smooth surfaces and at grazing angles.</summary>
@@ -1419,6 +1736,9 @@ public static class ShadedRender
 	}
 
 	// --- maths ---------------------------------------------------------------------------------
+
+	static float Overlay( float b, float l, float amt ) { var o = b < 0.5f ? 2f * b * l : 1f - 2f * (1f - b) * (1f - l); return b * (1f - amt) + o * amt; }
+	static Vec3 RotateAround( Vec3 v, Vec3 axis, float ang ) { var c = MathF.Cos( ang ); var s = MathF.Sin( ang ); return v * c + Vec3.Cross( axis, v ) * s + axis * Vec3.Dot( axis, v ) * (1f - c); }
 
 	static float Ggx( float nh, float nl, float nv, float roughness )
 	{

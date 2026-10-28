@@ -170,7 +170,7 @@ class Verification:
             if self.require_local:
                 args.append("--require-local-fixtures")
             try:
-                self.command("cpu", args)
+                self.command("cpu", args, timeout=300)
             finally:
                 if (self.output / "cpu-results.json").is_file():
                     self.report["cpuReport"] = str(self.output / "cpu-results.json")

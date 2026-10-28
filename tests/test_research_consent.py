@@ -27,7 +27,9 @@ class PolicyTests(unittest.TestCase):
                 self.assertIn('No asset research is allowed', policy)
             self.assertIn('Unknown or restricted licence means do not download or reuse', policy)
             self.assertIn('separate explicit approval', policy)
-        self.assertIn('has not been granted', research_consent.policy(None))
+        self.assertIn('Research is optional', research_consent.policy(None))
+        self.assertNotIn('Go and get the research yourself', research_consent.policy(None))
+        self.assertNotIn('approval before modeling', research_consent.policy(choices))
 
     def test_policy_reaches_each_http_provider_system_field(self):
         policy = research_consent.policy(dict(papers=True, photos=False, models=False))
@@ -134,7 +136,7 @@ class ConsentCardTests(unittest.TestCase):
         h.claude._set('idle')
         h.claudeNew()
         h._catalogue_busy = True  # this fixture owns its catalogue; no real discovery race
-        ui.root.setProperty('claudeOpen', True)
+        ui.root.setProperty('chatOpen', True)
         ui.find('claudeInput').setProperty('text', 'make an asset')
         self.assertFalse(h.claudeSend('make an asset'))
         ui.settle(.15)

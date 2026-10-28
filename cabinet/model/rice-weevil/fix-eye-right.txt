@@ -1,0 +1,2 @@
+echo "Opposite eye repair: match the left oval with Sphere's actual radius-and-scale parameters."
+add Primitive name=EyeR shape=Sphere radius=0.5 scale=0.34,0.22,0.31 position=1.76,-0.45,1.88 materialslot=3

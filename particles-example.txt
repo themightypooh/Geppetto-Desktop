@@ -1,0 +1,7 @@
+echo "Particles worked example: burst sparks + continuous smoke, gate, export. Regression script for the particles-export work."
+add Primitive shape=Box width=12 depth=12 height=2
+add Primitive shape=Cylinder radius=3 height=6
+add ParticleFx name=Sparks mode=burst burst=60 max=256 life=0.7 speed=150 spread=30 size0=0.4 size1=0.1 color0=#ffd27a color1=#ff4400 seed=7 sprite=spark
+add ParticleFx name=Smoke mode=continuous rate=40 life=2.5 max=256 speed=15 spread=15 size0=0.8 size1=2.5 color0=#999999 color1=#333333 sprite=smoke
+particles check
+export particles /tmp/particles-example-out

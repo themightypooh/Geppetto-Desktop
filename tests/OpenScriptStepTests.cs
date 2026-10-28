@@ -7,6 +7,16 @@ internal static class OpenScriptStepTests
 {
     public static void Register(TestRegistry registry, TestSettings settings)
     {
+        registry.Add("open-script-step", "STEP stops after var and rebuild, not the following add", () =>
+        {
+            using var run = new Fixture(settings.WorkDirectory,
+                "var length=3\nrebuild\nadd Primitive shape=Box name=TailA\n");
+            run.Step();
+            run.Step();
+            run.Step();
+            run.Close();
+            Require(run.Task.Result.Result.Ok, "script failed: " + run.Task.Result.Result);
+        });
         registry.Add("open-script-step", "pause then repeated STEP permits exactly one mutation each", () =>
         {
             using var run = new Fixture(settings.WorkDirectory);
@@ -53,14 +63,14 @@ internal static class OpenScriptStepTests
         JsonObject Latest => AiLiveRun.ReadLatest(Root) ?? new();
         public long Revision => Latest["snapshot"]?["revision"]?.GetValue<long>() ?? 0;
 
-        public Fixture(string parent)
+        public Fixture(string parent, string? tail = null)
         {
             Root = Path.Combine(parent, "open-script-step-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(Root);
-            const string script = "add Primitive shape=Box name=Base\n"
-                + "add Primitive shape=Box name=TailA\n"
+            string script = "add Primitive shape=Box name=Base\n"
+                + (tail ?? "add Primitive shape=Box name=TailA\n"
                 + "add Primitive shape=Box name=TailB\n"
-                + "add Primitive shape=Box name=TailC\n";
+                + "add Primitive shape=Box name=TailC\n");
             Task = System.Threading.Tasks.Task.Run(() => ScriptLive.Execute(new PartStudio(), script,
                 Root, Root, 0.8, cancel, open: true, idleMinutes: 1));
             try

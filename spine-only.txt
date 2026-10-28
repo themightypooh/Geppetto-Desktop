@@ -1,0 +1,49 @@
+add Inflate2D name=Spine_V00 rings="-2.00,-35.92;-0.79,-35.32;-0.45,-34.49;-0.31,-33.60;-1.02,-32.46;-2.23,-33.06;-2.57,-33.89;-2.71,-34.78" thickness=0.5 profile=FlatBevel bevel=0.1 materialslot=1
+add Inflate2D name=Spine_V01 rings="-3.62,-41.70;-2.41,-41.10;-2.07,-40.27;-1.93,-39.38;-2.64,-38.24;-3.85,-38.84;-4.19,-39.67;-4.33,-40.56" thickness=0.5 profile=FlatBevel bevel=0.1 materialslot=1
+add Inflate2D name=Spine_V02 rings="-4.05,-45.65;-2.94,-44.90;-2.71,-44.02;-2.68,-43.12;-3.55,-42.09;-4.66,-42.84;-4.89,-43.72;-4.92,-44.62" thickness=0.5 profile=FlatBevel bevel=0.1 materialslot=1
+add Inflate2D name=Spine_V03 rings="-4.88,-51.59;-3.77,-50.84;-3.54,-49.96;-3.51,-49.06;-4.38,-48.03;-5.49,-48.78;-5.72,-49.66;-5.75,-50.56" thickness=0.5 profile=FlatBevel bevel=0.1 materialslot=1
+add Inflate2D name=Spine_V04 rings="-5.39,-55.25;-4.28,-54.50;-4.05,-53.62;-4.02,-52.72;-4.89,-51.69;-6.00,-52.44;-6.23,-53.32;-6.26,-54.22" thickness=0.5 profile=FlatBevel bevel=0.1 materialslot=1
+add Inflate2D name=Spine_V05 rings="-6.22,-61.19;-5.11,-60.44;-4.88,-59.56;-4.85,-58.66;-5.72,-57.63;-6.83,-58.38;-7.06,-59.26;-7.09,-60.16" thickness=0.5 profile=FlatBevel bevel=0.1 materialslot=1
+add Inflate2D name=Spine_V06 rings="-7.37,-64.72;-6.16,-64.12;-5.82,-63.29;-5.68,-62.40;-6.39,-61.26;-7.60,-61.86;-7.94,-62.69;-8.08,-63.58" thickness=0.5 profile=FlatBevel bevel=0.1 materialslot=1
+add Inflate2D name=Spine_V07 rings="-8.99,-70.50;-7.78,-69.90;-7.44,-69.07;-7.30,-68.18;-8.01,-67.04;-9.22,-67.64;-9.56,-68.47;-9.70,-69.36" thickness=0.5 profile=FlatBevel bevel=0.1 materialslot=1
+add Inflate2D name=Spine_V08 rings="-10.06,-74.32;-8.85,-73.72;-8.51,-72.89;-8.37,-72.00;-9.08,-70.86;-10.29,-71.46;-10.63,-72.29;-10.77,-73.18" thickness=0.5 profile=FlatBevel bevel=0.1 materialslot=1
+add Inflate2D name=Spine_V09 rings="-11.67,-80.10;-10.46,-79.50;-10.12,-78.67;-9.98,-77.78;-10.69,-76.64;-11.90,-77.24;-12.24,-78.07;-12.38,-78.96" thickness=0.5 profile=FlatBevel bevel=0.1 materialslot=1
+add Inflate2D name=Spine_V10 rings="-13.30,-83.73;-12.03,-83.29;-11.59,-82.50;-11.33,-81.63;-11.90,-80.41;-13.17,-80.85;-13.61,-81.64;-13.87,-82.51" thickness=0.5 profile=FlatBevel bevel=0.1 materialslot=1
+add Inflate2D name=Spine_V11 rings="-15.62,-89.26;-14.35,-88.82;-13.91,-88.03;-13.65,-87.16;-14.22,-85.94;-15.49,-86.38;-15.93,-87.17;-16.19,-88.04" thickness=0.5 profile=FlatBevel bevel=0.1 materialslot=1
+add Inflate2D name=Spine_V12 rings="-17.33,-93.33;-16.06,-92.89;-15.62,-92.10;-15.36,-91.23;-15.93,-90.01;-17.20,-90.45;-17.64,-91.24;-17.90,-92.11" thickness=0.5 profile=FlatBevel bevel=0.1 materialslot=1
+add Inflate2D name=Spine_V13 rings="-19.65,-98.86;-18.38,-98.42;-17.94,-97.63;-17.68,-96.76;-18.25,-95.54;-19.52,-95.98;-19.96,-96.77;-20.22,-97.64" thickness=0.5 profile=FlatBevel bevel=0.1 materialslot=1
+add Inflate2D name=Spine_V14 rings="-18.83,-103.25;-17.96,-102.22;-17.99,-101.32;-18.22,-100.44;-19.33,-99.69;-20.20,-100.72;-20.17,-101.62;-19.94,-102.50" thickness=0.5 profile=FlatBevel bevel=0.1 materialslot=1
+add Inflate2D name=Spine_V15 rings="-18.00,-109.19;-17.13,-108.16;-17.16,-107.26;-17.39,-106.38;-18.50,-105.63;-19.37,-106.66;-19.34,-107.56;-19.11,-108.44" thickness=0.5 profile=FlatBevel bevel=0.1 materialslot=1
+add Inflate2D name=Spine_V16 rings="-15.81,-112.29;-15.38,-111.01;-15.73,-110.18;-16.26,-109.45;-17.57,-109.15;-18.00,-110.43;-17.65,-111.26;-17.12,-111.99" thickness=0.5 profile=FlatBevel bevel=0.1 materialslot=1
+add Transform bodies=Spine_V16 translate=0,0,-0.4
+add Inflate2D name=Spine_V17 rings="-12.88,-117.52;-12.45,-116.24;-12.80,-115.41;-13.33,-114.68;-14.64,-114.38;-15.07,-115.66;-14.72,-116.49;-14.19,-117.22" thickness=0.5 profile=FlatBevel bevel=0.1 materialslot=1
+add Transform bodies=Spine_V17 translate=0,0,-0.4
+add Inflate2D name=Spine_V18 rings="-9.13,-120.82;-9.17,-119.47;-9.79,-118.81;-10.53,-118.31;-11.87,-118.48;-11.83,-119.83;-11.21,-120.49;-10.47,-121.00" thickness=0.5 profile=FlatBevel bevel=0.1 materialslot=1
+add Transform bodies=Spine_V18 translate=0,0,-0.4
+add Inflate2D name=Spine_V19 rings="-2.17,-126.25;-2.32,-124.92;-2.99,-124.32;-3.78,-123.88;-5.09,-124.17;-4.94,-125.50;-4.27,-126.10;-3.48,-126.54" thickness=0.5 profile=FlatBevel bevel=0.1 materialslot=1
+add Transform bodies=Spine_V19 translate=0,0,-0.4
+add Inflate2D name=Spine_V20 rings="-4.60,-130.09;-3.29,-130.38;-2.50,-129.94;-1.83,-129.34;-1.68,-128.01;-2.99,-127.72;-3.78,-128.16;-4.45,-128.76" thickness=0.5 profile=FlatBevel bevel=0.1 materialslot=1
+add Transform bodies=Spine_V20 translate=0,0,-0.8
+add Inflate2D name=Spine_V21 rings="-10.77,-130.18;-10.09,-131.34;-9.23,-131.62;-8.33,-131.70;-7.25,-130.90;-7.93,-129.74;-8.79,-129.46;-9.69,-129.38" thickness=0.5 profile=FlatBevel bevel=0.1 materialslot=1
+add Transform bodies=Spine_V21 translate=0,0,-0.8
+add Inflate2D name=Spine_V22 rings="-16.65,-128.98;-15.97,-130.14;-15.11,-130.42;-14.21,-130.50;-13.13,-129.70;-13.81,-128.54;-14.67,-128.26;-15.57,-128.18" thickness=0.5 profile=FlatBevel bevel=0.1 materialslot=1
+add Transform bodies=Spine_V22 translate=0,0,-0.8
+add Inflate2D name=Spine_V23 rings="-18.94,-125.91;-18.98,-127.25;-18.40,-127.94;-17.68,-128.49;-16.34,-128.39;-16.30,-127.05;-16.88,-126.36;-17.60,-125.81" thickness=0.5 profile=FlatBevel bevel=0.1 materialslot=1
+add Transform bodies=Spine_V23 translate=0,0,-0.8
+add Inflate2D name=Spine_V24 rings="-23.28,-121.77;-23.32,-123.11;-22.74,-123.80;-22.02,-124.35;-20.68,-124.25;-20.64,-122.91;-21.22,-122.22;-21.94,-121.67" thickness=0.5 profile=FlatBevel bevel=0.1 materialslot=1
+add Transform bodies=Spine_V24 translate=0,0,-0.8
+add Inflate2D name=Spine_V25 rings="-24.47,-116.84;-25.27,-117.92;-25.19,-118.82;-24.91,-119.68;-23.75,-120.36;-22.95,-119.28;-23.03,-118.38;-23.31,-117.52" thickness=0.5 profile=FlatBevel bevel=0.1 materialslot=1
+add Transform bodies=Spine_V25 translate=0,0,-0.8
+add Inflate2D name=Spine_V26 rings="-25.64,-110.95;-26.44,-112.03;-26.36,-112.93;-26.08,-113.79;-24.92,-114.47;-24.12,-113.39;-24.20,-112.49;-24.48,-111.63" thickness=0.5 profile=FlatBevel bevel=0.1 materialslot=1
+add Transform bodies=Spine_V26 translate=0,0,-0.8
+add Inflate2D name=Spine_V27 rings="-26.20,-103.30;-27.20,-104.20;-27.30,-105.10;-27.20,-106.00;-26.20,-106.90;-25.20,-106.00;-25.10,-105.10;-25.20,-104.20" thickness=0.5 profile=FlatBevel bevel=0.1 materialslot=1
+add Transform bodies=Spine_V27 translate=0,0,-0.8
+add Inflate2D name=Spine_V28 rings="-26.20,-97.30;-27.20,-98.20;-27.30,-99.10;-27.20,-100.00;-26.20,-100.90;-25.20,-100.00;-25.10,-99.10;-25.20,-98.20" thickness=0.5 profile=FlatBevel bevel=0.1 materialslot=1
+add Transform bodies=Spine_V28 translate=0,0,-0.8
+add Inflate2D name=Spine_V29 rings="-26.20,-91.30;-27.20,-92.20;-27.30,-93.10;-27.20,-94.00;-26.20,-94.90;-25.20,-94.00;-25.10,-93.10;-25.20,-92.20" thickness=0.5 profile=FlatBevel bevel=0.1 materialslot=1
+add Transform bodies=Spine_V29 translate=0,0,-0.8
+add Inflate2D name=Spine_V30 rings="-25.72,-87.95;-26.81,-88.75;-27.00,-89.64;-26.99,-90.55;-26.08,-91.55;-24.99,-90.75;-24.80,-89.86;-24.81,-88.95" thickness=0.5 profile=FlatBevel bevel=0.1 materialslot=1
+add Transform bodies=Spine_V30 translate=0,0,-0.8
+add Inflate2D name=Spine_V31 rings="-25.13,-81.98;-26.22,-82.78;-26.41,-83.67;-26.40,-84.58;-25.49,-85.58;-24.40,-84.78;-24.21,-83.89;-24.22,-82.98" thickness=0.5 profile=FlatBevel bevel=0.1 materialslot=1
+add Transform bodies=Spine_V31 translate=0,0,-0.8
+save angler_trace.effigy

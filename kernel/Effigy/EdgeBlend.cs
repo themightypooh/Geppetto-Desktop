@@ -79,6 +79,138 @@ public static class EdgeBlend
 	public static BlendReport FilletReport( PolyMesh mesh, float radius, int segments, IEnumerable<EdgeKey> edges )
 		=> Apply( mesh, radius, 0f, Math.Max( 1, segments ), rounded: true, explicitEdges: ToSet( edges ) );
 
+	/// <summary>Bevel profiles on top of the fillet/chamfer engine (hard-surface wave 3).
+	/// Round is the existing circular arc. TwoStep is a two-flat bevel: the blend strip is
+	/// two flats meeting at a ridge pushed <paramref name="breakFraction"/> of the way from
+	/// the flat-chamfer line toward the original sharp corner (0 = the flat chamfer itself,
+	/// 0.9 = almost the original corner). TwoStep always uses 2 segments, whatever
+	/// <paramref name="segments"/> says, because a two-flat profile has exactly one ridge.
+	/// Bullnose is a round-over at the largest radius that still fits: it tries
+	/// <paramref name="radius"/> first, and if that collapses a face it retries at the
+	/// suggested fit and reports the reduction as a warning instead of failing.
+	/// </summary>
+	public enum BlendProfile { Round, TwoStep, Bullnose }
+
+	public sealed class BlendOptions
+	{
+		public BlendProfile Profile = BlendProfile.Round;
+		public float BreakFraction = 0.4f;
+		/// <summary>Per-edge radius (fillet) or distance (chamfer), overriding Size for that edge.</summary>
+		public Dictionary<EdgeKey, float> EdgeSizes;
+		/// <summary>Per-face setback for an edge, overriding the edge's setback on that face only.
+		/// This is what makes an asymmetric chamfer possible: the two faces meeting at an edge
+		/// get different cut distances, and the bridge strip between them is the asymmetric flat.</summary>
+		public Dictionary<(int Face, EdgeKey Edge), float> FaceSetbacks;
+	}
+
+	public static BlendReport FilletProfileReport( PolyMesh mesh, float radius, float angleThresholdDegrees,
+		int segments, BlendProfile profile, float breakFraction = 0.4f )
+	{
+		if ( profile == BlendProfile.Bullnose )
+		{
+			var first = FilletReport( mesh, radius, angleThresholdDegrees, Math.Max( 4, segments ) );
+			if ( first.Failure is null || first.SuggestedSize <= 0f ) return first;
+			var second = FilletReport( mesh, first.SuggestedSize, angleThresholdDegrees, Math.Max( 4, segments ) );
+			if ( second.Failure is null )
+				second.Warnings.Add( new FeatureDiagnostic( DiagnosticSeverity.Warning,
+					$"Bullnose radius reduced from {radius:0.###} to {first.SuggestedSize:0.###}",
+					"The full round-over would have eaten a face, so the largest radius that still fits was used instead.",
+					remedies: new[] { "Use a thinner stock for a fuller round-over", "Accept the reduced radius" } ) );
+			return second;
+		}
+		if ( profile == BlendProfile.TwoStep )
+			return Apply( mesh, radius, angleThresholdDegrees, 2, rounded: true, explicitEdges: null,
+				options: new BlendOptions { Profile = BlendProfile.TwoStep, BreakFraction = Math.Clamp( breakFraction, 0f, 0.9f ) } );
+		return FilletReport( mesh, radius, angleThresholdDegrees, segments );
+	}
+
+	public static BlendReport FilletProfileReport( PolyMesh mesh, float radius, int segments,
+		IEnumerable<EdgeKey> edges, BlendProfile profile, float breakFraction = 0.4f )
+	{
+		if ( profile == BlendProfile.Bullnose )
+		{
+			var first = FilletReport( mesh, radius, Math.Max( 4, segments ), edges );
+			if ( first.Failure is null || first.SuggestedSize <= 0f ) return first;
+			var second = FilletReport( mesh, first.SuggestedSize, Math.Max( 4, segments ), edges );
+			if ( second.Failure is null )
+				second.Warnings.Add( new FeatureDiagnostic( DiagnosticSeverity.Warning,
+					$"Bullnose radius reduced from {radius:0.###} to {first.SuggestedSize:0.###}",
+					"The full round-over would have eaten a face, so the largest radius that still fits was used instead.",
+					remedies: new[] { "Use a thinner stock for a fuller round-over", "Accept the reduced radius" } ) );
+			return second;
+		}
+		if ( profile == BlendProfile.TwoStep )
+			return Apply( mesh, radius, 0f, 2, rounded: true, explicitEdges: ToSet( edges ),
+				options: new BlendOptions { Profile = BlendProfile.TwoStep, BreakFraction = Math.Clamp( breakFraction, 0f, 0.9f ) } );
+		return FilletReport( mesh, radius, segments, edges );
+	}
+
+	/// <summary>Asymmetric chamfer: the face of each selected edge whose normal is closest to
+	/// <paramref name="referenceDirection"/> is cut back by <paramref name="distanceA"/>, the
+	/// other face by <paramref name="distanceB"/>. Which face is "A" is therefore determined
+	/// by direction, not by face order — a script can say "3 on top, 1 on the side" by
+	/// passing the top direction and distanceA 3, distanceB 1.</summary>
+	public static BlendReport ChamferAsymmetricReport( PolyMesh mesh, float distanceA, float distanceB,
+		Vec3 referenceDirection, float angleThresholdDegrees )
+	{
+		var (keys, faceSetbacks) = AsymmetricSetup( mesh, distanceA, distanceB, referenceDirection, angleThresholdDegrees, null );
+		if ( keys.Count == 0 )
+			return Apply( mesh, Math.Max( distanceA, distanceB ), angleThresholdDegrees, 1, rounded: false, explicitEdges: new HashSet<EdgeKey>() );
+		return Apply( mesh, Math.Max( distanceA, distanceB ), 0f, 1, rounded: false, explicitEdges: keys,
+			options: new BlendOptions { FaceSetbacks = faceSetbacks } );
+	}
+
+	public static BlendReport ChamferAsymmetricReport( PolyMesh mesh, float distanceA, float distanceB,
+		Vec3 referenceDirection, IEnumerable<EdgeKey> edges )
+	{
+		var (keys, faceSetbacks) = AsymmetricSetup( mesh, distanceA, distanceB, referenceDirection, 0f, edges );
+		if ( keys.Count == 0 )
+			return Apply( mesh, Math.Max( distanceA, distanceB ), 0f, 1, rounded: false, explicitEdges: new HashSet<EdgeKey>() );
+		return Apply( mesh, Math.Max( distanceA, distanceB ), 0f, 1, rounded: false, explicitEdges: keys,
+			options: new BlendOptions { FaceSetbacks = faceSetbacks } );
+	}
+
+	static (HashSet<EdgeKey> Keys, Dictionary<(int Face, EdgeKey Edge), float> FaceSetbacks) AsymmetricSetup(
+		PolyMesh mesh, float distanceA, float distanceB, Vec3 referenceDirection,
+		float angleThresholdDegrees, IEnumerable<EdgeKey> edges )
+	{
+		var edgeFaces = mesh.BuildEdgeFaces();
+		var normals = mesh.Faces.Select( mesh.FaceNormal ).ToArray();
+		var dir = referenceDirection.LengthSquared > 1e-12f ? referenceDirection.Normal : new Vec3( 0, 0, 1 );
+		var wanted = edges is null ? null : ToSet( edges );
+		var keys = new HashSet<EdgeKey>();
+		var faceSetbacks = new Dictionary<(int Face, EdgeKey Edge), float>();
+		foreach ( var (key, faces) in edgeFaces )
+		{
+			if ( faces.Count != 2 ) continue;
+			if ( wanted is not null && !wanted.Contains( key ) ) continue;
+			if ( wanted is null )
+			{
+				var deg = MathF.Acos( Math.Clamp( Vec3.Dot( normals[faces[0]], normals[faces[1]] ), -1f, 1f ) ) * 180f / MathF.PI;
+				if ( deg < angleThresholdDegrees ) continue;
+			}
+			var aFace = Vec3.Dot( normals[faces[0]], dir ) >= Vec3.Dot( normals[faces[1]], dir ) ? faces[0] : faces[1];
+			var bFace = aFace == faces[0] ? faces[1] : faces[0];
+			keys.Add( key );
+			faceSetbacks[(aFace, key)] = distanceA;
+			faceSetbacks[(bFace, key)] = distanceB;
+		}
+		return (keys, faceSetbacks);
+	}
+
+	/// <summary>Variable-radius fillet: each edge in <paramref name="edgeSizes"/> is rounded
+	/// at its own radius. Edges not in the map are untouched. A radius at or below zero for
+	/// an edge means that edge is skipped, so a falloff that fades to zero does not create
+	/// zero-width strips.</summary>
+	public static BlendReport FilletVariableReport( PolyMesh mesh, Dictionary<EdgeKey, float> edgeSizes, int segments )
+	{
+		var live = edgeSizes.Where( kv => kv.Value > 0f ).ToDictionary( kv => kv.Key, kv => kv.Value );
+		if ( live.Count == 0 )
+			return Apply( mesh, 0.001f, 0f, Math.Max( 1, segments ), rounded: true, explicitEdges: new HashSet<EdgeKey>() );
+		return Apply( mesh, live.Values.Max(), 0f, Math.Max( 1, segments ), rounded: true, explicitEdges: new HashSet<EdgeKey>( live.Keys ),
+			options: new BlendOptions { EdgeSizes = live } );
+	}
+
 	static HashSet<EdgeKey> ToSet( IEnumerable<EdgeKey> edges )
 	{
 		if ( edges is HashSet<EdgeKey> set )
@@ -100,7 +232,7 @@ public static class EdgeBlend
 	/// from the same vertex is that vertex's cut too, so it takes the same weights.
 	/// </summary>
 	static BlendReport Apply( PolyMesh mesh, float size, float angleThresholdDegrees, int segments, bool rounded,
-		HashSet<EdgeKey> explicitEdges )
+		HashSet<EdgeKey> explicitEdges, BlendOptions options = null )
 	{
 		var report = new BlendReport { OriginalVolume = mesh.SignedVolume() };
 		var noun = rounded ? "radius" : "distance";
@@ -118,7 +250,7 @@ public static class EdgeBlend
 			return report;
 		}
 
-		var work = Cut( mesh, size, angleThresholdDegrees, rounded, explicitEdges );
+		var work = Cut( mesh, size, angleThresholdDegrees, rounded, explicitEdges, options );
 		report.SelectedEdges = work.Selected.Count;
 		report.SharpestDegrees = work.SharpestDegrees;
 
@@ -147,7 +279,7 @@ public static class EdgeBlend
 
 		if ( collapsed > 0 )
 		{
-			var fit = Bisect( size, s => FitsAll( mesh, s, angleThresholdDegrees, segments, rounded, explicitEdges ) );
+			var fit = Bisect( size, s => FitsAll( mesh, s, angleThresholdDegrees, segments, rounded, explicitEdges, options ) );
 			report.SuggestedSize = fit;
 			report.Mesh = mesh.Clone();
 			report.Failure = new FeatureDiagnostic(
@@ -160,12 +292,12 @@ public static class EdgeBlend
 			return report;
 		}
 
-		var result = Finish( work, shrunk, segments, rounded, out var flattened, out var uncapped );
+		var result = Finish( work, shrunk, segments, rounded, options, out var flattened, out var uncapped );
 		report.ResultVolume = result.SignedVolume();
 
 		if ( report.ResultVolume <= 0f )
 		{
-			var fit = Bisect( size, s => FitsAll( mesh, s, angleThresholdDegrees, segments, rounded, explicitEdges ) );
+			var fit = Bisect( size, s => FitsAll( mesh, s, angleThresholdDegrees, segments, rounded, explicitEdges, options ) );
 
 			report.SuggestedSize = fit;
 			report.Mesh = mesh.Clone();
@@ -232,24 +364,24 @@ public static class EdgeBlend
 	}
 
 	static PolyMesh ApplyUnchecked( PolyMesh mesh, float size, float angleThresholdDegrees, int segments, bool rounded,
-		HashSet<EdgeKey> explicitEdges )
+		HashSet<EdgeKey> explicitEdges, BlendOptions options = null )
 	{
 		if ( size <= 0f )
 			return mesh.Clone();
 
-		var work = Cut( mesh, size, angleThresholdDegrees, rounded, explicitEdges );
+		var work = Cut( mesh, size, angleThresholdDegrees, rounded, explicitEdges, options );
 
 		if ( work.Selected.Count == 0 )
 			return mesh.Clone();
 
 		var shrunk = BuildShrunkFaces( work );
-		return Finish( work, shrunk, segments, rounded, out _, out _ );
+		return Finish( work, shrunk, segments, rounded, options, out _, out _ );
 	}
 
 	static bool ShrinkFits( PolyMesh mesh, float size, float angleThresholdDegrees, bool rounded,
-		HashSet<EdgeKey> explicitEdges )
+		HashSet<EdgeKey> explicitEdges, BlendOptions options = null )
 	{
-		var work = Cut( mesh, size, angleThresholdDegrees, rounded, explicitEdges );
+		var work = Cut( mesh, size, angleThresholdDegrees, rounded, explicitEdges, options );
 
 		if ( work.Selected.Count == 0 )
 			return true;
@@ -259,12 +391,12 @@ public static class EdgeBlend
 	}
 
 	static bool FitsAll( PolyMesh mesh, float size, float angleThresholdDegrees, int segments, bool rounded,
-		HashSet<EdgeKey> explicitEdges )
+		HashSet<EdgeKey> explicitEdges, BlendOptions options = null )
 	{
-		if ( !ShrinkFits( mesh, size, angleThresholdDegrees, rounded, explicitEdges ) )
+		if ( !ShrinkFits( mesh, size, angleThresholdDegrees, rounded, explicitEdges, options ) )
 			return false;
 
-		return ApplyUnchecked( mesh, size, angleThresholdDegrees, segments, rounded, explicitEdges ).SignedVolume() > 0f;
+		return ApplyUnchecked( mesh, size, angleThresholdDegrees, segments, rounded, explicitEdges, options ).SignedVolume() > 0f;
 	}
 
 	static float Bisect( float size, Func<float, bool> fits )
@@ -296,6 +428,8 @@ public static class EdgeBlend
 		public List<int>[] VertexFaces;
 		public HashSet<EdgeKey> Selected;
 		public Dictionary<EdgeKey, float> Setbacks;
+		public Dictionary<(int Face, EdgeKey Edge), float> FaceSetbacks;
+		public BlendOptions Options;
 		public Dictionary<(int Face, int Vertex), int> CornerPoint;
 		public Dictionary<(int Face, EdgeKey), int> EdgeFrom;
 		public Dictionary<(int Face, int Vertex), EdgeKey> NextEdgeAtVertex;
@@ -308,7 +442,7 @@ public static class EdgeBlend
 	}
 
 	static CutWork Cut( PolyMesh mesh, float size, float angleThresholdDegrees, bool rounded,
-		HashSet<EdgeKey> explicitEdges )
+		HashSet<EdgeKey> explicitEdges, BlendOptions options = null )
 	{
 		var edgeFaces = mesh.BuildEdgeFaces();
 		var vertexFaces = mesh.BuildVertexFaces();
@@ -316,7 +450,7 @@ public static class EdgeBlend
 		var selected = explicitEdges is null
 			? SelectEdges( mesh, edgeFaces, faceNormals, angleThresholdDegrees )
 			: SelectExplicit( edgeFaces, explicitEdges );
-		var setback = Setbacks( selected, edgeFaces, faceNormals, size, rounded, out var clamped );
+		var setback = Setbacks( selected, edgeFaces, faceNormals, size, rounded, options, out var clamped );
 
 		var work = new CutWork
 		{
@@ -326,6 +460,8 @@ public static class EdgeBlend
 			VertexFaces = vertexFaces,
 			Selected = selected,
 			Setbacks = setback,
+			FaceSetbacks = options?.FaceSetbacks,
+			Options = options,
 			CornerPoint = new Dictionary<(int Face, int Vertex), int>(),
 			EdgeFrom = new Dictionary<(int Face, EdgeKey), int>(),
 			NextEdgeAtVertex = new Dictionary<(int Face, int Vertex), EdgeKey>(),
@@ -358,7 +494,8 @@ public static class EdgeBlend
 
 				var point = CutCorner(
 					mesh.Positions[prev], mesh.Positions[v], mesh.Positions[next], n,
-					Setback( setback, prevKey ), Setback( setback, nextKey ), ref squared );
+					FaceSetback( options?.FaceSetbacks, fi, prevKey, setback ),
+					FaceSetback( options?.FaceSetbacks, fi, nextKey, setback ), ref squared );
 
 				int index;
 
@@ -516,7 +653,7 @@ public static class EdgeBlend
 		return sharpest;
 	}
 
-	static PolyMesh Finish( CutWork work, PolyMesh result, int segments, bool rounded,
+	static PolyMesh Finish( CutWork work, PolyMesh result, int segments, bool rounded, BlendOptions options,
 		out int flattened, out int uncapped )
 	{
 		var mesh = work.Source;
@@ -533,7 +670,7 @@ public static class EdgeBlend
 		// Pass 2 already ran: `result` holds the shrunk faces. Continue from the original Apply
 		// at pass 2.5.
 		var rails = rounded
-			? ArcRails( mesh, result, selected, edgeFaces, edgeFrom, cornerPoint, faceNormals, work.BlendSize, segments )
+			? ArcRails( mesh, result, selected, edgeFaces, edgeFrom, cornerPoint, faceNormals, work.BlendSize, segments, options )
 			: new Dictionary<EdgeKey, Rails>();
 
 		if ( rounded && segments >= 2 )
@@ -720,9 +857,9 @@ public static class EdgeBlend
 	static Dictionary<EdgeKey, Rails> ArcRails(
 		PolyMesh mesh, PolyMesh result, HashSet<EdgeKey> selected,
 		Dictionary<EdgeKey, List<int>> edgeFaces,
-		Dictionary<(int Face, EdgeKey Edge), int> edgeFrom,
+		Dictionary<(int Face, EdgeKey), int> edgeFrom,
 		Dictionary<(int Face, int Vertex), int> cornerPoint,
-		Vec3[] faceNormals, float radius, int segments )
+		Vec3[] faceNormals, float radius, int segments, BlendOptions options )
 	{
 		var rails = new Dictionary<EdgeKey, Rails>();
 
@@ -749,16 +886,17 @@ public static class EdgeBlend
 			// The direction the AB-side face traverses the edge is what breaks the tie.
 			var along = (mesh.Positions[key.B] - mesh.Positions[key.A]).Normal;
 			var convex = Vec3.Dot( Vec3.Cross( nA, nB ), along ) > 0f;
-			var signed = convex ? radius : -radius;
+			var edgeRadius = options?.EdgeSizes is not null && options.EdgeSizes.TryGetValue( key, out var er ) ? er : radius;
+			var signed = convex ? edgeRadius : -edgeRadius;
 
 			var atA = Arc( result, cornerPoint[(fAtoB, key.A)], cornerPoint[(fBtoA, key.A)],
-				nA, nB, signed, segments, key.A, mesh );
+				nA, nB, signed, segments, key.A, mesh, options );
 
 			if ( atA is null )
 				continue;
 
 			var atB = Arc( result, cornerPoint[(fAtoB, key.B)], cornerPoint[(fBtoA, key.B)],
-				nA, nB, signed, segments, key.B, mesh );
+				nA, nB, signed, segments, key.B, mesh, options );
 
 			if ( atB is null )
 				continue;
@@ -778,9 +916,27 @@ public static class EdgeBlend
 	/// rather than a corner some other edge has dragged elsewhere.
 	/// </summary>
 	static int[] Arc( PolyMesh result, int i0, int i1, Vec3 nA, Vec3 nB, float signedRadius,
-		int segments, int vertex, PolyMesh source )
+		int segments, int vertex, PolyMesh source, BlendOptions options = null )
 	{
 		var rail = new int[segments + 1];
+
+		// TwoStep: the middle point is NOT on the arc. It sits on the segment between the
+		// two tangent points, pushed toward the original sharp corner by BreakFraction, so
+		// the strip is two flats meeting at a ridge — the Hard Ops two-segment bevel.
+		// The centre-agreement check below is an arc check and does not apply here.
+		if ( options?.Profile == BlendProfile.TwoStep && segments == 2 && i0 != i1 )
+		{
+			var t0 = result.Positions[i0];
+			var t1 = result.Positions[i1];
+			var corner = source.Positions[vertex];
+			var mid = (t0 + t1) * 0.5f;
+			var ridge = mid + (corner - mid) * options.BreakFraction;
+			rail[0] = i0;
+			rail[1] = result.AddVertex( ridge );
+			rail[2] = i1;
+			result.Skin?.Vertices.Add( source.IsRigged ? source.Skin[vertex] : Array.Empty<BoneWeight>() );
+			return rail;
+		}
 
 		// An end where both faces kept the same point is an uncut corner: the rail is that one
 		// point repeated, so the strip's quads collapse to triangles converging on it. That is the
@@ -866,16 +1022,17 @@ public static class EdgeBlend
 	/// </summary>
 	static Dictionary<EdgeKey, float> Setbacks(
 		HashSet<EdgeKey> selected, Dictionary<EdgeKey, List<int>> edgeFaces, Vec3[] faceNormals,
-		float size, bool rounded, out int clamped )
+		float size, bool rounded, BlendOptions options, out int clamped )
 	{
 		var setbacks = new Dictionary<EdgeKey, float>( selected.Count );
 		clamped = 0;
 
 		foreach ( var key in selected )
 		{
+			var edgeSize = options?.EdgeSizes is not null && options.EdgeSizes.TryGetValue( key, out var es ) ? es : size;
 			if ( !rounded )
 			{
-				setbacks[key] = size;
+				setbacks[key] = edgeSize;
 				continue;
 			}
 
@@ -891,11 +1048,11 @@ public static class EdgeBlend
 			if ( tan < 1f / MaxSetback )
 			{
 				clamped++;
-				setbacks[key] = size * MaxSetback;
+				setbacks[key] = edgeSize * MaxSetback;
 			}
 			else
 			{
-				setbacks[key] = size / tan;
+				setbacks[key] = edgeSize / tan;
 			}
 		}
 
@@ -906,6 +1063,13 @@ public static class EdgeBlend
 	/// not move".</summary>
 	static float Setback( Dictionary<EdgeKey, float> setbacks, EdgeKey key ) =>
 		setbacks.TryGetValue( key, out var width ) ? width : 0f;
+
+	/// <summary>Per-face setback for an asymmetric chamfer: the face's own cut distance
+	/// wins over the edge's, so the two faces meeting at one edge can be cut back by
+	/// different amounts. Falls back to the edge setback when no per-face value exists.</summary>
+	static float FaceSetback( Dictionary<(int Face, EdgeKey Edge), float> faceSetbacks, int face, EdgeKey key,
+		Dictionary<EdgeKey, float> setbacks ) =>
+		faceSetbacks is not null && faceSetbacks.TryGetValue( (face, key), out var width ) ? width : Setback( setbacks, key );
 
 	// --- unchanged from the flat-chamfer original -----------------------------------------------
 

@@ -1,0 +1,777 @@
+effigy 1
+rollback 2147483647
+materiallook 1 color=#e9e0c8 rough=0.7 metal=0
+refimage top 134.2 50.5 15.4 -1 0.6 1 /home/poo/Desktop/geppetto-desktop/angler-full.jpg
+feature Inflate2DFeature
+	id a4281a74
+	name Cranium
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings 2.10,8.80;3.08,10.15;3.81,10.99;4.38,11.36;4.86,11.26;5.34,10.74;5.90,9.80;6.54,8.25;7.20,6.03;7.86,3.38;8.49,0.53;9.08,-2.27;9.60,-4.80;10.09,-7.12;10.58,-9.44;11.02,-11.72;11.38,-13.92;11.62,-15.99;11.70,-17.90;11.67,-19.62;11.58,-21.19;11.37,-22.64;10.99,-23.99;10.38,-25.26;9.50,-26.50;8.29,-27.76;6.79,-29.04;5.06,-30.26;3.19,-31.31;1.24,-32.12;-0.70,-32.60;-2.86,-32.75;-5.36,-32.64;-7.92,-32.28;-10.30,-31.70;-12.25,-30.90;-13.50,-29.90;-13.93,-28.61;-13.70,-26.99;-13.04,-25.16;-12.16,-23.22;-11.27,-21.30;-10.60,-19.50;-10.18,-17.91;-9.86,-16.44;-9.53,-14.99;-9.10,-13.43;-8.49,-11.64;-7.60,-9.50;-6.30,-6.73;-4.64,-3.37;-2.80,0.21;-0.94,3.67;0.75,6.66|1.00,-7.40;2.70,-9.00;3.50,-10.80;3.70,-14.10;2.10,-17.60;1.20,-18.40;-0.70,-19.40;-3.10,-19.60;-4.00,-18.80;-4.60,-16.70;-4.80,-13.20;-4.50,-11.90;-3.80,-10.50;-2.00,-8.50;-0.80,-7.70
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.8
+end
+feature Inflate2DFeature
+	id 17b6555d
+	name EyeRim
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings 4.70,-20.40;4.50,-19.90;5.30,-19.70;5.30,-19.00;5.70,-19.20;5.50,-18.60;6.20,-18.10;6.10,-17.40;6.60,-17.40;6.20,-16.90;6.80,-16.90;6.30,-16.60;7.00,-16.10;6.40,-10.80;5.60,-9.20;1.10,-5.50;1.80,-7.00;0.70,-6.20;0.90,-6.80;-2.30,-8.10;-2.90,-7.60;-2.40,-8.40;-4.50,-10.50;-5.30,-13.50;-5.30,-16.00;-4.90,-16.70;-5.40,-17.10;-4.90,-17.30;-5.40,-17.60;-4.90,-17.50;-5.20,-18.00;-4.60,-18.00;-5.00,-18.60;-4.60,-18.30;-3.50,-19.80;-1.60,-20.80;0.90,-21.10;3.30,-20.80;3.60,-20.40;3.90,-20.70;3.80,-20.30;4.40,-20.50|1.00,-7.40;2.70,-9.00;3.50,-10.80;3.70,-14.10;2.10,-17.60;1.20,-18.40;-0.70,-19.40;-3.10,-19.60;-4.00,-18.80;-4.60,-16.70;-4.80,-13.20;-4.50,-11.90;-3.80,-10.50;-2.00,-8.50;-0.80,-7.70
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.6
+end
+feature TransformFeature
+	id e635f02c
+	name Transform 1
+	suppressed 0
+	visible 1
+	bodies Bodies 17b6555db0
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Translate 0 0 0.8
+end
+feature Inflate2DFeature
+	id 58f9d964
+	name Cheek
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -0.50,7.50;-0.90,5.00;-1.62,1.27;-2.54,-3.11;-3.54,-7.56;-4.50,-11.50;-5.45,-15.12;-6.48,-18.79;-7.52,-22.25;-8.55,-25.24;-9.50,-27.50;-10.46,-28.94;-11.46,-29.74;-12.38,-30.02;-13.10,-29.90;-13.50,-29.50;-13.50,-28.77;-13.18,-27.64;-12.65,-26.16;-12.05,-24.43;-11.50,-22.50;-11.03,-20.32;-10.56,-17.83;-10.03,-15.13;-9.40,-12.32;-8.60,-9.50;-7.52,-6.42;-6.19,-3.02;-4.80,0.34;-3.51,3.30;-2.50,5.50;-1.74,7.07;-1.12,8.24;-0.67,8.84;-0.45,8.65
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature TransformFeature
+	id c6688353
+	name Transform 2
+	suppressed 0
+	visible 1
+	bodies Bodies 58f9d964b0
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Translate 0 0 0.5
+end
+feature Inflate2DFeature
+	id e9a764d4
+	name TriFrame
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings 10.60,-37.10;10.90,-35.70;10.40,-33.40;8.30,-28.90;5.60,-25.60;4.10,-25.80;2.70,-27.70;1.50,-30.80;2.60,-33.50;4.60,-36.10;5.80,-36.80;7.70,-37.30|8.63,-34.98;8.80,-34.21;8.53,-32.95;7.37,-30.47;5.88,-28.66;5.06,-28.77;4.29,-29.81;3.63,-31.52;4.23,-33.00;5.33,-34.43;6.00,-34.82;7.04,-35.09
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature TransformFeature
+	id ef9333f0
+	name Transform 3
+	suppressed 0
+	visible 1
+	bodies Bodies e9a764d4b0
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Translate 0 0 0.8
+end
+feature Inflate2DFeature
+	id 44b62330
+	name Operculum
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -1.00,-32.00;-1.03,-32.95;-1.30,-33.94;-1.74,-34.92;-2.33,-35.79;-3.00,-36.50;-3.82,-37.06;-4.83,-37.53;-5.93,-37.87;-7.02,-38.04;-8.00,-38.00;-8.91,-37.72;-9.82,-37.22;-10.66,-36.56;-11.41,-35.80;-12.00,-35.00;-12.46,-34.11;-12.81,-33.10;-13.03,-32.02;-13.10,-30.97;-13.00,-30.00;-12.70,-29.05;-12.23,-28.06;-11.61,-27.16;-10.86,-26.43;-10.00,-26.00;-8.94,-25.90;-7.67,-26.06;-6.33,-26.42;-5.06,-26.92;-4.00,-27.50;-3.13,-28.21;-2.34,-29.08;-1.70,-30.06;-1.23,-31.05
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature TransformFeature
+	id 67005f23
+	name Transform 4
+	suppressed 0
+	visible 1
+	bodies Bodies 44b62330b0
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Translate 0 0 -0.5
+end
+feature Inflate2DFeature
+	id 92ed6a63
+	name JawVert1
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -11.00,-28.00;-11.62,-28.36;-12.31,-28.97;-12.97,-29.72;-13.50,-30.50;-13.93,-31.35;-14.28,-32.31;-14.50,-33.24;-14.50,-34.00;-14.21,-34.63;-13.69,-35.19;-13.07,-35.52;-12.50,-35.50;-11.99,-34.96;-11.47,-34.03;-10.96,-32.96;-10.50,-32.00;-10.01,-31.17;-9.50,-30.34;-9.12,-29.60;-9.00,-29.00;-9.24,-28.53;-9.75,-28.16;-10.38,-27.96
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.4
+end
+feature TransformFeature
+	id 6ae27fcf
+	name Transform 5
+	suppressed 0
+	visible 1
+	bodies Bodies 92ed6a63b0
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Translate 0 0 0.3
+end
+feature Inflate2DFeature
+	id 6942e0c6
+	name JawVert2
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -13.00,-32.50;-13.52,-32.92;-14.06,-33.41;-14.57,-33.94;-15.00,-34.50;-15.39,-35.12;-15.75,-35.81;-15.98,-36.47;-16.00,-37.00;-15.71,-37.45;-15.19,-37.84;-14.57,-38.07;-14.00,-38.00;-13.48,-37.54;-12.94,-36.78;-12.43,-35.88;-12.00,-35.00;-11.61,-34.05;-11.25,-33.00;-11.02,-32.07;-11.00,-31.50;-11.29,-31.41;-11.81,-31.66;-12.43,-32.07
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.4
+end
+feature TransformFeature
+	id 00745271
+	name Transform 6
+	suppressed 0
+	visible 1
+	bodies Bodies 6942e0c6b0
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Translate 0 0 0.3
+end
+feature Inflate2DFeature
+	id 53d7f8e3
+	name RearUnderside
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings 10.00,-28.00;10.16,-28.84;9.92,-29.88;9.40,-31.00;8.72,-32.08;8.00,-33.00;7.19,-33.75;6.22,-34.42;5.14,-35.00;4.05,-35.53;3.00,-36.00;2.02,-36.44;1.05,-36.85;0.07,-37.19;-0.94,-37.42;-2.00,-37.50;-3.18,-37.43;-4.47,-37.24;-5.77,-36.92;-6.98,-36.51;-8.00,-36.00;-8.87,-35.38;-9.66,-34.63;-10.30,-33.79;-10.77,-32.90;-11.00,-32.00;-10.98,-31.01;-10.75,-29.90;-10.33,-28.80;-9.74,-27.79;-9.00,-27.00;-8.07,-26.44;-6.94,-26.05;-5.66,-25.79;-4.33,-25.62;-3.00,-25.50;-1.65,-25.45;-0.22,-25.48;1.22,-25.60;2.65,-25.77;4.00,-26.00;5.39,-26.26;6.86,-26.55;8.22,-26.91;9.33,-27.38
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.4
+end
+feature TransformFeature
+	id 9915babe
+	name Transform 7
+	suppressed 0
+	visible 1
+	bodies Bodies 53d7f8e3b0
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Translate 0 0 -1
+end
+feature Inflate2DFeature
+	id 47b20fa5
+	name Spine_V00
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -2.00,-35.92;-0.79,-35.32;-0.45,-34.49;-0.31,-33.60;-1.02,-32.46;-2.23,-33.06;-2.57,-33.89;-2.71,-34.78
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature Inflate2DFeature
+	id 093b33f6
+	name Spine_V01
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -3.62,-41.70;-2.41,-41.10;-2.07,-40.27;-1.93,-39.38;-2.64,-38.24;-3.85,-38.84;-4.19,-39.67;-4.33,-40.56
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature Inflate2DFeature
+	id 5442be00
+	name Spine_V02
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -4.05,-45.65;-2.94,-44.90;-2.71,-44.02;-2.68,-43.12;-3.55,-42.09;-4.66,-42.84;-4.89,-43.72;-4.92,-44.62
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature Inflate2DFeature
+	id 7df7c17a
+	name Spine_V03
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -4.88,-51.59;-3.77,-50.84;-3.54,-49.96;-3.51,-49.06;-4.38,-48.03;-5.49,-48.78;-5.72,-49.66;-5.75,-50.56
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature Inflate2DFeature
+	id 65475a7a
+	name Spine_V04
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -5.39,-55.25;-4.28,-54.50;-4.05,-53.62;-4.02,-52.72;-4.89,-51.69;-6.00,-52.44;-6.23,-53.32;-6.26,-54.22
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature Inflate2DFeature
+	id 16a92cd7
+	name Spine_V05
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -6.22,-61.19;-5.11,-60.44;-4.88,-59.56;-4.85,-58.66;-5.72,-57.63;-6.83,-58.38;-7.06,-59.26;-7.09,-60.16
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature Inflate2DFeature
+	id b677d8e1
+	name Spine_V06
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -7.37,-64.72;-6.16,-64.12;-5.82,-63.29;-5.68,-62.40;-6.39,-61.26;-7.60,-61.86;-7.94,-62.69;-8.08,-63.58
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature Inflate2DFeature
+	id f5633a9a
+	name Spine_V07
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -8.99,-70.50;-7.78,-69.90;-7.44,-69.07;-7.30,-68.18;-8.01,-67.04;-9.22,-67.64;-9.56,-68.47;-9.70,-69.36
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature Inflate2DFeature
+	id 1ed2a081
+	name Spine_V08
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -10.06,-74.32;-8.85,-73.72;-8.51,-72.89;-8.37,-72.00;-9.08,-70.86;-10.29,-71.46;-10.63,-72.29;-10.77,-73.18
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature Inflate2DFeature
+	id 58a2400f
+	name Spine_V09
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -11.67,-80.10;-10.46,-79.50;-10.12,-78.67;-9.98,-77.78;-10.69,-76.64;-11.90,-77.24;-12.24,-78.07;-12.38,-78.96
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature Inflate2DFeature
+	id a9383713
+	name Spine_V10
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -13.30,-83.73;-12.03,-83.29;-11.59,-82.50;-11.33,-81.63;-11.90,-80.41;-13.17,-80.85;-13.61,-81.64;-13.87,-82.51
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature Inflate2DFeature
+	id b9caf59d
+	name Spine_V11
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -15.62,-89.26;-14.35,-88.82;-13.91,-88.03;-13.65,-87.16;-14.22,-85.94;-15.49,-86.38;-15.93,-87.17;-16.19,-88.04
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature Inflate2DFeature
+	id f39c2714
+	name Spine_V12
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -17.33,-93.33;-16.06,-92.89;-15.62,-92.10;-15.36,-91.23;-15.93,-90.01;-17.20,-90.45;-17.64,-91.24;-17.90,-92.11
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature Inflate2DFeature
+	id 4a0292b4
+	name Spine_V13
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -19.65,-98.86;-18.38,-98.42;-17.94,-97.63;-17.68,-96.76;-18.25,-95.54;-19.52,-95.98;-19.96,-96.77;-20.22,-97.64
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature Inflate2DFeature
+	id b7798969
+	name Spine_V14
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -18.83,-103.25;-17.96,-102.22;-17.99,-101.32;-18.22,-100.44;-19.33,-99.69;-20.20,-100.72;-20.17,-101.62;-19.94,-102.50
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature Inflate2DFeature
+	id b8dbfbf1
+	name Spine_V15
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -18.00,-109.19;-17.13,-108.16;-17.16,-107.26;-17.39,-106.38;-18.50,-105.63;-19.37,-106.66;-19.34,-107.56;-19.11,-108.44
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature Inflate2DFeature
+	id 9c06d880
+	name Spine_V16
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -15.81,-112.29;-15.38,-111.01;-15.73,-110.18;-16.26,-109.45;-17.57,-109.15;-18.00,-110.43;-17.65,-111.26;-17.12,-111.99
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature TransformFeature
+	id a5346c7a
+	name Transform 8
+	suppressed 0
+	visible 1
+	bodies Bodies 9c06d880b0
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Translate 0 0 -0.4
+end
+feature Inflate2DFeature
+	id 3d58312e
+	name Spine_V17
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -12.88,-117.52;-12.45,-116.24;-12.80,-115.41;-13.33,-114.68;-14.64,-114.38;-15.07,-115.66;-14.72,-116.49;-14.19,-117.22
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature TransformFeature
+	id 246f0384
+	name Transform 9
+	suppressed 0
+	visible 1
+	bodies Bodies 3d58312eb0
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Translate 0 0 -0.4
+end
+feature Inflate2DFeature
+	id 30f8df42
+	name Spine_V18
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -9.13,-120.82;-9.17,-119.47;-9.79,-118.81;-10.53,-118.31;-11.87,-118.48;-11.83,-119.83;-11.21,-120.49;-10.47,-121.00
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature TransformFeature
+	id 7ffba392
+	name Transform 10
+	suppressed 0
+	visible 1
+	bodies Bodies 30f8df42b0
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Translate 0 0 -0.4
+end
+feature Inflate2DFeature
+	id d37f9987
+	name Spine_V19
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -2.17,-126.25;-2.32,-124.92;-2.99,-124.32;-3.78,-123.88;-5.09,-124.17;-4.94,-125.50;-4.27,-126.10;-3.48,-126.54
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature TransformFeature
+	id 9758e02f
+	name Transform 11
+	suppressed 0
+	visible 1
+	bodies Bodies d37f9987b0
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Translate 0 0 -0.4
+end
+feature Inflate2DFeature
+	id d774cab4
+	name Spine_V20
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -4.60,-130.09;-3.29,-130.38;-2.50,-129.94;-1.83,-129.34;-1.68,-128.01;-2.99,-127.72;-3.78,-128.16;-4.45,-128.76
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature TransformFeature
+	id 13dd971f
+	name Transform 12
+	suppressed 0
+	visible 1
+	bodies Bodies d774cab4b0
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Translate 0 0 -0.8
+end
+feature Inflate2DFeature
+	id a0d2f63d
+	name Spine_V21
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -10.77,-130.18;-10.09,-131.34;-9.23,-131.62;-8.33,-131.70;-7.25,-130.90;-7.93,-129.74;-8.79,-129.46;-9.69,-129.38
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature TransformFeature
+	id 3bb42bec
+	name Transform 13
+	suppressed 0
+	visible 1
+	bodies Bodies a0d2f63db0
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Translate 0 0 -0.8
+end
+feature Inflate2DFeature
+	id 2f36ce12
+	name Spine_V22
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -16.65,-128.98;-15.97,-130.14;-15.11,-130.42;-14.21,-130.50;-13.13,-129.70;-13.81,-128.54;-14.67,-128.26;-15.57,-128.18
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature TransformFeature
+	id 73fc8868
+	name Transform 14
+	suppressed 0
+	visible 1
+	bodies Bodies 2f36ce12b0
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Translate 0 0 -0.8
+end
+feature Inflate2DFeature
+	id 5fabbceb
+	name Spine_V23
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -18.94,-125.91;-18.98,-127.25;-18.40,-127.94;-17.68,-128.49;-16.34,-128.39;-16.30,-127.05;-16.88,-126.36;-17.60,-125.81
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature TransformFeature
+	id 01c2a0cd
+	name Transform 15
+	suppressed 0
+	visible 1
+	bodies Bodies 5fabbcebb0
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Translate 0 0 -0.8
+end
+feature Inflate2DFeature
+	id 09a8b170
+	name Spine_V24
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -23.28,-121.77;-23.32,-123.11;-22.74,-123.80;-22.02,-124.35;-20.68,-124.25;-20.64,-122.91;-21.22,-122.22;-21.94,-121.67
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature TransformFeature
+	id 4e36f0ab
+	name Transform 16
+	suppressed 0
+	visible 1
+	bodies Bodies 09a8b170b0
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Translate 0 0 -0.8
+end
+feature Inflate2DFeature
+	id 889cca1b
+	name Spine_V25
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -24.47,-116.84;-25.27,-117.92;-25.19,-118.82;-24.91,-119.68;-23.75,-120.36;-22.95,-119.28;-23.03,-118.38;-23.31,-117.52
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature TransformFeature
+	id 989103bf
+	name Transform 17
+	suppressed 0
+	visible 1
+	bodies Bodies 889cca1bb0
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Translate 0 0 -0.8
+end
+feature Inflate2DFeature
+	id 7e4bd052
+	name Spine_V26
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -25.64,-110.95;-26.44,-112.03;-26.36,-112.93;-26.08,-113.79;-24.92,-114.47;-24.12,-113.39;-24.20,-112.49;-24.48,-111.63
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature TransformFeature
+	id 377571a6
+	name Transform 18
+	suppressed 0
+	visible 1
+	bodies Bodies 7e4bd052b0
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Translate 0 0 -0.8
+end
+feature Inflate2DFeature
+	id abcff090
+	name Spine_V27
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -26.20,-103.30;-27.20,-104.20;-27.30,-105.10;-27.20,-106.00;-26.20,-106.90;-25.20,-106.00;-25.10,-105.10;-25.20,-104.20
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature TransformFeature
+	id 0aa3de56
+	name Transform 19
+	suppressed 0
+	visible 1
+	bodies Bodies abcff090b0
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Translate 0 0 -0.8
+end
+feature Inflate2DFeature
+	id a5421a54
+	name Spine_V28
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -26.20,-97.30;-27.20,-98.20;-27.30,-99.10;-27.20,-100.00;-26.20,-100.90;-25.20,-100.00;-25.10,-99.10;-25.20,-98.20
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature TransformFeature
+	id 8d388277
+	name Transform 20
+	suppressed 0
+	visible 1
+	bodies Bodies a5421a54b0
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Translate 0 0 -0.8
+end
+feature Inflate2DFeature
+	id f99890fd
+	name Spine_V29
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -26.20,-91.30;-27.20,-92.20;-27.30,-93.10;-27.20,-94.00;-26.20,-94.90;-25.20,-94.00;-25.10,-93.10;-25.20,-92.20
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature TransformFeature
+	id 217a909c
+	name Transform 21
+	suppressed 0
+	visible 1
+	bodies Bodies f99890fdb0
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Translate 0 0 -0.8
+end
+feature Inflate2DFeature
+	id ab60696f
+	name Spine_V30
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -25.72,-87.95;-26.81,-88.75;-27.00,-89.64;-26.99,-90.55;-26.08,-91.55;-24.99,-90.75;-24.80,-89.86;-24.81,-88.95
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature TransformFeature
+	id 17bb88a7
+	name Transform 22
+	suppressed 0
+	visible 1
+	bodies Bodies ab60696fb0
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Translate 0 0 -0.8
+end
+feature Inflate2DFeature
+	id 50c9ad60
+	name Spine_V31
+	suppressed 0
+	visible 1
+	param Bevel 0.1
+	param Profile 1
+	param Rings -25.13,-81.98;-26.22,-82.78;-26.41,-83.67;-26.40,-84.58;-25.49,-85.58;-24.40,-84.78;-24.21,-83.89;-24.22,-82.98
+	param Scale 1
+	param Slot 1
+	param Symmetry 0
+	param Thickness 0.5
+end
+feature TransformFeature
+	id a7fa3247
+	name Transform 23
+	suppressed 0
+	visible 1
+	bodies Bodies 50c9ad60b0
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Translate 0 0 -0.8
+end

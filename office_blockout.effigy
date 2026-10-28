@@ -1,0 +1,146 @@
+effigy 1
+rollback 2147483647
+materiallook 0 color=#8c8273 rough=0.9 metal=0
+materiallook 1 color=#a8a094 rough=0.9 metal=0
+materiallook 2 color=#b5a98e rough=0.95 metal=0
+materiallook 3 color=#7a6f5e rough=0.85 metal=0
+feature PrimitiveFeature
+	id d8058dbc
+	name FloorSlab
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position 0 0.2 0
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 12
+	param SizeY 10
+	param SizeZ 0.4
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id b5c12fda
+	name WallBack
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 0 1.8 5
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 12
+	param SizeY 0.4
+	param SizeZ 3.2
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id f8dda4db
+	name WallLeft
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -6 1.8 0
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.4
+	param SizeY 10
+	param SizeZ 3.2
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 6a22f7df
+	name CubicleBack
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 2
+	param Position 1 0.8 2
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 5
+	param SizeY 0.2
+	param SizeZ 1.6
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 4afa4465
+	name CubicleSideL
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 2
+	param Position -1.5 0.8 0.2
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.2
+	param SizeY 3.6
+	param SizeZ 1.6
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 935a232c
+	name CubicleSideR
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 2
+	param Position 3.5 0.8 0.2
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.2
+	param SizeY 3.6
+	param SizeZ 1.6
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 4935332d
+	name DeskBlock
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 3
+	param Position 1 0.8 1.4
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 4.4
+	param SizeY 1.2
+	param SizeZ 0.8
+	param UniformScale 0
+end

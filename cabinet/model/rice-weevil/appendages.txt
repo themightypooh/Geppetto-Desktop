@@ -1,0 +1,54 @@
+echo "Left eye: a small lateral, partly dorsal oval reads as a compound eye without cartoon-sized pupils."
+add Primitive name=EyeL shape=Sphere width=0.34 depth=0.22 height=0.31 position=1.76,0.45,1.88 materialslot=3
+echo "Right eye: matching eye sits against the other side of the head capsule."
+add Primitive name=EyeR shape=Sphere width=0.34 depth=0.22 height=0.31 position=1.76,-0.45,1.88 materialslot=3
+echo "Left scape: the antenna originates on the rostrum and projects out to a real elbow."
+add Spline name=ScapeL points=2.04,0.17,1.57;2.12,0.34,1.57;2.16,0.58,1.52 radius=0.068 endradius×=0.72 sides=10 materialslot=4
+material 4 color=#58372a rough=0.66 metal=0.01
+echo "Right scape: mirrored rostral antenna, rather than forehead-mounted feelers."
+add Spline name=ScapeR points=2.04,-0.17,1.57;2.12,-0.34,1.57;2.16,-0.58,1.52 radius=0.068 endradius×=0.72 sides=10 materialslot=4
+echo "Left funicle: a short angled six-segment region hangs from the scape elbow."
+add Spline name=FunicleL points=2.16,0.58,1.52;2.28,0.66,1.4;2.36,0.68,1.27;2.43,0.69,1.16;2.51,0.69,1.08 radius=0.046 endradius×=0.72 sides=9 pointspersegment=3 materialslot=4
+echo "Right funicle: the opposite elbow resolves into the descending antennal shaft."
+add Spline name=FunicleR points=2.16,-0.58,1.52;2.28,-0.66,1.4;2.36,-0.68,1.27;2.43,-0.69,1.16;2.51,-0.69,1.08 radius=0.046 endradius×=0.72 sides=9 pointspersegment=3 materialslot=4
+echo "Left club: compact terminal sensory club thickens only beyond the fine funicle."
+add Profile name=ClubL along=Forward front=0,0.065;0.11,0.093;0.28,0.105;0.37,0.064 side=0,0.055;0.11,0.075;0.28,0.077;0.37,0.047 sides=12 position=2.47,0.7,1.03 materialslot=4
+echo "Right club: matching termination gives both antennae the weevil silhouette."
+add Profile name=ClubR along=Forward front=0,0.065;0.11,0.093;0.28,0.105;0.37,0.064 side=0,0.055;0.11,0.075;0.28,0.077;0.37,0.047 sides=12 position=2.47,-0.7,1.03 materialslot=4
+echo "Left fore coxa and femur: the front leg hinges below the pronotum, not off the shell edge."
+add Spline name=ForeFemurL points=0.83,0.68,1.22;0.98,0.96,0.92;1.34,1.28,0.59 radius=0.16 endradius×=0.68 sides=12 materialslot=4
+echo "Left fore tibia: a narrower shaft bends towards the floor from a distinct knee."
+add Spline name=ForeTibiaL points=1.34,1.28,0.59;1.2,1.48,0.27;1.1,1.6,0.15 radius=0.084 endradius×=0.57 sides=10 materialslot=4
+echo "Left fore tarsus: outward-jointed foot touches near the ground."
+add Spline name=ForeTarsusL points=1.1,1.6,0.15;1.26,1.77,0.085;1.48,1.82,0.07 radius=0.047 endradius×=0.28 sides=8 materialslot=4
+echo "Right fore femur: mirrored front hip and thigh establish a true first leg pair."
+add Spline name=ForeFemurR points=0.83,-0.68,1.22;0.98,-0.96,0.92;1.34,-1.28,0.59 radius=0.16 endradius×=0.68 sides=12 materialslot=4
+echo "Right fore tibia: the second front shin separates from its femur at the knee."
+add Spline name=ForeTibiaR points=1.34,-1.28,0.59;1.2,-1.48,0.27;1.1,-1.6,0.15 radius=0.084 endradius×=0.57 sides=10 materialslot=4
+echo "Right fore tarsus: angled foot matches the left without fusing into the abdomen."
+add Spline name=ForeTarsusR points=1.1,-1.6,0.15;1.26,-1.77,0.085;1.48,-1.82,0.07 radius=0.047 endradius×=0.28 sides=8 materialslot=4
+echo "Left middle femur: the second leg pair starts beneath the rear thorax."
+add Spline name=MidFemurL points=-0.75,0.72,1.17;-0.51,1.02,0.83;-0.29,1.42,0.52 radius=0.15 endradius×=0.68 sides=12 materialslot=4
+echo "Left middle tibia: thin hinged leg extends outward to a separate ankle."
+add Spline name=MidTibiaL points=-0.29,1.42,0.52;-0.5,1.62,0.27;-0.69,1.67,0.14 radius=0.078 endradius×=0.57 sides=10 materialslot=4
+echo "Left middle tarsus: the foot brings the second leg to ground height."
+add Spline name=MidTarsusL points=-0.69,1.67,0.14;-0.56,1.85,0.076;-0.35,1.93,0.065 radius=0.043 endradius×=0.25 sides=8 materialslot=4
+echo "Right middle femur: a separate second hip avoids the mistaken four-legged insect."
+add Spline name=MidFemurR points=-0.75,-0.72,1.17;-0.51,-1.02,0.83;-0.29,-1.42,0.52 radius=0.15 endradius×=0.68 sides=12 materialslot=4
+echo "Right middle tibia: matches the inward bend of the other middle knee."
+add Spline name=MidTibiaR points=-0.29,-1.42,0.52;-0.5,-1.62,0.27;-0.69,-1.67,0.14 radius=0.078 endradius×=0.57 sides=10 materialslot=4
+echo "Right middle tarsus: independent contact point preserves readable articulation."
+add Spline name=MidTarsusR points=-0.69,-1.67,0.14;-0.56,-1.85,0.076;-0.35,-1.93,0.065 radius=0.043 endradius×=0.25 sides=8 materialslot=4
+echo "Left hind femur: the third hip begins below the elytral shoulder, not at its dorsal rim."
+add Spline name=HindFemurL points=-1.85,0.74,1.08;-1.81,1.03,0.8;-2.12,1.49,0.5 radius=0.17 endradius×=0.72 sides=12 materialslot=4
+echo "Left hind tibia: joint folds back beneath the wing-covers with a slender shin."
+add Spline name=HindTibiaL points=-2.12,1.49,0.5;-2.36,1.65,0.27;-2.56,1.77,0.14 radius=0.085 endradius×=0.55 sides=10 materialslot=4
+echo "Left hind tarsus: last foot anchors the posterior leg pair."
+add Spline name=HindTarsusL points=-2.56,1.77,0.14;-2.7,1.9,0.079;-2.84,1.96,0.066 radius=0.047 endradius×=0.25 sides=8 materialslot=4
+echo "Right hind femur: separate third hip completes six walking legs."
+add Spline name=HindFemurR points=-1.85,-0.74,1.08;-1.81,-1.03,0.8;-2.12,-1.49,0.5 radius=0.17 endradius×=0.72 sides=12 materialslot=4
+echo "Right hind tibia: kinked shin gives the rear legs a tucked stance."
+add Spline name=HindTibiaR points=-2.12,-1.49,0.5;-2.36,-1.65,0.27;-2.56,-1.77,0.14 radius=0.085 endradius×=0.55 sides=10 materialslot=4
+echo "Right hind tarsus: the sixth grounded foot keeps the abdomen clear of the floor."
+add Spline name=HindTarsusR points=-2.56,-1.77,0.14;-2.7,-1.9,0.079;-2.84,-1.96,0.066 radius=0.047 endradius×=0.25 sides=8 materialslot=4
+save rice-weevil.effigy

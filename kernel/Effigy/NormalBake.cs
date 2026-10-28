@@ -221,6 +221,28 @@ public sealed class BakeOptions
 	public float BevelRadius;
 
 	/// <summary>
+	/// Skew correction (P2): blend each texel's ray direction from the averaged
+	/// (cage) normal toward the low face normal, 0 = today's behaviour, 1 = fully
+	/// the face normal. Marmoset's skew map, as a scalar: it stops detail bending
+	/// away from a hard edge, at the cost of slightly less smooth shading.
+	/// </summary>
+	public float Skew;
+
+	/// <summary>
+	/// Hard-edge skew assist (P2): when above 0, any sample whose face normal
+	/// leans further than this many degrees from the averaged normal is blended
+	/// fully to the face normal, even if <see cref="Skew"/> is lower. 0 = off.
+	/// </summary>
+	public float SkewEdgeAngle;
+
+	/// <summary>Also derive a seam-free curvature map from the object-space normal
+	/// and position maps (P6), written as curvature3d.</summary>
+	public bool CurvatureWorld;
+
+	/// <summary>Write a hit/miss map alongside the bake (P4).</summary>
+	public bool ReportMiss;
+
+	/// <summary>
 	/// What the ID map (<see cref="BakeMaps.MaterialId"/>) colours by: one id per face of the high
 	/// mesh. Null means each face's material slot (<see cref="Face.Material"/>). A by-name or
 	/// multi-high bake (<see cref="NormalBake.BakeGroups"/>) can colour by which high body was hit
@@ -404,6 +426,19 @@ public sealed class BakeSet
 	/// <summary>What each texel's ray found, when <see cref="BakeOptions.KeepHits"/> asked for it; else null.</summary>
 	public BakeTexels Texels;
 
+	/// <summary>Hit/miss map (P4): white where a ray found the sculpt, black where
+	/// it missed. Built on every bake; only written to disk when report=1.</summary>
+	public BakedMap MissMap;
+
+	/// <summary>Seam-free curvature derived from object-space normals (P6), or null.</summary>
+	public BakedMap CurvatureWorld;
+
+	/// <summary>The curvature value that reads as white in <see cref="CurvatureWorld"/>.</summary>
+	public float CurvatureWorldRange;
+
+	/// <summary>Per-group hit/miss (P4): name, samples fired, samples that hit.</summary>
+	public List<(string Name, int Samples, int Hits)> GroupMiss = new();
+
 	/// <summary>The maps that were baked, with the short name each is written under.</summary>
 	public IEnumerable<(string Name, BakedMap Map)> Maps
 	{
@@ -412,6 +447,7 @@ public sealed class BakeSet
 			if ( Normal is not null ) yield return ("normal", Normal);
 			if ( AmbientOcclusion is not null ) yield return ("ao", AmbientOcclusion);
 			if ( Curvature is not null ) yield return ("curvature", Curvature);
+			if ( CurvatureWorld is not null ) yield return ("curvature3d", CurvatureWorld);
 			if ( Cavity is not null ) yield return ("cavity", Cavity);
 			if ( Height is not null ) yield return ("height", Height);
 			if ( Thickness is not null ) yield return ("thickness", Thickness);
@@ -429,6 +465,9 @@ public sealed class BakeSet
 		{
 			var c = System.Globalization.CultureInfo.InvariantCulture;
 			var lines = new List<string> { string.Format( c, "{0:N0} of {1:N0} rays hit the sculpt ({2:P0})", Hits, Samples, Samples == 0 ? 0f : (float)Hits / Samples ) };
+			foreach ( var g in GroupMiss )
+				lines.Add( string.Format( c, "group {0}: {1:P0} missed ({2:N0} of {3:N0} rays hit)", g.Name, g.Samples == 0 ? 0f : (float)(g.Samples - g.Hits) / g.Samples, g.Hits, g.Samples ) );
+			if ( CurvatureWorld is not null ) lines.Add( string.Format( c, "curvature3d: white is {0:0.####} (1/units), from object-space normals", CurvatureWorldRange ) );
 			if ( Height is not null ) lines.Add( string.Format( c, "height: sculpt sits {0:0.####} to {1:0.####} off the cage; map is +-{2:0.####} about mid grey", HeightMin, HeightMax, HeightRange ) );
 			if ( AmbientOcclusion is not null ) lines.Add( string.Format( c, "ao: occluders counted out to {0:0.####}", AoDistance ) );
 			if ( Curvature is not null ) lines.Add( string.Format( c, "curvature: white is {0:0.####} (1/units), black its negative", CurvatureRange ) );
@@ -1133,7 +1172,18 @@ public static class NormalBake
 			corners[c] = mesh.Positions[face.Indices[c]];
 
 		var clipped = Triangulate.Face( corners );
-		return clipped.Count == n - 2 && Clean( mesh, face, clipped ) ? clipped : fan;
+		if ( clipped.Count == n - 2 && Clean( mesh, face, clipped ) ) return clipped;
+
+		// A folded UV island may disagree with every geometrically valid diagonal.
+		// It must not make us return an inward triangle just to retain the UV fan.
+		// Keep the surface orientation; UV/tangent degeneracy is a separate problem.
+		if ( Clean( mesh, face, fan, checkUvs: false ) ) return fan;
+		if ( n == 4 )
+		{
+			var other = Fan( 4, 1 );
+			if ( Clean( mesh, face, other, checkUvs: false ) ) return other;
+		}
+		return clipped.Count == n - 2 && Clean( mesh, face, clipped, checkUvs: false ) ? clipped : fan;
 	}
 
 	static List<(int A, int B, int C)> Fan( int n, int start )
@@ -1147,7 +1197,7 @@ public static class NormalBake
 	}
 
 	/// <summary>Every triangle faces the same way as the polygon, in 3D and (when there are UVs) in UV.</summary>
-	static bool Clean( PolyMesh mesh, Face face, List<(int A, int B, int C)> triangles )
+	static bool Clean( PolyMesh mesh, Face face, List<(int A, int B, int C)> triangles, bool checkUvs = true )
 	{
 		var normal = Vec3.Zero;
 
@@ -1158,7 +1208,7 @@ public static class NormalBake
 			normal += new Vec3( (a.y - b.y) * (a.z + b.z), (a.z - b.z) * (a.x + b.x), (a.x - b.x) * (a.y + b.y) );
 		}
 
-		var uvs = face.UVs is not null && face.UVs.Length == face.Count ? face.UVs : null;
+		var uvs = checkUvs && face.UVs is not null && face.UVs.Length == face.Count ? face.UVs : null;
 		var uvArea = 0f;
 
 		if ( uvs is not null )
@@ -1170,7 +1220,13 @@ public static class NormalBake
 		foreach ( var (a, b, c) in triangles )
 		{
 			var pa = mesh.Positions[face.Indices[a]];
-			var cross = Vec3.Cross( mesh.Positions[face.Indices[b]] - pa, mesh.Positions[face.Indices[c]] - pa );
+			var ab = mesh.Positions[face.Indices[b]] - pa;
+			var ac = mesh.Positions[face.Indices[c]] - pa;
+			var cross = Vec3.Cross( ab, ac );
+			// Collinear cut corners can have either sign from float noise. In the
+			// geometry-only fallback a zero-area triangle must not force a genuinely
+			// backward diagonal. Relative area keeps this independent of model scale.
+			if ( !checkUvs && cross.LengthSquared <= ab.LengthSquared * ac.LengthSquared * 1e-12f ) continue;
 
 			if ( Vec3.Dot( cross, normal ) <= 0f )
 				return false;
@@ -1319,6 +1375,8 @@ public static class NormalBake
 	/// </summary>
 	sealed class Target
 	{
+		public string Name;
+		public int Samples, Hits;
 		public PolyMesh Low, High, Cage;
 		public Vec3[] Normals;
 		public MeshBVH Bvh, LowBvh;
@@ -1414,6 +1472,7 @@ public static class NormalBake
 			{
 				var t = new Target
 				{
+					Name = g.Name,
 					Low = g.Low, High = g.High, Cage = g.Cage, Ids = g.HighIds ?? (groups.Count == 1 ? options.FaceIds : null),
 					Normals = g.High.ComputeVertexNormals(),
 					Bvh = MeshBVH.Build( g.High ),
@@ -1590,6 +1649,8 @@ public static class NormalBake
 			{
 				_samples++;
 				var r = results[i];
+				samples[i].Triangle.G.Samples++;
+				if ( r.Hit ) samples[i].Triangle.G.Hits++;
 
 				if ( !r.Hit )
 					continue;
@@ -1637,7 +1698,7 @@ public static class NormalBake
 		/// The main ray of a sample. With a cage mesh it runs from the matching cage point through the
 		/// low point and <see cref="Target.Back"/> beyond; without one, along the averaged normal.
 		/// </summary>
-		static bool CastFromCage( BakeTriangle t, BakeSample s, Vec3 p, Vec3 n, out MeshHit hit )
+		static bool CastFromCage( BakeTriangle t, BakeSample s, Vec3 p, Vec3 n, Vec3 faceNormal, float skewBlend, out MeshHit hit )
 		{
 			var g = t.G;
 
@@ -1653,7 +1714,21 @@ public static class NormalBake
 			if ( length < 1e-6f || Vec3.Dot( along, n ) >= 0f )
 				return Cast( g, p, n, out hit );
 
-			var found = g.Bvh.Raycast( g.High, origin, along / length );
+			// Skew steering (P2): blend the cage-to-low direction toward the inward
+			// face normal, so a cage pushed out at an angle does not drag detail
+			// sideways across a hard edge. The window stays length + Back.
+			var dir = along / length;
+
+			if ( skewBlend > 0f && faceNormal.LengthSquared > 1e-12f )
+			{
+				var inward = new Vec3( -faceNormal.x, -faceNormal.y, -faceNormal.z );
+				var blended = dir * (1f - skewBlend) + inward * skewBlend;
+
+				if ( blended.LengthSquared > 1e-12f )
+					dir = blended.Normal;
+			}
+
+			var found = g.Bvh.Raycast( g.High, origin, dir );
 			hit = found ?? default;
 			return found is not null && found.Value.Distance <= length + g.Back;
 		}
@@ -1666,7 +1741,39 @@ public static class NormalBake
 			var p = t.P0 * s.A + t.P1 * s.B + t.P2 * s.C;
 			var n = (t.R0 * s.A + t.R1 * s.B + t.R2 * s.C).Normal;
 
-			if ( n.LengthSquared < 0.5f || !CastFromCage( t, s, p, n, out var hit ) )
+			// Skew blend (P2): the low face normal for this sample, and how far the
+			// ray direction moves from the averaged normal toward it. A hard edge
+			// is where the two disagree, so SkewEdgeAngle turns the blend fully on
+			// exactly there, even when the scalar skew is low.
+			var faceN = Vec3.Cross( t.P1 - t.P0, t.P2 - t.P0 );
+			var skewBlend = _o.Skew;
+
+			if ( faceN.LengthSquared > 1e-12f )
+			{
+				faceN = faceN.Normal;
+
+				if ( Vec3.Dot( faceN, n ) < 0f )
+					faceN = new Vec3( -faceN.x, -faceN.y, -faceN.z );
+
+				if ( _o.SkewEdgeAngle > 0f && Vec3.Dot( faceN, n ) < MathF.Cos( _o.SkewEdgeAngle * MathF.PI / 180f ) )
+					skewBlend = MathF.Max( skewBlend, 1f );
+			}
+			else
+			{
+				faceN = n;
+			}
+
+			var rayN = n;
+
+			if ( skewBlend > 0f )
+			{
+				var blended = n * (1f - skewBlend) + faceN * skewBlend;
+
+				if ( blended.LengthSquared > 1e-12f )
+					rayN = blended.Normal;
+			}
+
+			if ( n.LengthSquared < 0.5f || !CastFromCage( t, s, p, rayN, faceN, skewBlend, out var hit ) )
 				return result;
 
 			var hn = SmoothNormal( g.High, g.Normals, hit );
@@ -1991,6 +2098,100 @@ public static class NormalBake
 					set.ThicknessUnits[i] = _hits[i] > 0 ? _through[i] / _hits[i] : -1f;
 			}
 
+			// Miss map (P4): exact, undilated — white where a ray hit, black where it missed.
+			{
+				var miss = new BakedMap( _width, _height );
+
+				for ( var i = 0; i < n; i++ )
+				{
+					var v = _hits[i] > 0 ? (byte)255 : (byte)0;
+					miss.Rgb[i * 3] = v;
+					miss.Rgb[i * 3 + 1] = v;
+					miss.Rgb[i * 3 + 2] = v;
+					miss.Filled[i] = _hits[i] > 0;
+				}
+
+				set.MissMap = miss;
+			}
+
+			foreach ( var tg in _targets )
+				set.GroupMiss.Add( (tg.Name ?? "low", tg.Samples, tg.Hits) );
+
+			// Seam-free curvature (P6): derive from the object-space normal and
+			// position maps in 3D, not from UV-space neighbours, so a UV seam
+			// cannot draw a line in the map. Flat reads mid grey, brighter curves.
+			if ( _o.CurvatureWorld && set.ObjectNormal is not null && set.Position is not null )
+			{
+				var vals = new float[n];
+				var have = new bool[n];
+
+				Vec3 ObjN( int i )
+				{
+					var (r, g, b) = set.ObjectNormal.At16( i % _width, i / _width );
+					return new Vec3( r / 32767.5f - 1f, g / 32767.5f - 1f, b / 32767.5f - 1f );
+				}
+
+				Vec3 Pos( int i )
+				{
+					var (r, g, b) = set.Position.At16( i % _width, i / _width );
+					return new Vec3(
+						set.PositionMin.x + r / 65535f * (set.PositionMax.x - set.PositionMin.x),
+						set.PositionMin.y + g / 65535f * (set.PositionMax.y - set.PositionMin.y),
+						set.PositionMin.z + b / 65535f * (set.PositionMax.z - set.PositionMin.z) );
+				}
+
+				var all = new List<float>();
+
+				for ( var y = 0; y < _height; y++ )
+				{
+					for ( var x = 0; x < _width; x++ )
+					{
+						var i = y * _width + x;
+
+						if ( _hits[i] == 0 )
+							continue;
+
+						var n0 = ObjN( i );
+						var p0 = Pos( i );
+						var sum = 0f;
+						var cnt = 0;
+
+						foreach ( var (dx, dy) in new[] { (1, 0), (-1, 0), (0, 1), (0, -1) } )
+						{
+							var nx = x + dx;
+							var ny = y + dy;
+
+							if ( nx < 0 || ny < 0 || nx >= _width || ny >= _height )
+								continue;
+
+							var j = ny * _width + nx;
+
+							if ( _hits[j] == 0 )
+								continue;
+
+							var dist = (Pos( j ) - p0).Length;
+
+							if ( dist < 1e-9f )
+								continue;
+
+							sum += (1f - Math.Clamp( Vec3.Dot( n0, ObjN( j ) ), -1f, 1f )) / dist;
+							cnt++;
+						}
+
+						if ( cnt == 0 )
+							continue;
+
+						vals[i] = sum / cnt;
+						have[i] = true;
+						all.Add( vals[i] );
+					}
+				}
+
+				var range = Percentile( all, 0.98f );
+				set.CurvatureWorldRange = range;
+				set.CurvatureWorld = Grey( i => have[i] ? 0.5f + 0.5f * Math.Clamp( vals[i] / range, 0f, 1f ) : (float?)null, 0.5f );
+			}
+
 			if ( _hitNormal is not null )
 			{
 				var t = new BakeTexels
@@ -2224,6 +2425,34 @@ public static class NormalBake
 	}
 
 	static float Unit( uint x ) => (Hash( x ) >> 8) * (1f / 16777216f);
+
+	/// <summary>Open edges (used by exactly one face) in a mesh, for the
+	/// thickness guard (P10): thickness on an open sheet is meaningless, so the
+	/// caller must warn rather than silently write a plausible-looking map.</summary>
+	public static int CountOpenEdges( PolyMesh mesh )
+	{
+		if ( mesh is null )
+			return 0;
+
+		var counts = new Dictionary<EdgeKey, int>();
+
+		foreach ( var f in mesh.Faces )
+		{
+			for ( var e = 0; e < f.Count; e++ )
+			{
+				var key = new EdgeKey( f.Indices[e], f.Indices[(e + 1) % f.Count] );
+				counts[key] = counts.TryGetValue( key, out var c ) ? c + 1 : 1;
+			}
+		}
+
+		var open = 0;
+
+		foreach ( var c in counts.Values )
+			if ( c == 1 )
+				open++;
+
+		return open;
+	}
 
 	// --- the check the bake depends on ----------------------------------------------------------
 

@@ -213,21 +213,66 @@ class StateTests(unittest.TestCase):
         state = n.load_state("/nonexistent/geppetto/ai-consent.json")
         self.assertEqual(state, n.default_state())
 
-    def test_do_not_show_again_suppresses_every_provider(self):
-        state = n.default_state()
-        state["never_show"] = True
-        self.assertFalse(n.needs_notice(state, cfg())["show"])
-        self.assertFalse(n.needs_notice(state, cfg(CUSTOM))["show"])
-
-    def test_acknowledge_with_never_show_sets_the_flag_and_persists(self):
+    def test_do_not_show_again_suppresses_only_that_provider(self):
         state, c = n.default_state(), cfg()
         n.ack_notice(state, c, n.needs_notice(state, c)["missing"], never_show=True)
-        self.assertTrue(state["never_show"])
+        self.assertFalse(n.needs_notice(state, c)["show"])
+        self.assertTrue(n.needs_notice(state, cfg(CUSTOM))["show"])
+        self.assertNotIn("never_show", state)
+
+    def test_acknowledge_with_never_show_sets_the_per_provider_flag_and_persists(self):
+        state, c = n.default_state(), cfg()
+        n.ack_notice(state, c, n.needs_notice(state, c)["missing"], never_show=True)
+        self.assertTrue(state["providers"][c["key"]]["never_show"])
         self.assertFalse(n.needs_notice(state, c)["show"])
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "ai-consent.json")
             self.assertTrue(n.save_state(path, state))
-            self.assertTrue(n.load_state(path)["never_show"])
+            loaded = n.load_state(path)
+            self.assertTrue(loaded["providers"][c["key"]]["never_show"])
+            self.assertTrue(n.needs_notice(loaded, cfg(CUSTOM))["show"])
+
+    def test_dismissing_the_builder_does_not_dismiss_a_different_judge(self):
+        state, c = n.default_state(), cfg()
+        n.ack_notice(state, c, n.needs_notice(state, c)["missing"], never_show=True)
+        judged = cfg(judge={"model": GOOGLE_JUDGE, "same": False})
+        need = n.needs_notice(state, judged)
+        self.assertTrue(need["show"])
+        self.assertEqual(need["missing"], ["judge"])
+
+    def test_legacy_global_never_show_migrates_only_to_the_single_acked_provider(self):
+        anthropic_key = cfg()["key"]
+        custom_key = cfg(CUSTOM)["key"]
+        raw = {"version": 1, "show_cost_every_build": False, "never_show": True,
+               "providers": {
+                   anthropic_key: {"disclosure_seen": True, "cost_ack": True,
+                                   "acked_calls": 60, "acked_minutes": 15},
+                   custom_key: {}}}
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "ai-consent.json")
+            with open(path, "w") as f:
+                json.dump(raw, f)
+            loaded = n.load_state(path)
+        self.assertTrue(loaded["providers"][anthropic_key]["never_show"])
+        self.assertNotIn("never_show", loaded["providers"][custom_key])
+        self.assertNotIn("never_show", loaded)
+        self.assertFalse(n.needs_notice(loaded, cfg())["show"])
+        self.assertTrue(n.needs_notice(loaded, cfg(CUSTOM))["show"])
+
+    def test_legacy_global_never_show_with_two_acked_providers_is_dropped(self):
+        raw = {"version": 1, "show_cost_every_build": False, "never_show": True,
+               "providers": {
+                   cfg()["key"]: {"disclosure_seen": True, "cost_ack": True,
+                                  "acked_calls": 60, "acked_minutes": 15},
+                   cfg(CUSTOM)["key"]: {"disclosure_seen": True, "cost_ack": True,
+                                        "acked_calls": 60, "acked_minutes": 15}}}
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "ai-consent.json")
+            with open(path, "w") as f:
+                json.dump(raw, f)
+            loaded = n.load_state(path)
+        self.assertNotIn("never_show", loaded)
+        self.assertTrue(all("never_show" not in rec for rec in loaded["providers"].values()))
 
 
 if __name__ == "__main__":

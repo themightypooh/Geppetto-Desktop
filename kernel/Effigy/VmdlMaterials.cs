@@ -172,10 +172,15 @@ public static class VmdlMaterials
 			if ( !TryBoundVmat( slot, materialNames, out var target ) )
 			{
 				if ( seenFrom.Add( written ) )
-					remaps.Add( (written, string.IsNullOrWhiteSpace( fallback ) ? DefaultMaterial : fallback) );
+					remaps.Add( (written, string.IsNullOrWhiteSpace( fallback ) ? DefaultMaterial : VmdlDocument.NormalizeAssetPath( fallback )) );
 
 				continue;
 			}
+
+			// Wave 3: .vmdl material paths are normalized (lowercase, forward slashes),
+			// the follow-up VmdlDocument's own comment asked for; already-clean paths
+			// are unchanged.
+			target = VmdlDocument.NormalizeAssetPath( target );
 
 			foreach ( var from in FromAliases( written, target ) )
 			{
@@ -187,6 +192,78 @@ public static class VmdlMaterials
 		}
 
 		return remaps;
+	}
+
+	/// <summary>One generated sidecar .vmat for a slot nothing else bound: the file to write
+	/// beside the model, the asset path the .vmdl remap points at, and the diffuse colour
+	/// the OBJ's .mtl entry uses for the same slot.</summary>
+	public sealed class Sidecar
+	{
+		public int Slot;
+		public string AssetPath = "";
+		public string VmatText = "";
+		public Vec3 Colour = Vec3.One;
+	}
+
+	/// <summary>Sidecar .vmats for a mesh's unbound detail slots (Wear rust/algae, garment
+	/// worn/dirt, hard finishes). A slot is only a number until a material definition exists
+	/// for it: without this, GroupList remaps every such slot to materials/default.vmat and
+	/// the rust on a buoy compiles as blank grey. Bound slots are never overridden — a name
+	/// somebody set wins over anything generated here.
+	///
+	/// COLOURS ARE CHOSEN, NOT MEASURED. No rust/algae colour exists anywhere in the
+	/// codebase (WearFeature registers the slots with default grey metal values), so rust
+	/// is a reddish brown, algae a dull green, worn/dirt derive from the source slot's look
+	/// through the existing Worn/Dirty helpers, and hard finishes use their own values.
+	/// Glow and hole kinds get a plain HardVmat from their colour: glow textures and hole
+	/// masks are not exported, and a plain material beats default.vmat for those slots too.</summary>
+	public static List<Sidecar> SidecarsFor( PolyMesh mesh, IReadOnlyList<DetailMaterial> details,
+		Func<int, SlotLook> lookForSlot, IReadOnlyDictionary<int, string> existingBindings,
+		string folder, string modelName )
+	{
+		var sidecars = new List<Sidecar>();
+		if ( mesh is null || details is null )
+			return sidecars;
+		var used = SlotsOn( mesh );
+		var seen = new HashSet<int>();
+		foreach ( var d in details )
+		{
+			if ( d is null || !used.Contains( d.Slot ) || !seen.Add( d.Slot ) )
+				continue;
+			if ( existingBindings is not null && existingBindings.TryGetValue( d.Slot, out var bound ) && !string.IsNullOrWhiteSpace( bound ) )
+				continue;
+			var colour = d.Colour;
+			var metal = d.Metalness;
+			var rough = d.Roughness;
+			switch ( d.Kind )
+			{
+				case "rust":
+					colour = new Vec3( 0.48f, 0.23f, 0.10f ); metal = 0.1f; rough = 0.9f;
+					break;
+				case "algae":
+					colour = new Vec3( 0.23f, 0.42f, 0.20f ); metal = 0f; rough = 0.95f;
+					break;
+				case "worn":
+				case "dirt":
+				{
+					var source = d.SourceSlot >= 0 ? lookForSlot?.Invoke( d.SourceSlot ) : null;
+					var baseColour = source?.Color ?? d.Colour;
+					colour = d.Kind == "worn" ? DetailMaterials.Worn( baseColour ) : DetailMaterials.Dirty( baseColour );
+					metal = 0f; rough = d.Kind == "worn" ? 0.9f : 0.95f;
+					break;
+				}
+			}
+			var m = new DetailMaterial { Kind = d.Kind, Slot = d.Slot, Key = d.Key, Colour = colour, Metalness = metal, Roughness = rough };
+			var file = $"{modelName}_slot{d.Slot}.vmat";
+			sidecars.Add( new Sidecar
+			{
+				Slot = d.Slot,
+				AssetPath = $"{folder}/materials/{file}",
+				VmatText = DetailMaterials.HardVmat( m ),
+				Colour = colour,
+			} );
+		}
+		return sidecars;
 	}
 
 	/// <summary>Slots the mesh actually paints. A name sitting on a slot no face wears does not

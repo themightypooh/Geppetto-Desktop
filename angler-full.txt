@@ -1,0 +1,39 @@
+echo "Angler full fish, sections, Blob flesh + Fin + bones"
+add Blob name=Head shapes="sphere -22,0,0 9; sphere -28,-1,0 6; capsule -22,0,0 -10,0,0 7; -sphere -22,3,0 4" voxel=0.4 materialslot=0
+add Blob name=Jaw shapes="capsule -36,-7,0 -18,-9,0 3; sphere -36,-7,0 3" voxel=0.3 materialslot=0
+add Primitive name=Eye shape=Sphere radius=3.5 position=-22,3,0 scale=1,1,0.4 segments=16 materialslot=2
+add Primitive name=UpperTooth1 shape=Cylinder radius=0.3 height=1.6 position=-38,-4.5,0 rotationaxis=1,0,0 rotation=90 segments=4 materialslot=1
+add Primitive name=UpperTooth2 shape=Cylinder radius=0.3 height=1.6 position=-34,-4.5,0 rotationaxis=1,0,0 rotation=90 segments=4 materialslot=1
+add Primitive name=UpperTooth3 shape=Cylinder radius=0.3 height=1.6 position=-30,-4.5,0 rotationaxis=1,0,0 rotation=90 segments=4 materialslot=1
+add Primitive name=UpperTooth4 shape=Cylinder radius=0.3 height=1.6 position=-26,-4.5,0 rotationaxis=1,0,0 rotation=90 segments=4 materialslot=1
+add Primitive name=LowerTooth1 shape=Cylinder radius=0.3 height=1.4 position=-34,-6.2,0 rotationaxis=1,0,0 rotation=-90 segments=4 materialslot=1
+add Primitive name=LowerTooth2 shape=Cylinder radius=0.3 height=1.4 position=-30,-6.2,0 rotationaxis=1,0,0 rotation=-90 segments=4 materialslot=1
+add Primitive name=LowerTooth3 shape=Cylinder radius=0.3 height=1.4 position=-26,-6.2,0 rotationaxis=1,0,0 rotation=-90 segments=4 materialslot=1
+add Primitive name=LowerTooth4 shape=Cylinder radius=0.3 height=1.4 position=-22,-6.2,0 rotationaxis=1,0,0 rotation=-90 segments=4 materialslot=1
+add Primitive name=SnoutSpike1 shape=Cylinder radius=0.4 height=6.32 position=-39.00,6.00,0 rotationaxis=-0.316,-0.949,0 rotation=90 segments=6 materialslot=1
+add Primitive name=SnoutSpike2 shape=Cylinder radius=0.4 height=6.08 position=-37.00,4.50,0 rotationaxis=-0.164,-0.986,0 rotation=90 segments=6 materialslot=1
+add Primitive name=LureStalk1 shape=Cylinder radius=0.4 height=11.66 position=-23.00,13.00,0 rotationaxis=-0.857,-0.514,0 rotation=90 segments=6 materialslot=1
+add Primitive name=LureStalk2 shape=Cylinder radius=0.4 height=11.66 position=-29.00,23.00,0 rotationaxis=-0.857,-0.514,0 rotation=90 segments=6 materialslot=1
+add Primitive name=LureStalk3 shape=Cylinder radius=0.4 height=10.20 position=-31.00,33.00,0 rotationaxis=-0.981,0.196,0 rotation=90 segments=6 materialslot=1
+add Blob name=Esca shapes="sphere -30,38,0 1.4" voxel=0.2 materialslot=3
+add Primitive name=LureFilament1 shape=Cylinder radius=0.15 height=4.47 position=-32.00,39.00,0 rotationaxis=-0.447,-0.894,0 rotation=90 segments=6 materialslot=3
+add Primitive name=LureFilament2 shape=Cylinder radius=0.15 height=4.24 position=-28.50,39.50,0 rotationaxis=-0.707,0.707,0 rotation=90 segments=6 materialslot=3
+add Blob name=Body shapes="capsule -10,0,0 10,-1,0 6; capsule 10,-1,0 25,0,0 4; capsule 25,0,0 35,4,0 2.5" voxel=0.4 materialslot=0
+add Blob name=Tail shapes="capsule 35,4,0 45,10,0 1.5; capsule 45,10,0 52,12,0 1.2; capsule 52,12,0 55,8,0 0.8" voxel=0.3 materialslot=0
+add Primitive name=DorsalSpine1 shape=Cylinder radius=0.3 height=7.28 position=-1.00,7.50,0 rotationaxis=-0.962,0.275,0 rotation=90 segments=6 materialslot=1
+add Primitive name=DorsalSpine2 shape=Cylinder radius=0.3 height=8.54 position=3.50,7.00,0 rotationaxis=-0.936,0.351,0 rotation=90 segments=6 materialslot=1
+add Primitive name=DorsalSpine3 shape=Cylinder radius=0.3 height=7.62 position=7.50,6.50,0 rotationaxis=-0.919,0.394,0 rotation=90 segments=6 materialslot=1
+add Primitive name=DorsalSpine4 shape=Cylinder radius=0.3 height=7.62 position=11.50,5.50,0 rotationaxis=-0.919,0.394,0 rotation=90 segments=6 materialslot=1
+add Fin name=DorsalFin root=-5,4,0;5,3,0;10,2,0 tip=0,12,0;6,11,0;10,9,0 thickness=0.26,0.04 rays=8 ridge=0.06 web=0.72 curve=0.15 subdiv=2 materialslot=0
+add Fin name=PectoralFin root=-8,-4,0;-2,-5,0 tip=-4,-12,0;2,-11,0 thickness=0.26,0.04 rays=6 ridge=0.06 web=0.72 curve=0.15 subdiv=2 materialslot=0
+add Fin name=AnalFin root=20,-2,0;28,0,0 tip=24,-8,0;30,-6,0 thickness=0.26,0.04 rays=4 ridge=0.06 web=0.72 curve=0.15 subdiv=2 materialslot=0
+add Primitive name=CaudalRay1 shape=Cylinder radius=0.25 height=8.06 position=58.50,10.00,0 rotationaxis=-0.496,0.868,0 rotation=90 segments=6 materialslot=0
+add Primitive name=CaudalRay2 shape=Cylinder radius=0.25 height=7.00 position=58.50,8.00,0 rotationaxis=0.000,1.000,0 rotation=90 segments=6 materialslot=0
+add Primitive name=CaudalRay3 shape=Cylinder radius=0.25 height=8.06 position=58.50,6.00,0 rotationaxis=0.496,0.868,0 rotation=90 segments=6 materialslot=0
+add Primitive name=CaudalRay4 shape=Cylinder radius=0.25 height=8.60 position=57.50,11.50,0 rotationaxis=-0.814,0.581,0 rotation=90 segments=6 materialslot=0
+material 0 color=#3a3f44 rough=0.8 metal=0
+material 1 color=#e9e0c8 rough=0.7 metal=0
+material 2 color=#0a0a0a rough=0.4 metal=0
+material 3 color=#ffdf6b rough=0.5 metal=0
+save angler_full.effigy
+render angler_full.png shade=clay views=4 size=512

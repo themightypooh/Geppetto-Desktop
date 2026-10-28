@@ -1,0 +1,606 @@
+effigy 1
+rollback 2147483647
+materiallook 0 color=#3a3f44 rough=0.8 metal=0
+materiallook 1 color=#e9e0c8 rough=0.7 metal=0
+materiallook 2 color=#0a0a0a rough=0.4 metal=0
+materiallook 3 color=#ffdf6b rough=0.5 metal=0
+feature BlobFeature
+	id 1d6f6d2a
+	name Head
+	suppressed 0
+	visible 1
+	param Blend 2
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes sphere -22,0,0 9; sphere -28,-1,0 6; capsule -22,0,0 -10,0,0 7; -sphere -22,3,0 4
+	param Smooth 2
+	param Voxel 0.4
+end
+feature BlobFeature
+	id 0318d1db
+	name Jaw
+	suppressed 0
+	visible 1
+	param Blend 2
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes capsule -36,-7,0 -18,-9,0 3; sphere -36,-7,0 3
+	param Smooth 2
+	param Voxel 0.3
+end
+feature PrimitiveFeature
+	id a3489468
+	name Eye
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 2
+	param Position -22 3 0
+	param Radius 3.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 0.4
+	param Segments 16
+	param Shape 2
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 1
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 76dc04ea
+	name UpperTooth1
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -38 -4.5 0
+	param Radius 0.3
+	param RotationAngle 90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 4
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 1.6
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id acb156ad
+	name UpperTooth2
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -34 -4.5 0
+	param Radius 0.3
+	param RotationAngle 90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 4
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 1.6
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 4c5f4398
+	name UpperTooth3
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -30 -4.5 0
+	param Radius 0.3
+	param RotationAngle 90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 4
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 1.6
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id e31b559d
+	name UpperTooth4
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -26 -4.5 0
+	param Radius 0.3
+	param RotationAngle 90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 4
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 1.6
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id cf93b336
+	name LowerTooth1
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -34 -6.2 0
+	param Radius 0.3
+	param RotationAngle -90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 4
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 1.4
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 0a437cd6
+	name LowerTooth2
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -30 -6.2 0
+	param Radius 0.3
+	param RotationAngle -90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 4
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 1.4
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id a2c54d09
+	name LowerTooth3
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -26 -6.2 0
+	param Radius 0.3
+	param RotationAngle -90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 4
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 1.4
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id deaaa34a
+	name LowerTooth4
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -22 -6.2 0
+	param Radius 0.3
+	param RotationAngle -90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 4
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 1.4
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 3104810e
+	name SnoutSpike1
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -39 6 0
+	param Radius 0.4
+	param RotationAngle 90
+	param RotationAxis -0.316 -0.949 0
+	param Scale 1 1 1
+	param Segments 6
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 6.32
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id d5acd388
+	name SnoutSpike2
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -37 4.5 0
+	param Radius 0.4
+	param RotationAngle 90
+	param RotationAxis -0.164 -0.986 0
+	param Scale 1 1 1
+	param Segments 6
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 6.08
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id dac32525
+	name LureStalk1
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -23 13 0
+	param Radius 0.4
+	param RotationAngle 90
+	param RotationAxis -0.857 -0.514 0
+	param Scale 1 1 1
+	param Segments 6
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 11.66
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 520b8ea7
+	name LureStalk2
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -29 23 0
+	param Radius 0.4
+	param RotationAngle 90
+	param RotationAxis -0.857 -0.514 0
+	param Scale 1 1 1
+	param Segments 6
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 11.66
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 1b417a22
+	name LureStalk3
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -31 33 0
+	param Radius 0.4
+	param RotationAngle 90
+	param RotationAxis -0.981 0.196 0
+	param Scale 1 1 1
+	param Segments 6
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 10.2
+	param UniformScale 0
+end
+feature BlobFeature
+	id 9a2da606
+	name Esca
+	suppressed 0
+	visible 1
+	param Blend 2
+	param CutBlend 0.05
+	param Material 3
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes sphere -30,38,0 1.4
+	param Smooth 2
+	param Voxel 0.2
+end
+feature PrimitiveFeature
+	id 80f7fb9c
+	name LureFilament1
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 3
+	param Position -32 39 0
+	param Radius 0.15
+	param RotationAngle 90
+	param RotationAxis -0.447 -0.894 0
+	param Scale 1 1 1
+	param Segments 6
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 4.47
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 4bd76855
+	name LureFilament2
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 3
+	param Position -28.5 39.5 0
+	param Radius 0.15
+	param RotationAngle 90
+	param RotationAxis -0.707 0.707 0
+	param Scale 1 1 1
+	param Segments 6
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 4.24
+	param UniformScale 0
+end
+feature BlobFeature
+	id 01fd9cfc
+	name Body
+	suppressed 0
+	visible 1
+	param Blend 2
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes capsule -10,0,0 10,-1,0 6; capsule 10,-1,0 25,0,0 4; capsule 25,0,0 35,4,0 2.5
+	param Smooth 2
+	param Voxel 0.4
+end
+feature BlobFeature
+	id 166f9b27
+	name Tail
+	suppressed 0
+	visible 1
+	param Blend 2
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes capsule 35,4,0 45,10,0 1.5; capsule 45,10,0 52,12,0 1.2; capsule 52,12,0 55,8,0 0.8
+	param Smooth 2
+	param Voxel 0.3
+end
+feature PrimitiveFeature
+	id 98f85ee3
+	name DorsalSpine1
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -1 7.5 0
+	param Radius 0.3
+	param RotationAngle 90
+	param RotationAxis -0.962 0.275 0
+	param Scale 1 1 1
+	param Segments 6
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 7.28
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id f65ee782
+	name DorsalSpine2
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 3.5 7 0
+	param Radius 0.3
+	param RotationAngle 90
+	param RotationAxis -0.936 0.351 0
+	param Scale 1 1 1
+	param Segments 6
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 8.54
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id d3481d55
+	name DorsalSpine3
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 7.5 6.5 0
+	param Radius 0.3
+	param RotationAngle 90
+	param RotationAxis -0.919 0.394 0
+	param Scale 1 1 1
+	param Segments 6
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 7.62
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 59efaf63
+	name DorsalSpine4
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 11.5 5.5 0
+	param Radius 0.3
+	param RotationAngle 90
+	param RotationAxis -0.919 0.394 0
+	param Scale 1 1 1
+	param Segments 6
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 7.62
+	param UniformScale 0
+end
+feature FinFeature
+	id 7cf65caa
+	name DorsalFin
+	suppressed 0
+	visible 1
+	param Curve 0.15
+	param Material 0
+	param Rays 8
+	param Ridge 0.06
+	vec3s Root -5 4 0 5 3 0 10 2 0
+	param Subdiv 2
+	param Thickness 0.26,0.04
+	vec3s Tip 0 12 0 6 11 0 10 9 0
+	param Web 0.72
+end
+feature FinFeature
+	id a68b55fb
+	name PectoralFin
+	suppressed 0
+	visible 1
+	param Curve 0.15
+	param Material 0
+	param Rays 6
+	param Ridge 0.06
+	vec3s Root -8 -4 0 -2 -5 0
+	param Subdiv 2
+	param Thickness 0.26,0.04
+	vec3s Tip -4 -12 0 2 -11 0
+	param Web 0.72
+end
+feature FinFeature
+	id b5cfbbfc
+	name AnalFin
+	suppressed 0
+	visible 1
+	param Curve 0.15
+	param Material 0
+	param Rays 4
+	param Ridge 0.06
+	vec3s Root 20 -2 0 28 0 0
+	param Subdiv 2
+	param Thickness 0.26,0.04
+	vec3s Tip 24 -8 0 30 -6 0
+	param Web 0.72
+end
+feature PrimitiveFeature
+	id 3e84eb12
+	name CaudalRay1
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position 58.5 10 0
+	param Radius 0.25
+	param RotationAngle 90
+	param RotationAxis -0.496 0.868 0
+	param Scale 1 1 1
+	param Segments 6
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 8.06
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 1e571877
+	name CaudalRay2
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position 58.5 8 0
+	param Radius 0.25
+	param RotationAngle 90
+	param RotationAxis 0 1 0
+	param Scale 1 1 1
+	param Segments 6
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 7
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 2392f311
+	name CaudalRay3
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position 58.5 6 0
+	param Radius 0.25
+	param RotationAngle 90
+	param RotationAxis 0.496 0.868 0
+	param Scale 1 1 1
+	param Segments 6
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 8.06
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id fb411d0b
+	name CaudalRay4
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position 57.5 11.5 0
+	param Radius 0.25
+	param RotationAngle 90
+	param RotationAxis -0.814 0.581 0
+	param Scale 1 1 1
+	param Segments 6
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 8.6
+	param UniformScale 0
+end

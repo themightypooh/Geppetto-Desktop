@@ -1,0 +1,126 @@
+effigy 1
+rollback 2147483647
+materiallook 0 color=#20262a rough=0.35 metal=0.35
+materiallook 1 color=#b58b47 rough=0.34 metal=0.8
+materiallook 2 color=#aeb5b9 rough=0.27 metal=0.9
+refimage front 4 10 2 0 0.8 1 /home/poo/Desktop/geppetto-desktop/cabinet/art/nameplate.png
+feature BlobFeature
+	id 2057483a
+	name SignCore
+	suppressed 0
+	visible 1
+	param Blend 0.04
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 0,0,1.25 6.2,0.28,2.5 r=0.15 mat=0
+	param Smooth 2
+	param Voxel 0.04
+end
+feature BlobFeature
+	id 3d2b0b2a
+	name SignRim
+	suppressed 0
+	visible 1
+	param Blend 0.02
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box 0,-0.18,0.1 6.12,0.12,0.12 r=0.03 mat=1; box 0,-0.18,2.4 6.12,0.12,0.12 r=0.03 mat=1; box -3,-0.18,1.25 0.12,0.12,2.3 r=0.03 mat=1; box 3,-0.18,1.25 0.12,0.12,2.3 r=0.03 mat=1
+	param Smooth 2
+	param Voxel 0.025
+end
+feature BlobFeature
+	id 33a9167f
+	name LeftChain
+	suppressed 0
+	visible 1
+	param Blend 0.01
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes tube -2.6,-0.31,2.73|-2.72,-0.31,2.78|-2.76,-0.31,2.9|-2.76,-0.31,3.1|-2.72,-0.31,3.22|-2.6,-0.31,3.27|-2.48,-0.31,3.22|-2.44,-0.31,3.1|-2.44,-0.31,2.9|-2.48,-0.31,2.78|-2.6,-0.31,2.73 0.045 mat=2; tube -2.6,-0.31,3.09|-2.6,-0.43,3.14|-2.6,-0.47,3.26|-2.6,-0.47,3.46|-2.6,-0.43,3.58|-2.6,-0.31,3.63|-2.6,-0.19,3.58|-2.6,-0.15,3.46|-2.6,-0.15,3.26|-2.6,-0.19,3.14|-2.6,-0.31,3.09 0.045 mat=2; tube -2.6,-0.31,3.45|-2.72,-0.31,3.5|-2.76,-0.31,3.62|-2.76,-0.31,3.82|-2.72,-0.31,3.94|-2.6,-0.31,3.99|-2.48,-0.31,3.94|-2.44,-0.31,3.82|-2.44,-0.31,3.62|-2.48,-0.31,3.5|-2.6,-0.31,3.45 0.045 mat=2; tube -2.6,-0.31,3.81|-2.6,-0.43,3.86|-2.6,-0.47,3.98|-2.6,-0.47,4.18|-2.6,-0.43,4.3|-2.6,-0.31,4.35|-2.6,-0.19,4.3|-2.6,-0.15,4.18|-2.6,-0.15,3.98|-2.6,-0.19,3.86|-2.6,-0.31,3.81 0.045 mat=2
+	param Smooth 2
+	param Voxel 0.022
+end
+feature BlobFeature
+	id d778ed1f
+	name RightChain
+	suppressed 0
+	visible 1
+	param Blend 0.01
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes tube 2.6,-0.31,2.73|2.48,-0.31,2.78|2.44,-0.31,2.9|2.44,-0.31,3.1|2.48,-0.31,3.22|2.6,-0.31,3.27|2.72,-0.31,3.22|2.76,-0.31,3.1|2.76,-0.31,2.9|2.72,-0.31,2.78|2.6,-0.31,2.73 0.045 mat=2; tube 2.6,-0.31,3.09|2.6,-0.43,3.14|2.6,-0.47,3.26|2.6,-0.47,3.46|2.6,-0.43,3.58|2.6,-0.31,3.63|2.6,-0.19,3.58|2.6,-0.15,3.46|2.6,-0.15,3.26|2.6,-0.19,3.14|2.6,-0.31,3.09 0.045 mat=2; tube 2.6,-0.31,3.45|2.48,-0.31,3.5|2.44,-0.31,3.62|2.44,-0.31,3.82|2.48,-0.31,3.94|2.6,-0.31,3.99|2.72,-0.31,3.94|2.76,-0.31,3.82|2.76,-0.31,3.62|2.72,-0.31,3.5|2.6,-0.31,3.45 0.045 mat=2; tube 2.6,-0.31,3.81|2.6,-0.43,3.86|2.6,-0.47,3.98|2.6,-0.47,4.18|2.6,-0.43,4.3|2.6,-0.31,4.35|2.6,-0.19,4.3|2.6,-0.15,4.18|2.6,-0.15,3.98|2.6,-0.19,3.86|2.6,-0.31,3.81 0.045 mat=2
+	param Smooth 2
+	param Voxel 0.022
+end
+feature BlobFeature
+	id bfd77020
+	name Eyelets
+	suppressed 0
+	visible 1
+	param Blend 0.015
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box -2.6,-0.205,2.3 0.36,0.13,0.34 r=0.045 mat=1; cylinder -2.6,-0.31,2.53 -2.6,-0.205,2.39 0.065 mat=1; torus -2.6,-0.31,2.7 0.17 0.05 rot=0,90,0 mat=1; box 2.6,-0.205,2.3 0.36,0.13,0.34 r=0.045 mat=1; cylinder 2.6,-0.31,2.53 2.6,-0.205,2.39 0.065 mat=1; torus 2.6,-0.31,2.7 0.17 0.05 rot=0,90,0 mat=1
+	param Smooth 2
+	param Voxel 0.012
+end
+feature BlobFeature
+	id 82f5996e
+	name EyeletRivets
+	suppressed 0
+	visible 1
+	param Blend 0.01
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes cylinder -2.6,-0.34,2.28 -2.6,0.18,2.28 0.055 mat=2; sphere -2.6,-0.34,2.28 0.08 mat=2; sphere -2.6,0.18,2.28 0.08 mat=2; cylinder 2.6,-0.34,2.28 2.6,0.18,2.28 0.055 mat=2; sphere 2.6,-0.34,2.28 0.08 mat=2; sphere 2.6,0.18,2.28 0.08 mat=2
+	param Smooth 2
+	param Voxel 0.014
+end
+feature BlobFeature
+	id 34548e61
+	name UpperAnchors
+	suppressed 0
+	visible 1
+	param Blend 0.015
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes box -2.6,-0.205,4.93 0.35,0.13,0.32 r=0.04 mat=1; cylinder -2.6,-0.31,4.65 -2.6,-0.205,4.8 0.052 mat=1; torus -2.6,-0.31,4.43 0.21 0.045 rot=90,0,0 mat=1; box 2.6,-0.205,4.93 0.35,0.13,0.32 r=0.04 mat=1; cylinder 2.6,-0.31,4.65 2.6,-0.205,4.8 0.052 mat=1; torus 2.6,-0.31,4.43 0.21 0.045 rot=90,0,0 mat=1
+	param Smooth 2
+	param Voxel 0.013
+end
+feature BlobFeature
+	id 53c2eaba
+	name UpperRivets
+	suppressed 0
+	visible 1
+	param Blend 0.01
+	param CutBlend 0.05
+	param Material 0
+	param Noise 0
+	param NoiseSize 6
+	param Seed 1
+	param Shapes cylinder -2.6,-0.34,4.93 -2.6,0.18,4.93 0.055 mat=2; sphere -2.6,-0.34,4.93 0.08 mat=2; cylinder 2.6,-0.34,4.93 2.6,0.18,4.93 0.055 mat=2; sphere 2.6,-0.34,4.93 0.08 mat=2
+	param Smooth 2
+	param Voxel 0.014
+end

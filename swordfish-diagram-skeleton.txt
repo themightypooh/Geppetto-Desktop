@@ -1,0 +1,12 @@
+echo "Swordfish skeleton from black-and-white diagram, curved segmented bones only"
+add Blob name=UpperBill shapes="capsule -28,0,0 -40,0.2,0 0.9; capsule -40,0.2,0 -52,0.3,0 0.6; capsule -52,0.3,0 -60,0.3,0 0.3" voxel=0.35
+add Blob name=LowerJaw shapes="capsule -28,-2,0 -40,-2,0 0.5; capsule -40,-2,0 -50,-2,0 0.3" voxel=0.35
+add Blob name=Skull shapes="capsule -28,0,0 -20,0,0 3.5; sphere -26,0,0 3.5; -sphere -24,1,0 1.2" voxel=0.35
+add Blob name=Spine shapes="capsule -28,0,0 -24,0.5,0 1.5; capsule -24,0.5,0 -20,1,0 1.6; capsule -20,1,0 -16,1.5,0 1.7; capsule -16,1.5,0 -12,2,0 1.8; capsule -12,2,0 -8,2.5,0 1.8; capsule -8,2.5,0 -4,2.5,0 1.7; capsule -4,2.5,0 0,2,0 1.6; capsule 0,2,0 4,1.5,0 1.5; capsule 4,1.5,0 8,1,0 1.4; capsule 8,1,0 12,0.5,0 1.2; capsule 12,0.5,0 16,0,0 1.1; capsule 16,0,0 20,-0.5,0 1.0; capsule 20,-0.5,0 24,-1,0 0.9; capsule 24,-1,0 28,-2,0 0.8; capsule 28,-2,0 32,-4,0 0.7; capsule 32,-4,0 36,-7,0 0.6; capsule 36,-7,0 40,-10,0 0.5" voxel=0.35
+add Blob name=Ribs shapes="capsule -20,1,0 -19,-2,0 0.3; capsule -19,-2,0 -18,-5,0 0.3; capsule -16,1.5,0 -15,-1.5,0 0.3; capsule -15,-1.5,0 -14,-4.5,0 0.3; capsule -12,2,0 -11,-1,0 0.3; capsule -11,-1,0 -10,-4,0 0.3; capsule -8,2.5,0 -7,-0.5,0 0.3; capsule -7,-0.5,0 -6,-3.5,0 0.3; capsule -4,2.5,0 -3,-0.5,0 0.3; capsule -3,-0.5,0 -2,-3,0 0.3; capsule 0,2,0 1,-1,0 0.3; capsule 1,-1,0 2,-3,0 0.3; capsule 4,1.5,0 5,-1,0 0.3; capsule 5,-1,0 6,-2.5,0 0.3" voxel=0.35
+add Blob name=DorsalRays shapes="capsule -14,2,0 -13,9,0 0.35; capsule -10,2.5,0 -8,11,0 0.35; capsule -6,2.5,0 -4,10,0 0.35; capsule -2,2,0 0,8,0 0.35" voxel=0.35
+add Blob name=PectoralRays shapes="capsule -24,-2,0 -20,-9,0 0.35; capsule -22,-2,0 -17,-10,0 0.35; capsule -20,-2,0 -15,-9,0 0.35" voxel=0.35
+add Blob name=AnalRays shapes="capsule 22,-1,0 26,-7,0 0.35; capsule 26,-1,0 30,-6,0 0.35" voxel=0.35
+add Blob name=CaudalRays shapes="capsule 40,-10,0 54,8,0 0.4; capsule 40,-10,0 52,2,0 0.4; capsule 40,-10,0 50,-4,0 0.4; capsule 40,-10,0 46,-14,0 0.4" voxel=0.35
+material 0 color=#e6dcc0 rough=0.8 metal=0
+save swordfish_diagram_skeleton.effigy

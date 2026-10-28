@@ -1,0 +1,285 @@
+effigy 1
+rollback 2147483647
+materiallook 0 color=#2a1a12 rough=0.8 metal=0
+materiallook 1 color=#6b4a2f rough=0.8 metal=0
+materiallook 2 color=#111111 rough=0.6 metal=0
+feature PrimitiveFeature
+	id 9ca21754
+	name Body
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position 0 0 1.2
+	param Radius 1.2
+	param RotationAngle 90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 4.2
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 7d78959e
+	name Head
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position 0 2.6 1.1
+	param Radius 0.7
+	param RotationAngle 90
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 1.2
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 978b7f36
+	name Snout
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 0 4.3 1
+	param Radius 0.25
+	param RotationAngle 100
+	param RotationAxis 1 0 0
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 2.4
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 0cfc465f
+	name ElytraSeam
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 0 0 2.45
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.18
+	param SizeY 3.8
+	param SizeZ 0.15
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 328a027c
+	name EyeL
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 2
+	param Position 0.7 2.8 1.3
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.25
+	param SizeY 0.4
+	param SizeZ 0.25
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id d4d33cd2
+	name EyeR
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 2
+	param Position -0.7 2.8 1.3
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.25
+	param SizeY 0.4
+	param SizeZ 0.25
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id b9a82495
+	name AntennaL
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 1.1 5 1
+	param Radius 0.5
+	param RotationAngle 40
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.16
+	param SizeY 1.6
+	param SizeZ 0.16
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 9214c55a
+	name AntennaR
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -1.1 5 1
+	param Radius 0.5
+	param RotationAngle -40
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.16
+	param SizeY 1.6
+	param SizeZ 0.16
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 7f70ee4f
+	name LegFL
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 1.9 1.4 0.5
+	param Radius 0.5
+	param RotationAngle 50
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.22
+	param SizeY 1.8
+	param SizeZ 0.22
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id fc3b18a0
+	name LegFR
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -1.9 1.4 0.5
+	param Radius 0.5
+	param RotationAngle -50
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.22
+	param SizeY 1.8
+	param SizeZ 0.22
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id fac7bc58
+	name LegML
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 1.9 0.1 0.5
+	param Radius 0.5
+	param RotationAngle 50
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.22
+	param SizeY 1.8
+	param SizeZ 0.22
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 1e9eeaca
+	name LegMR
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -1.9 0.1 0.5
+	param Radius 0.5
+	param RotationAngle -50
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.22
+	param SizeY 1.8
+	param SizeZ 0.22
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id ff61bd08
+	name LegRL
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position 1.9 -1.3 0.5
+	param Radius 0.5
+	param RotationAngle 50
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.22
+	param SizeY 1.8
+	param SizeZ 0.22
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 2fcc12eb
+	name LegRR
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 1
+	param Position -1.9 -1.3 0.5
+	param Radius 0.5
+	param RotationAngle -50
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 0.22
+	param SizeY 1.8
+	param SizeZ 0.22
+	param UniformScale 0
+end

@@ -1,0 +1,494 @@
+"""Lane B fixture harness: geppetto-live gate-launch / attach / receipt path.
+
+FIXTURE ONLY. Never starts the real chest, never opens a real viewport,
+never touches the real cabinet/confirm directory, never runs a paid
+provider. Every subprocess runs with HOME pointed at a temp directory
+containing a stub gate (see below), a stub host, a stub live_runs, a
+stub receipt hook, and a fake runner.
+
+GATE STUB DISCLOSURE: the fixture gate is tests/gate_stub_for_launcher_tests.py,
+implementing the pre-Lane-A-change file/answer/claim/register surface
+Lane B was built against at 03:36. The real gate.py in tree now requires
+--worker/--session on claim (Lane A edit, 03:37, contract NOT yet
+forwarded to Lane B), and the launcher must not guess how it obtains
+those values. This harness therefore proves launcher logic (launch,
+attach, receipt hook, cancel, trap, group kill), NOT integration against
+Lane A's new claim signature. Re-point it at the real gate.py the moment
+the coordinator forwards A's frozen contract.
+
+The stub receipt hook RECORDS its invocation (run, answer, verb, token
+presence); it does NOT validate a real receipt. Real build_execution
+validation is covered by its own tests and by lane E integration.
+
+Run:  python3 tests/test_gate_launcher_attach.py -v
+from the project root on the PC. The launcher under test is
+~/.local/bin/geppetto-live, copied into the fixture HOME.
+"""
+
+import json
+import os
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import unittest
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+REAL_LAUNCHER = Path.home() / ".local" / "bin" / "geppetto-live"
+SCRIPT_TEXT = "add Primitive name=Body shape=Box materialslot=0\nsave model.effigy\n"
+
+HOST_STUB = """#!/usr/bin/env python3
+import fcntl, json, os, sys
+BASE = os.path.dirname(os.path.abspath(__file__))
+SLOTS = os.path.join(BASE, "gate-slots.json")
+def load():
+    try:
+        with open(SLOTS, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+def save(slots):
+    tmp = SLOTS + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(slots, f)
+    os.replace(tmp, SLOTS)
+def main():
+    args = sys.argv[1:]
+    if not args:
+        return 2
+    if args[0] == "tools":
+        return 0
+    with open(os.path.join(BASE, ".slots.lock"), "a+b") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            slots = load()
+            if args[0] == "gate-reserve":
+                iid, preferred = args[1], int(args[2])
+                if iid in slots:
+                    print(slots[iid]); return 0
+                for n in list(range(preferred, 5)) + list(range(1, preferred)):
+                    if str(n) not in slots.values():
+                        slots[iid] = str(n); save(slots); print(n); return 0
+                print("FULL"); return 0
+            if args[0] == "gate-check":
+                print(slots.get(args[1], "0")); return 0
+            if args[0] == "gate-release":
+                slots.pop(args[1], None); save(slots); print("ok"); return 0
+            if args[0] == "gate-place":
+                if os.environ.get("FAKE_HOST_PLACE_FAIL") == "1":
+                    print("no reservation"); return 1
+                if args[1] in slots:
+                    print("ok"); return 0
+                print("no reservation"); return 1
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+    return 2
+if __name__ == "__main__":
+    sys.exit(main())
+"""
+
+LIVE_RUNS_STUB = "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n"
+
+BUILD_EXEC_STUB = """#!/usr/bin/env python3
+import json, os, sys
+def main():
+    receipts = os.environ.get("GEPPETTO_BUILD_RECEIPTS")
+    if not receipts:
+        return 0
+    os.makedirs(receipts, exist_ok=True)
+    rec = {"run": sys.argv[1] if len(sys.argv) > 1 else "",
+           "answer": sys.argv[2] if len(sys.argv) > 2 else "",
+           "verb": sys.argv[3] if len(sys.argv) > 3 else "",
+           "token_present": bool(os.environ.get("GEPPETTO_BUILD_TOKEN"))}
+    with open(os.path.join(receipts, "receipt-invocations.jsonl"), "a", encoding="utf-8") as f:
+        f.write(json.dumps(rec) + "\\n")
+    return 0
+if __name__ == "__main__":
+    sys.exit(main())
+"""
+
+FAKE_GEPPETTO = """#!/usr/bin/env python3
+import json, os, sys, time
+def main():
+    args = sys.argv[1:]
+    run = None
+    for i, a in enumerate(args):
+        if a == "--run" and i + 1 < len(args):
+            run = args[i + 1]
+    if not run:
+        return 2
+    delay = float(os.environ.get("FAKE_RUNNER_DELAY", "0.2"))
+    fail = os.environ.get("FAKE_RUNNER_FAIL") == "1"
+    time.sleep(delay)
+    os.makedirs(os.path.join(run, ".live", "answers"), exist_ok=True)
+    with open(os.path.join(run, ".live", "latest.json"), "w", encoding="utf-8") as f:
+        json.dump({"state": "failed" if fail else "open",
+                   "snapshot": {"revision": 0 if fail else 2, "path": "model.effigy"}}, f)
+    with open(run + ".json", "w", encoding="utf-8") as f:
+        json.dump({"pid": os.getpid()}, f)
+    with open(os.path.join(run, ".live", "answers", "start.txt"), "w", encoding="utf-8") as f:
+        f.write("run failed\\n" if fail else "run is open\\n")
+    if os.environ.get("FAKE_RUNNER_SPAWN_CHILD") == "1":
+        import subprocess as _sp
+        _child = _sp.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        with open(os.path.join(run, ".live", "child.pid"), "w", encoding="utf-8") as f:
+            f.write(str(_child.pid))
+    end = time.time() + float(os.environ.get("FAKE_RUNNER_LINGER", "30"))
+    while time.time() < end:
+        time.sleep(0.2)
+    return 0
+if __name__ == "__main__":
+    sys.exit(main())
+"""
+
+
+class GateLauncherTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self.tmp.name) / "home"
+        self.project = self.home / "Desktop" / "geppetto-desktop"
+        self.cabinet = self.project / "cabinet"
+        self.cabinet.mkdir(parents=True)
+        shutil.copyfile(PROJECT_ROOT / "tests" / "gate_stub_for_launcher_tests.py",
+                        self.cabinet / "gate.py")
+        self._write(self.cabinet / "host.py", HOST_STUB)
+        self._write(self.cabinet / "live_runs.py", LIVE_RUNS_STUB)
+        self._write(self.cabinet / "build_execution.py", BUILD_EXEC_STUB)
+        bin_dir = self.home / ".local" / "bin"
+        bin_dir.mkdir(parents=True)
+        shutil.copyfile(REAL_LAUNCHER, bin_dir / "geppetto-live")
+        os.chmod(bin_dir / "geppetto-live", 0o755)
+        self._write(bin_dir / "geppetto", FAKE_GEPPETTO)
+        os.chmod(bin_dir / "geppetto", 0o755)
+        self.launcher = str(bin_dir / "geppetto-live")
+        self.script_dir = Path(self.tmp.name) / "work"
+        self.script_dir.mkdir()
+        self.script = self.script_dir / "build.txt"
+        self.script.write_text(SCRIPT_TEXT, encoding="utf-8")
+        self.outdir = str(self.script_dir)
+        self.receipts = Path(self.tmp.name) / "receipts"
+        self.receipts.mkdir()
+        self._pids = []
+
+    def tearDown(self):
+        runs = self.home / ".local" / "share" / "geppetto" / "research"
+        if runs.exists():
+            for meta in runs.glob("*.json"):
+                try:
+                    pid = int(json.loads(meta.read_text(encoding="utf-8")).get("pid") or 0)
+                except (OSError, ValueError):
+                    pid = 0
+                if pid:
+                    try:
+                        os.kill(pid, signal.SIGKILL)
+                    except OSError:
+                        pass
+        for pid in self._pids:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
+        self.tmp.cleanup()
+
+    @staticmethod
+    def _write(path, text):
+        path.write_text(text, encoding="utf-8")
+
+    def _env(self, extra=None):
+        env = dict(os.environ)
+        env["HOME"] = str(self.home)
+        env.pop("GEPPETTO_BUILD_RECEIPTS", None)
+        env.pop("GEPPETTO_BUILD_TOKEN", None)
+        if extra:
+            env.update(extra)
+        return env
+
+    def _run(self, args, env, timeout=30):
+        return subprocess.run(args, env=env, capture_output=True, text=True, timeout=timeout)
+
+    def _gate(self, *args, timeout=30):
+        return self._run([sys.executable, str(self.cabinet / "gate.py"), *args],
+                         self._env(), timeout=timeout)
+
+    def _file_and_yes(self):
+        r = self._gate("file", "--script", str(self.script), "--subject", "fixture model",
+                       "--worker", "laneB-fixture", "--pane", "1", "--doc", "-", "--out", self.outdir)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        intent = json.loads(r.stdout)
+        r = self._gate("answer", "--id", intent["id"], "--answer", "yes")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return intent["id"]
+
+    def _launcher_call(self, gate_launch=False, worker_receipts=False, extra_env=None):
+        env = self._env()
+        if worker_receipts:
+            env["GEPPETTO_BUILD_RECEIPTS"] = str(self.receipts)
+            env["GEPPETTO_BUILD_TOKEN"] = "fixture-token"
+        if extra_env:
+            env.update(extra_env)
+        args = [self.launcher, str(self.script), "-", self.outdir, "--gate-token", self._intent]
+        if gate_launch:
+            args.append("--gate-launch")
+        return self._run(args, env, timeout=30)
+
+    def _run_dirs(self):
+        runs = self.home / ".local" / "share" / "geppetto" / "research"
+        if not runs.exists():
+            return []
+        return [p for p in runs.iterdir() if p.is_dir()]
+
+    def _receipt_calls(self):
+        log = self.receipts / "receipt-invocations.jsonl"
+        if not log.exists():
+            return []
+        return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+    def _pid_alive(self, pid):
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+
+    def test_launcher_wins_then_worker_attaches_same_run(self):
+        self._intent = self._file_and_yes()
+        launch = self._launcher_call(gate_launch=True)
+        self.assertEqual(launch.returncode, 0, launch.stderr)
+        for _ in range(50):
+            if len(self._run_dirs()) == 1:
+                break
+            time.sleep(0.1)
+        self.assertEqual(len(self._run_dirs()), 1)
+        self.assertEqual(self._receipt_calls(), [])
+        worker = self._launcher_call(worker_receipts=True)
+        self.assertEqual(worker.returncode, 0, worker.stderr)
+        self.assertIn("run: ", worker.stdout)
+        self.assertEqual(len(self._run_dirs()), 1, "worker must not start a second run")
+        calls = self._receipt_calls()
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["run"], self._run_dirs()[0].as_posix())
+        self.assertTrue(calls[0]["token_present"])
+
+    def test_worker_wins_then_launcher_exits_zero_no_second_run(self):
+        self._intent = self._file_and_yes()
+        worker = self._launcher_call(worker_receipts=True)
+        self.assertEqual(worker.returncode, 0, worker.stderr)
+        self.assertEqual(len(self._run_dirs()), 1)
+        launch = self._launcher_call(gate_launch=True)
+        self.assertEqual(launch.returncode, 0, launch.stderr)
+        self.assertEqual(len(self._run_dirs()), 1)
+        self.assertEqual(len(self._receipt_calls()), 1)
+
+    def test_launcher_and_worker_simultaneous_one_run_one_receipt(self):
+        self._intent = self._file_and_yes()
+        env_launch = self._env()
+        env_worker = self._env()
+        env_worker["GEPPETTO_BUILD_RECEIPTS"] = str(self.receipts)
+        env_worker["GEPPETTO_BUILD_TOKEN"] = "fixture-token"
+        base = [self.launcher, str(self.script), "-", self.outdir, "--gate-token", self._intent]
+        p1 = subprocess.Popen(base + ["--gate-launch"], env=env_launch,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        p2 = subprocess.Popen(base, env=env_worker,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            o1, e1 = p1.communicate(timeout=30)
+            o2, e2 = p2.communicate(timeout=30)
+        finally:
+            for p in (p1, p2):
+                if p.poll() is None:
+                    p.kill()
+        self.assertEqual(p1.returncode, 0, e1)
+        self.assertEqual(p2.returncode, 0, e2)
+        self.assertEqual(len(self._run_dirs()), 1)
+        self.assertEqual(len(self._receipt_calls()), 1)
+
+    def test_delayed_start_worker_attach_waits_for_answer(self):
+        self._intent = self._file_and_yes()
+        launch = self._launcher_call(gate_launch=True, extra_env={"FAKE_RUNNER_DELAY": "2"})
+        self.assertEqual(launch.returncode, 0, launch.stderr)
+        worker = self._launcher_call(worker_receipts=True)
+        self.assertEqual(worker.returncode, 0, worker.stderr)
+        self.assertEqual(len(self._receipt_calls()), 1)
+
+    def test_wait_for_unregistered_run_is_bounded_and_starts_nothing(self):
+        self._intent = self._file_and_yes()
+        r = self._gate("claim", "--id", self._intent, "--script", str(self.script))
+        self.assertTrue(r.stdout.startswith("START"), r.stdout)
+        env = self._env()
+        env["GEPPETTO_BUILD_RECEIPTS"] = str(self.receipts)
+        env["GEPPETTO_BUILD_TOKEN"] = "fixture-token"
+        start = time.monotonic()
+        worker = self._run([self.launcher, str(self.script), "-", self.outdir,
+                            "--gate-token", self._intent], env, timeout=30)
+        elapsed = time.monotonic() - start
+        self.assertEqual(worker.returncode, 2, worker.stderr)
+        self.assertIn("GATE HANDOFF FAILED", worker.stderr)
+        self.assertLess(elapsed, 20, "WAIT must be bounded, not a hang")
+        self.assertEqual(self._run_dirs(), [])
+
+    def test_attach_to_registered_run_without_pid_fails_fast(self):
+        self._intent = self._file_and_yes()
+        r = self._gate("claim", "--id", self._intent, "--script", str(self.script))
+        self.assertTrue(r.stdout.startswith("START"), r.stdout)
+        fake_run = self.home / ".local" / "share" / "geppetto" / "research" / "script-fake-1"
+        (fake_run / ".live").mkdir(parents=True)
+        r = self._gate("register", "--id", self._intent, "--run", str(fake_run), "--pid", "999999")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        env = self._env()
+        start = time.monotonic()
+        worker = self._run([self.launcher, str(self.script), "-", self.outdir,
+                            "--gate-token", self._intent], env, timeout=15)
+        self.assertLess(time.monotonic() - start, 12)
+        self.assertNotEqual(worker.returncode, 0)
+        self.assertIn("no live run directory or pid", worker.stderr)
+
+    def test_gate_place_failure_cancels_only_that_run(self):
+        self._intent = self._file_and_yes()
+        launch = self._launcher_call(gate_launch=True, extra_env={"FAKE_HOST_PLACE_FAIL": "1"})
+        self.assertEqual(launch.returncode, 2, launch.stderr)
+        self.assertIn("reserved viewport disappeared", launch.stderr)
+        token_path = self.cabinet / "confirm" / (self._intent + ".token.json")
+        token = json.loads(token_path.read_text(encoding="utf-8"))
+        self.assertTrue(token.get("run"), "launcher must have registered a run before place")
+        pid = int(token["pid"])
+        for _ in range(50):
+            if not self._pid_alive(pid):
+                break
+            time.sleep(0.1)
+        self.assertFalse(self._pid_alive(pid), "failed place must cancel that run's process")
+
+    def test_once_is_rejected_before_claim_and_token_survives(self):
+        self._intent = self._file_and_yes()
+        env = self._env()
+        r = self._run([self.launcher, str(self.script), "-", self.outdir,
+                       "--gate-token", self._intent, "--once"], env, timeout=15)
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn("--once is not supported", r.stderr)
+        self.assertEqual(self._run_dirs(), [])
+        r = self._gate("claim", "--id", self._intent, "--script", str(self.script))
+        self.assertTrue(r.stdout.startswith("START"), r.stdout)
+
+    def test_gate_launch_with_receipts_is_refused_before_claim(self):
+        self._intent = self._file_and_yes()
+        env = self._env()
+        env["GEPPETTO_BUILD_RECEIPTS"] = str(self.receipts)
+        env["GEPPETTO_BUILD_TOKEN"] = "fixture-token"
+        r = self._run([self.launcher, str(self.script), "-", self.outdir,
+                       "--gate-token", self._intent, "--gate-launch"], env, timeout=15)
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn("must not carry GEPPETTO_BUILD_RECEIPTS", r.stderr)
+        self.assertEqual(self._run_dirs(), [])
+        r = self._gate("claim", "--id", self._intent, "--script", str(self.script))
+        self.assertTrue(r.stdout.startswith("START"), r.stdout)
+
+    def test_signal_during_answer_kills_run_and_its_child_group(self):
+        self._intent = self._file_and_yes()
+        env = self._env()
+        env["GEPPETTO_BUILD_RECEIPTS"] = str(self.receipts)
+        env["GEPPETTO_BUILD_TOKEN"] = "fixture-token"
+        env["FAKE_RUNNER_SPAWN_CHILD"] = "1"
+        env["FAKE_RUNNER_DELAY"] = "0.2"
+        proc = subprocess.Popen(
+            [self.launcher, str(self.script), "-", self.outdir, "--gate-token", self._intent],
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            run_dir = None
+            child_pid = None
+            for _ in range(100):
+                dirs = self._run_dirs()
+                if dirs:
+                    run_dir = dirs[0]
+                    child_file = run_dir / ".live" / "child.pid"
+                    if child_file.exists():
+                        child_pid = int(child_file.read_text(encoding="utf-8").strip())
+                        break
+                time.sleep(0.1)
+            self.assertIsNotNone(run_dir, "fake runner must have created a run")
+            self.assertIsNotNone(child_pid, "fake runner must have spawned a child")
+            token = json.loads((self.cabinet / "confirm" / (self._intent + ".token.json")).read_text(encoding="utf-8"))
+            run_pid = int(token["pid"])
+            proc.send_signal(signal.SIGTERM)
+            rc = proc.wait(timeout=15)
+            self.assertEqual(rc, 130, "trap must turn TERM into exit 130 after cancelling")
+            for _ in range(50):
+                if not self._pid_alive(run_pid) and not self._pid_alive(child_pid):
+                    break
+                time.sleep(0.1)
+            self.assertFalse(self._pid_alive(run_pid), "run leader must die on launcher TERM")
+            self.assertFalse(self._pid_alive(child_pid), "run group child must die on launcher TERM")
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=5)
+
+    def test_immediate_term_leaves_no_orphan_run(self):
+        self._intent = self._file_and_yes()
+        env = self._env()
+        env["FAKE_RUNNER_DELAY"] = "2"
+        proc = subprocess.Popen(
+            [self.launcher, str(self.script), "-", self.outdir, "--gate-token", self._intent],
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            proc.send_signal(signal.SIGTERM)
+            rc = proc.wait(timeout=15)
+            if proc.stdout:
+                proc.stdout.close()
+            if proc.stderr:
+                proc.stderr.close()
+            self.assertIn(rc, (130, -15))
+            for d in self._run_dirs():
+                meta = d.parent / (d.name + ".json")
+                if meta.exists():
+                    pid = int(json.loads(meta.read_text(encoding="utf-8")).get("pid") or 0)
+                    if pid:
+                        self.assertFalse(self._pid_alive(pid), "no orphan run may survive launcher TERM")
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=5)
+
+    def test_more_skip_close_use_inbox_and_no_gate_token(self):
+        runs = self.home / ".local" / "share" / "geppetto" / "research"
+        runs.mkdir(parents=True)
+        run = runs / "script-manual-1"
+        (run / ".live" / "answers").mkdir(parents=True)
+        (run / ".live" / "inbox").mkdir(parents=True)
+        sleeper = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        self._pids.append(sleeper.pid)
+        (run / ".live" / "latest.json").write_text(
+            json.dumps({"state": "open", "snapshot": {"revision": 2, "path": "model.effigy"}}),
+            encoding="utf-8")
+        Path(str(run) + ".json").write_text(json.dumps({"pid": sleeper.pid}), encoding="utf-8")
+        stop = threading.Event()
+
+        def responder():
+            while not stop.is_set():
+                for item in (run / ".live" / "inbox").iterdir():
+                    stem = item.name.split(".")[0]
+                    ans = run / ".live" / "answers" / (stem + ".txt")
+                    if not ans.exists():
+                        ans.write_text("run is open\n", encoding="utf-8")
+                time.sleep(0.05)
+
+        thread = threading.Thread(target=responder, daemon=True)
+        thread.start()
+        try:
+            env = self._env()
+            edit = self.script_dir / "edit.txt"
+            edit.write_text("echo hi\n", encoding="utf-8")
+            for args in (["more", str(run), str(edit)], ["skip", str(run)], ["close", str(run)]):
+                r = self._run([self.launcher, *args], env, timeout=15)
+                self.assertEqual(r.returncode, 0, (args, r.stderr, r.stdout))
+            self.assertEqual(len(list((run / ".live" / "inbox").iterdir())), 3)
+        finally:
+            stop.set()
+            sleeper.kill()
+            sleeper.wait(timeout=5)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

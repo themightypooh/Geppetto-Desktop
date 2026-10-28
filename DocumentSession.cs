@@ -98,7 +98,7 @@ public sealed class RenderSnapshot : IDisposable
 
 	public bool IsStaleFor( DocumentSession session ) =>
 		session is null || session.DocumentId != DocumentId || session.Revision != Revision
-		|| (session.SourceKind == DocumentSourceKind.Effigy && session.PaintFingerprint() != PaintFingerprint);
+		|| (session.SourceKind == DocumentSourceKind.Effigy && PaintFingerprint is not null && session.PaintFingerprint() != PaintFingerprint);
 
 	public void Dispose()
 	{

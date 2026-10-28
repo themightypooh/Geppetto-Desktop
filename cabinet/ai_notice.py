@@ -291,7 +291,7 @@ def blocks_for(cfg, missing):
 # --------------------------------------------------------------------- consent state
 
 def default_state():
-    return {"version": VERSION, "show_cost_every_build": False, "never_show": False, "providers": {}}
+    return {"version": VERSION, "show_cost_every_build": False, "providers": {}}
 
 
 def load_state(path):
@@ -305,8 +305,18 @@ def load_state(path):
         return default_state()
     out = default_state()
     out["show_cost_every_build"] = bool(state.get("show_cost_every_build", False))
-    out["never_show"] = bool(state.get("never_show", False))
     out["providers"] = {k: v for k, v in state["providers"].items() if isinstance(v, dict)}
+    # Legacy global flag (pre-per-provider): it must never suppress every
+    # provider again. If exactly one provider record is fully acked
+    # (disclosure_seen + cost_ack), that is the only provider it can
+    # plausibly have been dismissed for, so migrate the flag onto that
+    # record. Otherwise the flag is dropped: the card shows again, which
+    # is the safe direction, and the user can dismiss per provider.
+    if state.get("never_show"):
+        acked = [k for k, v in out["providers"].items()
+                 if v.get("disclosure_seen") and v.get("cost_ack")]
+        if len(acked) == 1:
+            out["providers"][acked[0]] = dict(out["providers"][acked[0]], never_show=True)
     return out
 
 
@@ -329,16 +339,16 @@ def needs_notice(state, cfg):
     """Should the gate show before this send, and which blocks? Local never gates
     (no cost gate for a model at home — task/spec §2.3 handling in the cabinet is
     informational only there). Returns {show, missing, blocks, key, compact}."""
-    if state.get("never_show"):
-        # DO NOT SHOW THIS AGAIN: the card never comes back, for any provider
-        return {"show": False, "missing": [], "blocks": [], "key": cfg["key"],
-                "compact": "", "chat_compact": ""}
     if cfg["local"]:
         # a model at home never gates on its own — but a hosted judge on a local
         # build is a second door and gets its own say-so (spec §3.3, local base)
         j = cfg["judge"]
         if j and not j["same"] and not j["local"]:
             jrec = _record(state, j["key"])
+            if jrec.get("never_show"):
+                # DO NOT SHOW THIS AGAIN, for that judge provider only.
+                return {"show": False, "missing": [], "blocks": [], "key": cfg["key"],
+                        "compact": "", "chat_compact": ""}
             if not (jrec.get("disclosure_seen") and jrec.get("judge_ack")):
                 blocks = [judge_block(cfg)]
                 return {"show": True, "missing": ["judge"], "blocks": blocks,
@@ -346,6 +356,20 @@ def needs_notice(state, cfg):
         return {"show": False, "missing": [], "blocks": [], "key": cfg["key"],
                 "compact": "", "chat_compact": ""}
     rec = _record(state, cfg["key"])
+    if rec.get("never_show"):
+        # DO NOT SHOW THIS AGAIN, for this provider only: it beats even the
+        # show-cost-every-build opt-in for this provider, as before, but
+        # another provider still gets its own first-send card. The one
+        # exception is a different judge provider: judging is a second
+        # door, so its judge block still shows on its own terms.
+        j = cfg["judge"]
+        if j and not j["same"]:
+            jrec = _record(state, j["key"])
+            if not jrec.get("never_show") and not (jrec.get("disclosure_seen") and jrec.get("judge_ack")):
+                return {"show": True, "missing": ["judge"], "blocks": [judge_block(cfg)],
+                        "key": cfg["key"], "compact": "", "chat_compact": ""}
+        return {"show": False, "missing": [], "blocks": [], "key": cfg["key"],
+                "compact": "", "chat_compact": ""}
     missing = []
     acked = bool(rec.get("disclosure_seen") and rec.get("cost_ack"))
     caps_grew = (cfg["calls"] > int(rec.get("acked_calls") or 0)
@@ -363,7 +387,9 @@ def needs_notice(state, cfg):
                 missing.append("judge")
         else:
             jrec = _record(state, j["key"])
-            if not (jrec.get("disclosure_seen") and jrec.get("judge_ack")):
+            # A different judge provider keeps its own say-so: dismissing
+            # the builder does not dismiss the judge, and vice versa.
+            if not jrec.get("never_show") and not (jrec.get("disclosure_seen") and jrec.get("judge_ack")):
                 missing.append("judge")
     blocks = blocks_for(cfg, missing)
     return {"show": bool(blocks), "missing": missing, "blocks": blocks,
@@ -375,8 +401,21 @@ def ack_notice(state, cfg, missing, every_time=False, never_show=False):
     """Record that the words were shown and agreed to. Never sends anything.
     Mutates and returns the state dict; the caller saves it."""
     state.setdefault("providers", {})
+    # The legacy global flag is never written again; load_state migrates it.
+    state.pop("never_show", None)
     if never_show:
-        state["never_show"] = True
+        # DO NOT SHOW THIS AGAIN, for this provider only. On a judge-only
+        # card (local base, different hosted judge) that provider is the
+        # judge, not the local builder, which never gates on its own.
+        if missing == ["judge"] and cfg["judge"] and not cfg["judge"]["same"]:
+            jkey = cfg["judge"]["key"]
+            jrec0 = dict(_record(state, jkey))
+            jrec0["never_show"] = True
+            state["providers"][jkey] = jrec0
+        else:
+            rec0 = dict(_record(state, cfg["key"]))
+            rec0["never_show"] = True
+            state["providers"][cfg["key"]] = rec0
     if every_time:
         state["show_cost_every_build"] = True
     now_caps = {"acked_calls": cfg["calls"], "acked_minutes": cfg["minutes"]}

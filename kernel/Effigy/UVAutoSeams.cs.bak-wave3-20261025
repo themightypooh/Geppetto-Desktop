@@ -1,0 +1,252 @@
+using System;
+using System.Collections.Generic;
+
+namespace Effigy;
+
+/// <summary>
+/// Seams from geometry, not from a layout: the cuts an unwrap needs before anyone has marked
+/// anything by hand. RizomUV-style auto-seams in the narrow sense — place cuts where the surface
+/// itself says to cut, so <see cref="UVUnwrap.Unwrap"/> can be steered without a user marking
+/// every edge first.
+///
+/// WHAT COUNTS AS A CUT. An interior edge is a candidate when the dihedral angle between its two
+/// faces clears <see cref="Options.AngleDegrees"/> — a box corner at 90 degrees qualifies, a
+/// smooth sphere wall at a few degrees does not. A valley edge (concave: both face centroids lie
+/// on the outward side of each other's planes) scores <see cref="Options.ConcaveBoost"/> times
+/// higher, because a seam hides in a valley and shows on a ridge: cutting the inside of a sleeve
+/// is invisible, cutting across its outside is not.
+///
+/// The candidates are then chained into paths: from the highest-scoring unclaimed edge, walk to
+/// the highest-scoring unclaimed candidate sharing the current endpoint, until the path hits a
+/// dead end, revisits a vertex, or closes a loop. The seam SET is every candidate edge — the
+/// paths are just how the set is reported, so a caller can see loops and runs rather than a
+/// scatter of edges.
+///
+/// WHAT THIS IS NOT. It does not flatten anything and it does not pack anything: it returns edge
+/// keys for <see cref="UVUnwrap.Unwrap"/>'s <c>seams</c> parameter (or for
+/// <see cref="PolyMesh.Seams"/> marking). Chart counts here are face components that do not
+/// cross a seam — the cuts the unwrap will then respect, before its own angle rule splits
+/// further. On a smooth mesh this can legitimately return zero seams: no sharp edge, no cut.
+/// </summary>
+public static class UVAutoSeams
+{
+	public sealed class Options
+	{
+		/// <summary>Minimum dihedral angle in degrees for an edge to become a seam candidate.</summary>
+		public float AngleDegrees = 50f;
+
+		/// <summary>Score multiplier for concave (valley) edges. 1 keeps them equal to ridges.</summary>
+		public float ConcaveBoost = 1.5f;
+
+		/// <summary>When true, only concave edges become seams — ridges are left to the angle rule.</summary>
+		public bool ConcaveOnly = false;
+	}
+
+	public sealed class Result
+	{
+		/// <summary>Every seam edge: the union of <see cref="Paths"/>.</summary>
+		public HashSet<EdgeKey> Seams = new();
+
+		/// <summary>The seam edges grouped into chains, in the order they were walked.</summary>
+		public List<List<EdgeKey>> Paths = new();
+
+		/// <summary>Edges that cleared the angle threshold (before chaining).</summary>
+		public int CandidateCount;
+
+		/// <summary>Face charts after cutting along <see cref="Seams"/> (no chart crosses a seam).</summary>
+		public int ChartCount;
+
+		/// <summary>Mean dihedral angle across the seam edges, in degrees.</summary>
+		public float MeanSeamDihedral;
+
+		public override string ToString() =>
+			$"{Seams.Count} seam edges in {Paths.Count} paths, {ChartCount} charts, mean dihedral {MeanSeamDihedral:0.##} deg";
+	}
+
+	/// <summary>Generate seams for <paramref name="mesh"/> under <paramref name="options"/>.</summary>
+	public static Result Generate( PolyMesh mesh, Options options = null )
+	{
+		if ( mesh is null )
+			throw new ArgumentNullException( nameof( mesh ) );
+		options ??= new Options();
+
+		var result = new Result();
+		var edgeFaces = mesh.BuildEdgeFaces();
+		var scored = new List<(EdgeKey Key, float Score, float Angle)>();
+
+		foreach ( var (key, owners) in edgeFaces )
+		{
+			if ( owners.Count != 2 )
+				continue;
+			if ( !ScoreEdge( mesh, owners[0], owners[1], out var angle, out var concave ) )
+				continue;
+			if ( angle < options.AngleDegrees )
+				continue;
+			if ( options.ConcaveOnly && !concave )
+				continue;
+			scored.Add( (key, angle * (concave ? options.ConcaveBoost : 1f), angle) );
+		}
+
+		result.CandidateCount = scored.Count;
+		if ( scored.Count == 0 )
+		{
+			result.ChartCount = ChartsAfterCut( mesh, result.Seams );
+			return result;
+		}
+
+		// Highest score first; lowest edge key breaks ties, so the result is deterministic.
+		scored.Sort( ( a, b ) =>
+		{
+			var cmp = b.Score.CompareTo( a.Score );
+			if ( cmp != 0 ) return cmp;
+			cmp = a.Key.A.CompareTo( b.Key.A );
+			return cmp != 0 ? cmp : a.Key.B.CompareTo( b.Key.B );
+		} );
+
+		var byScore = new Dictionary<EdgeKey, float>( scored.Count );
+		var angleSum = 0f;
+		foreach ( var s in scored )
+		{
+			byScore[s.Key] = s.Score;
+			angleSum += s.Angle;
+		}
+		result.MeanSeamDihedral = angleSum / scored.Count;
+
+		// Vertex -> candidate edges, for walking chains.
+		var atVertex = new Dictionary<int, List<EdgeKey>>();
+		foreach ( var s in scored )
+		{
+			if ( !atVertex.TryGetValue( s.Key.A, out var la ) ) atVertex[s.Key.A] = la = new List<EdgeKey>();
+			if ( !atVertex.TryGetValue( s.Key.B, out var lb ) ) atVertex[s.Key.B] = lb = new List<EdgeKey>();
+			la.Add( s.Key );
+			lb.Add( s.Key );
+		}
+
+		// Partition the candidates into chains. Each step claims one new edge, so every walk
+		// terminates; a walk stops at a dead end, at a revisited vertex, or when it closes a loop.
+		var claimed = new HashSet<EdgeKey>();
+		foreach ( var s in scored )
+		{
+			if ( claimed.Contains( s.Key ) )
+				continue;
+			var path = new List<EdgeKey> { s.Key };
+			claimed.Add( s.Key );
+			var pathVerts = new HashSet<int> { s.Key.A, s.Key.B };
+			var current = s.Key.B;
+			var previous = s.Key;
+			while ( true )
+			{
+				EdgeKey best = default;
+				var bestScore = float.NegativeInfinity;
+				var found = false;
+				if ( atVertex.TryGetValue( current, out var incident ) )
+				{
+					foreach ( var edge in incident )
+					{
+						if ( edge.Equals( previous ) || claimed.Contains( edge ) )
+							continue;
+						var score = byScore[edge];
+						if ( !found || score > bestScore ||
+							(score == bestScore && (edge.A < best.A || (edge.A == best.A && edge.B < best.B))) )
+						{
+							best = edge;
+							bestScore = score;
+							found = true;
+						}
+					}
+				}
+				if ( !found )
+					break;
+				var next = best.A == current ? best.B : best.A;
+				path.Add( best );
+				claimed.Add( best );
+				if ( pathVerts.Contains( next ) )
+					break;
+				pathVerts.Add( next );
+				previous = best;
+				current = next;
+			}
+			result.Paths.Add( path );
+		}
+
+		foreach ( var s in scored )
+			result.Seams.Add( s.Key );
+		result.ChartCount = ChartsAfterCut( mesh, result.Seams );
+		return result;
+	}
+
+	/// <summary>Dihedral angle and concavity of the edge shared by faces <paramref name="fa"/> and
+	/// <paramref name="fb"/>. Returns false for degenerate faces (zero-area normals).</summary>
+	public static bool ScoreEdge( PolyMesh mesh, int fa, int fb, out float angleDegrees, out bool concave )
+	{
+		angleDegrees = 0f;
+		concave = false;
+		var n1 = mesh.FaceNormal( mesh.Faces[fa] );
+		var n2 = mesh.FaceNormal( mesh.Faces[fb] );
+		if ( n1.LengthSquared < 1e-12f || n2.LengthSquared < 1e-12f )
+			return false;
+		var cos = Math.Clamp( Vec3.Dot( n1 / n1.Length, n2 / n2.Length ), -1f, 1f );
+		angleDegrees = MathF.Acos( cos ) * 180f / MathF.PI;
+
+		// Valley test, symmetric so winding cannot flip it one-sided: both centroids on the
+		// outward side of each other's planes means the surface folds inward there (a valley);
+		// both on the inward side means it folds outward (a ridge, like a box corner).
+		var c1 = Centroid( mesh, mesh.Faces[fa] );
+		var c2 = Centroid( mesh, mesh.Faces[fb] );
+		var d = c2 - c1;
+		concave = Vec3.Dot( d, n1 ) > 0f && Vec3.Dot( -d, n2 ) > 0f;
+		return true;
+	}
+
+	/// <summary>Face charts when <paramref name="seams"/> may not be crossed: BFS over faces where
+	/// adjacency is an interior edge that is not a seam. Boundary edges connect nothing.</summary>
+	public static int ChartsAfterCut( PolyMesh mesh, IReadOnlySet<EdgeKey> seams )
+	{
+		var neighbours = new List<int>[mesh.FaceCount];
+		foreach ( var (key, owners) in mesh.BuildEdgeFaces() )
+		{
+			if ( seams is not null && seams.Contains( key ) )
+				continue;
+			for ( var a = 0; a < owners.Count; a++ )
+				for ( var b = a + 1; b < owners.Count; b++ )
+				{
+					(neighbours[owners[a]] ??= new List<int>()).Add( owners[b] );
+					(neighbours[owners[b]] ??= new List<int>()).Add( owners[a] );
+				}
+		}
+
+		var seen = new bool[mesh.FaceCount];
+		var charts = 0;
+		var stack = new Stack<int>();
+		for ( var f = 0; f < mesh.FaceCount; f++ )
+		{
+			if ( seen[f] )
+				continue;
+			charts++;
+			stack.Push( f );
+			seen[f] = true;
+			while ( stack.Count > 0 )
+			{
+				var at = stack.Pop();
+				if ( neighbours[at] is null )
+					continue;
+				foreach ( var n in neighbours[at] )
+				{
+					if ( seen[n] )
+						continue;
+					seen[n] = true;
+					stack.Push( n );
+				}
+			}
+		}
+		return charts;
+	}
+
+	static Vec3 Centroid( PolyMesh mesh, Face face )
+	{
+		var sum = new Vec3( 0f, 0f, 0f );
+		foreach ( var vi in face.Indices )
+			sum += mesh.Positions[vi];
+		return sum / Math.Max( 1, face.Indices.Length );
+	}
+}

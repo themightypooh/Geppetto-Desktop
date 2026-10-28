@@ -1,0 +1,280 @@
+#!/usr/bin/env bash
+# in_progress.sh — shared hook/cron claim helper for Geppetto Muse turns.
+# Usage: in_progress.sh {check|claim|heartbeat|release|janitor} [args...]
+# All timestamps epoch seconds. ISO status timestamps parsed with python3.
+# BASE override (testing only): MUSE_SEAT_BASE. RUNS override: MUSE_RUNS_BASE.
+set -uo pipefail
+BASE="${MUSE_SEAT_BASE:-/home/poo/Desktop/geppetto-desktop/cabinet/muse-seat}"
+IP="$BASE/in-progress"; REQ="$BASE/requests"; RES="$BASE/responses"; ST="$BASE/status"
+RUNS="${MUSE_RUNS_BASE:-$HOME/.local/share/geppetto/research}"
+CLAIM_TTL="${CLAIM_TTL:-360}"; ACTIVE_TTL="${ACTIVE_TTL:-600}"; LOCK_STALE=30; MAX_AGE=86400
+mkdir -p "$IP" 2>/dev/null || true
+chmod 700 "$IP" 2>/dev/null || true
+
+# to_epoch <value> -> epoch seconds, 0 on parse failure
+to_epoch() {
+  python3 -c '
+import sys, datetime
+v = sys.argv[1].strip()
+try:
+    print(int(float(v))); sys.exit(0)
+except Exception:
+    pass
+try:
+    print(int(datetime.datetime.fromisoformat(v).timestamp()))
+except Exception:
+    print(0)
+' "$1" 2>/dev/null || echo 0
+}
+
+# json_field <file> <field> -> value (string, or empty on error)
+json_field() {
+  python3 -c '
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+    v = d.get(sys.argv[2], "")
+    print(v if isinstance(v, (str, int, float)) else "")
+except Exception:
+    print("")
+' "$1" "$2" 2>/dev/null || echo ""
+}
+
+# activity_at <turn> -> max(marker last_activity, active-status mtime, live-run mtime)
+activity_at() {
+  local t="$1" a=0 m s f
+  if [ -f "$IP/$t.json" ]; then
+    m=$(json_field "$IP/$t.json" last_activity_at)
+    [ -n "$m" ] && a=$(to_epoch "$m") && [ "$a" -gt 0 ] || a=0
+    # recompute below with max logic in shell
+    local ma="$a"
+    a="$ma"
+  fi
+  if [ -f "$ST/$t.json" ]; then
+    s=$(json_field "$ST/$t.json" stage)
+    case "$s" in
+      "Picked up"|"Thinking"|"Building")
+        m=$(stat -c %Y "$ST/$t.json" 2>/dev/null || echo 0)
+        [ "$m" -gt "$a" ] && a="$m"
+        ;;
+    esac
+  fi
+  # live-run activity: newest mtime under .live for run dirs matching *turn*
+  if [ -d "$RUNS" ]; then
+    while IFS= read -r f; do
+      m=$(stat -c %Y "$f" 2>/dev/null || echo 0)
+      [ "$m" -gt "$a" ] && a="$m"
+    done <<EOF
+$(find "$RUNS" -path "*$t*" -path "*.live/*" -type f 2>/dev/null | head -50)
+EOF
+  fi
+  echo "$a"
+}
+
+# check_internal <turn> -> CLAIMABLE|ACTIVE|TERMINAL (no output side effects except TERMINAL release handled by caller)
+check_turn() {
+  local t="$1" now stage claimed picked act
+  now=$(date +%s)
+  # Valid response -> TERMINAL
+  if [ -f "$RES/$t.json" ]; then
+    if python3 -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+sys.exit(0 if (d.get("result") or d.get("text")) else 1)
+' "$RES/$t.json" 2>/dev/null; then
+      echo "TERMINAL response-exists"
+      return 0
+    fi
+  fi
+  if [ -f "$IP/$t.json" ]; then
+    stage=$(json_field "$IP/$t.json" stage)
+    if [ "$stage" = "Reply written" ]; then
+      # Believed only with a response file, already checked above.
+      echo "CLAIMABLE stale-reply-written"
+      return 0
+    fi
+    if [ "$stage" = "Claimed" ]; then
+      claimed=$(json_field "$IP/$t.json" claimed_at)
+      claimed=$(to_epoch "$claimed")
+      if [ $((now - claimed)) -gt "$CLAIM_TTL" ]; then
+        echo "CLAIMABLE claim-expired"
+      else
+        echo "ACTIVE claimed"
+      fi
+      return 0
+    fi
+    if [ "$stage" = "Picked up" ] || [ "$stage" = "Thinking" ] || [ "$stage" = "Building" ]; then
+      act=$(activity_at "$t")
+      if [ $((now - act)) -gt "$ACTIVE_TTL" ]; then
+        # STOP SYSTEM 2026-10-25: a stalled modeler is NOT reclaimed.
+        # Reclaiming it was the silent loop: new worker, new tokens, no
+        # visible live run, stall again, reclaim again. TERMINAL cancels it.
+        echo "TERMINAL stale-inactive"
+      else
+        echo "ACTIVE active"
+      fi
+      return 0
+    fi
+    # Unknown/corrupt stage in marker: treat as claimable, claim will overwrite.
+    echo "CLAIMABLE unknown-marker-stage"
+    return 0
+  fi
+  # No marker: active per-turn status counts as ACTIVE (migration case)
+  if [ -f "$ST/$t.json" ]; then
+    stage=$(json_field "$ST/$t.json" stage)
+    case "$stage" in
+      "Picked up"|"Thinking"|"Building")
+        m=$(stat -c %Y "$ST/$t.json" 2>/dev/null || echo 0)
+        if [ $((now - m)) -le "$ACTIVE_TTL" ]; then
+          echo "ACTIVE status-active"
+          return 0
+        fi
+        ;;
+    esac
+  fi
+  echo "CLAIMABLE"
+}
+
+cmd="${1:-}"
+turn="${2:-}"
+case "$cmd" in
+  check)
+    out=$(check_turn "$turn")
+    case "$out" in
+      TERMINAL*)
+        # Cancel, do not reclaim: move the request out of the pending window
+        # so hook/cron never list it again, delete the marker so a live
+        # worker stops on its next heartbeat (NO_MARKER), and record the stop.
+        mkdir -p "$BASE/cancelled" 2>/dev/null || true
+        mv -f "$REQ/$turn.json" "$BASE/cancelled/$turn.json" 2>/dev/null || true
+        rm -f "$IP/$turn.json" 2>/dev/null || true
+        # So the panel does not keep showing the old stage forever: mark
+        # the status Cancelled (not Reply written, no response forged).
+        python3 - "$ST/$turn.json" <<'PYEOF' 2>/dev/null || true
+import json, sys, time
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    d = {}
+d["stage"] = "Cancelled"
+d["last_check"] = time.time()
+json.dump(d, open(sys.argv[1], "w"))
+PYEOF
+        mkdir -p "$BASE/cancel" 2>/dev/null || true
+        printf '{"turn_id": "%s", "reason": "stale-inactive"}' "$turn" > "$BASE/cancel/$turn.json" 2>/dev/null || true
+        echo "TERMINAL" ;;
+      *) echo "$out" | cut -d' ' -f1 ;;
+    esac
+    ;;
+  claim)
+    owner="${3:-hook}"
+    lock="$IP/.lock-$turn"
+    # stale lock removal
+    if [ -d "$lock" ]; then
+      lm=$(stat -c %Y "$lock" 2>/dev/null || echo 0)
+      now=$(date +%s)
+      if [ $((now - lm)) -gt "$LOCK_STALE" ]; then rmdir "$lock" 2>/dev/null || true; fi
+    fi
+    claimed_ok=0
+    for _ in 1 2 3 4 5; do
+      if mkdir "$lock" 2>/dev/null; then claimed_ok=1; break; fi
+      sleep 0.2
+    done
+    if [ "$claimed_ok" -ne 1 ]; then echo "ACTIVE lock"; exit 0; fi
+    # re-check inside lock
+    out=$(check_turn "$turn")
+    case "$out" in
+      CLAIMABLE*|TERMINAL*)
+        ;;
+      *)
+        rmdir "$lock" 2>/dev/null || true
+        echo "ACTIVE"
+        exit 0
+        ;;
+    esac
+    attempt=1
+    if [ -f "$IP/$turn.json" ]; then
+      old=$(json_field "$IP/$turn.json" attempt)
+      case "$old" in ''|*[!0-9]*) old=0;; esac
+      if [ "$old" -ge 3 ]; then
+        # STOP SYSTEM: max 3 attempts per turn. Do not claim a 4th.
+        mkdir -p "$BASE/cancelled" "$BASE/cancel" 2>/dev/null || true
+        mv -f "$REQ/$turn.json" "$BASE/cancelled/$turn.json" 2>/dev/null || true
+        rm -f "$IP/$turn.json" 2>/dev/null || true
+        printf '{"turn_id": "%s", "reason": "attempt-cap"}' "$turn" > "$BASE/cancel/$turn.json" 2>/dev/null || true
+        rmdir "$lock" 2>/dev/null || true
+        echo "TERMINAL attempt-cap"
+        exit 0
+      fi
+      attempt=$((old + 1))
+    fi
+    mode="plan"
+    if [ -f "$REQ/$turn.json" ]; then
+      m=$(json_field "$REQ/$turn.json" mode)
+      [ -n "$m" ] && mode="$m"
+    fi
+    now=$(date +%s)
+    tmp="$IP/.$turn.json.tmp-$$"
+    python3 - "$tmp" "$turn" "$owner" "$attempt" "$mode" "$now" <<'PYEOF'
+import json, sys
+tmp, turn, owner, attempt, mode, now = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), sys.argv[5], int(sys.argv[6])
+obj = {"turn_id": turn, "owner": owner, "owner_run": "%s-%s" % (owner, now), "attempt": attempt, "mode": mode, "stage": "Claimed", "claimed_at": now, "picked_up_at": None, "last_activity_at": now, "live_run": None}
+with open(tmp, "w", encoding="utf-8") as f:
+    json.dump(obj, f)
+PYEOF
+    mv -f "$tmp" "$IP/$turn.json" 2>/dev/null || true
+    chmod 600 "$IP/$turn.json" 2>/dev/null || true
+    rmdir "$lock" 2>/dev/null || true
+    echo "CLAIMED $attempt"
+    ;;
+  heartbeat)
+    owner="${3:-hook}"; stage="${4:-}"; live="${5:-}"
+    if [ ! -f "$IP/$turn.json" ]; then echo "NO_MARKER"; exit 0; fi
+    mowner=$(json_field "$IP/$turn.json" owner)
+    if [ "$mowner" != "$owner" ]; then echo "NOT_OWNER"; exit 0; fi
+    now=$(date +%s)
+    python3 - "$IP/$turn.json" "$stage" "$now" "$live" <<'PYEOF'
+import json, sys
+path, stage, now, live = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
+try:
+    d = json.load(open(path))
+except Exception:
+    d = {}
+if stage:
+    d["stage"] = stage
+d["last_activity_at"] = now
+if stage == "Picked up" and not d.get("picked_up_at"):
+    d["picked_up_at"] = now
+if live:
+    d["live_run"] = live
+with open(path + ".tmp-hb", "w", encoding="utf-8") as f:
+    json.dump(d, f)
+import os
+os.replace(path + ".tmp-hb", path)
+PYEOF
+    echo "HEARTBEAT"
+    ;;
+  release)
+    owner="${3:-any}"
+    if [ ! -f "$IP/$turn.json" ]; then echo "RELEASED"; exit 0; fi
+    mowner=$(json_field "$IP/$turn.json" owner)
+    if [ "$owner" != "any" ] && [ "$mowner" != "$owner" ] && [ ! -f "$RES/$turn.json" ]; then echo "NOT_OWNER"; exit 0; fi
+    rm -f "$IP/$turn.json" 2>/dev/null || true
+    echo "RELEASED"
+    ;;
+  janitor)
+    now=$(date +%s)
+    for f in "$IP"/*.json; do
+      [ -e "$f" ] || continue
+      t=$(basename "$f" .json)
+      if [ -f "$RES/$t.json" ]; then rm -f "$f" 2>/dev/null || true; continue; fi
+      claimed=$(json_field "$f" claimed_at); claimed=$(to_epoch "$claimed")
+      if [ "$claimed" -gt 0 ] && [ $((now - claimed)) -gt "$MAX_AGE" ]; then rm -f "$f" 2>/dev/null || true; fi
+    done
+    echo "JANITOR_DONE"
+    ;;
+  *)
+    echo "Usage: in_progress.sh {check|claim|heartbeat|release|janitor} <turn_id> [args...]" >&2
+    exit 2
+    ;;
+esac

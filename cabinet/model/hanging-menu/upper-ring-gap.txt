@@ -1,0 +1,6 @@
+echo Upper ring clearance: a complete larger eye stays fully visible below its plate; a short neck joins only at the ring crown, away from the linked chain.
+set UpperAnchors shapes="box -2.6,-0.205,4.93 0.35,0.13,0.32 r=0.04 mat=1; cylinder -2.6,-0.42,4.65 -2.6,-0.205,4.8 0.052 mat=1; torus -2.6,-0.42,4.43 0.21 0.045 rot=90,0,0 mat=1; box 2.6,-0.205,4.93 0.35,0.13,0.32 r=0.04 mat=1; cylinder 2.6,-0.42,4.65 2.6,-0.205,4.8 0.052 mat=1; torus 2.6,-0.42,4.43 0.21 0.045 rot=90,0,0 mat=1"
+echo Upper rivets rise with the plate so they remain centered in the actual fastener tabs.
+set UpperRivets shapes="cylinder -2.6,-0.34,4.93 -2.6,0.18,4.93 0.055 mat=2; sphere -2.6,-0.34,4.93 0.08 mat=2; cylinder 2.6,-0.34,4.93 2.6,0.18,4.93 0.055 mat=2; sphere 2.6,-0.34,4.93 0.08 mat=2"
+turnaround out shade=material size=512 views=front,quarter,side,back name=hanging_menu_ring_gap
+save hanging_menu.effigy

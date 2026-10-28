@@ -1,0 +1,12 @@
+# Novelty chat button 2: a brass speaking trumpet / megaphone, axis along X.
+# Front view faces -Y; Z is up. Inches. A loose drawer object, not a flat badge.
+material 0 color=#b58b47 rough=0.34 metal=0.8
+material 1 color=#6e3f1d rough=0.45 metal=0.1
+echo horn: stepped brass cone, mouthpiece at the left, bell at the right
+add Blob name=Horn voxel=0.03 blend=0.01 shapes="cylinder -2.2,0,1.2 -1.7,0,1.2 0.28 r=0.05 mat=0; cylinder -1.7,0,1.2 -1.0,0,1.2 0.35 r=0.05 mat=0; cylinder -1.0,0,1.2 -0.2,0,1.2 0.55 r=0.05 mat=0; cylinder -0.2,0,1.2 0.7,0,1.2 0.8 r=0.05 mat=0; cylinder 0.7,0,1.2 1.6,0,1.2 1.05 r=0.05 mat=0; torus 1.6,0,1.2 1.05 0.07 rot=0,90,0 mat=0; torus -2.2,0,1.2 0.28 0.05 rot=0,90,0 mat=0"
+echo handle: dark wood grip under the middle of the horn
+add Blob name=Handle voxel=0.03 blend=0.01 shapes="box -0.3,0,0.45 0.45,0.55,0.85 r=0.08 mat=1"
+describe
+turnaround out shade=material size=512 views=front,quarter,side,back name=megaphone
+save megaphone.effigy
+export out name=megaphone

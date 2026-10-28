@@ -138,8 +138,73 @@ public sealed class Spline3
 	/// the loop meets itself.
 	/// </summary>
 	public static List<(Vec3 T, Vec3 U, Vec3 V)> Frames( IReadOnlyList<Vec3> path, bool closed )
+		=> Frames( path, closed, true );
+
+	/// <param name="frameMode">0 parallel transport (default, no banking), 1 fixed up (one
+	/// world up for the whole path — a ribbon that never rolls), 2 Frenet (normal from the
+	/// path's curvature — the classic frame, which flips where curvature vanishes and can
+	/// seam-twist on closed loops; parallel transport stays the safe default).</param>
+	public static List<(Vec3 T, Vec3 U, Vec3 V)> Frames( IReadOnlyList<Vec3> path, bool closed, int frameMode )
 	{
-		var frames = new List<(Vec3, Vec3, Vec3)>( path.Count );
+		var frames = Frames( path, closed, true );
+		if ( frameMode == 0 || frames.Count == 0 )
+			return frames;
+
+		var n = path.Count;
+		for ( var i = 0; i < n; i++ )
+		{
+			var t = frames[i].T;
+			if ( frameMode == 1 )
+			{
+				var up = MathF.Abs( t.z ) < 0.9f ? new Vec3( 0, 0, 1 ) : new Vec3( 1, 0, 0 );
+				var u = Vec3.Cross( up, t );
+				if ( u.LengthSquared < 1e-12f )
+					u = frames[i].U;
+				else
+					u = u.Normal;
+				frames[i] = (t, u, Vec3.Cross( t, u ));
+			}
+			else
+			{
+				// Frenet: curvature direction from the change in tangent across this station.
+				var prev = TangentAtLocal( path, closed, i - 1 );
+				var next = TangentAtLocal( path, closed, i + 1 );
+				var curv = next - prev;
+				if ( curv.LengthSquared < 1e-12f )
+					continue;
+				var normal = curv.Normal;
+				var binormal = Vec3.Cross( t, normal );
+				if ( binormal.LengthSquared < 1e-12f )
+					continue;
+				binormal = binormal.Normal;
+				frames[i] = (t, Vec3.Cross( binormal, t ), binormal );
+			}
+		}
+		return frames;
+
+		static Vec3 TangentAtLocal( IReadOnlyList<Vec3> path, bool closed, int i )
+		{
+			var n = path.Count;
+			Vec3 a, b;
+			if ( closed )
+			{
+				a = path[((i - 1) % n + n) % n];
+				b = path[(i + 1) % n];
+			}
+			else
+			{
+				a = path[Math.Clamp( i - 1, 0, n - 1 )];
+				b = path[Math.Clamp( i + 1, 0, n - 1 )];
+			}
+			var t = b - a;
+			return t.LengthSquared < 1e-12f ? new Vec3( 1, 0, 0 ) : t.Normal;
+		}
+	}
+
+	// Private wrapper so the mode overload reads like the original Frames body below.
+	static List<(Vec3 T, Vec3 U, Vec3 V)> Frames( IReadOnlyList<Vec3> path, bool closed, bool _unused )
+	{
+		var frames = new List<(Vec3 T, Vec3 U, Vec3 V)>( path.Count );
 		var n = path.Count;
 
 		if ( n == 0 )
@@ -250,14 +315,14 @@ public static class SplineTube
 	/// <param name="twistDegrees">How far the profile turns over the whole length. Ignored on a
 	/// closed path, which has to meet itself.</param>
 	public static PolyMesh Build( IReadOnlyList<Vec3> path, bool closed, float radius, float endRadius,
-		int sides, float twistDegrees, int material, bool capEnds = true )
+		int sides, float twistDegrees, int material, bool capEnds = true, int frameMode = 0 )
 	{
 		if ( path is null || path.Count < 2 )
 			throw new ArgumentException( "A tube needs a path of at least two points.", nameof( path ) );
 
 		sides = Math.Max( 3, sides );
 
-		var frames = Spline3.Frames( path, closed );
+		var frames = Spline3.Frames( path, closed, frameMode );
 		var rings = new List<List<Vec3>>( path.Count );
 		var n = path.Count;
 
@@ -289,6 +354,45 @@ public static class SplineTube
 
 		return Skinner.Skin( rings, capEnds && !closed, material, wrap: closed );
 	}
+
+	/// <summary>Tube with a radius at every station (radii.Count must cover the path; a
+	/// shorter list repeats its last value). Arc-length fractions match Build's taper
+	/// spread, so a profile sampled at t = 0, 0.5, 1 lands where a taper would.</summary>
+	public static PolyMesh BuildWithRadiusProfile( IReadOnlyList<Vec3> path, bool closed, IReadOnlyList<float> radii,
+		int sides, float twistDegrees, int material, int frameMode = 0, bool capEnds = true )
+	{
+		if ( path is null || path.Count < 2 )
+			throw new ArgumentException( "A tube needs a path of at least two points.", nameof( path ) );
+		if ( radii is null || radii.Count == 0 )
+			throw new ArgumentException( "A radius profile needs at least one radius.", nameof( radii ) );
+
+		sides = Math.Max( 3, sides );
+		var frames = Spline3.Frames( path, closed, frameMode );
+		var rings = new List<List<Vec3>>( path.Count );
+		var n = path.Count;
+		var total = Spline3.Length( path, closed );
+		var along = 0f;
+
+		for ( var i = 0; i < n; i++ )
+		{
+			if ( i > 0 )
+				along += (path[i] - path[i - 1]).Length;
+			var f = total > 1e-8f ? along / total : 0f;
+			var r = radii[Math.Min( i, radii.Count - 1 )];
+			if ( r < 0f )
+				throw new ArgumentException( "A radius profile radius must not be negative.", nameof( radii ) );
+			var twist = closed ? 0f : twistDegrees * MathF.PI / 180f * f;
+			var (_, u, v) = frames[i];
+			var ring = new List<Vec3>( sides );
+			for ( var k = 0; k < sides; k++ )
+			{
+				var a = twist + k * MathF.PI * 2f / sides;
+				ring.Add( path[i] + u * (MathF.Cos( a ) * r) + v * (MathF.Sin( a ) * r) );
+			}
+			rings.Add( ring );
+		}
+		return Skinner.Skin( rings, capEnds && !closed, material, wrap: closed );
+	}
 }
 
 /// <summary>
@@ -307,12 +411,12 @@ public static class SplineBand
 	/// frame. At each station it is taken square to the path.</param>
 	/// <param name="endWidth">Width at the end, for a strap that tapers.</param>
 	public static PolyMesh Build( IReadOnlyList<Vec3> path, bool closed, float width, float endWidth, float thickness,
-		Vec3 facing, float twistDegrees, int material, bool capEnds = true )
+		Vec3 facing, float twistDegrees, int material, bool capEnds = true, int frameMode = 0 )
 	{
 		if ( path is null || path.Count < 2 )
 			throw new ArgumentException( "A band needs a path of at least two points.", nameof( path ) );
 
-		var frames = Spline3.Frames( path, closed );
+		var frames = Spline3.Frames( path, closed, frameMode );
 		var total = Spline3.Length( path, closed );
 		var rings = new List<List<Vec3>>( path.Count );
 		var along = 0f;

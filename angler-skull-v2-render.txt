@@ -1,0 +1,1 @@
+render angler_skull_v2_4.png shade=material views=4 size=1024

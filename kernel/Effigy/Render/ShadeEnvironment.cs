@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading.Tasks;
 
 namespace Effigy.Render;
@@ -52,6 +53,11 @@ public sealed class ShadeEnvironment
 	/// <summary>Turns the whole environment about z, degrees.</summary>
 	public float Yaw;
 	/// <summary>Scales the light the environment adds to rough (diffuse) shading.</summary>
+	/// <summary>An image environment (HDRI/PNG lat-long) when one was loaded: it replaces the
+	/// procedural sky and softboxes in <see cref="Radiance"/>. Internal: the type is internal too.</summary>
+	internal EnvBake.LatLong Image;
+	internal string ImagePath;
+
 	public float Diffuse = 0.6f;
 	/// <summary>Scales its reflections.</summary>
 	public float Specular = 1f;
@@ -70,11 +76,156 @@ public sealed class ShadeEnvironment
 		return e;
 	}
 
+	/// <summary>Bright outdoor sun-and-sky: a hot warm sun, a bright blue sky gradient, a warm ground
+	/// bounce. No HDRI needed; the sun softbox is small and intense so metals get a hard highlight.</summary>
+	public static ShadeEnvironment Outdoor()
+	{
+		var e = new ShadeEnvironment
+		{
+			Zenith = new Vec3( 0.55f, 0.65f, 0.95f ), Horizon = new Vec3( 0.85f, 0.9f, 1.05f ),
+			Ground = new Vec3( 0.28f, 0.24f, 0.19f ), HorizonGlow = new Vec3( 1.1f, 0.95f, 0.7f ),
+		};
+		e.Softboxes.Add( new ShadeSoftbox( new Vec3( 0.35f, 0.25f, 1f ), 0.08f, 0.08f, 24f, new Vec3( 1f, 0.95f, 0.85f ) ) );
+		e.Softboxes.Add( new ShadeSoftbox( new Vec3( -0.6f, -0.5f, 0.4f ), 0.6f, 0.4f, 0.7f, new Vec3( 0.8f, 0.88f, 1.05f ) ) );
+		return e;
+	}
+
+	/// <summary>Flat mid-grey, no softboxes: the "does the material hold up with nowhere to hide" check.
+	/// Metals go grey here by design; a material that only reads in a fancy studio is a material bug.</summary>
+	public static ShadeEnvironment Neutral()
+	{
+		var e = new ShadeEnvironment
+		{
+			Zenith = new Vec3( 0.18f, 0.18f, 0.18f ), Horizon = new Vec3( 0.18f, 0.18f, 0.18f ),
+			Ground = new Vec3( 0.18f, 0.18f, 0.18f ), HorizonGlow = Vec3.Zero,
+		};
+		return e;
+	}
+
+	/// <summary>Striped environment for surface quality: dark sky plus tall white strips round the
+	/// horizon, so waviness shows as wavy reflections. This is the zebra check, procedural.</summary>
+	public static ShadeEnvironment Zebra()
+	{
+		var e = new ShadeEnvironment
+		{
+			Zenith = new Vec3( 0.02f, 0.02f, 0.02f ), Horizon = new Vec3( 0.03f, 0.03f, 0.03f ),
+			Ground = new Vec3( 0.01f, 0.01f, 0.01f ), HorizonGlow = Vec3.Zero,
+		};
+		for ( var k = 0; k < 8; k++ )
+		{
+			var a = k * MathF.PI / 4f;
+			e.Softboxes.Add( new ShadeSoftbox( new Vec3( MathF.Cos( a ), MathF.Sin( a ), 0.15f ), 0.12f, 0.95f, 10f ) );
+		}
+		return e;
+	}
+
+	/// <summary>Load a lat-long environment image: Radiance .hdr (RGBE, RLE or flat) at true HDR,
+	/// or a PNG lat-long (sRGB, clamped, documented as not true HDR). Top row is the zenith.
+	/// The image replaces the procedural sky/softboxes; softboxes already on the environment are ignored.</summary>
+	public static bool TryLoadImage( string path, out ShadeEnvironment env, out string why )
+	{
+		env = null; why = null;
+		try
+		{
+			var ext = Path.GetExtension( path ).ToLowerInvariant();
+			EnvBake.LatLong img;
+			if ( ext == ".hdr" ) img = DecodeHdr( File.ReadAllBytes( path ) );
+			else if ( ext == ".png" )
+			{
+				var (w, h, rgb, _) = Raster.LoadPng( path );
+				img = new EnvBake.LatLong( w, h );
+				for ( var i = 0; i < w * h; i++ )
+				{
+					var px = rgb[i];
+					img.Px[i] = new Vec3(
+						ShadedRender.SrgbToLinear( ((px >> 16) & 0xFF) / 255f ),
+						ShadedRender.SrgbToLinear( ((px >> 8) & 0xFF) / 255f ),
+						ShadedRender.SrgbToLinear( (px & 0xFF) / 255f ) );
+				}
+			}
+			else { why = $"env={path}: use a .hdr or .png lat-long image, or studio|outdoor|neutral|zebra|none."; return false; }
+			env = new ShadeEnvironment { Image = img, ImagePath = path };
+			return true;
+		}
+		catch ( Exception e ) { why = $"env={path}: could not be loaded ({e.Message})."; return false; }
+	}
+
+	static EnvBake.LatLong DecodeHdr( byte[] bytes )
+	{
+		// Header: ASCII lines ending in a blank line, then a resolution line like "-Y 256 +X 512".
+		var headerEnd = -1;
+		for ( var i = 0; i + 1 < bytes.Length; i++ )
+			if ( bytes[i] == (byte)'\n' && bytes[i + 1] == (byte)'\n' ) { headerEnd = i + 2; break; }
+		if ( headerEnd < 0 ) throw new InvalidDataException( "no HDR header terminator" );
+		// The resolution line comes AFTER the blank line that ends the header block:
+		// "#?RADIANCE\nFORMAT=...\n\n-Y H +X W\n" then the pixel data.
+		var resEnd = headerEnd;
+		while ( resEnd < bytes.Length && bytes[resEnd] != (byte)'\n' ) resEnd++;
+		if ( resEnd >= bytes.Length ) throw new InvalidDataException( "no HDR resolution line (-Y H +X W)" );
+		var resParts = System.Text.Encoding.ASCII.GetString( bytes, headerEnd, resEnd - headerEnd ).Trim().Split( ' ', StringSplitOptions.RemoveEmptyEntries );
+		var w = 0; var h = 0; var flipY = false;
+		if ( resParts.Length == 4 && (resParts[0] == "-Y" || resParts[0] == "+Y") && resParts[2] == "+X" )
+		{
+			h = int.Parse( resParts[1] ); w = int.Parse( resParts[3] ); flipY = resParts[0] == "+Y";
+		}
+		if ( w <= 0 || h <= 0 ) throw new InvalidDataException( "no HDR resolution line (-Y H +X W)" );
+		var img = new EnvBake.LatLong( w, h );
+		var pos = resEnd + 1;
+		var rle = w >= 8 && pos + 4 <= bytes.Length && bytes[pos] == 2 && bytes[pos + 1] == 2;
+		for ( var y = 0; y < h; y++ )
+		{
+			var row = new byte[w * 4];
+			if ( rle )
+			{
+				if ( pos + 4 > bytes.Length || bytes[pos] != 2 || bytes[pos + 1] != 2 || bytes[pos + 2] != (w >> 8) || bytes[pos + 3] != (w & 0xFF) )
+					throw new InvalidDataException( "bad HDR RLE scanline header" );
+				pos += 4;
+				for ( var ch = 0; ch < 4; ch++ )
+				{
+					var x = 0;
+					while ( x < w )
+					{
+						if ( pos >= bytes.Length ) throw new InvalidDataException( "truncated HDR scanline" );
+						var count = bytes[pos++];
+						if ( count > 128 )
+						{
+							var run = count - 128;
+							if ( pos >= bytes.Length ) throw new InvalidDataException( "truncated HDR run" );
+							var v = bytes[pos++];
+							for ( var k = 0; k < run && x < w; k++ ) row[x * 4 + ch] = v;
+							x += run;
+						}
+						else
+						{
+							for ( var k = 0; k < count && x < w; k++ ) row[x * 4 + ch] = bytes[pos++];
+							x += count;
+						}
+					}
+				}
+			}
+			else
+			{
+				if ( pos + w * 4 > bytes.Length ) throw new InvalidDataException( "truncated HDR data" );
+				Array.Copy( bytes, pos, row, 0, w * 4 ); pos += w * 4;
+			}
+			var yy = flipY ? h - 1 - y : y;
+			for ( var x = 0; x < w; x++ )
+			{
+				var e = row[x * 4 + 3];
+				if ( e == 0 ) { img.Px[yy * w + x] = Vec3.Zero; continue; }
+				var s = MathF.Pow( 2f, e - 136f );
+				img.Px[yy * w + x] = new Vec3( (row[x * 4] + 0.5f) * s, (row[x * 4 + 1] + 0.5f) * s, (row[x * 4 + 2] + 0.5f) * s );
+			}
+		}
+		return img;
+	}
+
 	/// <summary>Radiance arriving from direction <paramref name="d"/> (unit, environment frame).</summary>
 	public Vec3 Radiance( Vec3 d ) => Radiance( d, Prepare() );
 
 	internal Vec3 Radiance( Vec3 d, Prepared[] panels )
 	{
+		if ( Image is { } img ) return img.Sample( d );
 		var z = d.z;
 		var sky = z >= 0f ? Vec3.Lerp( Horizon, Zenith, MathF.Sqrt( z ) ) : Vec3.Lerp( Horizon, Ground, MathF.Min( 1f, -z * 6f ) );
 		var hz = z / MathF.Max( HorizonWidth, 1e-4f );
@@ -130,6 +281,8 @@ public sealed class ShadeEnvironment
 		void F( float f ) { h = (h ^ (uint)BitConverter.SingleToInt32Bits( f )) * 1099511628211UL; }
 		void V( Vec3 v ) { F( v.x ); F( v.y ); F( v.z ); }
 		V( Zenith ); V( Horizon ); V( Ground ); V( HorizonGlow ); F( HorizonWidth );
+		if ( ImagePath is { } ip ) foreach ( var ch in ip ) h = (h ^ (ulong)ch) * 1099511628211UL;
+		if ( Image is { } im ) { F( im.W ); F( im.H ); }
 		foreach ( var b in Softboxes ) { V( b.Direction ); F( b.Width ); F( b.Height ); F( b.Intensity ); V( b.Colour ); F( b.Softness ); F( b.Roll ); }
 		return h;
 	}

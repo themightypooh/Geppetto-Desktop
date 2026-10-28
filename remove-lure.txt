@@ -1,0 +1,5 @@
+remove Transform 9
+remove Esca_Tip
+remove Transform 8
+remove Lure_Stalk
+save angler_trace.effigy

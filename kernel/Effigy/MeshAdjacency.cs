@@ -2279,6 +2279,141 @@ public sealed partial class MeshEditSession
 		Changed();
 	}
 
+	// --- proportional editing (Blender-style) ------------------------------------------------
+	/// <summary>Proportional editing: the selected vertices move fully, vertices
+	/// near them move less, vertices at or beyond <paramref name="falloffRadius"/>
+	/// do not move. Distance is the shortest distance to a selected vertex's
+	/// ORIGINAL position (centroid distance if more than 512 are selected, to
+	/// keep large meshes fast). With radius 0 only the selected vertices move.
+	/// Curves, all 1 at distance 0 and 0 at the radius: Smooth = cosine,
+	/// Sphere = sqrt(1-t^2), Root = sqrt(1-t), InverseSquare = (1-t)^2/(1+3t^2),
+	/// Sharp = (1-t)^3, Linear = 1-t. Unknown curve names fall back to Smooth.</summary>
+	static float ProportionalWeight( float distance, float radius, string curve )
+	{
+		if ( radius <= 0f )
+			return distance <= 1e-6f ? 1f : 0f;
+		var tt = distance / radius;
+		if ( tt >= 1f )
+			return 0f;
+		if ( tt <= 0f )
+			return 1f;
+		return ( curve ?? "" ).Trim().ToLowerInvariant() switch
+		{
+			"sphere" => MathF.Sqrt( MathF.Max( 0f, 1f - tt * tt ) ),
+			"root" => MathF.Sqrt( 1f - tt ),
+			"inversesquare" => (1f - tt) * (1f - tt) / (1f + 3f * tt * tt),
+			"sharp" => (1f - tt) * (1f - tt) * (1f - tt),
+			"linear" => 1f - tt,
+			_ => 0.5f * (1f + MathF.Cos( MathF.PI * tt )),
+		};
+	}
+
+	float[] ProportionalWeights( Vec3[] original, HashSet<int> selected, float falloffRadius, string falloffCurve )
+	{
+		var weights = new float[original.Length];
+		if ( selected.Count == 0 )
+			return weights;
+		var useCentroid = selected.Count > 512;
+		var centroid = Vec3.Zero;
+		if ( useCentroid )
+		{
+			foreach ( var v in selected )
+				centroid += original[v];
+			centroid = centroid * (1f / selected.Count);
+		}
+		for ( var i = 0; i < original.Length; i++ )
+		{
+			if ( selected.Contains( i ) )
+			{
+				weights[i] = 1f;
+				continue;
+			}
+			float d;
+			if ( useCentroid )
+				d = (original[i] - centroid).Length;
+			else
+			{
+				d = float.MaxValue;
+				foreach ( var v in selected )
+				{
+					var dd = (original[i] - original[v]).Length;
+					if ( dd < d )
+						d = dd;
+				}
+			}
+			weights[i] = ProportionalWeight( d, falloffRadius, falloffCurve );
+		}
+		return weights;
+	}
+
+	/// <summary>Move the selected vertices by <paramref name="delta"/>, neighbours by
+	/// delta times their falloff weight.</summary>
+	public void ProportionalMove( Vec3 delta, float falloffRadius, string falloffCurve )
+	{
+		var selected = AffectedVertices();
+		if ( selected.Count == 0 )
+			throw new InvalidOperationException( "Proportional move needs vertices selected." );
+		if ( delta.LengthSquared <= 1e-12f )
+			throw new InvalidOperationException( "Proportional move needs a non-zero delta." );
+		Step( "Proportional move", () =>
+		{
+			var original = Mesh.Positions.ToArray();
+			var weights = ProportionalWeights( original, selected, falloffRadius, falloffCurve );
+			for ( var i = 0; i < original.Length; i++ )
+				if ( weights[i] > 0f )
+					Mesh.Positions[i] = original[i] + delta * weights[i];
+		} );
+	}
+
+	/// <summary>Rotate about <paramref name="pivot"/> by <paramref name="angleDegrees"/>
+	/// times each vertex's falloff weight, around <paramref name="axis"/>.</summary>
+	public void ProportionalRotate( Vec3 pivot, Vec3 axis, float angleDegrees, float falloffRadius, string falloffCurve )
+	{
+		var selected = AffectedVertices();
+		if ( selected.Count == 0 )
+			throw new InvalidOperationException( "Proportional rotate needs vertices selected." );
+		if ( axis.LengthSquared <= 1e-12f )
+			throw new InvalidOperationException( "Proportional rotate needs a non-zero axis." );
+		if ( MathF.Abs( angleDegrees ) <= 1e-6f )
+			throw new InvalidOperationException( "Proportional rotate needs a non-zero angle." );
+		var n = axis * (1f / axis.Length);
+		Step( "Proportional rotate", () =>
+		{
+			var original = Mesh.Positions.ToArray();
+			var weights = ProportionalWeights( original, selected, falloffRadius, falloffCurve );
+			for ( var i = 0; i < original.Length; i++ )
+			{
+				if ( weights[i] <= 0f )
+					continue;
+				var a = angleDegrees * weights[i] * MathF.PI / 180f;
+				var v = original[i] - pivot;
+				var c = MathF.Cos( a );
+				var s = MathF.Sin( a );
+				var rotated = v * c + Vec3.Cross( n, v ) * s + n * (Vec3.Dot( n, v ) * (1f - c));
+				Mesh.Positions[i] = pivot + rotated;
+			}
+		} );
+	}
+
+	/// <summary>Scale about <paramref name="pivot"/> by <paramref name="factor"/> for
+	/// selected vertices, blending to 1 (no change) with falloff weight.</summary>
+	public void ProportionalScale( Vec3 pivot, float factor, float falloffRadius, string falloffCurve )
+	{
+		var selected = AffectedVertices();
+		if ( selected.Count == 0 )
+			throw new InvalidOperationException( "Proportional scale needs vertices selected." );
+		if ( MathF.Abs( factor - 1f ) <= 1e-6f )
+			throw new InvalidOperationException( "Proportional scale needs a factor other than 1." );
+		Step( "Proportional scale", () =>
+		{
+			var original = Mesh.Positions.ToArray();
+			var weights = ProportionalWeights( original, selected, falloffRadius, falloffCurve );
+			for ( var i = 0; i < original.Length; i++ )
+				if ( weights[i] > 0f )
+					Mesh.Positions[i] = pivot + (original[i] - pivot) * (1f + (factor - 1f) * weights[i]);
+		} );
+	}
+
 	// --- operations --------------------------------------------------------------------------
 
 	/// <summary>Extrude the selected faces, pushing each face out along the group's average normal. If edges are selected, extrude them into walls.</summary>

@@ -123,6 +123,53 @@ public static class ModelMeasure
 				if ( !body.Visible )
 					sb.Append( ", hidden" );
 
+				// Sculpt/paint reporting, 2026-10-25: a script user must be able to
+				// tell from describe alone whether paint had somewhere to go.
+				// UVs: PaintMasks.HasUVs alone cannot answer this — every Face
+				// defaults to a full-length zero UV array — so "real" UVs means
+				// the UV range across the mesh is non-zero. Paint: the replayed
+				// canvas on the mesh, plus how many Paint features target it.
+				var paintLayers = studio.Features.OfType<PaintFeature>()
+					.Count( f => !f.Suppressed && f.Bodies.Matches( body ) );
+				var paint = body.Mesh.Paint;
+				sb.Append( body.Mesh.HasUV2 ? ", UV2 yes" : ", UV2 no" );
+				sb.Append( HasRealUVs( body.Mesh ) ? ", UVs yes" : ", UVs no" );
+				if ( HasRealUVs( body.Mesh ) )
+				{
+					try
+					{
+						var layout = UVIslands.Find( body.Mesh );
+						var dist = UVIslands.Distortion( body.Mesh );
+						sb.Append( $", {layout.Count} islands, stretch {dist.Mean:0.00} mean / {dist.Max:0.00} max" );
+					}
+					catch { }
+				}
+				if ( paint is not null )
+					sb.Append( $", paint {paint.Width}x{paint.Height}" + ( paintLayers > 0 ? $" ({paintLayers} layer(s))" : "" ) );
+				else if ( paintLayers > 0 )
+					sb.Append( $", paint {paintLayers} layer(s), no canvas" );
+				else
+					sb.Append( ", paint none" );
+
+				// P7 texel density: pore/grain size is specified in world
+				// units, never in texels, so the same preset must read the
+				// same size on every model. When a body has a paint canvas,
+				// report what its texels are worth in world units, so a
+				// scale mismatch is checkable from describe alone.
+				if ( paint is not null )
+				{
+					var longest = MathF.Max( r.Size.x, MathF.Max( r.Size.y, r.Size.z ) );
+					if ( longest > 0f && paint.Width > 0 )
+					{
+						var unitsPerTexel = longest / paint.Width;
+						// F2 prints 0.00 for anything under 0.005 units/texel
+						// (a 4-unit box at 1024 texels is 0.0039), which reads
+						// as zero density. Show 4 decimals when small.
+						var upt = unitsPerTexel >= 0.1f ? unitsPerTexel.ToString( "F2" ) : unitsPerTexel.ToString( "F4" );
+						sb.Append( $", texel density {paint.Width / longest:F1} texels/unit ({upt} units/texel)" );
+					}
+				}
+
 				sb.AppendLine( "." );
 			}
 		}
@@ -166,7 +213,44 @@ public static class ModelMeasure
 		foreach ( var f in warned )
 			sb.AppendLine( $"  note {f.Name ?? f.TypeName}: {f.Warning}" );
 
+		var particles = studio.Features.OfType<ParticleFxFeature>().Where( f => !f.Suppressed ).ToList();
+
+		if ( particles.Count > 0 )
+		{
+			sb.AppendLine();
+			sb.AppendLine( "Particles:" );
+			foreach ( var p in particles )
+				sb.AppendLine( p.DescribeLine() );
+		}
+
 		return sb.ToString().TrimEnd();
+	}
+
+	/// <summary>True when the mesh carries a UV layout that actually spans
+	/// area, not just the zero UV array every Face is born with. A Blob with
+	/// no UV project reads no; a primitive Box or a UV-projected body reads
+	/// yes.</summary>
+	static bool HasRealUVs( PolyMesh mesh )
+	{
+		if ( mesh is null || mesh.Faces.Count == 0 )
+			return false;
+		var minU = float.MaxValue; var maxU = float.MinValue;
+		var minV = float.MaxValue; var maxV = float.MinValue;
+		var any = false;
+		foreach ( var face in mesh.Faces )
+		{
+			if ( face?.UVs is null || face.UVs.Length != face.Count )
+				continue;
+			foreach ( var uv in face.UVs )
+			{
+				if ( !float.IsFinite( uv.x ) || !float.IsFinite( uv.y ) )
+					continue;
+				any = true;
+				minU = MathF.Min( minU, uv.x ); maxU = MathF.Max( maxU, uv.x );
+				minV = MathF.Min( minV, uv.y ); maxV = MathF.Max( maxV, uv.y );
+			}
+		}
+		return any && ( maxU - minU > 1e-6f || maxV - minV > 1e-6f );
 	}
 
 	static string Where( Vec3 centre, Vec3 min, Vec3 max )

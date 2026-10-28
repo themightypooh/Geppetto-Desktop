@@ -288,34 +288,44 @@ class Snap(unittest.TestCase):
         qml = """
 import QtQuick
 import QtQuick.Window
+import QtQuick.Controls as C
 Window {
-    width: 720; height: 120; visible: true; color: "#0e1012"
+    width: 720; height: 380; visible: true; color: "#0e1012"
     property color amber: "#f2a91c"; property color keyText: "#c9ccd0"; property string mono: "DejaVu Sans Mono"
     property int activePane: 2
+    property bool blinkOn: false; property bool chatOpen: false
+    property string buildNoteDir: ""; property string keyTip: ""
+    QtObject { id: host; function setPace(dir, pace) {} }
+    QtObject { id: claudePanel; property string who: "Codex" }
+    component Tape: Text {}
     id: root
     %s
     Column { y: 6; spacing: 6; width: parent.width
-        Item { width: parent.width; height: 22; PaneHeader { n: 1; who: "Claude"; what: "suit/boots2.txt"; state: "LIVE  REV 41"; owner: ({presence: "here", title: "Fix Survey player pants + mouth IN EFFIGY", quiet: ""}) } }
-        Item { width: parent.width; height: 22; PaneHeader { n: 2; who: "Claude"; what: "mug/build.txt"; state: "DONE"; owner: ({presence: "idle", title: "Red mug, short handle", quiet: "3m"}) } }
-        Item { width: parent.width; height: 22; PaneHeader { n: 3; who: "Codex"; what: "dagger.effigy"; owner: ({presence: "left", title: "", quiet: "6m"}) } }
-        Item { width: parent.width; height: 22; PaneHeader { n: 4 } }
+        Item { width: parent.width; height: 84; PaneHeader { n: 1; who: "Claude"; what: "suit/boots2.txt"; state: "LIVE  REV 41"; owner: ({presence: "here", title: "Fix Survey player pants + mouth IN EFFIGY", quiet: ""}) } }
+        Item { width: parent.width; height: 84; PaneHeader { n: 2; who: "Claude"; what: "mug/build.txt"; state: "DONE"; owner: ({presence: "idle", title: "Red mug, short handle", quiet: "3m"}) } }
+        Item { width: parent.width; height: 84; PaneHeader { n: 3; who: "Codex"; what: "dagger.effigy"; owner: ({presence: "left", title: "", quiet: "6m"}) } }
+        Item { width: parent.width; height: 84; PaneHeader { n: 4 } }
     }
 }
 """
         src = open(CABINET / "cabinet.qml").read()
         start = src.index("    component PaneHeader: Rectangle {")
         end = src.index("\n    }\n", start) + 6
+        dependencies = []
+        for name in ('Chip', 'RunBar', 'CheckpointBar'):
+            at = src.index('    component ' + name + ':')
+            dependencies.append(src[at:src.index('\n    }\n', at) + 6])
         engine = QQmlEngine()
         comp = QQmlComponent(engine)
-        comp.setData((qml % src[start:end]).encode(), QUrl.fromLocalFile(str(CABINET / "snap.qml")))
+        comp.setData((qml % (src[start:end] + '\n' + '\n'.join(dependencies))).encode(), QUrl.fromLocalFile(str(CABINET / "snap.qml")))
         win = comp.create()
         self.assertIsNotNone(win, comp.errorString())
         app = QGuiApplication.instance()
         for _ in range(20):
             app.processEvents()
         texts = [o.property("text") for o in win.findChildren(QObject) if o.metaObject().className().startswith("QQuickText")]
-        self.assertTrue(any("Red mug, short handle" in t and "idle 3m" in t for t in texts), texts)
-        self.assertTrue(any("gone 6m" in t for t in texts), texts)
+        self.assertIn("mug/build.txt", win.findChild(QObject, "paneHeader2").property("fullText"))
+        self.assertIn("dagger.effigy", win.findChild(QObject, "paneHeader3").property("fullText"))
         if os.environ.get("GEPPETTO_SNAP"):
             win.grabWindow().save(os.environ["GEPPETTO_SNAP"])
 

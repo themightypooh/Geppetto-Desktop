@@ -1,0 +1,13 @@
+echo "Blockout: one-story office slice, front-left open"
+add Primitive name=FloorSlab shape=Box width=12 depth=10 height=0.4 position=0,0.2,0 materialslot=0
+add Primitive name=WallBack shape=Box width=12 depth=0.4 height=3.2 position=0,2.0,5 materialslot=1
+add Primitive name=WallRight shape=Box width=0.4 depth=10 height=3.2 position=6,2.0,0 materialslot=1
+add Primitive name=PartitionWest shape=Box width=0.3 depth=4.5 height=1.8 position=-2.5,1.3,1.0 materialslot=2
+add Primitive name=PartitionEast shape=Box width=0.3 depth=4.5 height=1.8 position=2.5,1.3,1.0 materialslot=2
+add Primitive name=PartitionBack shape=Box width=5.3 depth=0.3 height=1.8 position=0,1.3,3.25 materialslot=2
+add Primitive name=DeskBlock shape=Box width=4.4 depth=1.0 height=0.75 position=0,0.775,2.6 materialslot=3
+material 0 color=#7a7568 rough=0.95 metal=0
+material 1 color=#b8b2a4 rough=0.9 metal=0
+material 2 color=#c2b49a rough=0.95 metal=0
+material 3 color=#8a8578 rough=0.85 metal=0.05
+save war_office_blockout.effigy

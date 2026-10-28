@@ -1,0 +1,20 @@
+# Novelty chat button 3: a chunky toy walkie-talkie, push-to-talk.
+# Front view faces -Y; Z is up. Inches. A loose drawer object, not a flat badge.
+material 0 color=#e8b417 rough=0.5 metal=0.1
+material 1 color=#22242a rough=0.6 metal=0.1
+material 2 color=#c22a22 rough=0.5 metal=0.1
+material 3 color=#aeb5b9 rough=0.27 metal=0.9
+echo body: yellow toy case with a black top cap
+add Blob name=Body voxel=0.03 blend=0.01 shapes="box 0,0,1.4 1.7,0.65,2.8 r=0.15 mat=0; box 0,0,2.85 1.7,0.65,0.25 r=0.08 mat=1"
+echo antenna: black rod on top, red tip
+add Blob name=Antenna voxel=0.02 blend=0.01 shapes="cylinder 0.55,0,2.95 0.55,0,4.5 0.07 r=0.03 mat=1; sphere 0.55,0,4.55 0.12 mat=2"
+echo channel knob: silver, on top beside the antenna
+add Blob name=Knob voxel=0.02 blend=0.01 shapes="cylinder -0.55,0,2.9 -0.55,0,3.15 0.18 r=0.03 mat=3"
+echo speaker grille: nine black holes on the front face
+add Blob name=Grille voxel=0.02 blend=0.01 shapes="box -0.4,-0.36,1.0 0.22,0.05,0.22 mat=1; box 0,-0.36,1.0 0.22,0.05,0.22 mat=1; box 0.4,-0.36,1.0 0.22,0.05,0.22 mat=1; box -0.4,-0.36,1.3 0.22,0.05,0.22 mat=1; box 0,-0.36,1.3 0.22,0.05,0.22 mat=1; box 0.4,-0.36,1.3 0.22,0.05,0.22 mat=1; box -0.4,-0.36,1.6 0.22,0.05,0.22 mat=1; box 0,-0.36,1.6 0.22,0.05,0.22 mat=1; box 0.4,-0.36,1.6 0.22,0.05,0.22 mat=1"
+echo push-to-talk: red button low on the front face
+add Blob name=PTT voxel=0.02 blend=0.01 shapes="box 0,-0.36,0.6 0.7,0.08,0.5 r=0.05 mat=2"
+describe
+turnaround out shade=material size=512 views=front,quarter,side,back name=walkie
+save walkie.effigy
+export out name=walkie

@@ -1,0 +1,27 @@
+echo "UV project: organic unwrap for all bodies"
+add UVProject bodies=Torso,Head,Ears,Tail,HindLegs,Forearms,Nut,Eyes,Claws mode=Organic
+
+echo "Materials: fur brown, belly tan, eye dark, claw light, nut"
+material 1 color=#8b5a2b rough=0.9 metal=0
+material 2 color=#c9a87c rough=0.95 metal=0
+material 3 color=#1a1a1a rough=0.3 metal=0
+material 4 color=#d4c5a9 rough=0.6 metal=0
+material 5 color=#8b6914 rough=0.7 metal=0
+
+echo "Assign materials to bodies"
+set Torso Material=1
+set Head Material=1
+set Ears Material=1
+set Tail Material=1
+set HindLegs Material=1
+set Forearms Material=1
+set Eyes Material=3
+set Claws Material=4
+set Nut Material=5
+
+echo "Belly: lighter tan on lower torso (per-vertex not available; keep single slot)"
+echo "Save material pass"
+save squirrel.effigy
+
+echo "Render material turnaround"
+render out.png shade=material views=4 size=512

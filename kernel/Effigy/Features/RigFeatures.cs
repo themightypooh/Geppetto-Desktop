@@ -65,9 +65,12 @@ public sealed class BodyFromBonesFeature : Feature
 	/// <summary>How many times the blocky skin is smoothed. 0 keeps the cubes and tubes.</summary>
 	public readonly IntParam Levels = new( "Smooth levels", 2, 0, 4 );
 
+	/// <summary>How joints are made: Cube is the original (six bones at most per joint); Hull takes any number (see <see cref="SkinBlockout"/>); Auto tries Cube and falls back to Hull where a joint is too crowded.</summary>
+	public readonly ChoiceParam Joints = new( "Joints", new[] { "Auto", "Cube", "Hull" } );
+
 	public readonly IntParam Material = new( "Material slot", 0, 0, 63 ) { Slider = false };
 
-	public override IReadOnlyList<IParam> Parameters => new IParam[] { Radii, Levels, Material };
+	public override IReadOnlyList<IParam> Parameters => new IParam[] { Radii, Levels, Joints, Material };
 
 	public override IReadOnlyList<IParam> AdvancedParameters => new IParam[] { Material };
 
@@ -86,7 +89,7 @@ public sealed class BodyFromBonesFeature : Feature
 			Fail(
 				"Body from Bones needs a rig",
 				"The body is grown along the bones, and there are none yet.",
-				"Add a template rig: Rig ▸ Template (Human, Biped, Quadruped), or `rig human` in a script",
+				"Any rig works: `rig human` in a script, a template rig, or bones placed with Add Bone in the Rig workspace — a template is not required, bone names are free",
 				"Or place bones with Add Bone in the Rig workspace" );
 		}
 
@@ -98,14 +101,28 @@ public sealed class BodyFromBonesFeature : Feature
 
 		PolyMesh mesh;
 
+		Func<int, float> radiusOf = radii is null ? null : (Func<int, float>)(i => radii[i] ?? DefaultRadius( ctx.Rig, i ));
+		var usedHull = false;
 		try
 		{
-			mesh = SkinBlockout.Build( ctx.Rig, radii is null ? null : i => radii[i] ?? DefaultRadius( ctx.Rig, i ), Levels.Clamped );
+			if ( Joints.Value == "Hull" )
+				mesh = SkinBlockout.Build( ctx.Rig, radiusOf, Levels.Clamped, SkinBlockout.Joints.Hull );
+			else if ( Joints.Value == "Cube" )
+				mesh = SkinBlockout.Build( ctx.Rig, radiusOf, Levels.Clamped );
+			else
+			{
+				try { mesh = SkinBlockout.Build( ctx.Rig, radiusOf, Levels.Clamped ); }
+				catch ( InvalidOperationException e ) when ( e.Message.Contains( "more than six" ) )
+				{
+					mesh = SkinBlockout.Build( ctx.Rig, radiusOf, Levels.Clamped, SkinBlockout.Joints.Hull );
+					usedHull = true;
+				}
+			}
 		}
 		catch ( InvalidOperationException e )
 		{
 			Fail( "Body from Bones could not build", e.Message,
-				"Give the bones some length, or check no joint has more than six bones leaving it" );
+				Joints.Value == "Cube" ? "Set joints=Hull, or leave joints=Auto so a crowded joint falls back to hull joints" : "Give the bones some length, or check no joint has more than six bones leaving it" );
 			return;
 		}
 
@@ -114,6 +131,7 @@ public sealed class BodyFromBonesFeature : Feature
 
 		ctx.Bodies.Add( new Body( ctx.NewBodyId(), Name ?? "Body", mesh ) );
 		Warning = $"{mesh.FaceCount:N0} quads over {ctx.Rig.Count} bones. It has no UVs yet: add a UV project (Unwrap) before baking.";
+		if ( usedHull ) Warning += " Cube joints refused at a crowded joint, so hull joints were used.";
 	}
 
 	static float DefaultRadius( Skeleton rig, int bone )
@@ -217,7 +235,8 @@ public sealed class BodyFromBonesFeature : Feature
 /// bend instead of hinging. Envelope is the distance part alone - softer through space, blind to
 /// the surface. Rigid gives each vertex wholly to its nearest bone: right for machinery. Heat is
 /// the bone-heat solve (weights diffused over the surface from each bone); it is a hook another
-/// build fills in through <see cref="HeatBinder"/>, and until then it refuses with the reason.
+/// build fills in through <see cref="HeatBinder"/>; when no build provides one, Bind uses
+/// <see cref="AutoWeights.Heat"/> directly and reports its <see cref="BindReport"/> in the warning.
 ///
 /// Helper bones - twist, IK, aim, hold - take no weight directly. With Twist on, each limb's
 /// weight is then shared onto its twist bones by position along the limb
@@ -232,8 +251,12 @@ public sealed class BindFeature : Feature
 
 	public static readonly string[] MethodNames = { "Smooth", "Envelope", "Rigid", "Heat" };
 
-	/// <summary>Bone heat: (mesh, deform skeleton) → weights indexed into that skeleton. Null until
-	/// a build provides one; then Method = Heat uses it.</summary>
+	/// <summary>Bone heat: (mesh, deform skeleton) → weights indexed into that skeleton. A build
+	/// may provide one; when it does not, Method = Heat uses AutoWeights.Heat directly.</summary>
+
+	/// <summary>The BindReport from the last Heat bind in this process, or null when the last
+	/// bind was not Heat (or a custom HeatBinder was used, which carries its own report).</summary>
+	public static BindReport LastHeatReport;
 	public static Func<PolyMesh, Skeleton, SkinWeights> HeatBinder;
 
 	/// <summary>Bodies to weight. Empty = every body that is not a reference.</summary>
@@ -277,7 +300,7 @@ public sealed class BindFeature : Feature
 			Fail(
 				"Automatic Weights needs a rig",
 				"Weights say how much each bone moves each vertex, and there are no bones yet.",
-				"Add a template rig: Rig ▸ Template, or `rig human` in a script",
+				"Any rig works: `rig human` in a script, a template rig, or bones placed with Add Bone in the Rig workspace — a template is not required, bone names are free",
 				"Or place bones with Add Bone in the Rig workspace" );
 		}
 
@@ -293,13 +316,6 @@ public sealed class BindFeature : Feature
 
 		var method = Method.Value;
 
-		if ( method == "Heat" && HeatBinder is null )
-		{
-			FailOn( "Method",
-				"Heat weights are not available in this build",
-				"Bone heat needs the surface solve, which has not been added yet.",
-				"Use Smooth: distance to the bones, averaged over the surface" );
-		}
 
 		var deform = DeformSkeleton( ctx.Rig, out var map );
 
@@ -315,12 +331,29 @@ public sealed class BindFeature : Feature
 		foreach ( var body in targets )
 		{
 			var mesh = body.Mesh;
-			var weights = method switch
+			SkinWeights weights;
+			BindReport heatReport = null;
+
+			if ( method == "Heat" && HeatBinder is not null )
 			{
-				"Rigid" => SkinBinder.BindRigid( mesh, deform ),
-				"Heat" => HeatBinder( mesh, deform ),
-				_ => SkinBinder.BindSmooth( mesh, deform, Falloff.Clamped ),
-			};
+				weights = HeatBinder( mesh, deform );
+			}
+			else if ( method == "Heat" )
+			{
+				weights = AutoWeights.Heat( mesh, deform, out heatReport );
+				LastHeatReport = heatReport;
+			}
+			else if ( method == "Rigid" )
+			{
+				weights = SkinBinder.BindRigid( mesh, deform );
+			}
+			else
+			{
+				weights = SkinBinder.BindSmooth( mesh, deform, Falloff.Clamped );
+			}
+
+			if ( heatReport is not null )
+				Warning = heatReport.ToString();
 
 			if ( weights is null || weights.Count != mesh.VertexCount )
 				Fail( "The weights did not come back for every vertex", $"{body.Name}: {weights?.Count ?? 0} of {mesh.VertexCount}.", "Use Smooth" );
@@ -344,7 +377,8 @@ public sealed class BindFeature : Feature
 		}
 
 		Warning = $"{WeightedVertices:N0} vertices on {targets.Count} bod{(targets.Count == 1 ? "y" : "ies")} weighted to {deform.Count} bones ({method})"
-			+ (twists ? ", shared onto twist bones." : ".");
+			+ (twists ? ", shared onto twist bones." : ".")
+			+ (LastHeatReport is not null && method == "Heat" ? $" Bind report: {LastHeatReport}." : "");
 	}
 
 	/// <summary>Helpers that should take no weight directly: twist stations, IK targets, aim

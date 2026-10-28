@@ -33,7 +33,7 @@ public static class StrandSolver
 	/// moves. Directions are the initial strand direction (unit-length is not required).
 	/// </summary>
 	public static List<List<Vec3>> Settle( IReadOnlyList<Vec3> roots, IReadOnlyList<Vec3> directions,
-		Options o, IReadOnlyList<(Vec3 Centre, float Radius)> colliders = null )
+		Options o, IReadOnlyList<(Vec3 Centre, float Radius)> colliders = null, SurfaceCollider surface = null, float surfaceRadius = 0f )
 	{
 		if ( roots is null || roots.Count == 0 )
 			throw new ArgumentException( "Strands need at least one root.", nameof( roots ) );
@@ -64,6 +64,7 @@ public static class StrandSolver
 
 				Project( pts, rest );
 				Collide( pts, colliders );
+				if ( surface is not null && surfaceRadius > 0f ) surface.Collide( pts, surfaceRadius );
 				Project( pts, rest );
 			}
 
@@ -161,12 +162,13 @@ public static class StrandSolver
 	/// Card geometry for settled strands: twist-minimised ribbons (parallel-transported side
 	/// frame), double-sided so a hair card reads from both sides, UV u along length, v across.
 	/// </summary>
-	public static PolyMesh BuildCards( IReadOnlyList<List<Vec3>> strands, float width, float tipRatio, int material )
+	public static PolyMesh BuildCards( IReadOnlyList<List<Vec3>> strands, float width, float tipRatio, int material, IReadOnlyList<float> widths = null )
 	{
 		var mesh = new PolyMesh();
 
-		foreach ( var strand in strands )
+		for ( var si = 0; si < strands.Count; si++ )
 		{
+			var strand = strands[si];
 			if ( strand.Count < 2 )
 				continue;
 
@@ -198,7 +200,8 @@ public static class StrandSolver
 			for ( var i = 0; i < strand.Count; i++ )
 			{
 				var t = (float)i / (strand.Count - 1);
-				var half = width * 0.5f * (1f + (Math.Clamp( tipRatio, 0f, 1f ) - 1f) * t);
+				var wHere = widths is not null && si < widths.Count ? widths[si] : width;
+				var half = wHere * 0.5f * (1f + (Math.Clamp( tipRatio, 0f, 1f ) - 1f) * t);
 				left[i] = mesh.AddVertex( strand[i] + sides[i] * half );
 				right[i] = mesh.AddVertex( strand[i] - sides[i] * half );
 			}
@@ -215,6 +218,155 @@ public static class StrandSolver
 		}
 
 		return mesh;
+	}
+
+	/// <summary>Re-project a polyline to an exact total arc length, pinned at point 0.
+	/// Same 2-pass outward projection as <see cref="Settle"/> uses internally, exposed so
+	/// groom operators that run after settling (curl, braid, gather, frizz) can restore the
+	/// length they distorted. A "length 3" groom stays length 3 with curl on or off.</summary>
+	public static void ProjectToLength( List<Vec3> pts, float length )
+	{
+		if ( pts is null || pts.Count < 2 || length <= 0f ) return;
+		var rest = length / (pts.Count - 1);
+		Project( pts, rest );
+	}
+
+	/// <summary>Random point inside a face (barycentric in an area-weighted fan triangle),
+	/// not the face centroid. Roots sampled this way do not coincide on coarse meshes and
+	/// do not show the triangulation. Returns the point, its face normal, and its UV
+	/// (barycentric interpolation of the face's corner UVs, or zero when the face has none).</summary>
+	public static (Vec3 Point, Vec3 Normal, Vec2 Uv) SamplePointInFace( PolyMesh mesh, Face f, Random rng )
+	{
+		var idx = f.Indices;
+		if ( idx.Length == 0 ) return (Vec3.Zero, new Vec3( 0, 0, 1 ), Vec2.Zero);
+		if ( idx.Length == 1 ) return (mesh.Positions[idx[0]], mesh.FaceNormal( f ), f.UVs is { Length: > 0 } ? f.UVs[0] : Vec2.Zero);
+		if ( idx.Length == 2 )
+		{
+			var k = (float)rng.NextDouble();
+			var pt = mesh.Positions[idx[0]] * (1f - k) + mesh.Positions[idx[1]] * k;
+			var uv = f.UVs is { Length: >= 2 } ? f.UVs[0] * (1f - k) + f.UVs[1] * k : Vec2.Zero;
+			return (pt, mesh.FaceNormal( f ), uv);
+		}
+		// Fan triangles (0, i, i+1), area-weighted.
+		var tris = new List<(int A, int B, int C, float Area)>();
+		var total = 0f;
+		for ( var i = 1; i + 1 < idx.Length; i++ )
+		{
+			var a = mesh.Positions[idx[0]]; var b = mesh.Positions[idx[i]]; var c = mesh.Positions[idx[i + 1]];
+			var area = Vec3.Cross( b - a, c - a ).Length * 0.5f;
+			tris.Add( (idx[0], idx[i], idx[i + 1], area) ); total += area;
+		}
+		if ( total <= 0f ) return (mesh.FaceCentroid( f ), mesh.FaceNormal( f ), Vec2.Zero);
+		var pick = (float)rng.NextDouble() * total;
+		var tri = tris[^1];
+		foreach ( var cand in tris ) { pick -= cand.Area; if ( pick <= 0f ) { tri = cand; break; } }
+		var r1 = (float)rng.NextDouble(); var r2 = (float)rng.NextDouble();
+		if ( r1 + r2 > 1f ) { r1 = 1f - r1; r2 = 1f - r2; }
+		var w0 = 1f - r1 - r2;
+		var pa = mesh.Positions[tri.A]; var pb = mesh.Positions[tri.B]; var pc = mesh.Positions[tri.C];
+		var point = pa * w0 + pb * r1 + pc * r2;
+		Vec2 uv2 = Vec2.Zero;
+		if ( f.UVs is { } uvs && uvs.Length == idx.Length )
+		{
+			var ia = System.Array.IndexOf( idx, tri.A ); var ib = System.Array.IndexOf( idx, tri.B ); var ic = System.Array.IndexOf( idx, tri.C );
+			uv2 = uvs[ia] * w0 + uvs[ib] * r1 + uvs[ic] * r2;
+		}
+		return (point, mesh.FaceNormal( f ), uv2);
+	}
+
+	/// <summary>Uniform-grid surface collider: the real-surface replacement for the
+	/// bounding-sphere approximation. Triangles are bucketed by the cells their
+	/// radius-expanded AABB touches, so a point only ever tests the triangles that
+	/// can actually be within radius of it. Collide pushes a point that is closer
+	/// than <paramref name="radius"/> to the surface (or inside it) out to exactly
+	/// <paramref name="radius"/> along the triangle normal, so short hair can lie on
+	/// a scalp instead of floating out to a bounding sphere.</summary>
+	public sealed class SurfaceCollider
+	{
+		readonly List<(Vec3 A, Vec3 B, Vec3 C, Vec3 Normal)> _tris = new();
+		readonly Dictionary<(int, int, int), List<int>> _grid = new();
+		float _cell = 1f;
+		public int TriangleCount => _tris.Count;
+		public static SurfaceCollider Build( IReadOnlyList<PolyMesh> meshes )
+		{
+			var sc = new SurfaceCollider();
+			if ( meshes is null ) return sc;
+			foreach ( var mesh in meshes )
+			{
+				if ( mesh is null ) continue;
+				for ( var fi = 0; fi < mesh.FaceCount; fi++ )
+				{
+					var f = mesh.Faces[fi];
+					for ( var k = 1; k + 1 < f.Indices.Length; k++ )
+						sc._tris.Add( (mesh.Positions[f.Indices[0]], mesh.Positions[f.Indices[k]], mesh.Positions[f.Indices[k + 1]], mesh.FaceNormal( f )) );
+				}
+			}
+			if ( sc._tris.Count > 0 )
+			{
+				var min = sc._tris[0].A; var max = sc._tris[0].A;
+				foreach ( var tri in sc._tris ) foreach ( var pt in new[] { tri.A, tri.B, tri.C } )
+				{ min = new Vec3( Math.Min( min.x, pt.x ), Math.Min( min.y, pt.y ), Math.Min( min.z, pt.z ) ); max = new Vec3( Math.Max( max.x, pt.x ), Math.Max( max.y, pt.y ), Math.Max( max.z, pt.z ) ); }
+				var span = Math.Max( 0.5f, Math.Max( max.x - min.x, Math.Max( max.y - min.y, max.z - min.z ) ) / 20f );
+				sc._cell = span;
+				const float expand = 0.5f;
+				for ( var ti = 0; ti < sc._tris.Count; ti++ )
+				{
+					var tri = sc._tris[ti];
+					var lo = new Vec3( Math.Min( tri.A.x, Math.Min( tri.B.x, tri.C.x ) ) - expand, Math.Min( tri.A.y, Math.Min( tri.B.y, tri.C.y ) ) - expand, Math.Min( tri.A.z, Math.Min( tri.B.z, tri.C.z ) ) - expand );
+					var hi = new Vec3( Math.Max( tri.A.x, Math.Max( tri.B.x, tri.C.x ) ) + expand, Math.Max( tri.A.y, Math.Max( tri.B.y, tri.C.y ) ) + expand, Math.Max( tri.A.z, Math.Max( tri.B.z, tri.C.z ) ) + expand );
+					for ( var cx = (int)Math.Floor( lo.x / sc._cell ); cx <= (int)Math.Floor( hi.x / sc._cell ); cx++ )
+					for ( var cy = (int)Math.Floor( lo.y / sc._cell ); cy <= (int)Math.Floor( hi.y / sc._cell ); cy++ )
+					for ( var cz = (int)Math.Floor( lo.z / sc._cell ); cz <= (int)Math.Floor( hi.z / sc._cell ); cz++ )
+					{
+						var key = (cx, cy, cz);
+						if ( !sc._grid.TryGetValue( key, out var list ) ) sc._grid[key] = list = new List<int>();
+						list.Add( ti );
+					}
+				}
+			}
+			return sc;
+		}
+		public void Collide( List<Vec3> pts, float radius )
+		{
+			if ( pts is null || _tris.Count == 0 || radius <= 0f ) return;
+			for ( var i = 1; i < pts.Count; i++ )
+			{
+				var key = ((int)Math.Floor( pts[i].x / _cell ), (int)Math.Floor( pts[i].y / _cell ), (int)Math.Floor( pts[i].z / _cell ));
+				if ( !_grid.TryGetValue( key, out var tris ) ) continue;
+				var best = float.MaxValue; Vec3 bestPt = default; Vec3 bestN = default;
+				foreach ( var ti in tris )
+				{
+					var tri = _tris[ti];
+					var cp = ClosestPointTriangle( pts[i], tri.A, tri.B, tri.C );
+					var d = (pts[i] - cp).Length;
+					if ( d < best ) { best = d; bestPt = cp; bestN = tri.Normal.LengthSquared > 1e-12f ? tri.Normal.Normal : new Vec3( 0, 0, 1 ); }
+				}
+				if ( best < radius )
+				{
+					var signed = Vec3.Dot( pts[i] - bestPt, bestN );
+					if ( signed < radius ) pts[i] = bestPt + bestN * radius;
+				}
+			}
+		}
+		static Vec3 ClosestPointTriangle( Vec3 p, Vec3 a, Vec3 b, Vec3 c )
+		{
+			var ab = b - a; var ac = c - a; var ap = p - a;
+			var d1 = Vec3.Dot( ab, ap ); var d2 = Vec3.Dot( ac, ap );
+			if ( d1 <= 0f && d2 <= 0f ) return a;
+			var bp = p - b; var d3 = Vec3.Dot( ab, bp ); var d4 = Vec3.Dot( ac, bp );
+			if ( d3 >= 0f && d4 <= d3 ) return b;
+			var vc = d1 * d4 - d3 * d2;
+			if ( vc <= 0f && d1 >= 0f && d3 <= 0f ) { var v = d1 / (d1 - d3); return a + ab * v; }
+			var cp = p - c; var d5 = Vec3.Dot( ab, cp ); var d6 = Vec3.Dot( ac, cp );
+			if ( d6 >= 0f && d5 <= d6 ) return c;
+			var vb = d5 * d2 - d1 * d6;
+			if ( vb <= 0f && d2 >= 0f && d6 <= 0f ) { var w = d2 / (d2 - d6); return a + ac * w; }
+			var va = d3 * d6 - d5 * d4;
+			if ( va <= 0f && (d4 - d3) >= 0f && (d5 - d6) >= 0f ) { var w = (d4 - d3) / ((d4 - d3) + (d5 - d6)); return b + (c - b) * w; }
+			var denom = 1f / (va + vb + vc);
+			var v2 = vb * denom; var w2 = vc * denom;
+			return a + ab * v2 + ac * w2;
+		}
 	}
 
 	/// <summary>
@@ -267,9 +419,9 @@ public static class StrandSolver
 			}
 
 			var face = chosen.Mesh.Faces[chosen.Face];
-			var centre = chosen.Mesh.FaceCentroid( face );
-			var normal = chosen.Mesh.FaceNormal( face );
-			result.Add( (centre + normal * 0.01f, normal.LengthSquared > 1e-12f ? normal.Normal : new Vec3( 0, 0, 1 )) );
+			var (sp, sn, _) = SamplePointInFace( chosen.Mesh, face, rng );
+			var normal2 = sn;
+			result.Add( (sp + normal2 * 0.01f, normal2.LengthSquared > 1e-12f ? normal2.Normal : new Vec3( 0, 0, 1 )) );
 		}
 
 		return result;
@@ -406,6 +558,14 @@ public sealed class StrandsFeature : Feature
 		var mesh = Geometry.Value == "Card"
 			? StrandSolver.BuildCards( settled, Width.Clamped, TipRatio.Clamped, Material.Clamped )
 			: StrandSolver.BuildTube( settled, Radius.Clamped, TipRatio.Clamped, Sides.Clamped, Material.Clamped );
+
+		// P7: same count/triangle logging as Scatter, no behaviour change.
+		var strandTris = Decimate.TriangleCount( mesh );
+		var perStrand = roots.Count > 0 ? strandTris / roots.Count : 0;
+		Info( $"Strands emitted {roots.Count} strands x about {perStrand} tris = {strandTris} tris (geometry {Geometry.Value}, sides {Sides.Clamped}, segments {Segments.Clamped})" );
+
+		if ( strandTris > 200000 && Diagnostic is null )
+			Warn( $"Strands emitted about {strandTris} triangles.", "Large strand sets get heavy to edit, save and render.", "Lower Scatter", "Lower Sides or Segments" );
 
 		ctx.Bodies.Add( new Body( ctx.NewBodyId(), Name, mesh ) );
 	}

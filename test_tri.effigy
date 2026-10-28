@@ -1,0 +1,17 @@
+effigy 1
+rollback 2147483647
+materiallook 2 color=#ffdf6b rough=0.7 metal=0
+refimage top 134.2 50.5 15.4 -1 0.6 1 /home/poo/Desktop/geppetto-desktop/angler-full.jpg
+feature Inflate2DFeature
+	id 0156ca75
+	name TriTestDot
+	suppressed 0
+	visible 1
+	param Bevel 0
+	param Profile 0
+	param Rings 7.43,-32.39;7.27,-31.79;6.83,-31.35;6.23,-31.19;5.63,-31.35;5.19,-31.79;5.03,-32.39;5.19,-32.99;5.63,-33.43;6.23,-33.59;6.83,-33.43;7.27,-32.99
+	param Scale 1
+	param Slot 2
+	param Symmetry 0
+	param Thickness 0.5
+end

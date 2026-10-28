@@ -24,9 +24,6 @@ the workflow; it does not grant tools to a model that cannot run them.
 
 - Start/edit through `geppetto-live`; keep the run **open**. Record the exact RUN
   path printed by the tool. Never use `last` with several sessions/runs.
-- Keep `geppetto-notes --follow build.txt` armed, or call
-  `geppetto-live wait RUN` between edits. Re-arm a monitor after it delivers;
-  follow is not an eternal subscription. No Claude-only hook is required.
 - A Stop is a review hold, not permission to finish/close the run. Do not send
   speculative edits while the user composes. Do not resume another run or a
   global agent session to work around it.

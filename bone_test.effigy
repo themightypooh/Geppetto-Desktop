@@ -1,0 +1,83 @@
+effigy 1
+rollback 2147483647
+materiallook 0 color=#e9e0c8 rough=0.7 metal=0
+feature PrimitiveFeature
+	id 4668af53
+	name SpineSeg
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position 0 0 0
+	param Radius 0.6
+	param RotationAngle 90
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 4
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id 46be4b04
+	name Bill
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position -6 0 0
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 3
+	param SizeX 6
+	param SizeY 0.4
+	param SizeZ 1.2
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id b0728fb1
+	name SkullPlate
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position 2 0 0
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 3
+	param SizeY 0.4
+	param SizeZ 3
+	param UniformScale 0
+end
+feature PrimitiveFeature
+	id b70ccbce
+	name FinRay
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position 0 4 0
+	param Radius 0.15
+	param RotationAngle 30
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 1
+	param SizeX 1
+	param SizeY 1
+	param SizeZ 6
+	param UniformScale 0
+end

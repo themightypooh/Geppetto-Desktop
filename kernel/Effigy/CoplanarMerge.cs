@@ -270,6 +270,21 @@ public static class CoplanarMerge
 
 		normal = normal.Normal;
 
+		// Pairwise near-coplanarity is not transitive: a curved shell's small
+		// facets can chain into a warped n-gon. Keep the original pieces unless
+		// every corner actually lies on this one plane; projected area alone
+		// cannot detect the fold or the backward render triangles it creates.
+		var origin = mesh.Positions[mesh.Faces[members[0]].Indices[0]];
+		var extent = 0f;
+		foreach ( var member in members )
+			foreach ( var index in mesh.Faces[member].Indices )
+				extent = MathF.Max( extent, (mesh.Positions[index] - origin).Length );
+		var planeEpsilon = MathF.Max( 1e-7f, extent * 1e-5f );
+		foreach ( var member in members )
+			foreach ( var index in mesh.Faces[member].Indices )
+				if ( MathF.Abs( Vec3.Dot( normal, mesh.Positions[index] - origin ) ) > planeEpsilon )
+					return null;
+
 		Basis( normal, out var u, out var v );
 
 		var flat = new List<List<Vec2>>( loops.Count );

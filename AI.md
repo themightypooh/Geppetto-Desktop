@@ -38,7 +38,7 @@ dotnet run -c Release -- --ai chat \
 dotnet run -c Release -- --ai create \
   --provider anthropic --model YOUR_MODEL_ID --vision \
   --prompt "Make one original 1940s British semi-detached house exterior" \
-  --research --judge --out /tmp/opencode/geppetto-house-run
+  --out /tmp/opencode/geppetto-house-run
 ```
 
 `--out` must be **new**. Runs never overwrite an existing project or input model.
@@ -115,56 +115,21 @@ Chat supports `/inspect`, `/freeze FEATURE_ID`, and `/quit`. Frozen feature para
 cannot be edited or removed by the agent; this is not a guarantee that upstream edits
 cannot change the final appearance. Recent chat context is bounded to four exchanges.
 
-## Judge Mode
+## Builder-led output
 
-`--judge` enables an independent build → render → judge → fix loop. The AI selects and
-locks a task-specific rubric, target, category floor, round count and plateau policy
-before building. The player need not configure any of those.
+Builds follow the player's request without an automatic judge, rubric, score veto,
+forced render, correction loop or score-selected rollback. The model chooses its
+approach and when to finish within the explicit call/time budget; there is no hidden
+24-tool-round cutoff. Inspection and rendering remain available as tools.
 
-Mark a capable model `--vision`, or choose a separate judge:
+Legacy `--judge`, `--judge-*`, `--rubric`, `--target`, `--floor`, `--rounds`,
+`--plateau` and `--delta` options are accepted for launcher compatibility but do not
+activate judging or contact another provider. The standalone `--ai judge` command
+remains a separate, manually invoked inspection tool, not part of a build.
 
-```sh
---judge --judge-provider google --judge-model YOUR_VISION_MODEL --judge-vision
-```
-
-Separate judges may also use `--judge-endpoint` and `--judge-key-env`. Each judgment
-starts a fresh context with the brief, locked rubric, native model data, and five actual
-rendered views. It gets no builder self-praise or previous scores. It cannot run tools.
-The host validates every category, score and evidence field, computes the weighted
-score itself, and checks the floor. This reduces score gaming; it does not make an AI's
-subjective rating equivalent to a human quality guarantee.
-
-Optional player overrides:
-
-```sh
---target 9 --floor 7 --rounds 6 --plateau 3 --delta 0.2 --calls 60 --minutes 15
-```
-
-Plateau means no cumulative improvement of `delta` from the last significant best for
-`plateau` consecutive judgments. Round count includes the initial judgment. Revision
-starts from the best checkpoint, not a degraded latest version. Passing all category
-floors takes precedence over a higher average that fails one.
-
-Provide your own JSON with `--rubric file.json`:
-
-```json
-{
-  "target": 9,
-  "floor": 7,
-  "maxRounds": 6,
-  "plateauRounds": 3,
-  "minImprovement": 0.2,
-  "categories": [
-    { "name": "Period fidelity", "weight": 2, "description": "Roof, openings and facade proportions follow the researched brief." },
-    { "name": "Construction", "weight": 1, "description": "Walls, roof and openings meet plausibly in front, side and rear views." }
-  ]
-}
-```
-
-The rubric can use 1–12 unique categories with positive weights and checkable
-descriptions. Command-line target/floor overrides win over the file. Custom rubrics
-that omit loop policy use defaults of 6 rounds, 3-judgment patience and 0.2 improvement.
-AI-generated policy has bounded ranges; player round overrides are capped at 12.
+Cabinet prompts no longer require phase announcements, artistic recipes or a
+research stage. Research permission is optional scope, not a prerequisite to modeling.
+Explicit terminal `--research` / `research` requests still run the research workflow.
 
 Calls and elapsed time are bounded; there are no automatic paid retries. Dollar-spend
 and token-cost accounting are not yet implemented. Ctrl-C cancels. The API request
@@ -172,31 +137,31 @@ timeout is three minutes, and the overall session deadline can stop it sooner.
 
 ## Outputs and honest stops
 
-- Editable `round-NN.effigy` checkpoints and multi-angle PNG evidence.
-- Frozen rubric, selected limits, per-round judge evidence and selection records.
-- `task-NN-best.effigy` and `task-NN-result.json` on a completed loop.
+- Editable `round-NN.effigy` checkpoints; PNGs only when the model requests a render.
+- `task-NN-best.effigy` (legacy name for the final builder result) and `task-NN-result.json`.
+- Result status is `built-unjudged`; no quality target is claimed.
 - `stopped.json` on cancellation/error/budget exhaustion, including the earlier best
-  checkpoint if one had been judged. Last valid native state is checkpointed too.
+  completed checkpoint if available. Last valid native state is checkpointed too.
 
-Creation exit codes: `0` built without judging or met the target; `2` stopped below
-target due to plateau/round limit; `1` error/cancellation/call/time budget. Interactive
-chat reports each task's status and continues until quit or an error. A plateau is
-never renamed a success. Existing checkpoints are never rewritten.
+Creation exit codes: `0` saved the builder's output; `1` error/cancellation/call/time
+budget. Interactive chat reports each task's status and continues until quit or an
+error. Existing checkpoints are never rewritten. Successful saving is not an
+artistic quality verdict.
 
 ## Verification
 
 ```sh
-env -u DISPLAY -u WAYLAND_DISPLAY AI_REQUIRE_EGL=1 \
+env -u DISPLAY -u WAYLAND_DISPLAY \
   dotnet run --project tests/Desktop.Tests.csproj -c Release -- --filter ai/
 ```
 
 Protocol fixtures cover all three native wire formats, tool-call history/signatures,
 local-key handling, safe paths, reference address checks, rollback/frozen parameters,
-and call limits. The GPU integration tests use real EGL renders and editable native
-documents with **mock provider responses** to verify passing, plateau and failure
-checkpoint behavior. They do not demonstrate artistic model quality or authenticate
-against a live provider. Live-provider and local-model acceptance still need actual
-credentials/running model servers.
+and call limits. Mock provider fixtures verify that legacy judge options do not
+trigger extra calls, renders or revisions, and that builders can exceed 24 tool
+rounds within their explicit budget. These tests do not demonstrate artistic model
+quality or authenticate against a live provider. Live-provider and local-model
+acceptance still need actual credentials/running model servers.
 
 ## Watch the AI build
 
@@ -257,8 +222,7 @@ from the same poll. Foreign run IDs are ignored; finished runs reject commands.
 - **Directions** queue (max 16, 2000 chars each). Unstarted tool calls from a response that
   arrived after a direction get explicit `not_executed` results, then the builder receives
   the directions with the current model. A direction that races the final answer is
-  applied before the run completes. Judged runs reject directions (`judged-rubric-is-locked`)
-  because their rubric was fixed before building. Direction text is not written to the
+  applied before the run completes. Direction text is not written to the
   public event journal.
 
 If the process has crashed there can be no live acknowledgement; published documents

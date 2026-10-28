@@ -301,6 +301,70 @@ public sealed class UVProjectFeature : Feature
 	/// so separate UV Projects (or a hand and the arm) can match.</summary>
 	public readonly FloatParam TexelDensity = new( "Texel density", 0f, 0f, unit: "px/u" );
 
+	/// <summary>Which seams the unwrap must respect. Marked (the default, previous
+	/// behaviour) uses seams already marked on the mesh; Auto wires in
+	/// <see cref="UVAutoSeams"/> (geometry-driven cuts at sharp/valley edges) so a
+	/// script user gets seams without hand-marking every edge; None cuts only by the
+	/// chart angle. Auto is opt-in because it changes layouts that previously relied
+	/// on the angle rule alone.</summary>
+	public readonly ChoiceParam Seams = new( "Seams", new[] { "Marked", "Auto", "None" } );
+
+	/// <summary>Auto-seams only: minimum dihedral angle for an edge to become a cut.</summary>
+	public readonly FloatParam SeamAngle = new( "Seam angle", 50f, 1f, 179f, unit: "deg" );
+
+	/// <summary>Auto-seams only: when on, only concave (valley) edges become cuts.</summary>
+	public readonly BoolParam ConcaveOnly = new( "Concave only", false );
+
+	/// <summary>Auto-seams only: forward-facing "hero" direction. Zero (the default)
+	/// disables visibility weighting; when set, cuts prefer backs and valleys over
+	/// surfaces facing this direction.</summary>
+	public readonly Vec3Param SeamHero = new( "Seam hero direction", new Vec3( 0, 0, 0 ) );
+
+	/// <summary>Unwrap and Organic: run a pinned-boundary stretch relax over every
+	/// island after flattening, and report stretch before/after. Never makes a layout
+	/// worse: an island whose relax does not improve it keeps its original UVs.</summary>
+	public readonly BoolParam Relax = new( "Relax", false );
+
+	/// <summary>Relax only: maximum relax iterations (stops early when the mean
+	/// stretch improves by less than 1% in an iteration).</summary>
+	public readonly IntParam RelaxIterations = new( "Relax iterations", 10, 1, 50 );
+
+	/// <summary>Unwrap and Organic: turn every island so its longest straight
+	/// boundary run lies along U, so straps and panels read straight.</summary>
+	public readonly BoolParam Straighten = new( "Straighten islands", false );
+
+	/// <summary>Per-island density priority: a 3D point in the hero area (e.g. a face
+	/// centre). Only used with <see cref="HeroDensity"/> above zero.</summary>
+	public readonly Vec3Param HeroPoint = new( "Hero point", new Vec3( 0, 0, 0 ) );
+
+	/// <summary>Per-island density priority: scale the island containing
+	/// <see cref="HeroPoint"/> by this factor before packing (2 = twice the texels).
+	/// Zero (the default) disables it. Packed with KeepScale so the packer does not
+	/// rescale everything to fill and undo the priority.</summary>
+	public readonly FloatParam HeroDensity = new( "Hero density", 0f, 0f, unit: "x" );
+
+	/// <summary>Unwrap and Organic: also generate a UV2 lightmap layout — the UV1
+	/// islands repacked with a generous margin and no stacking, written per-corner
+	/// so UV2 seams survive. Needs a body whose UV1 is already unwrapped in this
+	/// same feature run.</summary>
+	public readonly BoolParam UV2Lightmap = new( "UV2 lightmap", false );
+
+	/// <summary>Unwrap and Organic: pack islands across this many UDIM tiles in U
+	/// (0 or 1 = off, one square as before). Layout only: export paths do not yet
+	/// split textures per tile, so a UDIM layout is for pipelines that read tile
+	/// offsets themselves.</summary>
+	public readonly IntParam UdimTiles = new( "UDIM tiles", 0, 0, 16 );
+
+	/// <summary>Unwrap and Organic: pack by rasterised island shape instead of
+	/// bounding boxes, so concave and diagonal islands stop paying for their whole
+	/// box. Slower; for final bakes. Falls back to the box packer when it cannot fit.</summary>
+	public readonly BoolParam ExactPack = new( "Exact pack", false );
+
+	/// <summary>One-line report for the last unwrap, printed by the script path
+	/// ("added UV project ... (UV report: ...)"). Null for projection modes.</summary>
+	internal string LastReport;
+
+
 	/// <summary>
 	/// What the last Unwrap produced, so the editor can say "12 charts, 340 faces, 1.4 units per
 	/// UV unit" rather than discarding the report. Null while Mode is Box or Planar, and null
@@ -324,35 +388,54 @@ public sealed class UVProjectFeature : Feature
 	{
 		"Planar" => new IParam[] { Bodies, Mode, Direction, Scale },
 		"Cylinder" or "Sphere" => new IParam[] { Bodies, Mode, Direction },
-		"Unwrap" => new IParam[] { Bodies, Mode, ChartAngle, Margin, Atlas },
-		"Organic" => new IParam[] { Bodies, Mode, Margin, Atlas },
+		"Unwrap" => new IParam[] { Bodies, Mode, ChartAngle, Margin, Atlas, Seams, SeamAngle, ConcaveOnly, Relax, Straighten, HeroDensity, UV2Lightmap, UdimTiles, ExactPack },
+		"Organic" => new IParam[] { Bodies, Mode, Margin, Atlas, Seams, SeamAngle, ConcaveOnly, Relax, Straighten, HeroDensity, UV2Lightmap, UdimTiles, ExactPack },
 		_ => new IParam[] { Bodies, Mode, Scale },
 	};
 
 	public override IReadOnlyList<IParam> AdvancedParameters => Mode.Value is "Unwrap" or "Organic"
-		? new IParam[] { TextureSize, MarginPixels, RotateIslands, TexelDensity }
+		? new IParam[] { TextureSize, MarginPixels, RotateIslands, TexelDensity, RelaxIterations, HeroPoint, SeamHero }
 		: System.Array.Empty<IParam>();
 
 	/// <summary>True when the pixel margin, rotation or density settings ask for a repack.</summary>
-	bool Repacks => MarginPixels.Value > 0f || RotateIslands.Value || TexelDensity.Value > 0f;
+	bool Repacks => MarginPixels.Value > 0f || RotateIslands.Value || TexelDensity.Value > 0f || ExactPack.Value || HeroDensity.Value > 0f;
 
 	/// <summary>
 	/// After the unwrap: set the density, then repack at a pixel margin. Says what it did on the
 	/// report, and warns - leaving the unwrap's own layout - when the islands do not fit.
+	/// Hero scaling happens here, before packing, so a KeepScale pack holds it; exact
+	/// packing is tried first when asked and falls back to the box packer when it cannot fit.
 	/// </summary>
-	void Repack( PolyMesh mesh, UnwrapReport report, string what )
+	void Repack( PolyMesh mesh, UnwrapReport report, string what, out int heroIsland )
 	{
+		heroIsland = -1;
 		if ( !Repacks || mesh.FaceCount == 0 )
 			return;
 
 		var size = TextureSize.Clamped;
-		var keep = TexelDensity.Value > 0f;
+		var keep = TexelDensity.Value > 0f || HeroDensity.Value > 0f;
 		var before = mesh.Faces.Select( f => (Vec2[])f.UVs.Clone() ).ToArray();
 
-		if ( keep )
+		if ( TexelDensity.Value > 0f )
 			UVDensity.Set( mesh, TexelDensity.Value, size );
 
+		if ( HeroDensity.Value > 0f )
+			heroIsland = UVIslands.HeroIsland( mesh, HeroPoint.Value, HeroDensity.Value );
+
 		var margin = MarginPixels.Value > 0f ? MarginPixels.Clamped : Margin.Clamped * size;
+		var exactAttempted = false;
+		if ( ExactPack.Value )
+		{
+			exactAttempted = true;
+			var exact = UVPack.Pack( mesh, new UVPack.Options { TextureSize = size, MarginPixels = margin, Rotate = RotateIslands.Value, KeepScale = keep, Exact = true } );
+			if ( exact.Fits )
+			{
+				var density = UVDensity.Measure( mesh, size );
+				report.Note = $"{exact} (exact-shape); {density}";
+				return;
+			}
+		}
+
 		var result = UVPack.Pack( mesh, new UVPack.Options { TextureSize = size, MarginPixels = margin, Rotate = RotateIslands.Value, KeepScale = keep } );
 
 		if ( !result.Fits )
@@ -360,7 +443,7 @@ public sealed class UVProjectFeature : Feature
 			for ( var f = 0; f < mesh.FaceCount; f++ )
 				mesh.Faces[f].UVs = before[f];
 
-			if ( keep )
+			if ( keep && TexelDensity.Value > 0f )
 			{
 				FailOn( "Texel density",
 					$"{TexelDensity.Value:0.##} px per unit does not fit on a {size} px texture",
@@ -378,8 +461,97 @@ public sealed class UVProjectFeature : Feature
 			return;
 		}
 
-		var density = UVDensity.Measure( mesh, size );
-		report.Note = $"{result}; {density}";
+		var densityAfter = UVDensity.Measure( mesh, size );
+		report.Note = $"{result}; {densityAfter}" + (exactAttempted ? "; exact pack did not fit, box pack used" : "");
+	}
+
+	/// <summary>Auto-seam options for this feature's parameters.</summary>
+	UVAutoSeams.Options AutoOptions() => new()
+	{
+		AngleDegrees = SeamAngle.Clamped,
+		ConcaveOnly = ConcaveOnly.Value,
+		HeroDirection = SeamHero.Value,
+	};
+
+	/// <summary>Relax and/or straighten every island of <paramref name="mesh"/> after
+	/// flattening. Aggregates are face-weighted for the report.</summary>
+	void PostUnwrap( PolyMesh mesh, ref float relaxBeforeSum, ref float relaxAfterSum, ref int relaxFaces, ref float straightenDeg )
+	{
+		if ( !Relax.Value && !Straighten.Value )
+			return;
+		foreach ( var islandFaces in UVIslands.Find( mesh ).Islands )
+		{
+			if ( Relax.Value )
+			{
+				var r = UVIslands.Relax( mesh, islandFaces, RelaxIterations.Clamped );
+				relaxBeforeSum += r.BeforeMean * islandFaces.Count;
+				relaxAfterSum += r.AfterMean * islandFaces.Count;
+				relaxFaces += islandFaces.Count;
+			}
+			if ( Straighten.Value )
+				straightenDeg += MathF.Abs( UVIslands.Straighten( mesh, islandFaces ) );
+		}
+	}
+
+	/// <summary>Shift islands across <paramref name="tiles"/> UDIM tiles in U, largest
+	/// island first, round-robin. Returns the tiles actually used (1 when off).</summary>
+	static int ApplyUdim( PolyMesh mesh, int tiles )
+	{
+		if ( tiles <= 1 )
+			return 1;
+		var layout = UVIslands.Find( mesh );
+		if ( layout.Count <= 1 )
+			return 1;
+		var order = layout.Islands.Select( (faces, i) => (i, faces.Count) ).OrderByDescending( e => e.Count ).Select( e => e.i ).ToList();
+		var used = 0;
+		for ( var rank = 0; rank < order.Count; rank++ )
+		{
+			var tile = rank % tiles;
+			used = Math.Max( used, tile + 1 );
+			if ( tile == 0 )
+				continue;
+			foreach ( var f in layout.Islands[order[rank]] )
+			{
+				var face = mesh.Faces[f];
+				for ( var i = 0; i < face.Count; i++ )
+					face.UVs[i] = new Vec2( face.UVs[i].x + tile, face.UVs[i].y );
+			}
+		}
+		return used;
+	}
+
+	/// <summary>Generate a UV2 lightmap layout from the mesh's current UV1 islands:
+	/// the same islands repacked with a generous margin and no stacking, written
+	/// per-corner so UV2 seams survive. False when the islands do not fit.</summary>
+	static bool GenerateUV2( PolyMesh mesh, float marginPixels, int textureSize )
+	{
+		var clone = new PolyMesh { Positions = new List<Vec3>( mesh.Positions ) };
+		foreach ( var face in mesh.Faces )
+			clone.Faces.Add( new Face( (int[])face.Indices.Clone(), (Vec2[])face.UVs.Clone(), face.Material ) );
+		var result = UVPack.Pack( clone, new UVPack.Options { TextureSize = textureSize, MarginPixels = MathF.Max( marginPixels, 8f ), Rotate = true } );
+		if ( !result.Fits )
+			return false;
+		for ( var f = 0; f < mesh.FaceCount; f++ )
+			for ( var c = 0; c < mesh.Faces[f].Count; c++ )
+				mesh.SetUV2Corner( f, c, clone.Faces[f].UVs[c] );
+		return true;
+	}
+
+	/// <summary>One-line unwrap report for the script path and the panel.</summary>
+	static string BuildReport( int charts, int islands, float meanStretch, float maxStretch, int autoSeams,
+		float relaxBefore, float relaxAfter, bool relaxed, float straightenDeg, bool straightened,
+		int heroIsland, float heroDensity, bool exactPack, int udimTiles, bool uv2Ok, UVCoverage coverage )
+	{
+		var s = $"UV report: {charts} charts, {islands} islands, stretch {meanStretch:0.00} mean / {maxStretch:0.00} max";
+		if ( autoSeams > 0 ) s += $", {autoSeams} auto seams";
+		if ( relaxed ) s += $", relax {relaxBefore:0.00} -> {relaxAfter:0.00}";
+		if ( straightened ) s += $", straightened {straightenDeg:0.#} deg";
+		if ( heroIsland >= 0 ) s += $", hero island {heroIsland} x{heroDensity:0.#}";
+		if ( exactPack ) s += ", exact pack";
+		if ( udimTiles > 1 ) s += $", UDIM {udimTiles} tiles";
+		if ( uv2Ok ) s += ", UV2 lightmap written";
+		if ( coverage is not null ) s += $", bake coverage {coverage.CoveredFraction * 100f:0.#}% covered, {coverage.OverlappingTexels} overlapping texels";
+		return s;
 	}
 
 	protected override void Execute( FeatureContext ctx )
@@ -405,6 +577,15 @@ public sealed class UVProjectFeature : Feature
 		var stretchSum = 0f;
 		var stretchMax = 0f;
 		string lastNote = null;
+		var islandsTotal = 0;
+		var autoSeamsTotal = 0;
+		var relaxBeforeSum = 0f;
+		var relaxAfterSum = 0f;
+		var relaxFaces = 0;
+		var straightenDeg = 0f;
+		var heroIslandFound = -1;
+		var udimUsed = 1;
+		var uv2Written = false;
 		var unwrapping = Mode.Value is "Unwrap" or "Organic";
 
 		var bodies = RequireBodies( ctx, Bodies ).ToList();
@@ -413,31 +594,74 @@ public sealed class UVProjectFeature : Feature
 		{
 			// One pack across every body: one report, one coverage measure of the whole model.
 			var meshes = bodies.Select( b => b.Mesh ).Where( m => m is not null ).ToList();
-			var report = UVUnwrap.UnwrapAll( meshes, ChartAngle.Clamped, Margin.Clamped,
-				mode: Mode.Value == "Organic" ? UnwrapMode.Organic : UnwrapMode.Angle );
-
-			LastUnwrap = report;
-			var whole = new PolyMesh();
-			foreach ( var m in meshes ) MeshTransform.Append( whole, m );
-
-			if ( Repacks )
+			var savedSeams = meshes.Select( m => m.Seams ).ToList();
+			try
 			{
+				if ( Seams.Value == "Auto" )
+				{
+					foreach ( var m in meshes )
+					{
+						var ar = UVAutoSeams.Generate( m, AutoOptions() );
+						autoSeamsTotal += ar.Seams.Count;
+						m.Seams = new HashSet<EdgeKey>( ar.Seams );
+					}
+				}
+				else if ( Seams.Value == "None" )
+				{
+					foreach ( var m in meshes ) m.Seams = new HashSet<EdgeKey>();
+				}
+				// Seams are restored in finally: the atlas unwrap uses them, but the
+				// document keeps whatever the user had marked before this run.
+				var report = UVUnwrap.UnwrapAll( meshes, ChartAngle.Clamped, Margin.Clamped,
+					mode: Mode.Value == "Organic" ? UnwrapMode.Organic : UnwrapMode.Angle );
+
+				var whole = new PolyMesh();
+				foreach ( var m in meshes ) MeshTransform.Append( whole, m );
+
+				PostUnwrap( whole, ref relaxBeforeSum, ref relaxAfterSum, ref relaxFaces, ref straightenDeg );
+				Repack( whole, report, "the atlas", out heroIslandFound );
+				udimUsed = ApplyUdim( whole, UdimTiles.Clamped );
+				if ( UV2Lightmap.Value )
+					uv2Written = GenerateUV2( whole, MarginPixels.Value > 0f ? MarginPixels.Clamped : Margin.Clamped * TextureSize.Clamped, TextureSize.Clamped );
+
 				// Packed as one atlas, then each body's faces take their UVs back in Append's order.
-				Repack( whole, report, "the atlas" );
 				var at = 0;
 				foreach ( var m in meshes )
 					foreach ( var face in m.Faces )
 						face.UVs = (Vec2[])whole.Faces[at++].UVs.Clone();
+				if ( uv2Written )
+				{
+					at = 0;
+					foreach ( var m in meshes )
+					{
+						for ( var fi = 0; fi < m.FaceCount; fi++ )
+						{
+							for ( var c = 0; c < m.Faces[fi].Count; c++ )
+								m.SetUV2Corner( fi, c, whole.GetUV2( at, c ) );
+							at++;
+						}
+					}
+				}
+
+				var finalDist = UVIslands.Distortion( whole );
+				islandsTotal = UVIslands.Find( whole ).Count;
+				LastUnwrap = new UnwrapReport( report.Charts, report.Faces, report.SkippedFaces, report.Scale, finalDist.Mean, finalDist.Max ) { Note = report.Note };
+				LastCoverage = UdimTiles.Clamped > 1 ? null : NormalBake.Measure( whole );
+				LastReport = BuildReport( report.Charts, islandsTotal, finalDist.Mean, finalDist.Max, autoSeamsTotal,
+					 relaxFaces > 0 ? relaxBeforeSum / relaxFaces : 0f, relaxFaces > 0 ? relaxAfterSum / relaxFaces : 0f, relaxFaces > 0,
+					 straightenDeg, Straighten.Value, heroIslandFound, HeroDensity.Value, ExactPack.Value, udimUsed, uv2Written, LastCoverage );
+
+				if ( report.SkippedFaces > 0 )
+				{
+					Warn(
+						"Some faces could not be unwrapped",
+						$"{report}. A face with no area has no direction to flatten onto.",
+						"Check the bodies for degenerate faces" );
+				}
 			}
-
-			LastCoverage = NormalBake.Measure( whole );
-
-			if ( report.SkippedFaces > 0 )
+			finally
 			{
-				Warn(
-					"Some faces could not be unwrapped",
-					$"{report}. A face with no area has no direction to flatten onto.",
-					"Check the bodies for degenerate faces" );
+				for ( var i = 0; i < meshes.Count; i++ ) meshes[i].Seams = savedSeams[i];
 			}
 
 			return;
@@ -450,9 +674,25 @@ public sealed class UVProjectFeature : Feature
 			// see UVUnwrap and NormalBake.Measure.
 			if ( unwrapping )
 			{
-				var report = UVUnwrap.Unwrap( body.Mesh, ChartAngle.Clamped, Margin.Clamped,
+				HashSet<EdgeKey> seams = null;
+				if ( Seams.Value == "Auto" )
+				{
+					var ar = UVAutoSeams.Generate( body.Mesh, AutoOptions() );
+					seams = ar.Seams;
+					autoSeamsTotal += ar.Seams.Count;
+				}
+				else if ( Seams.Value == "None" )
+				{
+					seams = new HashSet<EdgeKey>();
+				}
+				var report = UVUnwrap.Unwrap( body.Mesh, ChartAngle.Clamped, Margin.Clamped, seams,
 					mode: Mode.Value == "Organic" ? UnwrapMode.Organic : UnwrapMode.Angle );
-				Repack( body.Mesh, report, body.Name );
+				PostUnwrap( body.Mesh, ref relaxBeforeSum, ref relaxAfterSum, ref relaxFaces, ref straightenDeg );
+				Repack( body.Mesh, report, body.Name, out var heroHere );
+				if ( heroHere >= 0 ) heroIslandFound = heroHere;
+				udimUsed = Math.Max( udimUsed, ApplyUdim( body.Mesh, UdimTiles.Clamped ) );
+				if ( UV2Lightmap.Value && GenerateUV2( body.Mesh, MarginPixels.Value > 0f ? MarginPixels.Clamped : Margin.Clamped * TextureSize.Clamped, TextureSize.Clamped ) )
+					uv2Written = true;
 				lastNote = report.Note;
 
 				charts += report.Charts;
@@ -460,14 +700,18 @@ public sealed class UVProjectFeature : Feature
 				skipped += report.SkippedFaces;
 				scale = report.Scale;
 
-				// Face-weighted across bodies, so a tiny button does not count as much as the torso.
-				stretchSum += report.MeanStretch * report.Faces;
-				stretchMax = MathF.Max( stretchMax, report.MaxStretch );
+				// Measured AFTER every post step, so the report reflects the layout that
+				// was actually written, not the one that came out of the flattener.
+				var bodyDist = UVIslands.Distortion( body.Mesh );
+				islandsTotal += UVIslands.Find( body.Mesh ).Count;
+				stretchSum += bodyDist.Mean * report.Faces;
+				stretchMax = MathF.Max( stretchMax, bodyDist.Max );
 
 				// Measured AFTER the unwrap, so it reflects what the unwrap actually wrote, and kept
 				// for the panel to say "these UVs still will not bake" when a degenerate face was
-				// skipped and left its old, overlapping UVs behind.
-				LastCoverage = NormalBake.Measure( body.Mesh );
+				// skipped and left its old, overlapping UVs behind. Skipped for UDIM layouts:
+				// a tile offset reads as "outside the square" in a 0-1 bake raster.
+				LastCoverage = UdimTiles.Clamped > 1 ? null : NormalBake.Measure( body.Mesh );
 
 				if ( report.SkippedFaces > 0 )
 				{
@@ -477,6 +721,7 @@ public sealed class UVProjectFeature : Feature
 						"Check the body for degenerate faces" );
 				}
 			}
+
 			else if ( Mode.Value == "Planar" )
 			{
 				UVProjection.PlanarProject( body.Mesh, Direction.Value, Scale.Clamped );
@@ -503,7 +748,12 @@ public sealed class UVProjectFeature : Feature
 		}
 
 		if ( unwrapping )
+		{
 			LastUnwrap = new UnwrapReport( charts, faces, skipped, scale, faces > 0 ? stretchSum / faces : 0f, stretchMax ) { Note = lastNote };
+			LastReport = BuildReport( charts, islandsTotal, faces > 0 ? stretchSum / faces : 0f, stretchMax, autoSeamsTotal,
+				relaxFaces > 0 ? relaxBeforeSum / relaxFaces : 0f, relaxFaces > 0 ? relaxAfterSum / relaxFaces : 0f, relaxFaces > 0,
+				straightenDeg, Straighten.Value, heroIslandFound, HeroDensity.Value, ExactPack.Value, udimUsed, uv2Written, LastCoverage );
+		}
 	}
 }
 

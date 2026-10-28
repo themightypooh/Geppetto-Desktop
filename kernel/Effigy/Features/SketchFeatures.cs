@@ -25,6 +25,19 @@ public sealed class SketchFeature : Feature
 	public readonly ChoiceParam Plane = new( "Plane", new[] { "Top (XY)", "Front (XZ)", "Right (YZ)" } );
 	public readonly FloatParam PlaneOffset = new( "Offset", 0f, unit: "u" );
 
+	/// <summary>Script curves for this sketch, added 2026-10-25 so a sketch can be
+	/// written in a build script instead of only drawn in the GUI. One quoted
+	/// token, curves separated by ';', each "kind:args" with comma numbers:
+	/// rect:x1,y1,x2,y2 | circle:x,y,r | ellipse:cx,cy,mx,my,mr |
+	/// poly:x1,y1,x2,y2,... (closed, 3+ points) |
+	/// spline:x1,y1,... (open) | splineclosed:x1,y1,... |
+	/// line:x1,y1,x2,y2 | bezier:x1,y1,x2,y2,x3,y3,x4,y4 |
+	/// text:TEXT,x,y,height (text is everything before the last 3 numbers).
+	/// When set, it is authoritative: Execute clears any GUI-drawn points/curves
+	/// first, so rebuilds are idempotent and never duplicate curves. When empty,
+	/// a GUI-drawn sketch is left exactly as drawn.</summary>
+	public readonly StringParam Curves = new( "Curves", "" );
+
 	/// <summary>
 	/// A face of an existing body to sketch on, instead of one of the three global planes.
 	///
@@ -45,10 +58,13 @@ public sealed class SketchFeature : Feature
 	/// </summary>
 	public string PlaneFeatureId = "";
 
-	public override IReadOnlyList<IParam> Parameters => new IParam[] { Plane, PlaneOffset };
+	public override IReadOnlyList<IParam> Parameters => new IParam[] { Plane, PlaneOffset, Curves };
 
 	protected override void Execute( FeatureContext ctx )
 	{
+		if ( !string.IsNullOrWhiteSpace( Curves.Value ) )
+			ApplyScriptCurves();
+
 		var basePlane = ResolveBasePlane( ctx );
 
 		Sketch.Plane = PlaneOffset.Value == 0f ? basePlane : basePlane.Offset( PlaneOffset.Value );
@@ -78,6 +94,7 @@ public sealed class SketchFeature : Feature
 		}
 
 		ctx.Sketches[Id] = Sketch;
+		ctx.SketchNames[Id] = Name ?? Id;
 
 		// Publish what this sketch is growing out of, so a consumer can add to that body instead of
 		// starting a new one. Cleared when there is nothing to grow out of, or a sketch moved back
@@ -104,7 +121,157 @@ public sealed class SketchFeature : Feature
 	/// leaves the previous answer behind unless something clears it, and precedence is better
 	/// written down than discovered.
 	/// </summary>
-	SketchPlane ResolveBasePlane( FeatureContext ctx )
+		/// <summary>Parse <see cref="Curves"/> into <see cref="Sketch"/>. Called at the
+	/// start of Execute, before the sketch is published, so Extrude / Revolve /
+	/// Sweep / Loft consuming this sketch see the script curves on the very
+	/// first build, not only after a GUI edit.</summary>
+	void ApplyScriptCurves()
+	{
+		var raw = ( Curves.Value ?? "" ).Trim();
+		if ( raw.Length == 0 )
+			return;
+		Sketch.Points.Clear();
+		Sketch.Curves.Clear();
+		Sketch.Constraints.Clear();
+		foreach ( var part in raw.Split( ';', System.StringSplitOptions.RemoveEmptyEntries ) )
+		{
+			var curve = part.Trim();
+			if ( curve.Length == 0 )
+				continue;
+			var colon = curve.IndexOf( ':' );
+			if ( colon < 0 )
+				Fail( $"Sketch curves: '{curve}' has no kind (use kind:args, e.g. rect:-2,-1,2,1)",
+				"Every curve in curves= needs a kind prefix before the first colon.",
+				"Write e.g. curves=\"rect:-2,-1,2,1;circle:0,0,1\"" );
+			var kind = curve[..colon].Trim().ToLowerInvariant();
+			var args = curve[( colon + 1 )..].Trim();
+			try
+			{
+				switch ( kind )
+				{
+					case "rect":
+					{
+						var n = Nums( args, 4, curve );
+						Sketch.AddRectangle( new Vec2( n[0], n[1] ), new Vec2( n[2], n[3] ) );
+						break;
+					}
+					case "circle":
+					{
+						var n = Nums( args, 3, curve );
+						Sketch.AddCircle( new Vec2( n[0], n[1] ), n[2] );
+						break;
+					}
+					case "ellipse":
+					{
+						var n = Nums( args, 5, curve );
+						Sketch.AddEllipse( new Vec2( n[0], n[1] ), new Vec2( n[2], n[3] ), n[4] );
+						break;
+					}
+					case "poly":
+					{
+						var pts = Points( args, curve );
+						if ( pts.Count < 3 )
+							Fail( $"Sketch curves: poly '{curve}' needs at least 3 points",
+								"A polygon needs at least 3 corners.",
+								"Give 3 or more x,y pairs, e.g. poly:-2,-1,2,-1,0,2" );
+						Sketch.AddPolygon( pts.ToArray() );
+						break;
+					}
+					case "spline":
+					case "splineclosed":
+					{
+						var pts = Points( args, curve );
+						if ( pts.Count < 2 )
+							Fail( $"Sketch curves: spline '{curve}' needs at least 2 points",
+								"A spline needs at least 2 points.",
+								"Give 2 or more x,y pairs, e.g. spline:-2,0,0,2,2,0" );
+						Sketch.AddSpline( kind == "splineclosed", pts.ToArray() );
+						break;
+					}
+					case "line":
+					{
+						var n = Nums( args, 4, curve );
+						Sketch.AddLine( new Vec2( n[0], n[1] ), new Vec2( n[2], n[3] ) );
+						break;
+					}
+					case "bezier":
+					{
+						var n = Nums( args, 8, curve );
+						Sketch.AddBezier( new Vec2( n[0], n[1] ), new Vec2( n[2], n[3] ), new Vec2( n[4], n[5] ), new Vec2( n[6], n[7] ) );
+						break;
+					}
+					case "text":
+					{
+						var last = args.LastIndexOf( ',' );
+						if ( last < 0 )
+							Fail( $"Sketch curves: text '{curve}' needs TEXT,x,y,height",
+								"The last three comma fields are x, y, height.",
+								"Write e.g. text:HELLO,-2,0,1" );
+						var rest = args[..last];
+						var last2 = rest.LastIndexOf( ',' );
+						if ( last2 < 0 )
+							Fail( $"Sketch curves: text '{curve}' needs TEXT,x,y,height",
+								"The last three comma fields are x, y, height.",
+								"Write e.g. text:HELLO,-2,0,1" );
+						var rest2 = rest[..last2];
+						var last3 = rest2.LastIndexOf( ',' );
+						if ( last3 < 0 )
+							Fail( $"Sketch curves: text '{curve}' needs TEXT,x,y,height",
+								"The last three comma fields are x, y, height.",
+								"Write e.g. text:HELLO,-2,0,1" );
+						var text = rest2[..last3];
+						var nx = Num( rest2[( last3 + 1 )..], curve );
+						var ny = Num( rest[( last2 + 1 )..], curve );
+						var h = Num( args[( last + 1 )..], curve );
+						Sketch.AddText( text, new Vec2( nx, ny ), h );
+						break;
+					}
+					default:
+						Fail( $"Sketch curves: unknown kind '{kind}' in '{curve}'",
+							"Known kinds: rect, circle, ellipse, poly, spline, splineclosed, line, bezier, text.",
+							"Fix the kind prefix, e.g. circle:0,0,1" );
+						break;
+				}
+			}
+			catch ( System.Exception e ) when ( e is System.FormatException || e is System.ArgumentException )
+			{
+				Fail( $"Sketch curves: could not parse '{curve}': {e.Message}",
+					"The numbers in curves= must be plain comma numbers, e.g. 0,0,1.",
+					"Check the curve's numbers and separators, then rebuild." );
+			}
+		}
+	}
+
+	static float Num( string s, string curve )
+	{
+		if ( !float.TryParse( s.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v ) )
+			throw new System.FormatException( $"'{s}' is not a number in '{curve}'" );
+		return v;
+	}
+
+	static float[] Nums( string args, int count, string curve )
+	{
+		var parts = args.Split( ',', System.StringSplitOptions.RemoveEmptyEntries );
+		if ( parts.Length != count )
+			throw new System.FormatException( $"expected {count} numbers, got {parts.Length} in '{curve}'" );
+		var outp = new float[count];
+		for ( var i = 0; i < count; i++ )
+			outp[i] = Num( parts[i], curve );
+		return outp;
+	}
+
+	static System.Collections.Generic.List<Vec2> Points( string args, string curve )
+	{
+		var parts = args.Split( ',', System.StringSplitOptions.RemoveEmptyEntries );
+		if ( parts.Length % 2 != 0 )
+			throw new System.FormatException( $"expected x,y pairs, got odd count in '{curve}'" );
+		var pts = new System.Collections.Generic.List<Vec2>();
+		for ( var i = 0; i < parts.Length; i += 2 )
+			pts.Add( new Vec2( Num( parts[i], curve ), Num( parts[i + 1], curve ) ) );
+		return pts;
+	}
+
+SketchPlane ResolveBasePlane( FeatureContext ctx )
 	{
 		if ( !string.IsNullOrEmpty( PlaneFeatureId ) )
 		{
@@ -285,7 +452,7 @@ public abstract class SketchConsumingFeature : Feature
 		{
 			Fail(
 				$"Sketch '{SketchFeatureId}' is not available at this point in the tree",
-				"The sketch this feature was pointed at has been deleted, suppressed, or sits below this feature, so it has not run yet.",
+				"The sketch this feature was pointed at has been deleted, suppressed, or sits below this feature, so it has not run yet. Sketches available at this point: " + SketchList( ctx ) + ".",
 				"Pick a sketch that sits above this feature",
 				"Move this feature below the sketch it should consume" );
 		}
@@ -294,6 +461,32 @@ public abstract class SketchConsumingFeature : Feature
 	}
 
 	/// <summary>
+	/// <summary>Name of a sketch by feature id, falling back to the id itself when no name was published.</summary>
+	protected string SketchName( FeatureContext ctx, string id )
+	{
+		if ( id is not null && ctx.SketchNames.TryGetValue( id, out var name ) && !string.IsNullOrEmpty( name ) )
+			return name;
+		return id ?? "(none)";
+	}
+
+	/// <summary>Name of a sketch object by finding its id in the published sketches.</summary>
+	protected string SketchNameFor( FeatureContext ctx, Sketch sketch )
+	{
+		foreach ( var pair in ctx.Sketches )
+			if ( ReferenceEquals( pair.Value, sketch ) )
+				return SketchName( ctx, pair.Key );
+		return "(unknown sketch)";
+	}
+
+	/// <summary>All sketches available at this point, by name, for error messages.</summary>
+	protected string SketchList( FeatureContext ctx ) => string.Join( ", ", ctx.Sketches.Keys.Select( k => SketchName( ctx, k ) ) );
+
+	/// <summary>Append a choice note to this feature's Warning so the script log names what was actually used. Appends, never overwrites, because taper/twist warnings may already be set.</summary>
+	protected void NoteChoice( string note )
+	{
+		Warning = string.IsNullOrEmpty( Warning ) ? note : Warning + "; " + note;
+	}
+
 	/// Put a built solid into the model: as its own body, or merged into the one it grows from.
 	///
 	/// WHAT MERGING IS AND IS NOT. The two meshes are combined into one body. It is not a boolean
@@ -321,7 +514,14 @@ public abstract class SketchConsumingFeature : Feature
 
 		if ( target is null )
 		{
-			ctx.Bodies.Add( new Body( ctx.NewBodyId(), Name, mesh ) );
+			var bodyName = Name;
+			if ( ctx.Bodies.Any( b => b.Name == bodyName ) )
+			{
+				var i = 1;
+				while ( ctx.Bodies.Any( b => b.Name == $"{Name}_{i}" ) ) i++;
+				bodyName = $"{Name}_{i}";
+			}
+			ctx.Bodies.Add( new Body( ctx.NewBodyId(), bodyName, mesh ) );
 			return;
 		}
 
@@ -1604,6 +1804,7 @@ public sealed class RevolveFeature : SketchConsumingFeature
 	protected override void Execute( FeatureContext ctx )
 	{
 		var sketch = ResolveSketch( ctx );
+		NoteChoice( $"Revolve: sketch={SketchNameFor( ctx, sketch )}" + ( string.IsNullOrEmpty( SketchFeatureId ) ? " (auto-selected)" : "" ) );
 		var profiles = ResolveProfiles( sketch, ctx );
 
 		// PAST A FULL TURN THE SWEEP OVERLAPS ITSELF, and the overlap welds: the result comes back

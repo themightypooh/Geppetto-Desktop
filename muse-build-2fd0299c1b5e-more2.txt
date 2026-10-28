@@ -1,0 +1,2 @@
+add Primitive name=DanglingCable shape=Cylinder radius=0.04 height=1.4 position=4.2,2.0,-0.8 materialslot=6
+save mech_office_smash.effigy

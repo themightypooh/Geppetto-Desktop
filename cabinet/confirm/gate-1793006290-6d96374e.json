@@ -1,0 +1,24 @@
+{
+  "created_at": 1793006290.747463,
+  "doc": "-",
+  "first_frame_at": 1793006314.664699,
+  "id": "gate-1793006290-6d96374e",
+  "out": "/home/poo/workspace/her-separate",
+  "pane": "2",
+  "placed_at": 1793006312.4169917,
+  "preflight": {
+    "errors": [],
+    "first_geom_line": 9,
+    "first_shape": "Profile",
+    "lines": 65,
+    "materials_before_first": 2,
+    "ok": true,
+    "rotated_boxes": 0
+  },
+  "script": "/home/poo/workspace/her-separate/her-separate.txt",
+  "script_hash": "ed41a2c857d229557b531aae0b27cbc9d139d4bb24e4f797118a4a2739cc593a",
+  "session": "efae35e2-ef00-4411-85ac-438925c99245",
+  "status": "placed",
+  "subject": "blonde woman, separate shirt, pants, socks, undies and bra, arcade character method, full body",
+  "worker": "subagent-her-separate-attempt4"
+}

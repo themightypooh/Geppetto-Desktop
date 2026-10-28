@@ -1,0 +1,166 @@
+using System;
+using System.Collections.Generic;
+
+namespace Effigy;
+
+/// <summary>
+/// One grade for a UV layout, assembled from measures that already existed but were
+/// never reported together: islands, stretch, flipped triangles, faces outside the
+/// square, wrap-spanning faces, n-gons, texel-density spread, and bake coverage.
+/// Used by the `uvcheck` script verb and by the unwrap report in
+/// <see cref="UVProjectFeature"/>. A layout that will bake must have no flips, no
+/// overlaps and nothing outside its tile(s); stretch over 1.3 and a density spread
+/// over 2x are warnings, not failures, because a hero island may deliberately be
+/// denser than its neighbours.
+/// </summary>
+public sealed class UVLayoutReport
+{
+	public int Islands;
+	public int Faces;
+	public float MeanStretch;
+	public float MaxStretch;
+	public int FlippedFaces;
+	public int OutsideFaces;
+	public int WrapFaces;
+	public int NgonFaces;
+	public float DensityMin;
+	public float DensityMax;
+	public float DensitySpread => DensityMin > 0f ? DensityMax / DensityMin : 0f;
+	public float CoveredFraction = -1f;
+	public int OverlappingTexels;
+	public int OutsideSquareFaces;
+	public int Tiles = 1;
+	public string Verdict = "PASS";
+	public List<string> Reasons = new();
+
+	public override string ToString()
+	{
+		var coverage = CoveredFraction < 0f ? "bake coverage n/a (UDIM)" : $"bake coverage {CoveredFraction * 100f:0.#}% covered, {OverlappingTexels} overlapping texels, {OutsideSquareFaces} faces outside the square";
+		return $"uvcheck: {Verdict} — {Islands} islands, {Faces} faces, stretch {MeanStretch:0.00} mean / {MaxStretch:0.00} max, flipped {FlippedFaces}, outside {OutsideFaces}, wrap {WrapFaces}, n-gon {NgonFaces}, density {DensityMin:0.#}..{DensityMax:0.#} px/u (spread {DensitySpread:0.00}x), {coverage}, tiles {Tiles}"
+			+ (Reasons.Count > 0 ? $" — {string.Join( "; ", Reasons )}" : "");
+	}
+}
+
+public static class UVLayoutCheck
+{
+	/// <summary>Grade <paramref name="mesh"/>'s current UV layout. Never mutates the mesh.</summary>
+	public static UVLayoutReport Check( PolyMesh mesh, int textureSize = 1024, int bakeResolution = 256 )
+	{
+		var report = new UVLayoutReport { Faces = mesh.FaceCount };
+		if ( mesh.FaceCount == 0 )
+		{
+			report.Verdict = "FAIL";
+			report.Reasons.Add( "no faces" );
+			return report;
+		}
+
+		var layout = UVIslands.Find( mesh );
+		report.Islands = layout.Count;
+		var (mean, max) = UVIslands.Distortion( mesh );
+		report.MeanStretch = mean;
+		report.MaxStretch = max;
+
+		// Tiles: a UDIM layout shifts islands by whole tiles in U, so the tile count
+		// is the highest whole tile any UV touches, plus one.
+		var maxU = 0f;
+		foreach ( var face in mesh.Faces )
+			foreach ( var uv in face.UVs )
+				maxU = MathF.Max( maxU, uv.x );
+		report.Tiles = Math.Max( 1, (int)Math.Floor( maxU - 1e-4f ) + 1 );
+
+		// Per-island flipped faces: a face whose UV signed area has the opposite sign
+		// to its island's majority sign is flipped (its tangent frame is inverted).
+		// Per-island density from UV area over surface area, as UVDensity measures it.
+		var densityMin = float.MaxValue; var densityMax = 0f;
+		for ( var isl = 0; isl < layout.Count; isl++ )
+		{
+			var faces = layout.Islands[isl];
+			var pos = 0; var neg = 0;
+			var signs = new List<(int Face, float Signed)>();
+			var area3 = 0.0; var areaUV = 0.0;
+			foreach ( var f in faces )
+			{
+				var face = mesh.Faces[f];
+				var signed = 0f;
+				for ( var i = 1; i + 1 < face.Count; i++ )
+				{
+					signed += Vec2.Cross( face.UVs[i] - face.UVs[0], face.UVs[i + 1] - face.UVs[0] ) * 0.5f;
+					areaUV += Math.Abs( Vec2.Cross( face.UVs[i] - face.UVs[0], face.UVs[i + 1] - face.UVs[0] ) ) * 0.5;
+					area3 += 0.5 * Vec3.Cross( mesh.Positions[face.Indices[i]] - mesh.Positions[face.Indices[0]], mesh.Positions[face.Indices[i + 1]] - mesh.Positions[face.Indices[0]] ).Length;
+				}
+				signs.Add( (f, signed) );
+				if ( signed > 1e-12f ) pos++; else if ( signed < -1e-12f ) neg++;
+			}
+			var majorityPositive = pos >= neg;
+			foreach ( var (_, signed) in signs )
+				if ( (signed > 1e-12f && !majorityPositive) || (signed < -1e-12f && majorityPositive) )
+					report.FlippedFaces++;
+			if ( area3 > 1e-12 )
+			{
+				var density = (float)(Math.Sqrt( areaUV / area3 ) * textureSize);
+				densityMin = MathF.Min( densityMin, density );
+				densityMax = MathF.Max( densityMax, density );
+			}
+		}
+		report.DensityMin = densityMin == float.MaxValue ? 0f : densityMin;
+		report.DensityMax = densityMax;
+
+		foreach ( var face in mesh.Faces )
+		{
+			var minU = float.MaxValue; var maxUF = float.MinValue;
+			foreach ( var uv in face.UVs )
+			{
+				minU = MathF.Min( minU, uv.x );
+				maxUF = MathF.Max( maxUF, uv.x );
+				if ( uv.x < 0f || uv.x > report.Tiles || uv.y < 0f || uv.y > 1f )
+					report.OutsideFaces++;
+			}
+			if ( face.Count > 4 )
+				report.NgonFaces++;
+			// A face spanning almost the whole U range with a corner near 0 is a
+			// cylinder/sphere wrap face: the seam where U wraps round the back.
+			if ( minU < 0.1f && maxUF > 0.9f && maxUF - minU > 0.9f )
+				report.WrapFaces++;
+		}
+		// OutsideFaces counted per corner above; recount per face for the report.
+		report.OutsideFaces = 0;
+		foreach ( var face in mesh.Faces )
+		{
+			var outside = false;
+			foreach ( var uv in face.UVs )
+				if ( uv.x < 0f || uv.x > report.Tiles || uv.y < 0f || uv.y > 1f ) outside = true;
+			if ( outside ) report.OutsideFaces++;
+		}
+
+		// Bake coverage only means something in a single 0-1 square: a UDIM layout
+		// would read every higher tile as "outside" in that grid, so it is skipped.
+		if ( report.Tiles == 1 )
+		{
+			try
+			{
+				var coverage = NormalBake.Measure( mesh, bakeResolution );
+				report.CoveredFraction = coverage.CoveredFraction;
+				report.OverlappingTexels = coverage.OverlappingTexels;
+				report.OutsideSquareFaces = coverage.FacesOutsideTheSquare;
+			}
+			catch
+			{
+				// A layout too degenerate to rasterise still gets the rest of the grade.
+			}
+		}
+
+		var reasons = new List<string>();
+		if ( report.FlippedFaces > 0 ) reasons.Add( $"{report.FlippedFaces} flipped face(s): the normal map's tangent frame is inverted there" );
+		if ( report.Tiles == 1 && report.OverlappingTexels > 0 ) reasons.Add( $"{report.OverlappingTexels} overlapping texel(s): two faces fight over the same texels" );
+		if ( report.Tiles == 1 && report.OutsideSquareFaces > 0 ) reasons.Add( $"{report.OutsideSquareFaces} face(s) outside the square in the bake raster" );
+		if ( report.OutsideFaces > 0 ) reasons.Add( $"{report.OutsideFaces} face(s) outside their tile" );
+		report.Verdict = reasons.Count > 0 ? "FAIL" : "PASS";
+		if ( report.MaxStretch > 1.3f ) { reasons.Add( $"max stretch {report.MaxStretch:0.00} over the 1.3 guide — relax the layout" ); report.Verdict = "WARN"; }
+		if ( report.DensitySpread > 2f ) { reasons.Add( $"density spread {report.DensitySpread:0.00}x over the 2x guide" ); if ( report.Verdict == "PASS" ) report.Verdict = "WARN"; }
+		if ( report.WrapFaces > 0 ) { reasons.Add( $"{report.WrapFaces} wrap-spanning face(s): check the cylinder/sphere seam" ); if ( report.Verdict == "PASS" ) report.Verdict = "WARN"; }
+		if ( report.NgonFaces > 0 ) { reasons.Add( $"{report.NgonFaces} n-gon face(s): stretch is measured on a fan, so it is approximate" ); if ( report.Verdict == "PASS" ) report.Verdict = "WARN"; }
+		if ( report.Tiles > 1 ) { reasons.Add( "UDIM layout: bake coverage is measured per tile, not in one square" ); if ( report.Verdict == "PASS" ) report.Verdict = "WARN"; }
+		report.Reasons = reasons;
+		return report;
+	}
+}

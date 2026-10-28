@@ -1,0 +1,53 @@
+# Walkie-talkie, detailed v2, polished for realism.
+# Rules for this pass, user 2026-10-25: no belt clip, no wrist strap;
+# no clipping, no floating; if it would not work IRL, do not model it.
+# So: every part overlaps its parent by at least 0.01 (nothing face-touching
+# only, nothing floating 0.005 off); speaker holes are real cuts through a
+# panel over a dark cavity, not bumps; screen is recessed in a cut bezel
+# frame, not a proud box; mic is a flush slot, not bumps; USB is a flush
+# port, not a protruding plug; screws are flush cylinders, not spheres;
+# knob markers are paint, not raised boxes; the raised case-seam band is
+# gone, IRL case halves meet at a line, not a raised band.
+# Front face is -Y; Z is up. Inches. V1 kept intact in model/walkie/.
+material 0 color=#e8b417 rough=0.45 metal=0.1
+material 1 color=#22242a rough=0.6 metal=0.1
+material 2 color=#c22a22 rough=0.5 metal=0.1
+material 3 color=#aeb5b9 rough=0.27 metal=0.9
+material 4 color=#1d3a3a rough=0.3 metal=0.2
+material 5 color=#ffb020 rough=0.3 metal=0.1
+material 6 color=#3a3d41 rough=0.6 metal=0.1
+material 7 color=#e8e8e8 rough=0.5 metal=0.1
+echo body: yellow toy case, black top cap overlapping the shell
+add Blob name=Body voxel=0.02 blend=0.01 shapes="box 0,0,1.4 1.7,0.65,2.8 r=0.15 mat=0; box 0,0,2.85 1.7,0.65,0.25 r=0.08 mat=1"
+echo screen: dark teal glass recessed, with amber and white status bars painted on
+add Blob name=Screen voxel=0.02 blend=0.01 shapes="box 0,-0.33,2.42 0.95,0.05,0.42 r=0.03 mat=4; paint box -0.25,-0.36,2.47 0.3,0.02,0.08 mat=5; paint box 0.15,-0.36,2.47 0.3,0.02,0.08 mat=7; paint box 0,-0.36,2.32 0.7,0.02,0.06 mat=7"
+echo bezel: black frame around the screen, cut open so the screen shows through, overlapping the shell
+add Blob name=Bezel voxel=0.02 blend=0.01 shapes="box 0,-0.34,2.42 1.05,0.05,0.56 r=0.04 mat=1; -box 0,-0.36,2.42 0.95,0.06,0.44"
+echo LED and small front buttons under the screen, embedded into the shell
+add Blob name=FrontButtons voxel=0.02 blend=0.01 shapes="sphere 0.55,-0.37,2.08 0.07 mat=5; cylinder 0.55,-0.38,2.08 0.55,-0.30,2.08 0.1 r=0.02 mat=1; cylinder -0.3,-0.38,2.08 -0.3,-0.30,2.08 0.09 r=0.02 mat=1; cylinder 0,-0.38,2.08 0,-0.30,2.08 0.09 r=0.02 mat=2"
+echo speaker panel: black panel with real holes cut through it
+add Blob name=SpeakerPanel voxel=0.02 blend=0.01 shapes="box 0,-0.34,1.4 1.15,0.05,0.95 r=0.06 mat=1; -cylinder -0.45,-0.38,1.75 -0.45,-0.30,1.75 0.06; -cylinder -0.22,-0.38,1.75 -0.22,-0.30,1.75 0.06; -cylinder 0,-0.38,1.75 0,-0.30,1.75 0.06; -cylinder 0.22,-0.38,1.75 0.22,-0.30,1.75 0.06; -cylinder 0.45,-0.38,1.75 0.45,-0.30,1.75 0.06; -cylinder -0.45,-0.38,1.55 -0.45,-0.30,1.55 0.06; -cylinder -0.22,-0.38,1.55 -0.22,-0.30,1.55 0.06; -cylinder 0,-0.38,1.55 0,-0.30,1.55 0.06; -cylinder 0.22,-0.38,1.55 0.22,-0.30,1.55 0.06; -cylinder 0.45,-0.38,1.55 0.45,-0.30,1.55 0.06; -cylinder -0.45,-0.38,1.35 -0.45,-0.30,1.35 0.06; -cylinder -0.22,-0.38,1.35 -0.22,-0.30,1.35 0.06; -cylinder 0,-0.38,1.35 0,-0.30,1.35 0.06; -cylinder 0.22,-0.38,1.35 0.22,-0.30,1.35 0.06; -cylinder 0.45,-0.38,1.35 0.45,-0.30,1.35 0.06; -cylinder -0.33,-0.38,1.15 -0.33,-0.30,1.15 0.06; -cylinder 0,-0.38,1.15 0,-0.30,1.15 0.06; -cylinder 0.33,-0.38,1.15 0.33,-0.30,1.15 0.06"
+echo speaker cavity: dark box behind the panel, so the holes read as holes, not yellow dots
+add Blob name=Cavity voxel=0.02 blend=0.01 shapes="box 0,-0.325,1.4 1.0,0.02,0.85 mat=1"
+echo mic: a flush dark slot under the speaker, not bumps
+add Blob name=Mic voxel=0.02 blend=0.01 shapes="box 0,-0.33,0.82 0.6,0.03,0.12 mat=1"
+echo front call button low on the face, red, rounded, embedded into the shell
+add Blob name=Call voxel=0.02 blend=0.01 shapes="box 0,-0.36,0.55 0.6,0.08,0.35 r=0.05 mat=2"
+echo corner screws on the front face, flush cylinders, not spheres
+add Blob name=Screws voxel=0.02 blend=0.01 shapes="cylinder -0.7,-0.35,0.25 -0.7,-0.31,0.25 0.06 r=0.02 mat=3; cylinder 0.7,-0.35,0.25 0.7,-0.31,0.25 0.06 r=0.02 mat=3; cylinder -0.7,-0.35,2.62 -0.7,-0.31,2.62 0.06 r=0.02 mat=3; cylinder 0.7,-0.35,2.62 0.7,-0.31,2.62 0.06 r=0.02 mat=3"
+echo side PTT: the big button, on the right side, with grip ridges overlapping it
+add Blob name=PTT voxel=0.02 blend=0.01 shapes="box 0.9,0,1.15 0.08,0.55,1.1 r=0.06 mat=2; box 0.95,0,0.85 0.04,0.55,0.08 mat=1; box 0.95,0,1.15 0.04,0.55,0.08 mat=1; box 0.95,0,1.45 0.04,0.55,0.08 mat=1"
+echo rubber side grips, left and right, overlapping the shell, with vertical ridges overlapping the grips
+add Blob name=Grips voxel=0.02 blend=0.01 shapes="box 0.875,0,1.4 0.07,0.5,1.8 r=0.04 mat=1; box -0.875,0,1.4 0.07,0.5,1.8 r=0.04 mat=1; box 0.92,0,0.8 0.04,0.55,0.08 mat=6; box 0.92,0,1.2 0.04,0.55,0.08 mat=6; box 0.92,0,1.6 0.04,0.55,0.08 mat=6; box 0.92,0,2.0 0.04,0.55,0.08 mat=6; box -0.92,0,0.8 0.04,0.55,0.08 mat=6; box -0.92,0,1.2 0.04,0.55,0.08 mat=6; box -0.92,0,1.6 0.04,0.55,0.08 mat=6; box -0.92,0,2.0 0.04,0.55,0.08 mat=6"
+echo accessory side: earpiece jack with silver ring, flush USB port below it
+add Blob name=Accessory voxel=0.02 blend=0.01 shapes="cylinder -0.9,0.1,1.9 -0.84,0.1,1.9 0.12 r=0.02 mat=3; cylinder -0.92,0.1,1.9 -0.86,0.1,1.9 0.07 r=0.02 mat=1; box -0.855,-0.1,1.2 0.03,0.3,0.15 mat=1"
+echo top knobs: volume left, channel right of it, each with a base ring, markers painted on top, not raised
+add Blob name=Knobs voxel=0.02 blend=0.01 shapes="cylinder -0.5,0,2.95 -0.5,0,3.2 0.22 r=0.03 mat=1; torus -0.5,0,2.98 0.22 0.03 mat=6; paint box -0.5,0,3.21 0.06,0.3,0.03 mat=7; cylinder 0.05,0,2.95 0.05,0,3.18 0.18 r=0.03 mat=6; torus 0.05,0,2.98 0.18 0.03 mat=1; paint box 0.05,0,3.19 0.05,0.24,0.03 mat=7"
+echo antenna: collar, lower rod, coil rings overlapping the rod, thinner upper rod, red tip
+add Blob name=Antenna voxel=0.02 blend=0.01 shapes="cylinder 0.62,0,2.95 0.62,0,3.25 0.15 r=0.03 mat=1; cylinder 0.62,0,3.25 0.62,0,4.0 0.07 r=0.02 mat=1; torus 0.62,0,3.6 0.09 0.025 mat=6; torus 0.62,0,3.75 0.09 0.025 mat=6; torus 0.62,0,3.9 0.09 0.025 mat=6; cylinder 0.62,0,4.0 0.62,0,4.7 0.05 r=0.02 mat=1; sphere 0.62,0,4.75 0.11 mat=2"
+echo back battery pack, latch on top, flush screws
+add Blob name=Battery voxel=0.02 blend=0.01 shapes="box 0,0.36,1.25 1.4,0.08,1.9 r=0.08 mat=6; box 0,0.42,2.05 0.4,0.06,0.25 mat=1; cylinder -0.5,0.38,0.6 -0.5,0.42,0.6 0.06 r=0.02 mat=3; cylinder 0.5,0.38,0.6 0.5,0.42,0.6 0.06 r=0.02 mat=3"
+describe
+turnaround out shade=material size=512 views=front,quarter,side,back name=walkie_detailed
+save walkie_detailed.effigy
+export out name=walkie_detailed

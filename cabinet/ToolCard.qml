@@ -267,7 +267,6 @@ Item {
         CardKey { text: "UNDO"; enabled: !!card.bench.canUndo && !card.bench.busy; onClicked: card.undo() }
         CardKey { text: "KEEP"; enabled: !!card.bench.revision && !card.bench.busy; onClicked: card.keep() }
         CardKey { text: "WHEEL"; onClicked: card.wheel() }
-        CardKey { text: "DRAW"; onClicked: card.drawOver() }
         CardKey { text: "X"; onClicked: card.closed() }
     }
 

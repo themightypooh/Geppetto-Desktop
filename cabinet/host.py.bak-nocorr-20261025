@@ -1,0 +1,3863 @@
+#!/usr/bin/env python3
+"""Geppetto tool-chest host: one frameless, transparent, normal window on the real desktop.
+
+The 3D viewport is rendered headless by `marionette-desktop --serve` (ServeMode.cs) and streamed
+here through a shared-memory file; mouse input goes back to it as commands on its stdin. Around it
+sits a baked steel tool chest (cabinet.qml) with three drawers that slide out onto the desktop:
+Research (left), Outliner (right) and Timeline (bottom). Only the chest, the lid and the drawers
+take the mouse: the rest of the window is masked out, so it is see-through *and* click-through.
+
+  python3 host.py [MODEL]    start (or, if already running, bring it to the front / open MODEL)
+  python3 host.py snap PATH  ask the running chest to save a picture of itself to PATH
+  python3 host.py open|shut NAME   slide a drawer (research, tools, timeline)
+  python3 host.py clip PATH  play a .riganim (on the model it was made for)
+  python3 host.py draw [PATH|ID]  bring the drawing tool up, or open one of its drawings
+  python3 host.py cmd LINE   send a command to the viewport (see ServeMode.cs)
+  python3 host.py pane N model PATH [CLIP] | clip PATH | cmd LINE | clear
+                             the same in split pane N (2-4): several sessions, each in its own pane
+  python3 host.py quit       close the running chest
+"""
+import json
+import shutil
+import mmap
+import os
+import re
+import sys
+import time
+import threading
+import uuid
+import research_consent
+import subprocess
+import signal
+import tempfile
+
+from live_runs import TERMINAL, read_state, preview_path, activity, request_cancel, send_command, next_pace, control_state, continue_checkpoint
+import live_runs
+from viewport_correction import ViewportCorrections
+from drawing_tools import (drawings as drawing_gallery, program as drawing_program,
+                           resolve as drawing_resolve, socket_key as drawing_socket_key,
+                           DRAWINGS as DRAWING_DIR)
+import chat as chatlib
+import build_execution
+import claude_gate
+import claude_link
+from chat_log_model import ChatLogModel
+import claude_feed
+import model_sheet
+import panes as paneslib
+import pane_owner
+import agent_activity
+import part_focus
+import ai_notice as noticelib
+import sticker as stickerlib
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+PROJECT = os.path.dirname(HERE)
+BIN = os.path.join(PROJECT, "bin", "Release", "net8.0")
+EXE = os.path.join(BIN, "marionette-desktop")
+if not os.path.exists(EXE) and os.path.exists(os.path.join(PROJECT, "marionette-desktop")):
+    # a packaged bundle (packaging/package-linux.sh): the viewer sits beside the cabinet
+    # folder instead of in a build tree — drive that one
+    BIN = PROJECT
+    EXE = os.path.join(PROJECT, "marionette-desktop")
+SOCK = "geppetto-cabinet"
+DRAWER_ALIASES = {"outliner": "tools"}      # the right drawer is the tools drawer now
+PROJECTS = os.path.expanduser("~/games/projects")
+RUNS = os.path.expanduser("~/.local/share/geppetto/research")
+CHAT_IMAGES = os.path.expanduser("~/.cache/geppetto/chat-images")   # pictures attached to drawer chat (audit G5)
+
+
+def makedirs_private(path):
+    """os.makedirs + 0700 on the leaf (audit G6): Geppetto's state trees hold the user's
+    prompts, briefs and pictures - private by default, not the umask's 0755."""
+    os.makedirs(path, exist_ok=True)
+    try:
+        os.chmod(path, 0o700)
+    except OSError:
+        pass
+    return path
+
+
+def open_private(path, mode="w"):
+    """open() with the file created 0600 (audit G6), for Geppetto's own state files."""
+    flags = os.O_WRONLY | os.O_CREAT | (os.O_APPEND if "a" in mode else os.O_TRUNC)
+    return os.fdopen(os.open(path, flags, 0o600), mode)
+VIEW_PREFS = os.path.expanduser("~/.config/geppetto/chest-view.json")   # viewport layout (1/2/4 panes), linked cameras
+NOTICE_STATE = os.path.expanduser("~/.config/geppetto/ai-consent.json")  # BYO-AI notices: per-provider acks (ai_notice.py)
+MODELING = os.path.expanduser("~/.local/share/geppetto/modeling")   # models you KEEP off the bench: <name>/<name>.effigy + sticker.png
+DEFAULT_MODEL = os.path.join(PROJECTS, "deep_sentance/tools/out/suit/live/pants.effigy")
+OLLAMA = "http://localhost:11434/v1/"
+VIEW_W, VIEW_H = 1024, 576
+REPLAY_STEP_MS = 700                        # replay speed: one kept revision per tick (waits for slow loads)
+# the dope sheet before the viewer has said what keys the clip has
+NO_KEYS = {"tracks": [], "undo": 0, "redo": 0, "dirty": False, "saveable": False, "frames": 0}
+
+from PySide6.QtCore import (Q_ARG, QMetaObject, QObject, QProcess, QProcessEnvironment, QRect,  # noqa: E402
+                            QTimer, QUrl, Qt, QCoreApplication, Property, Signal, Slot)
+from PySide6.QtGui import QColor, QDesktopServices, QGuiApplication, QIcon, QImage, QRegion  # noqa: E402
+from PySide6.QtNetwork import QLocalServer, QLocalSocket  # noqa: E402
+from PySide6.QtQuick import QQuickPaintedItem  # noqa: E402
+from PySide6.QtQml import qmlRegisterType  # noqa: E402
+
+HOST = None
+
+# On Wayland a window can't put itself in front; KWin can, through a one-shot script. It must NOT take focus:
+# po shares the screen with several sessions, and a chest that activates itself on every new run steals the keyboard
+# from whatever po is typing in (2026-10-22). It only un-minimizes and flashes in the taskbar; po raises it when ready.
+RAISE_JS = """
+for (const w of workspace.windowList()) {
+    if (w.resourceClass === "geppetto") { w.minimized = false; w.demandsAttention = true; }
+}
+"""
+
+
+def kwin_raise():
+    """un-minimize the chest and flash it in the taskbar, without taking focus (KDE; silently nothing elsewhere)"""
+    def go():
+        try:
+            path = os.path.join(tempfile.gettempdir(), "geppetto-raise-%d.js" % os.getuid())
+            with open(path, "w") as f:
+                f.write(RAISE_JS)
+            q = ["qdbus6", "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting."]
+            subprocess.run(q[:3] + [q[3] + "unloadScript", "geppetto-raise"], capture_output=True, timeout=3)
+            subprocess.run(q[:3] + [q[3] + "loadScript", path, "geppetto-raise"], capture_output=True, timeout=3)
+            subprocess.run(q[:3] + [q[3] + "start"], capture_output=True, timeout=3)
+            time.sleep(0.5)
+            subprocess.run(q[:3] + [q[3] + "unloadScript", "geppetto-raise"], capture_output=True, timeout=3)
+        except (OSError, subprocess.SubprocessError):
+            pass
+    threading.Thread(target=go, daemon=True).start()
+
+
+def any_script_running():
+    """some marionette-desktop is running a live script (for older runs that recorded no pid)"""
+    for pid in os.listdir("/proc"):
+        if pid.isdigit():
+            try:
+                with open("/proc/%s/cmdline" % pid, "rb") as f:
+                    cmd = f.read()
+            except OSError:
+                continue
+            if b"marionette-desktop" in cmd and b"--script" in cmd:
+                return True
+    return False
+
+
+def _proc_table():
+    """One /proc scan: pid -> (ppid, cmdline, zombie, pgid). The host itself is excluded."""
+    table = {}
+    for name in os.listdir("/proc"):
+        if not name.isdigit():
+            continue
+        pid = int(name)
+        if pid == os.getpid():
+            continue
+        try:
+            with open("/proc/%d/cmdline" % pid, "rb") as f:
+                cmd = f.read()
+            ppid, zombie = 0, False
+            with open("/proc/%d/status" % pid) as f:
+                for line in f:
+                    if line.startswith("PPid:"):
+                        ppid = int(line.split()[1])
+                    elif line.startswith("State:"):
+                        zombie = "Z" in line.split(":", 1)[1]
+            try:
+                pgid = os.getpgid(pid)
+            except OSError:
+                pgid = 0
+        except (OSError, ValueError):
+            continue
+        table[pid] = (ppid, cmd, zombie, pgid)
+    return table
+
+
+def _run_tree_pids(d, pid):
+    """All PIDs belonging to run `d`: the recorded pid's descendants, its process
+    group (only when it is a session leader, i.e. a setsid geppetto-live open run or
+    a start_new_session research run -- never a --once run sharing its agent's group),
+    plus any modeller process whose cmdline names the run dir or the run's script.
+    The last leg covers siblings outside the run's tree: --serve --watch-run viewers,
+    geppetto-live more/wait wrappers, live_runs.py --take/--wait, and --follow with a
+    matching script. The recorded pid is trusted only if its cmdline still names a
+    modeller, so a stale/reused pid kills nothing. Returns (pids, pgids)."""
+    markers = (b"marionette-desktop", b"geppetto-live", b"live_runs.py")
+    table = _proc_table()
+    if pid > 0:
+        seed_cmd = table.get(pid, (0, b"", False, 0))[1]
+        if not seed_cmd:
+            try:
+                with open("/proc/%d/cmdline" % pid, "rb") as f:
+                    seed_cmd = f.read()
+            except OSError:
+                seed_cmd = b""
+        if not any(m in seed_cmd for m in markers):
+            pid = 0
+    pids, pgids = set(), set()
+    if pid > 0:
+        try:
+            if os.getpgid(pid) == pid and pid != os.getpgid(0):
+                pgids.add(pid)
+        except OSError:
+            pass
+        children = {}
+        for p, (ppid, _cmd, _z, _g) in table.items():
+            children.setdefault(ppid, set()).add(p)
+        stack = [pid]
+        while stack:
+            p = stack.pop()
+            if p in pids or p == os.getpid():
+                continue
+            pids.add(p)
+            stack.extend(children.get(p, ()))
+        for p, (_pp, cmd, _z, pgid) in table.items():
+            if pgid in pgids and any(m in cmd for m in markers):
+                pids.add(p)
+    d_b = os.path.abspath(d).encode()
+    try:
+        script_b = (live_runs.run_meta(d).get("script") or "").encode()
+    except Exception:
+        script_b = b""
+    for p, (_pp, cmd, _z, _g) in table.items():
+        if p in pids:
+            continue
+        if not any(m in cmd for m in markers):
+            continue
+        if d_b in cmd or (script_b and script_b in cmd):
+            pids.add(p)
+    return pids, pgids
+
+
+def _kill_pids(pids, pgids, term_grace=3.0, kill_grace=2.0):
+    """SIGTERM everything, wait term_grace, SIGKILL survivors, wait kill_grace.
+    Returns survivors (zombies count as dead). Never raises; survivors go to stderr."""
+    def alive(ps):
+        out = []
+        for p in ps:
+            try:
+                with open("/proc/%d/status" % p) as f:
+                    zombie = any(l.startswith("State:") and "Z" in l.split(":", 1)[1] for l in f)
+            except OSError:
+                continue
+            if not zombie:
+                out.append(p)
+        return out
+    remaining = alive(pids)
+    for p in remaining:
+        try:
+            os.kill(p, signal.SIGTERM)
+        except OSError:
+            pass
+    for pgid in pgids:
+        try:
+            os.killpg(pgid, signal.SIGTERM)
+        except OSError:
+            pass
+    deadline = time.monotonic() + term_grace
+    while remaining and time.monotonic() < deadline:
+        time.sleep(0.05)
+        remaining = alive(remaining)
+    if remaining:
+        for p in remaining:
+            try:
+                os.kill(p, signal.SIGKILL)
+            except OSError:
+                pass
+        for pgid in pgids:
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except OSError:
+                pass
+        deadline = time.monotonic() + kill_grace
+        while remaining and time.monotonic() < deadline:
+            time.sleep(0.05)
+            remaining = alive(remaining)
+    if remaining:
+        print("geppetto quit: still alive after SIGKILL: %s" % sorted(remaining), file=sys.stderr, flush=True)
+    return remaining
+
+
+
+def _system_modeller_pids():
+    """2026-10-25 quit-all sweep: every geppetto-live / marionette-desktop process
+    in /proc, whether or not any run dir knows about it -- externally started,
+    unrecorded, or orphaned (parent dead). A process matches only if its cmdline
+    names one of those two binaries (as a path or bare name), never on generic
+    words like live or model. Pane viewers serving a static model
+    (marionette-desktop --serve --model ...) are EXCLUDED: they die via the
+    panes' normal shut path after quit_all, and pane 1's Pip viewer is one of
+    them. Run viewers (--serve --watch-run) and script runs (--script) are
+    modelling and ARE swept. Wrappers are caught too: a `timeout` or shell
+    wrapper's cmdline still names the geppetto-live path it wraps. Returns
+    (pids, pgids); pgids only for session leaders outside the host's own
+    group, so a killpg can never hit the GUI's group. Zombies are skipped
+    (already dead; reaping is the parent's job). The host itself is excluded
+    by _proc_table and again here."""
+    out_pids, out_pgids = set(), set()
+    try:
+        host_pgid = os.getpgid(0)
+    except OSError:
+        host_pgid = 0
+    for pid, (_pp, cmd, zombie, pgid) in _proc_table().items():
+        if zombie or pid == os.getpid():
+            continue
+        if b"geppetto-live" not in cmd and b"marionette-desktop" not in cmd:
+            continue
+        if (b"marionette-desktop" in cmd and b"--model" in cmd
+                and b"--watch-run" not in cmd and b"--script" not in cmd):
+            continue
+        out_pids.add(pid)
+        if pgid and pgid == pid and pgid != host_pgid:
+            out_pgids.add(pgid)
+    return out_pids, out_pgids
+
+def run_is_live(d, state):
+    """a run still building: not finished, and its journal moved in the last 10 minutes (a crashed run goes quiet)"""
+    if not state or state.get("state") in TERMINAL:
+        return False
+    # a script run records its pid beside the folder: once that process is gone the run is dead,
+    # however fresh its journal still looks
+    try:
+        pid = int(json.load(open(d.rstrip("/") + ".json")).get("pid", 0))
+    except (OSError, ValueError, TypeError, AttributeError):
+        pid = 0
+    if pid > 0:
+        try:
+            with open("/proc/%d/cmdline" % pid, "rb") as f:
+                if b"marionette-desktop" not in f.read():
+                    return False
+        except OSError:
+            return False
+        if state.get("state") in live_runs.OPEN:
+            return True                 # open between lines: quiet for as long as po looks, still alive
+    elif not any_script_running():
+        return False
+    try:
+        return time.time() - os.stat(os.path.join(d, ".live", "events.jsonl")).st_mtime < 600
+    except OSError:
+        return False
+
+
+def send(msg):
+    """send a command to a running chest; True if one answered"""
+    s = QLocalSocket()
+    s.connectToServer(SOCK)
+    if not s.waitForConnected(500):
+        return False
+    s.write(msg.encode())
+    s.flush()
+    s.waitForBytesWritten(500)
+    s.waitForReadyRead(3000)
+    print(bytes(s.readAll()).decode() or "ok")
+    s.disconnectFromServer()
+    return True
+
+
+def project_root(path):
+    """the s&box project a file belongs to: the nearest folder up with a .sbproj in it"""
+    d = os.path.dirname(os.path.abspath(path))
+    while d.startswith(PROJECTS) and d != PROJECTS:
+        try:
+            if any(n.endswith(".sbproj") for n in os.listdir(d)):
+                return d
+        except OSError:
+            pass
+        d = os.path.dirname(d)
+    return None
+
+
+def filed_stickers():
+    """what's in the MODELING folder, newest first: finished runs' stickers and the models you kept"""
+    return sorted(stickerlib.filed(RUNS) + stickerlib.filed(MODELING), key=os.path.getmtime, reverse=True)
+
+
+def kept_model(d):
+    return os.path.join(d, os.path.basename(d) + ".effigy")
+
+
+def folder_entry(sticker):
+    """one slip in the MODELING folder: its picture, its name, what opening it puts on screen,
+    and when it was filed (the listing shows the date and sorts kept models before runs)"""
+    d = os.path.dirname(sticker)
+    try:
+        when = int(os.path.getmtime(sticker))
+    except OSError:
+        when = 0
+    if os.path.dirname(d) == MODELING:
+        try:
+            name = json.load(open(os.path.join(d, "kept.json"))).get("name", "")
+        except (OSError, ValueError, AttributeError):
+            name = ""
+        return {"sticker": "file://" + sticker, "name": name or os.path.basename(d), "kind": "model", "path": kept_model(d), "mtime": when}
+    return {"sticker": "file://" + sticker, "name": run_name(d), "kind": "run", "path": d, "mtime": when}
+
+
+def run_name(d):
+    """what a run made, in a word or two, unique per run: a real prompt, else the
+    script's own stem — never its parent folder (every script in one folder used
+    to collapse to that folder's name: five "geppetto-desktop" rows). A script run
+    also gets its date/time from its dir tail, so two runs of one script (calib-turn
+    twice tonight) never share a label"""
+    try:
+        meta = json.load(open(d + ".json"))
+        prompt = meta.get("prompt", "") or ""
+        script = meta.get("script", "") or ""
+    except (OSError, ValueError, AttributeError):
+        prompt, script = "", ""
+    name = ""
+    if script and prompt.startswith("script:"):
+        name = os.path.splitext(os.path.basename(script))[0]
+    elif prompt and not prompt.startswith("script:"):
+        name = prompt
+    if not name:
+        base = os.path.basename(d.rstrip("/"))
+        name = re.sub(r"-?\d{8}-\d{6}(-\d+)?$", "", base)
+        if name.startswith("script-"):
+            name = name[len("script-"):]
+        name = name or base
+    if script:
+        # script-run dirs end <stem>-YYYYMMDD-HHMMSS[-pid]: date/time disambiguates repeats
+        m = re.search(r"(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})\d{2}(-\d+)?$", os.path.basename(d.rstrip("/")))
+        if m:
+            name = "%s %s-%s %s:%s" % (name, m.group(2), m.group(3), m.group(4), m.group(5))
+    return name[:60]
+
+
+def walk(root, exts, limit, skip=("backups", ".sbox", "obj", "bin", "node_modules", ".git")):
+    out = []
+    for d, dirs, files in os.walk(root):
+        dirs[:] = sorted(x for x in dirs if x not in skip and not x.startswith("."))
+        for f in sorted(files):
+            if f.lower().endswith(exts):
+                out.append(os.path.join(d, f))
+                if len(out) >= limit:
+                    return out
+    return out
+
+
+def clip_source(clip, root):
+    """the model a .riganim was authored on (its SourceModel), as a file the viewer can load:
+    the .fbx/.effigy next to the .vmdl, else the .vmdl path itself. None if it doesn't say."""
+    try:
+        with open(clip, encoding="utf-8", errors="replace") as f:
+            m = re.search(r'"SourceModel"\s*:\s*"([^"]*)"', f.read(4096))
+    except OSError:
+        return None
+    if not m or not m.group(1):
+        return None
+    rel = m.group(1)
+    stem = os.path.splitext(os.path.join(root, "Assets", rel))[0]
+    for ext in (".fbx", ".effigy", ".FBX"):
+        if os.path.isfile(stem + ext):
+            return stem + ext
+    return stem + os.path.splitext(rel)[1]
+
+
+def same_model(a, b):
+    return bool(b) and os.path.splitext(os.path.abspath(a))[0] == os.path.splitext(os.path.abspath(b))[0]
+
+
+
+LAST_OPEN = os.path.expanduser("~/.cache/geppetto/chest-last.json")
+PANES_SAVED = os.path.expanduser("~/.cache/geppetto/chest-panes.json")   # panes 2-4: what each showed, for a restart
+
+def remember_open(model, clip=""):
+    """the model (and clip) on screen, so a restarted chest reopens them"""
+    try:
+        makedirs_private(os.path.dirname(LAST_OPEN))
+        with open_private(LAST_OPEN) as f:
+            json.dump({"model": model, "clip": clip}, f)
+    except OSError:
+        pass
+
+def last_open():
+    try:
+        with open(LAST_OPEN) as f:
+            d = json.load(f)
+        if os.path.isfile(d.get("model", "")):
+            if d.get("clip") and not os.path.isfile(d["clip"]): d["clip"] = ""
+            return d
+    except (OSError, ValueError):
+        pass
+    return None
+
+class Viewport(QQuickPaintedItem):
+    """shows the latest frame from the serve process, 1:1; `pane` 1 is the host's viewer, 2-4 the split panes"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setOpaquePainting(True)
+        self._pane = 1
+        HOST.frameReady.connect(self.update)
+        for pane in HOST.panes:
+            pane.frameReady.connect(self._pane_frame)
+
+    def _pane_frame(self):
+        if self._pane > 1 and self.sender() is HOST.panes[self._pane - 2]:
+            self.update()
+
+    def _set_pane(self, n):
+        self._pane = max(1, min(1 + len(HOST.panes), int(n)))
+        self.update()
+    pane = Property(int, lambda self: self._pane, _set_pane)
+
+    def paint(self, p):
+        img = HOST.image if self._pane == 1 else HOST.panes[self._pane - 2].image
+        if img is None:
+            # 2026-10-25: no frame yet is an empty scene, not a broken black screen.
+            # Fill with the serve process's own empty clear colour (.14/.145/.16),
+            # so the pane looks the same before the first frame as it does on an
+            # empty scene, instead of flashing pure black at startup.
+            p.fillRect(0, 0, int(self.width()), int(self.height()), QColor("#242529"))
+            return
+        p.drawImage(QRect(0, 0, int(self.width()), int(self.height())), img)
+
+
+class Host(QObject):
+    """what cabinet.qml can ask of Python"""
+    frameReady = Signal()
+    infoChanged = Signal()
+    schemeChanged = Signal()
+    playheadChanged = Signal()
+    keysChanged = Signal()
+    listsChanged = Signal()
+    runsChanged = Signal()
+    statusChanged = Signal()
+    clearNoteChanged = Signal()
+    toolsChanged = Signal()
+    chatChanged = Signal()
+    claudeChanged = Signal()
+    museTrackerChanged = Signal()
+    otherChunk = Signal(int, str)               # a non-Claude model's reply streaming into the CLAUDE card
+    otherAnswer = Signal(int, str, str)
+    claudePicturesChanged = Signal()
+    claudePicture = Signal(str)               # a new picture to pop large (its file path)
+    p1OwnerChanged = Signal()
+    chatAnswer = Signal(int, str, str)
+    chatChunk = Signal(int, str)
+    modelsAnswer = Signal(object)
+    # a finished model's sticker was cut from the viewport: its file and where it was, as fractions of the view
+    stickerMade = Signal(str, float, float, float, float)
+    filedChanged = Signal()
+    replayChanged = Signal()
+    noticeChanged = Signal()           # the BYO-AI notice card (ai_notice.py): cost + first-send disclosure gate
+    shownOpChanged = Signal()
+    benchChanged = Signal()
+    refsChanged = Signal()             # the reference pictures standing behind the model
+    faceChanged = Signal()             # the Face Poser panel: which pane it poses and that pane's flex sliders
+    subSelectionChanged = Signal()     # faces/edges/vertices picked in the viewport (s&box-style sub-selection)
+
+    @property
+    def _preferences_path(self):
+        return self._preferences_path_store
+
+    @_preferences_path.setter
+    def _preferences_path(self, value):
+        self._preferences_path_store = value
+        try:
+            with open(value) as f:
+                self._model_preferences = json.load(f)
+        except (OSError, ValueError):
+            self._model_preferences = {}
+        if not isinstance(self._model_preferences, dict):
+            self._model_preferences = {}
+        self._claude_model = self._model_preferences.get("claude", "")
+        self._chat_model = self._model_preferences.get("chat", "")
+        self.ai_model = self._model_preferences.get("research", "")
+
+    def __init__(self):
+        super().__init__()
+        self.window = None
+        self.image = None
+        self.proc = None
+        self.buf = b""
+        self.shm = None
+        self.shm_path = ""
+        self._info = {}
+        self._clip = {}
+        self._sel = {"bone": -1, "body": -1}
+        self._playhead = {"time": 0, "frame": 0, "playing": False, "loop": True}
+        self._keys = NO_KEYS
+        self._status = ""  # 2026-10-24: no characters up top at startup / model load for now
+        self._clear_note = ""
+        self._models = []
+        self._clips = []
+        self._runs = []
+        self._drawings = []
+        self._drawing_open = False
+        self._chat_session = str(uuid.uuid4())   # Claude's CLI session for this conversation; CLEAR starts a new one
+        self._chat = []                   # [{"role": "you"|"model", "text": ..., "images": [...]?}, ...]
+        self._chat_pending = []           # picture paths waiting to go with the next send
+        self._sweep_chat_images()         # audit G5: a new session sweeps the last one's attached pictures
+        self._chat_models = []
+        self._chat_model = self._chat_models[0]["id"] if self._chat_models else ""
+        self._chat_busy = False
+        self._chat_mode = "build"
+        self._chat_request = 0
+        self._chat_cancel = threading.Event()
+        self._catalogue_busy = False
+        self._model_preferences = {}
+        self._preferences_path = os.path.expanduser("~/.config/geppetto/model-selection.json")
+        self.drawing_key = drawing_socket_key()    # the socket the drawing tool listens on
+        self.drawing_program = drawing_program      # what to run to start it
+        self.model = ""
+        self.ai_model = self._model_preferences.get("research", "")
+        self.jobs = {}                  # run dir -> QProcess
+        self.watching = ""
+        self.live_states = {}
+        self.displayed_revision = 0
+        self.stop_requests = {}
+        self._corrections = ViewportCorrections(self)
+        self.seen_runs = None           # run dirs present at the last scan (None until the first one)
+        self.saw_building = set()       # runs seen mid-build in the viewport, so finishing them sends the model off
+        self.auto_pending = set()       # new runs to follow as soon as they publish a live identity
+        self._fresh_start = True        # 2026-10-24: a fresh start never auto-places runs already going; only runs that start after this start get a pane
+        self._startup_runs = set()      # 2026-10-25 fix cluster 2 (startup): run dirs present at the first scan; never auto-followed this session, even if they drop out of a later scan and reappear. Cards still list them; only an explicit place (card drag, showRunIn, paneVerb) puts one in a pane. Never killed or deleted by startup code.
+        self._quitting = False          # set once by quit_all(); save_panes() is a no-op from then on, so PANES_SAVED stays deleted
+        self._filed = filed_stickers()         # stickers in the MODELING folder, newest first
+        self._keep_to = ""              # a KEEP in flight: the folder its sticker goes in
+        self.collapsed = {}             # run dir -> folded by hand (unset: fold finished runs nobody is watching)
+        self.env = QProcessEnvironment.systemEnvironment()
+        dotnet = self.env.value("DOTNET_ROOT", os.path.expanduser("~/.dotnet"))
+        self.env.insert("DOTNET_ROOT", dotnet)
+        self.env.insert("PATH", dotnet + ":" + self.env.value("PATH", ""))
+        self.env.insert("LD_LIBRARY_PATH", ":".join(
+            [BIN, os.path.join(BIN, "runtimes/linux-x64/native"), self.env.value("LD_LIBRARY_PATH", "")]))
+        self._bench = {}                # your own edits: dir, alive, bodies, features, canUndo, form, error, log
+        self.bench_proc = None
+        self.bench_buf = b""
+        self._sub_mode = "body"         # viewport pick mode: body | face | edge | vertex
+        self._sub_sel = {}              # the latest @selection event from the viewer
+        self._sub_prompt = ""
+        self._sub_lost = 0
+        self._hover_at = None           # last hover sent, and the one waiting for the throttle
+        self._hover_pending = None
+        self._tool_open = False          # the tool card is up: a face/edge tool may be driving the pick mode
+        self._tool_mode = None           # the mode that card imposed (face or edge), or None
+        self._mode_before_tool = None    # what to put back when the card closes, if the user didn't pick one
+        self.hoverTimer = QTimer(self)
+        self.hoverTimer.setSingleShot(True)
+        self.hoverTimer.setInterval(16)
+        self.hoverTimer.timeout.connect(self._hover_flush)
+        self._refs = {"images": [], "problems": "", "saveable": False, "changed": False}
+        self._face, self._face_pane = {}, 0   # the Face Poser: the posed pane's last face event, and which pane (0 = shut)
+        self._ortho = False             # the viewer's camera is flat (front/side/top line-up)
+        self._replay = {}               # the run being replayed step by step: dir, steps, at, playing, notes
+        self.replayTimer = QTimer(self)
+        self.replayTimer.setInterval(REPLAY_STEP_MS)
+        self.replayTimer.timeout.connect(self._replay_tick)
+        self.runTimer = QTimer(self)
+        self.runTimer.setInterval(500)
+        self.runTimer.timeout.connect(self.scanRuns)
+        self.runTimer.start()
+        self.chatAnswer.connect(self._chat_done)
+        # the CLAUDE card: a Claude Code session of its own (claude_link.py); its reader thread only
+        # emits, Qt queues that onto this thread
+        self.claude = claude_link.ClaudeLink(on_change=self.claudeChanged.emit, lockdown=True,
+                                             build_guard_factory=build_execution.BuildTurn)
+        self._claude_log = ChatLogModel(self.claude, self)
+        self.claudeChanged.connect(self._claude_log.schedule)
+        # Slot guard (2026-10-24 Send regression): if a future edit stacks or moves
+        # claudeSend's @Slot, QML sees no function and Send silently dies. Catch it
+        # at startup, in the panel log, instead of on the user's first send.
+        if self.metaObject().indexOfMethod("claudeSend(QString)") < 0:
+            self.claude._add("note", "Send is broken: claudeSend is not exposed to the panel (missing @Slot) - sending will not work until host.py is fixed")
+            self.set_status("Send is broken: claudeSend is not exposed to the panel")
+        self._other_session = str(uuid.uuid4())   # the CLI session (Grok) for a non-Claude model on the card
+        self._other_cancel = threading.Event()
+        self._other_request = 0
+        self._claude_research = None
+        self._muse_tracker = {}
+        self._muse_turn_id = ""  # current Muse bridge turn; set by seat-system callback, never by refreshMuseTracker
+        self._muse_pending_lock = threading.Lock()
+        self._muse_current_turn = ""  # turn_id of the live _other turn, set only by the seat-system callback
+        self._muse_current_session = ""  # session_id reported by that seat (NOT _other_session)
+        self._muse_pending_fields = {}
+        self._claude_research_prompt = False
+        self.otherChunk.connect(self._other_chunk)
+        self.otherAnswer.connect(self._other_done)
+        # pictures Claude reads or sends pop over the viewport (claude_feed.py, written by the gate hook)
+        self.claudeFeed = claude_feed.Feed()
+        self.pictureTimer = QTimer(self)
+        self.pictureTimer.setInterval(700)
+        self.pictureTimer.timeout.connect(self._poll_pictures)
+        self.pictureTimer.start()
+        self.chatChunk.connect(self._chat_chunk)
+        self.modelsAnswer.connect(self._models_done)
+        # split viewport: pane 1 is the viewer above; panes 2-4 each run a viewer of their own
+        self.view_size = (VIEW_W, VIEW_H)
+        self.cam = None                 # pane 1's (yaw, pitch) from its last frame
+        self.panes = [paneslib.Pane(self, n, EXE, self.env) for n in (2, 3, 4)]
+        for pane in self.panes:
+            pane.changed.connect(self.panesChanged)
+        self.waiting = []               # live runs that found every pane busy, oldest first
+        self._layout, self._link = 1, False
+        self._auto = True               # AUTO: one pane per live run, the split grows and shrinks on its own
+        self._shrink_at = 0.0           # AUTO: when fewer panes started to be enough (it waits before shrinking)
+        self._p1_owner, self._p1_since = {}, 0.0
+        self._parked = {}               # pane number -> what it showed when a smaller layout hid it
+        self._mine = False              # pane 1 is po's own scene (a model po opened): runs never take it.
+                                        # Off, pane 1 is an empty pane like the others, any run can join it
+        self._solo = 0                  # 1 pane, po's pick: only pane N shows, full size; the rest keep going hidden
+        self._scheme = "red"            # the chest's enamel colour: a folder under art/schemes/, "red" is the stock art
+        try:
+            prefs = json.load(open(VIEW_PREFS))
+            self._layout = prefs.get("layout", 1) if prefs.get("layout") in (1, 2, 4) else 1
+            self._link = bool(prefs.get("link", False))
+            self._auto = bool(prefs.get("auto", True))
+            self._solo = prefs.get("solo", 0) if prefs.get("solo") in (1, 2, 3, 4) and prefs["solo"] <= self._layout else 0
+            self._scheme = str(prefs.get("scheme", "red"))
+        except (OSError, ValueError, AttributeError):
+            pass
+        # Startup 2026-10-24: Geppetto always opens with one panel only (pane 1).
+        # Saved panes 2-4 are not cleared: restore_panes() parks them (n > layout)
+        # and growing the layout later gives them back. Manual split / AUTO in this
+        # session still works via setViewLayout / _apply_layout, but the next startup
+        # forces 1 again, so a manual split does not persist across restarts.
+        # _auto is off at startup so autoFollow cannot grow the layout back on startup.
+        self._layout, self._solo, self._auto = 1, 0, False
+        # the BYO-AI notices (ai_notice.py): per-provider consent, file-tolerant; the card
+        # starts hidden and only the send paths below raise it, before anything is sent.
+        self._notice_path = NOTICE_STATE
+        self._notice_state = noticelib.load_state(self._notice_path)
+        self._notice_cfg = None
+        self._notice_missing = []
+        self._notice_show = False
+        self._pending_notice = None      # ("research", prompt, model_id) or ("chat", text)
+
+    # ---- properties ------------------------------------------------------------------------
+    def _get_info(self): return self._info
+    def _get_clip(self): return self._clip
+    def _get_sel(self): return self._sel
+    def _get_playhead(self): return self._playhead
+    def _get_status(self): return self._status
+    def _get_models(self): return self._models
+    def _get_clips(self): return self._clips
+    def _get_runs(self): return self._runs
+    def _get_ai_model(self): return self.ai_model
+    info = Property("QVariantMap", _get_info, notify=infoChanged)
+    clip = Property("QVariantMap", _get_clip, notify=infoChanged)
+    sel = Property("QVariantMap", _get_sel, notify=infoChanged)
+    playhead = Property("QVariantMap", _get_playhead, notify=playheadChanged)
+    keys = Property("QVariantMap", lambda self: self._keys, notify=keysChanged)
+    status = Property(str, _get_status, notify=statusChanged)
+    clearNote = Property(str, lambda self: self._clear_note, notify=clearNoteChanged)
+    models = Property("QVariantList", _get_models, notify=listsChanged)
+    clips = Property("QVariantList", _get_clips, notify=listsChanged)
+    runs = Property("QVariantList", _get_runs, notify=runsChanged)
+    corrections = Property(QObject, lambda self: self._corrections, constant=True)
+    aiModel = Property(str, _get_ai_model, notify=runsChanged)
+    watchedRun = Property(str, lambda self: self.watching, notify=runsChanged)
+    p1ModelPath = Property(str, lambda self: self.model, notify=runsChanged)
+    p1Owner = Property("QVariantMap", lambda self: self._p1_owner, notify=p1OwnerChanged)
+    drawings = Property("QVariantList", lambda self: self._drawings, notify=toolsChanged)
+    filed = Property("QVariantList", lambda self: self._filed, notify=filedChanged)
+    folder = Property("QVariantList", lambda self: [folder_entry(s) for s in self._filed], notify=filedChanged)
+    drawingOpen = Property(bool, lambda self: self._drawing_open, notify=toolsChanged)
+    chatMessages = Property("QVariantList", lambda self: self._chat, notify=chatChanged)
+    chatImages = Property("QVariantList", lambda self: self._chat_pending, notify=chatChanged)
+    claudeMessages = Property(QObject, lambda self: self._claude_log, constant=True)
+    claudeStatus = Property(str, lambda self: self.claude.status, notify=claudeChanged)
+    museTracker = Property("QVariantMap", lambda self: self._muse_tracker, notify=museTrackerChanged)
+    claudePictures = Property("QVariantList", lambda self: [p["path"] for p in self.claudeFeed.pictures],
+                              notify=claudePicturesChanged)
+    claudeAsk = Property(str, lambda self: self.claude.ask["text"] if self.claude.ask else "", notify=claudeChanged)
+    chatModels = Property("QVariantList", lambda self: self._chat_models, notify=chatChanged)
+    chatModel = Property(str, lambda self: self._chat_model, notify=chatChanged)
+    chatBusy = Property(bool, lambda self: self._chat_busy, notify=chatChanged)
+    chatMode = Property(str, lambda self: self._chat_mode, notify=chatChanged)
+    catalogueBusy = Property(bool, lambda self: self._catalogue_busy, notify=chatChanged)
+    replay = Property("QVariantMap", lambda self: self._replay, notify=replayChanged)
+    def _get_notice(self):
+        m = noticelib.notice_map(self._notice_state, self._notice_cfg, show=self._notice_show)
+        pending = self._pending_notice[0] if self._pending_notice else ""
+        m["startLabel"] = "START" if pending == "chat" else "START THE BUILD"
+        return m
+    notice = Property("QVariantMap", _get_notice, notify=noticeChanged)
+    # the op that made the revision on screen ("line 14: add Blob ..."): the tool wheel's tool, in step with
+    # the viewport, whether it follows a run, a replay or your bench
+    shownOp = Property(str, lambda self: live_runs.revision_op(self.watching, self.displayed_revision)
+                       if self.watching and self.displayed_revision else "", notify=shownOpChanged)
+    bench = Property("QVariantMap", lambda self: self._bench, notify=benchChanged)
+    researchModels = Property("QVariantList", lambda self: [m for m in self._chat_models if m.get("research", True)], notify=chatChanged)
+    # s&box-style sub-selection in the viewport: the latest @selection event, the pick mode and its prompt line
+    refs = Property("QVariantMap", lambda self: self._refs, notify=refsChanged)
+    face = Property("QVariantMap", lambda self: self._face, notify=faceChanged)
+    facePane = Property(int, lambda self: self._face_pane, notify=faceChanged)
+    ortho = Property(bool, lambda self: self._ortho, notify=refsChanged)
+    subSelection = Property("QVariantMap", lambda self: self._sub_sel, notify=subSelectionChanged)
+    subMode = Property(str, lambda self: self._sub_mode, notify=subSelectionChanged)
+    subPrompt = Property(str, lambda self: self._sub_prompt, notify=subSelectionChanged)
+    panesChanged = Signal()
+    paneStickerMade = Signal(int, str, float, float, float, float)   # pane number, then as stickerMade
+    paneList = Property("QVariantList", lambda self: list(self.panes), constant=True)
+    viewLayout = Property(int, lambda self: self._layout, notify=panesChanged)
+    linkCameras = Property(bool, lambda self: self._link, notify=panesChanged)
+    autoLayout = Property(bool, lambda self: self._auto, notify=panesChanged)
+    soloPane = Property(int, lambda self: self._solo, notify=panesChanged)
+    scheme = Property(str, lambda self: self._scheme, notify=schemeChanged)    # the enamel colour scheme
+    # OPEN dialog start folder: the MODELING folder, as a file:// url. Creates it
+    # on first use if it is missing, so the dialog never starts in a dead folder.
+    modelingFolder = Property(str, lambda self: (makedirs_private(MODELING), QUrl.fromLocalFile(MODELING).toString())[1], constant=True)
+
+    # ---- the Face Poser: GMod-style flex sliders over one pane's model -----------------------
+    def _viewer(self, n):
+        return self if n == 1 else self.panes[n - 2]
+
+    @Slot(int)
+    def faceOpen(self, n):
+        """open the Face Poser on pane n (0 shuts it); the viewer answers with a face event"""
+        self._face_pane = n
+        self._face = {}
+        self.faceChanged.emit()
+        if n:
+            self._viewer(n).cmd("face")
+
+    @Slot(str)
+    def faceCmd(self, line):
+        """face set NAME V [BAL] | preset NAME | zero | random | scale S | save NAME | export PATH, to the posed pane"""
+        if self._face_pane:
+            self._viewer(self._face_pane).cmd(("face " + line).strip())
+
+    def on_face(self, n, ev):
+        if ev.get("message"):
+            self.set_status("face: " + ev["message"])
+        if n == self._face_pane:
+            self._face = ev
+            self.faceChanged.emit()
+
+    def set_status(self, s):
+        self._status = s
+        self.statusChanged.emit()
+
+    @Slot(str)
+    def say(self, s):
+        """a line in the lid's status, from the cabinet (help, hints)"""
+        self.set_status(s)
+
+    # ---- the window ------------------------------------------------------------------------
+    @Slot("QVariantList")
+    def setMask(self, rects):
+        """rects: flat list x, y, w, h, x, y, w, h, ... in window coordinates"""
+        if self.window is None:
+            return
+        reg = QRegion()
+        for i in range(0, len(rects) - 3, 4):
+            x, y, w, h = (int(round(v)) for v in rects[i:i + 4])
+            if w > 0 and h > 0:
+                reg = reg.united(QRegion(QRect(x, y, w, h)))
+        self.window.setMask(reg)
+
+    def snap(self, path):
+        # not grabWindow: it blocks this thread on the render thread, which needs Python (Viewport.paint) -> deadlock
+        QMetaObject.invokeMethod(self.window, "snapTo", Q_ARG("QVariant", path))
+        return True
+
+    # ---- the viewport process --------------------------------------------------------------
+    @Slot(str)
+    def openModel(self, path, clip=""):
+        # FileDialog hands back a file:// url; every other caller hands back a plain
+        # path. Accept both, so the OPEN dialog does not need a QML-side url strip
+        # that would break on spaces and % escapes.
+        if path.startswith("file://"):
+            path = QUrl(path).toLocalFile()
+        path = os.path.abspath(os.path.expanduser(path))
+        if not os.path.isfile(path):
+            self.set_status("no such model: " + path)
+            return
+        remember_open(path, clip)
+        self._end_replay()
+        if not self._mine:
+            self._mine = True
+            self.panesChanged.emit()
+        self.watching = ""
+        self.displayed_revision = 0
+        self.runsChanged.emit()
+        self.stop()
+        self.model = path
+        self._info, self._clip, self._sel = {"model": path}, {}, {"bone": -1, "body": -1}
+        self._sub_reset()
+        self._keys = NO_KEYS
+        self.infoChanged.emit()
+        self.keysChanged.emit()
+        # 2026-10-24: model load says nothing up top for now (user request)
+        self.listFiles()
+        p = QProcess(self)
+        p.setProcessEnvironment(self.env)
+        p.setProgram(EXE)
+        p.setArguments(["--serve", "--size", "%dx%d" % self.view_size, "--model", path] + (["--clip", clip] if clip else []))
+        p.setProcessChannelMode(QProcess.SeparateChannels)
+        p.readyReadStandardOutput.connect(lambda p=p: self.onOutput(p))
+        p.readyReadStandardError.connect(lambda p=p: self._viewer_stderr(p))
+        p.finished.connect(lambda code, _st, p=p: self.onFinished(p, code))
+        self.buf = b""
+        self.proc = p
+        p.start()
+
+    def stop(self):
+        p, self.proc = self.proc, None
+        if p is not None and p.state() != QProcess.NotRunning:
+            p.write(b"quit\n")
+            if not p.waitForFinished(1500):
+                p.kill()
+                p.waitForFinished(500)
+        self.unmap()
+
+    def unmap(self):
+        if self.shm is not None:
+            self.shm.close()
+        self.shm, self.shm_path = None, ""
+
+    def quit_all(self):
+        """Closing the chest ends everything: live runs in panes, in the waiting queue,
+        and in the last scan are cancelled/closed and their modeller processes are killed,
+        the waiting queue is cleared, and saved panes are deleted so a fresh start is clean.
+        Force-kill is the whole process tree per run (SIGTERM, 3 s, then SIGKILL).
+        Finally, a system-wide /proc sweep adds any geppetto-live / marionette-desktop
+        process no run knew about (externally started, unrecorded, orphaned) to the
+        same kill pass; pane model viewers (--serve --model) are excluded and die
+        via the panes' normal shut path.
+        Pane 1's default Pip model is not a run, so it still loads on the next start."""
+        self._quitting = True           # first: no later save_panes() (via tidy_panes/scanRuns) may recreate PANES_SAVED
+        self._other_cancel.set()
+        # Worker 2 (cooperative wait): one shared deadline for every dir, so
+        # N runs cannot multiply the quit delay. Poll 0.25s, total 10.0s.
+        quit_deadline = time.monotonic() + 10.0
+        failures = []
+        unresolved = []
+        last_state = {}
+        dirs = set()
+        if self.watching:
+            dirs.add(self.watching)
+        for pane in self.panes:
+            if pane.run:
+                dirs.add(pane.run)
+        dirs.update(self.waiting)
+        dirs.update(self.auto_pending)
+        dirs.update(self.jobs.keys())
+        if self._bench.get("dir"):
+            dirs.add(self._bench["dir"])
+        for r in getattr(self, "_runs", []) or []:
+            if isinstance(r, dict) and r.get("dir"):
+                dirs.add(r["dir"])
+        for e in list(getattr(self, "_parked", {}).values()):
+            if isinstance(e, dict) and e.get("run"):
+                dirs.add(e["run"])
+        # fresh quit-time sweep: a run whose dir appeared under RUNS after the
+        # last scanRuns tick (runTimer, 500 ms) is not in _runs / seen_runs yet.
+        # This is a bare directory listing, NOT scanRuns(): scanRuns() would
+        # tidy panes, save panes, emit runsChanged and autoFollow new runs
+        # into panes during teardown. Bench-flagged dirs stay with _bench.
+        if os.path.isdir(RUNS):
+            for name in os.listdir(RUNS):
+                if name.startswith("."):
+                    continue
+                d = os.path.join(RUNS, name)
+                if not os.path.isdir(d):
+                    continue
+                try:
+                    if json.load(open(os.path.join(RUNS, name + ".json"))).get("bench"):
+                        continue
+                except (OSError, ValueError, AttributeError):
+                    pass
+                dirs.add(d)
+        kill_pids, kill_pgids = set(), set()
+        for d in list(dirs):
+            if not d or not os.path.isdir(d):
+                continue
+            state = {}
+            try:
+                state = read_state(d)
+            except Exception as e:
+                failures.append("%s: read_state failed: %r" % (d, e))
+            if not state or not state.get("state"):
+                # No state to wait on: do not claim terminal, do not drop it;
+                # fall through to the process-kill path below.
+                unresolved.append(d)
+            elif state.get("state") in TERMINAL:
+                pass
+            else:
+                last_state[d] = state.get("state")
+                try:
+                    if state.get("state") in live_runs.OPEN:
+                        live_runs.close_open(d)
+                    else:
+                        # Paused is not in OPEN and not terminal: cancel, never
+                        # resume or step it. AiLiveControl.WatchAsync polls
+                        # commands every 50ms independently of the pause gate
+                        # (AiLiveControl.cs:135-172), so a paused run still sees
+                        # this cancel; resuming it would let it model again.
+                        request_cancel(d)
+                except Exception as e:
+                    failures.append("%s: %s failed: %r" % (d, "close_open" if state.get("state") in live_runs.OPEN else "request_cancel", e))
+                # Cooperative wait: poll for a terminal state instead of
+                # exiting on the request alone. A run already in "cancelling"
+                # is pending, not failed: a re-sent cancel is a no-op there
+                # (WatchAsync already holds the legacy-cancel id), the poll
+                # is what matters. Overshoot past the deadline is at most
+                # one 0.25s sleep.
+                terminal = False
+                while time.monotonic() < quit_deadline:
+                    try:
+                        now = read_state(d)
+                    except Exception:
+                        break
+                    if not now:
+                        break
+                    last_state[d] = now.get("state")
+                    if last_state[d] in TERMINAL:
+                        terminal = True
+                        break
+                    time.sleep(0.25)
+                if not terminal:
+                    unresolved.append(d)
+            # the modeller process tree, not just the recorded pid (collected here,
+            # killed once below so the wait is bounded for all runs together)
+            try:
+                pid = int(json.load(open(d.rstrip("/") + ".json")).get("pid", 0))
+            except Exception:
+                pid = 0
+            pids, pgids = _run_tree_pids(d, pid)
+            kill_pids.update(pids)
+            kill_pgids.update(pgids)
+        # 2026-10-25 quit-all sweep: processes no run dir knows about --
+        # externally started, unrecorded, or orphaned geppetto-live /
+        # marionette-desktop processes (e.g. a --once run started by an
+        # agent after the last scan, or one whose parent died). They join
+        # the SAME single bounded TERM/KILL pass below, so the whole quit
+        # path stays ~15 s instead of adding a second kill pass. Pane model
+        # viewers are excluded by _system_modeller_pids and die via the
+        # panes' normal shut path after quit_all.
+        _sys_pids, _sys_pgids = _system_modeller_pids()
+        _extra = _sys_pids - kill_pids
+        if _extra:
+            print("geppetto quit: system sweep found %d modeller process(es) no run knew about: %s"
+                  % (len(_extra), sorted(_extra)), file=sys.stderr, flush=True)
+        kill_pids.update(_sys_pids)
+        kill_pgids.update(_sys_pgids)
+        _kill_pids(kill_pids, kill_pgids)   # one bounded TERM/KILL pass for all runs
+        for proc in list(self.jobs.values()):
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+        self.waiting = []
+        self.auto_pending.clear()
+        self._parked = {}
+        try:
+            os.unlink(PANES_SAVED)
+        except OSError:
+            pass
+        if unresolved or failures:
+            # Surfaced, not swallowed. Wording is exact: "not confirmed
+            # terminal after cooperative wait" - the kill block above has
+            # already run, so this does NOT by itself mean a process survived;
+            # Worker 1's verification is what establishes survival.
+            print("geppetto quit: run(s) not confirmed terminal after cooperative wait (process-kill path above still ran): %s; failures: %s"
+                  % (", ".join("%s (%s)" % (d, last_state.get(d, "?")) for d in unresolved) or "none",
+                     "; ".join(failures) or "none"),
+                  file=sys.stderr, flush=True)
+
+    @Slot(str)
+    def cmd(self, line):
+        if self.proc is not None and self.proc.state() != QProcess.NotRunning:
+            self.proc.write((line + "\n").encode())     # a viewer still starting gets it once it is up
+
+    # ---- reference pictures: a photo stood behind the model to build against ----------------
+    @Slot(str, str)
+    def refAdd(self, view, url):
+        """put the picture at url (a file:// url from the file dialog) up on the front, side or top view"""
+        path = QUrl(url).toLocalFile() if url.startswith("file:") else url
+        if not path or not os.path.isfile(path):
+            self.set_status("no picture at " + (path or "?"))
+            return
+        if self.proc is None:
+            self.set_status("open a model first: the picture stands behind it")
+            return
+        self.cmd("refadd %s %s" % (view, path))
+
+    @Slot()
+    def refCopyLines(self):
+        """a build can't be saved into: copy the refimage lines, to paste into its build script"""
+        lines = [i.get("line", "") for i in self._refs.get("images", [])]
+        if not lines:
+            self.set_status("no reference pictures to copy")
+            return
+        QGuiApplication.clipboard().setText("\n".join(lines) + "\n")
+        self.set_status("copied %d refimage line(s): paste them into the build script" % len(lines))
+
+    # ---- sub-selection: faces / edges / vertices picked in the viewport (s&box Geppetto semantics) ----
+    SUB_MODES = ("body", "face", "edge", "vertex")
+
+    @staticmethod
+    def sub_prompt(ev):
+        """the s&box prompt line for a selection event: edge > face > vertex, then the notice, then lost refs"""
+        items = [i for i in (ev.get("items") or []) if isinstance(i, dict)]
+        n = {k: sum(1 for i in items if i.get("kind") == k) for k in ("face", "edge", "vertex")}
+        if not items and ev.get("count"):                    # no item list: trust kind/count
+            k = {"faces": "face", "edges": "edge", "vertices": "vertex"}.get(ev.get("kind", ""))
+            if k:
+                n[k] = int(ev["count"])
+        if n["edge"]:
+            text = "1 edge selected" if n["edge"] == 1 else "%d edges selected" % n["edge"]
+        elif n["face"] == 1:
+            body = next((i.get("body") for i in items if i.get("kind") == "face"), "") or ev.get("bodyNames", "") or "?"
+            text = "Face of %s selected — tools that take faces will use it." % body
+        elif n["face"]:
+            text = "%d faces selected" % n["face"]
+        elif n["vertex"]:
+            text = "1 vertex selected" if n["vertex"] == 1 else "%d vertices selected" % n["vertex"]
+        else:
+            text = ""
+        notice = ev.get("notice") or ""
+        if notice:
+            text = (text + " — " + notice) if text else notice
+        lost = int(ev.get("lost") or 0)
+        if lost > 0:
+            word = {"edge": ("edge", "edges"), "vertex": ("vertex", "vertices")}.get(ev.get("mode", ""), ("face", "faces"))
+            gone = ("1 picked %s no longer exists… Re-pick." % word[0]) if lost == 1 else \
+                   ("%d picked %s no longer exist… Re-pick." % (lost, word[1]))
+            text = (text + " " + gone) if text else gone
+        return text
+
+    def onSubSelection(self, ev):
+        mode = ev.get("mode") or self._sub_mode
+        if mode in self.SUB_MODES:
+            self._sub_mode = mode
+        self._sub_sel = ev
+        lost = int(ev.get("lost") or 0)
+        self._sub_prompt = self.sub_prompt(ev)       # built from the counts only, so hover events leave it alone
+        self._sub_lost = lost
+        self.subSelectionChanged.emit()
+
+    def _sub_reset(self):
+        """a new viewer starts in body mode with nothing picked"""
+        self._sub_mode, self._sub_sel, self._sub_prompt, self._sub_lost = "body", {}, "", 0
+        self._hover_at = self._hover_pending = None
+        self.hoverTimer.stop()
+        self.subSelectionChanged.emit()
+
+    @Slot(str)
+    def setSelMode(self, mode):
+        mode = (mode or "").strip().lower()
+        if mode not in self.SUB_MODES:
+            self.set_status("selection mode: body, face, edge or vertex")
+            return
+        self._sub_mode = mode
+        self._hover_at = self._hover_pending = None
+        self.cmd("selmode " + mode)
+        self.subSelectionChanged.emit()               # the viewer answers with the (cleared) selection
+
+    @staticmethod
+    def _pick_mode_for(form):
+        """A tool that takes a face lights faces (fillet included: the face is the pick, its rim is the
+        edge the face-mode snap already draws). Edge, and only edge, when it takes edges and no faces."""
+        accepts = form.get("accepts") or []
+        if isinstance(accepts, str):
+            accepts = [accepts]
+        kinds = {str(a).lower() for a in accepts}
+        if "face" in kinds:
+            return "face"
+        if "edge" in kinds:
+            return "edge"
+        return None
+
+    def _arm_tool_pick(self, form):
+        """the open card's tool: leave body mode so hovering the model lights what the tool selects"""
+        if not self._tool_open:
+            return
+        mode = self._pick_mode_for(form)
+        if mode is None:
+            self._release_tool_pick()
+            return
+        if self._tool_mode is None:
+            self._mode_before_tool = self._sub_mode
+        self._tool_mode = mode
+        if self._sub_mode != mode:
+            self.setSelMode(mode)
+
+    def _release_tool_pick(self):
+        """the card went away, or the tool takes no face or edge: put the old pick mode back,
+        unless the user has since pressed 1-4 and chosen one themselves"""
+        imposed, back = self._tool_mode, self._mode_before_tool
+        self._tool_mode = self._mode_before_tool = None
+        if imposed and back and self._sub_mode == imposed and back != imposed:
+            self.setSelMode(back)
+
+    @Slot(bool)
+    def toolPicking(self, open):
+        """the tool card opened or closed. The describe reply is what knows whether the tool takes a face."""
+        self._tool_open = bool(open)
+        if not self._tool_open:
+            self._release_tool_pick()
+
+    @Slot(float, float, bool, bool, bool)
+    def subPick(self, x, y, shift=False, ctrl=False, alt=False):
+        """a click in face/edge/vertex mode: plain replaces, shift toggles in, ctrl removes, alt takes the opposite face too"""
+        line = "pick %d %d" % (round(x), round(y))
+        if shift:
+            line += " add"
+        if ctrl:
+            line += " remove"
+        if alt:
+            line += " pair"
+        self.cmd(line)
+
+    @Slot(float, float)
+    def subHover(self, x, y):
+        """the cursor over the viewport: light what's under it, at most ~60 a second and only when it moved"""
+        if self._sub_mode == "body":
+            return
+        at = (round(x), round(y))
+        if at == self._hover_at:
+            self._hover_pending = None
+            return
+        if self.hoverTimer.isActive():
+            self._hover_pending = at                  # sent when the timer runs out, so the last one isn't lost
+            return
+        self._hover_send(at)
+
+    def _hover_send(self, at):
+        self._hover_at = at
+        self._hover_pending = None
+        self.cmd("hover %d %d" % at)
+        self.hoverTimer.start()
+
+    def _hover_flush(self):
+        if self._hover_pending is not None and self._hover_pending != self._hover_at:
+            self._hover_send(self._hover_pending)
+
+    @Slot()
+    def clearSubSelection(self):
+        self.cmd("selclear")
+
+    @Slot(int)
+    def assignFacesToSlot(self, slot):
+        """the picked faces onto material slot N of your bench copy (0 = detach them)"""
+        faces = (self._sub_sel.get("faces") or "").strip()
+        if not faces:
+            self.set_status("no faces picked: switch to face mode (2) and click some")
+            return
+        self.benchApply("facematerial slot=%d faces=%s" % (int(slot), faces))
+
+    def _viewer_stderr(self, p):
+        text = bytes(p.readAllStandardError()).decode(errors="replace")
+        lines = [x for x in text.splitlines() if x.strip()]
+        if lines:
+            self.viewer_err = lines[-1][:160]
+
+    def onFinished(self, p, code):
+        if p is self.proc:
+            self.proc = None
+            self.unmap()
+            if not self._status.startswith("error"):
+                self.set_status("viewer exited (%d)" % code + (": " + self.viewer_err if code and getattr(self, "viewer_err", "") else ""))
+
+    def onOutput(self, p):
+        if p is not self.proc:
+            p.readAllStandardOutput()
+            return
+        self.buf += bytes(p.readAllStandardOutput())
+        *lines, self.buf = self.buf.split(b"\n")
+        frame = None
+        for raw in lines:
+            if not raw.startswith(b"@"):
+                continue
+            try:
+                ev = json.loads(raw[1:])
+            except ValueError:
+                continue
+            kind = ev.get("ev")
+            if kind == "frame":
+                frame = ev                      # only the latest of a burst is worth showing
+            elif kind == "ready":
+                self._info = ev
+                self._clip = ev.get("clip") or {}
+                self.infoChanged.emit()
+                # 2026-10-24: do not show model name / tris / load time in the top status bar
+                # a new viewer starts in body mode; a face tool still on the card wants the face under the cursor lit
+                if self._tool_open and self._tool_mode and self._sub_mode != self._tool_mode:
+                    self.setSelMode(self._tool_mode)
+            elif kind == "place":
+                self._place_landed(ev)
+            elif kind == "ai-activity":
+                if self.watching:
+                    self.live_states[self.watching] = ev
+                    self.maybeSendOff(self.watching, ev)
+                    self.set_status(activity(ev))
+                    self.scanRuns()
+            elif kind == "ai-preview":
+                self.displayed_revision = ev.get("revision", 0)
+                self.shownOpChanged.emit()
+                part_focus.follow(self, self.watching, self.displayed_revision, self._replay)   # the part this step touched glows
+                if self._replay:
+                    self._replay = dict(self._replay, shown=self.displayed_revision)
+                    self.replayChanged.emit()
+                self._info.update({"model": ev.get("path", ""), "tris": ev.get("tris", 0),
+                                   "bodies": [], "bones": [], "materials": []})
+                self._clip, self._sel = {}, {"bone": -1, "body": -1}
+                self.infoChanged.emit()
+                self.scanRuns()
+            elif kind == "sent-off":
+                if self._keep_to:
+                    # a KEEP flew off: put the kept model back on screen, so the next edit and KEEP carry on from it
+                    kept, self._keep_to = self._keep_to, ""
+                    tool = (self._bench.get("form") or {}).get("key", "")
+                    self.openModel(kept_model(kept))
+                    if tool:                                   # the card stays up, now on a copy of the kept model
+                        self.benchDescribe(tool)
+                elif self.watching and not self._replay:
+                    # the sticker has gone to the folder: the finished model comes back and stays on screen
+                    # (the pane is free again, so the next run still lands in it)
+                    self.set_status("finished " + os.path.basename(self.watching))
+                    self.cmd("follow " + self.watching)
+                    self.scanRuns()
+            elif kind == "ai-preview-error":
+                self.set_status("preview: " + ev.get("msg", "?"))
+            elif kind == "clip":
+                self._clip = ev
+                self.infoChanged.emit()
+            elif kind == "keys":
+                self._keys = ev
+                self.keysChanged.emit()
+                if self._clip and ev.get("frames", 0) != self._clip.get("frames", 0):
+                    self._clip = dict(self._clip, frames=ev.get("frames", 0))   # a key dragged past the end
+                    self.infoChanged.emit()
+            elif kind == "saved":
+                self.set_status("saved %s (backup in %s)" % (os.path.basename(ev.get("path", "")), os.path.dirname(ev.get("backup", ""))))
+            elif kind == "selected":
+                self._sel = {"bone": ev.get("bone", -1), "body": ev.get("body", -1)}
+                self.infoChanged.emit()
+            elif kind == "selection":
+                self.onSubSelection(ev)
+            elif kind == "refs":
+                self._refs = ev
+                self.refsChanged.emit()
+                if ev.get("problems"):
+                    self.set_status(ev["problems"].split("\n")[0])
+                elif ev.get("note"):
+                    self.set_status(ev["note"])
+            elif kind == "face":
+                self.on_face(1, ev)
+            elif kind == "error":
+                self.set_status("error: " + ev.get("msg", "?"))
+            elif kind == "loading":
+                pass
+        if frame is not None:
+            self.onFrame(frame)
+
+    def onFrame(self, ev):
+        w, h = ev["w"], ev["h"]
+        path = self._info.get("shm", "")
+        try:
+            if self.shm is None or self.shm_path != path or len(self.shm) != w * h * 4:
+                self.unmap()
+                with open(path, "rb") as f:
+                    self.shm = mmap.mmap(f.fileno(), w * h * 4, access=mmap.ACCESS_READ)
+                self.shm_path = path
+            data = self.shm[:w * h * 4]
+            self.image = QImage(data, w, h, w * 4, QImage.Format_RGBX8888).copy()
+            if ev.get("card") and (self._keep_to or self.watching):
+                self.fileSticker(data, w, h)
+        except (OSError, ValueError) as e:
+            self.set_status("frame: %s" % e)
+        self.cmd("ack")
+        self.cam = (ev.get("yaw", 0), ev.get("pitch", 0))
+        if bool(ev.get("ortho")) != self._ortho:
+            self._ortho = bool(ev.get("ortho"))
+            self.refsChanged.emit()
+        self._playhead = {"time": ev.get("time", 0), "frame": ev.get("frame", 0), "playing": ev.get("playing", False),
+                          "loop": ev.get("loop", True)}
+        self.playheadChanged.emit()
+        self.frameReady.emit()
+
+    def fileSticker(self, data, w, h):
+        """the send-off's card frame: cut the model out as a sticker, keep it with its run, and tell QML
+        where it sat so it can be peeled off the viewport and filed"""
+        got = stickerlib.cut(data, w, h)
+        if got is None:
+            return
+        rgba, (x, y, sw, sh) = got
+        path = os.path.join(self._keep_to or self.watching, "sticker.png")
+        if not QImage(rgba.tobytes(), sw, sh, sw * 4, QImage.Format_RGBA8888).save(path):
+            self.set_status("sticker: could not write " + path)
+            return
+        self._landing = [path] + [f for f in self._filed if f != path]
+        self.stickerMade.emit("file://" + path, x / w, y / h, sw / w, sh / h)
+
+    @Slot()
+    def stickerLanded(self):
+        """the flying sticker is in the folder: now it's filed"""
+        if getattr(self, "_landing", None) is not None:
+            self._filed, self._landing = self._landing, None
+            self.filedChanged.emit()
+
+    # ---- files -----------------------------------------------------------------------------
+    def listFiles(self):
+        models = walk(PROJECTS, (".effigy",), 200)
+        root = project_root(self.model) if self.model else None
+        if root:
+            models += walk(os.path.join(root, "Assets", "models"), (".fbx",), 200)
+        if self.model and self.model not in models:
+            models.insert(0, self.model)
+        self._models = [{"path": m, "name": os.path.basename(m),
+                         "where": os.path.relpath(os.path.dirname(m), PROJECTS) if m.startswith(PROJECTS) else os.path.dirname(m)}
+                        for m in models]
+        clips = walk(root, (".riganim",), 300) if root else []
+        self._clips = []
+        for c in clips:
+            src = clip_source(c, root)
+            self._clips.append({"path": c, "name": os.path.splitext(os.path.basename(c))[0],
+                                "where": os.path.relpath(os.path.dirname(c), root),
+                                "source": src or "",
+                                "fits": src is None or same_model(src, self.model)})
+        # clips made on this model first
+        self._clips.sort(key=lambda c: (not c["fits"], c["name"]))
+        self.listsChanged.emit()
+
+    @Slot(str)
+    def playClip(self, path):
+        """play a clip on the model it was made for: a clip on the wrong rig only mangles it"""
+        if self._keys.get("dirty") and getattr(self, "_drop_edits", None) != path:
+            self._drop_edits = path           # a second click on the same clip means it
+            self.set_status("unsaved key edits: SAVE them, or click the clip again to drop them")
+            return
+        self._drop_edits = None
+        remember_open(getattr(self, "model", "") or "", path)
+        c = next((c for c in self._clips if c["path"] == path), None)
+        if c is None or c["fits"]:
+            self.cmd("clip " + path)
+        elif c["source"] and os.path.isfile(c["source"]):
+            self.openModel(c["source"], path)
+        else:
+            self.set_status("%s was made for %s, which isn't here" % (c["name"], os.path.basename(c["source"]) or "another model"))
+
+    @Slot(str)
+    def watchRun(self, directory):
+        directory = os.path.abspath(directory)
+        state = read_state(directory)
+        if not state.get("runId"):
+            self.set_status("run is starting; try Watch again shortly")
+            return
+        if self._replay and self._replay["dir"] != directory:
+            self._end_replay()      # following another run: the old run's replay strip goes
+        if directory != self.watching:
+            self._p1_since = time.time()
+        if self._mine:
+            self._mine = False
+            self.panesChanged.emit()
+        self.watching = directory
+        self.displayed_revision = 0
+        self.live_states[directory] = state
+        if self.proc is None or self.proc.state() == QProcess.NotRunning:
+            # Boot the existing headless server directly into its blank/follow mode.
+            self.stop()
+            p = QProcess(self)
+            p.setProcessEnvironment(self.env)
+            p.setProgram(EXE)
+            p.setArguments(["--serve", "--watch-run", directory, "--size", "%dx%d" % self.view_size])
+            p.setProcessChannelMode(QProcess.SeparateChannels)
+            p.readyReadStandardOutput.connect(lambda p=p: self.onOutput(p))
+            p.readyReadStandardError.connect(lambda p=p: self._viewer_stderr(p))
+            p.finished.connect(lambda code, _st, p=p: self.onFinished(p, code))
+            self.buf = b""
+            self.proc = p
+            p.start()
+        else:
+            self.cmd("follow " + directory)
+        self.set_status("watching " + os.path.basename(directory))
+        self.scanRuns()
+
+    SEND_OFF_DELAY_MS = 1800
+
+    def maybeSendOff(self, directory, ev):
+        """A run watched while it built has just completed: let the last model sit a moment, then send it
+        off and leave the viewport empty. Opening a finished run's card later just shows it."""
+        state = ev.get("state")
+        if directory == self._bench.get("dir"):
+            return
+        if state not in TERMINAL:
+            self.saw_building.add(directory)
+        elif state == "completed" and directory in self.saw_building:
+            self.saw_building.discard(directory)
+            def go(d=directory):
+                if self.watching == d and not self._replay:
+                    self.cmd("sendoff")
+            QTimer.singleShot(self.SEND_OFF_DELAY_MS, go)
+
+    @Slot()
+    def stopWatching(self):
+        self._end_replay()
+        self.cmd("follow")
+        self.watching = ""
+        self.displayed_revision = 0
+        self.scanRuns()
+
+    # ---- the bench: tools from the wheel, used by hand on your own copy ------------------------
+    # Whatever is on screen is copied into a bench run of its own (--bench), and every tool you apply
+    # is a script line there, published as a revision the viewport follows. The run you scrubbed or
+    # watched is only ever read: its journal, revisions and script stay as they were, and the AI
+    # building it carries on untouched.
+    def bench_alive(self):
+        return self.bench_proc is not None and self.bench_proc.state() != QProcess.NotRunning
+
+    def _bench_set(self, **fields):
+        self._bench = dict(self._bench, **fields)
+        self.benchChanged.emit()
+
+    def _bench_source(self):
+        """(document to copy or "", line to run first or "", what it came from) for what is on screen"""
+        if self._replay:
+            d, rev = self._replay["dir"], self._replay.get("rev", 0)
+            path = live_runs.revision_path(d, rev)
+            if path:
+                return path, "", "%s step %d" % (os.path.basename(d), self._replay.get("at", 0) + 1)
+        if self.watching:
+            state = self.live_states.get(self.watching) or read_state(self.watching)
+            rev = self.displayed_revision
+            path = live_runs.revision_path(self.watching, rev) if rev else ""
+            path = path or preview_path(self.watching, state)
+            if path:
+                return path, "", "%s rev %d" % (os.path.basename(self.watching), rev or (state.get("snapshot") or {}).get("revision", 0))
+        if self.model and os.path.isfile(self.model):
+            if self.model.endswith(".effigy"):
+                return self.model, "", os.path.basename(self.model)
+            return "", 'add Import source="%s"' % self.model, os.path.basename(self.model)
+        return "", "", "empty"
+
+    def _bench_current(self):
+        """the bench already on screen, still running and not scrubbed back: keep editing it"""
+        if self.bench_alive() and self._bench.get("busy"):
+            return True        # still working (starting up, or a big drop going in): never pull it out from under itself
+        return (self.bench_alive() and self.watching == self._bench.get("dir")
+                and (not self._replay or self._replay.get("dir") != self._bench.get("dir")))
+
+    def bench_ensure(self):
+        if self._bench_current():
+            return True
+        source, first, label = self._bench_source()
+        # what was on screen, so the EDIT/RUN key can put it back: the scrubbed step, the run followed, the model
+        back = {"replay": self._replay.get("dir", ""), "at": self._replay.get("at", 0),
+                "watching": "" if self._replay else self.watching, "model": self.model}
+        self.benchClose()
+        stem = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-")[:40] or "empty"
+        d = os.path.join(RUNS, "bench-%s-%s" % (stem, time.strftime("%Y%m%d-%H%M%S")))
+        k = 2
+        while os.path.exists(d) or os.path.exists(d + ".json"):
+            d, k = d.rstrip("-0123456789") + "-%d" % k, k + 1
+        args = ["--bench", d, "--from", label]
+        if source:
+            # a copy beside the bench, so loading it can't write anything into the run it came from
+            base = d + ".base.effigy"
+            makedirs_private(RUNS)
+            shutil.copyfile(source, base)
+            args += ["--doc", base]
+        p = QProcess(self)
+        p.setProcessEnvironment(self.env)
+        p.setProgram(EXE)
+        p.setArguments(args)
+        p.setProcessChannelMode(QProcess.SeparateChannels)
+        p.readyReadStandardOutput.connect(lambda p=p: self._bench_output(p))
+        p.readyReadStandardError.connect(lambda p=p: self._bench_stderr(p))
+        p.finished.connect(lambda code, _st, p=p: self._bench_finished(p, code))
+        self.bench_buf = b""
+        self.bench_proc = p
+        self._bench = {"dir": d, "alive": True, "ready": False, "from": label, "bodies": [], "features": [],
+                       "canUndo": False, "form": {}, "error": "", "log": "", "busy": True,
+                       "back": back, "view": "edit"}
+        self.benchChanged.emit()
+        p.start()
+        if first:
+            self._bench_send("apply " + first)
+        self.set_status("editing a copy of " + label)
+        return True
+
+    def _bench_send(self, line):
+        if self.bench_alive():
+            self.bench_proc.write((line + "\n").encode())
+
+    def _bench_stderr(self, p):
+        err = bytes(p.readAllStandardError()).decode(errors="replace").strip()
+        if err and p is self.bench_proc:
+            self._bench_set(error=err.splitlines()[-1][:300])
+
+    def _bench_finished(self, p, code):
+        if p is self.bench_proc:
+            self.bench_proc = None
+            self._bench_set(alive=False, busy=False)
+            self.scanRuns()
+
+    def _bench_output(self, p):
+        if p is not self.bench_proc:
+            p.readAllStandardOutput()
+            return
+        self.bench_buf += bytes(p.readAllStandardOutput())
+        *lines, self.bench_buf = self.bench_buf.split(b"\n")
+        for raw in lines:
+            if not raw.startswith(b"@"):
+                continue
+            try:
+                ev = json.loads(raw[1:])
+            except ValueError:
+                continue
+            kind = ev.get("ev")
+            state = ev.get("state") if isinstance(ev.get("state"), dict) else ev
+            keep = {k: state[k] for k in ("bodies", "features", "canUndo", "revision", "slots", "presets") if k in state}
+            if kind == "ready":
+                self._bench_set(ready=True, busy=False, **keep)
+                self.watchRun(self._bench["dir"])
+            elif kind in ("applied", "undone", "state"):
+                self._bench_set(busy=False, error="", log=ev.get("log", "") or ("undid " + ev["line"] if kind == "undone" else ""), **keep)
+                if kind != "state":
+                    self.set_status(("undid " if kind == "undone" else "") + ev.get("line", "")[:80])
+            elif kind == "failed":
+                self._bench_set(busy=False, error=ev.get("error", "failed"))
+                self.set_status("can't: " + ev.get("error", "")[:100])
+            elif kind == "describe":
+                self._bench_set(form=ev, error=ev.get("error", ""))
+                if self._tool_open:
+                    self._arm_tool_pick(ev)
+
+    @Slot(str)
+    def benchDescribe(self, key):
+        """a tool picked off the wheel by hand: its fields, for the tool card"""
+        if self.bench_ensure():
+            self._bench_set(form={"key": key, "loading": True}, error="")
+            self._bench_send("describe " + key)
+
+    @Slot()
+    def benchStart(self):
+        """the material browser opened: a bench on what's on screen, so it can list the slots"""
+        if self.bench_ensure() and self._bench.get("ready"):
+            self._bench_send("state")
+
+    @Slot(str)
+    def benchApply(self, line):
+        line = " ".join(line.split())
+        if not line:
+            return
+        if self.bench_ensure():
+            self._bench_set(busy=True, error="")
+            self._bench_send("apply " + line)
+
+    @Slot()
+    def benchUndo(self):
+        if self._bench_current():
+            self._bench_set(busy=True)
+            self._bench_send("undo")
+
+    @Slot(bool)
+    def benchView(self, edit):
+        """the EDIT/RUN key: your copy on screen, or what you copied it from (the run's step, the run, the model)"""
+        if not self._bench:
+            return
+        if edit:
+            if os.path.isdir(self._bench["dir"]):
+                self.watchRun(self._bench["dir"])
+                self._bench_set(view="edit")
+            return
+        b = self._bench.get("back") or {}
+        if b.get("replay"):
+            self.replayRun(b["replay"])
+            self.replaySeek(b.get("at", 0))
+        elif b.get("watching"):
+            self.watchRun(b["watching"])
+        elif b.get("model") and os.path.isfile(b["model"]):
+            self.openModel(b["model"])
+        else:
+            self.set_status("nothing behind the bench: it started empty")
+            return
+        self._bench_set(view="run")
+
+    @Slot(str)
+    def benchKeep(self, name=""):
+        """KEEP: your edit becomes a real model in the MODELING folder. A model you opened from the folder
+        is saved over in place; anything else (a run's step, a run, an empty bench) gets a folder of its own.
+        It flies off the viewport into the folder like a finished run, then comes back up to carry on with."""
+        b = self._bench
+        if not b.get("dir") or not b.get("revision"):
+            self._bench_set(error="nothing to keep yet: make an edit first")
+            return ""
+        src = live_runs.revision_path(b["dir"], b["revision"])
+        if not src:
+            self._bench_set(error="can't find revision %s of your edit" % b["revision"])
+            return ""
+        model = (b.get("back") or {}).get("model", "")
+        if not name and model and os.path.dirname(os.path.dirname(model)) == MODELING and os.path.isfile(model):
+            d = os.path.dirname(model)                    # opened from the folder: save it back where it was
+        else:
+            back = b.get("back") or {}
+            src_dir = back.get("replay") or back.get("watching")
+            name = name or (run_name(src_dir) if src_dir else os.path.splitext(os.path.basename(model))[0] if model else "model")
+            stem = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:40] or "model"
+            d, k = os.path.join(MODELING, stem), 2
+            while os.path.exists(d):
+                d, k = os.path.join(MODELING, "%s-%d" % (stem, k)), k + 1
+        makedirs_private(d)
+        try:
+            meta = json.load(open(os.path.join(d, "kept.json")))
+        except (OSError, ValueError):
+            meta = {"name": name or os.path.basename(d), "from": b.get("from", "")}
+        meta.update(saved=time.strftime("%Y-%m-%d %H:%M:%S"), bench=b["dir"], revision=b["revision"])
+        shutil.copyfile(src, kept_model(d))
+        json.dump(meta, open(os.path.join(d, "kept.json"), "w"), indent=1)
+        self.set_status("kept " + meta["name"] + " in MODELING")
+        self._keep_to = d
+        if self.proc is not None and self.proc.state() != QProcess.NotRunning:
+            self.cmd("sendoff")                            # card frame -> sticker -> folder; sent-off reopens it
+        else:
+            self._keep_to = ""
+        return kept_model(d)
+
+    @Slot(int)
+    def openFiled(self, i):
+        """a slip out of the MODELING folder, on screen: a kept model opens to edit, a run shows what it built"""
+        if not 0 <= i < len(self._filed):
+            return
+        e = folder_entry(self._filed[i])
+        if e["kind"] == "model":
+            self.openModel(e["path"])
+        elif os.path.isdir(e["path"]):
+            self.watchRun(e["path"])
+
+    def filed_doc(self, i):
+        """the .effigy behind slip i: a kept model's file, or the last thing a run built"""
+        if not 0 <= i < len(self._filed):
+            return ""
+        e = folder_entry(self._filed[i])
+        if e["kind"] == "model":
+            return e["path"] if os.path.isfile(e["path"]) else ""
+        d = e["path"]
+        state = read_state(d)
+        return preview_path(d, state) or live_runs.revision_path(d, (state.get("snapshot") or {}).get("revision", 0)) or ""
+
+    @Slot(int, float, float)
+    def placeFiled(self, i, x, y):
+        """a slip dropped on the viewport: that model goes INTO the scene on screen, standing where it
+        was let go (the face under the cursor, else the floor), as an edit on the bench you can undo"""
+        doc = self.filed_doc(i)
+        if not doc:
+            self.set_status("nothing built in that one to drop in")
+            return
+        if self.proc is None or self.proc.state() == QProcess.NotRunning:
+            self._placing_name = folder_entry(self._filed[i])["name"]
+            self._place_landed({"ok": True, "at": [0, 0, 0], "on": "ground"}, doc)   # nothing on screen: the origin
+            return
+        self._placing, self._placing_name = doc, folder_entry(self._filed[i])["name"]
+        self.cmd("place %d %d" % (round(x), round(y)))
+
+    def _place_landed(self, ev, doc=None):
+        doc = doc or getattr(self, "_placing", "")
+        self._placing = ""
+        if not doc:
+            return
+        if not ev.get("ok"):
+            self.set_status(ev.get("refusal", "can't drop it there"))
+            return
+        x, y, z = ev["at"]
+        # the camera stays where you dropped it: through the edit copy coming up (if it isn't yet) and the model landing
+        self.cmd("holdframe %d" % (1 if self._bench_current() else 2))
+        if self.bench_ensure():
+            self._bench_set(busy=True, error="")
+            self._bench_send("place name=%s size=%.4f %s %.4f %.4f %.4f" % (re.sub(r"\W+", "", getattr(self, "_placing_name", "") or "") or "model", float(ev.get("size", 0) or 0), doc, x, y, z))
+            self.set_status("dropping %s onto %s" % (getattr(self, "_placing_name", "") or os.path.basename(doc), ev.get("on", "the scene")))
+
+    @Slot()
+    def benchClose(self):
+        """put the tools down: the bench keeps its revisions on disk (KEEP files the result), the process ends"""
+        p = self.bench_proc
+        if p is not None and p.state() != QProcess.NotRunning:
+            p.write(b"quit\n")
+            p.closeWriteChannel()
+            if not p.waitForFinished(3000):
+                p.kill()
+        self.bench_proc = None
+        if self._bench:
+            self._bench = dict(self._bench, alive=False, busy=False, form={})
+            self.benchChanged.emit()
+
+    # ---- replay: scrub a run's kept revisions, leave notes on steps ------------------------
+    def _replay_step(self, at):
+        steps = self._replay.get("steps", [])
+        if not steps:
+            return {}
+        at = max(0, min(len(steps) - 1, at))
+        st = steps[at]
+        return {"at": at, "rev": st["rev"], "op": st["op"], "code": live_runs.script_line(self._replay["dir"], st["op"]),
+                "say": live_runs.plain_words.say(live_runs.script_line(self._replay["dir"], st["op"]) or st["op"].split(": ", 1)[-1])}
+
+    def _replay_set(self, at, **extra):
+        step = self._replay_step(at)
+        if not step:
+            return
+        self._replay = dict(self._replay, **step, **extra)
+        self.cmd("seek %d" % step["rev"])
+        self.replayChanged.emit()
+
+    @Slot(str)
+    def replayRun(self, directory):
+        """WATCH on a run card: play the build back from its first step, using the revisions the run kept"""
+        directory = os.path.abspath(directory)
+        steps = live_runs.steps(directory)
+        if not steps:
+            self.set_status("nothing kept to replay for " + os.path.basename(directory))
+            return
+        if self.watching != directory:
+            self.watchRun(directory)
+        if self.watching != directory:
+            return
+        self._replay = {"dir": directory, "steps": steps, "count": len(steps), "playing": True, "shown": 0,
+                        "notes": live_runs.notes(directory), "live": directory in self.jobs or run_is_live(directory, read_state(directory))}
+        self.collapsed[directory] = False       # open the card: the scrubber and notes live on it
+        self._replay_set(0)
+        self.replayTimer.start()
+        self.scanRuns()
+        self.set_status("replaying %s: %d steps" % (os.path.basename(directory), len(steps)))
+
+    # ---- the BYO-AI notices: cost pre-flight + first-send disclosure (ai_notice.py) -------
+    def _notice_cfg_for(self, model, surface, research=False):
+        return noticelib.config_from_model(
+            model, research=research,
+            brave=bool(self.env.value("BRAVE_SEARCH_API_KEY") or os.environ.get("BRAVE_SEARCH_API_KEY")),
+            vision=bool(model.get("vision")))
+
+    def _notice_gate(self, model, surface, research=False):
+        """True when this send must stop at the notice card. Raises the card and
+        returns True; the caller stashes its pending send and returns unsent."""
+        cfg = self._notice_cfg_for(model, surface, research=research)
+        if surface == "chat":
+            cfg["surface"] = "chat"
+        need = noticelib.needs_notice(self._notice_state, cfg)
+        self._notice_cfg = cfg
+        self._notice_missing = need["missing"]
+        if not need["show"]:
+            self.noticeChanged.emit()
+            return False
+        self._notice_show = True
+        self.noticeChanged.emit()
+        return True
+
+    @Slot(bool, bool)
+    def noticeStart(self, every_time, never_show=False):
+        """[ Start the build ] on the notice card: record the ack (never sends by
+        itself), hide the card, then resume the send that was waiting on it. Check DO NOT SHOW THIS AGAIN and the card never comes back for that provider; another provider still gets its own first-send card."""
+        pending, self._pending_notice = self._pending_notice, None
+        if self._notice_cfg is not None:
+            noticelib.ack_notice(self._notice_state, self._notice_cfg,
+                                 self._notice_missing, every_time=bool(every_time),
+                                 never_show=bool(never_show))
+            noticelib.save_state(self._notice_path, self._notice_state)
+        self._notice_show = False
+        self.noticeChanged.emit()
+        if pending and pending[0] == "research":
+            self.beginResearch(pending[1], pending[2])
+        elif pending and pending[0] == "chat":
+            self.sendChat(pending[1])
+
+    @Slot()
+    def noticeCancel(self):
+        """[ Not yet ]: nothing was sent, nothing is acked; the prompt stays filled."""
+        self._pending_notice = None
+        self._notice_show = False
+        self.noticeChanged.emit()
+        self.set_status("not started — nothing was sent")
+
+    @Slot(str, int)
+    def replayAt(self, directory, rev):
+        """a step clicked in the watch panel: the replay opens paused on that step (a note or REWIND HERE goes from there)"""
+        self.replayRun(directory)
+        r = self._replay
+        if not r or r.get("dir") != os.path.abspath(directory):
+            return
+        self.replayTimer.stop()
+        at = next((i for i, st in enumerate(r["steps"]) if st["rev"] == rev), r["count"] - 1)
+        self._replay_set(at, playing=False)
+
+    def _replay_tick(self):
+        r = self._replay
+        if not r or not r.get("playing"):
+            self.replayTimer.stop()
+            return
+        if r.get("shown") != r.get("rev"):
+            return                              # still loading this step: hold it until it shows
+        if r["at"] >= r["count"] - 1:
+            fresh = live_runs.steps(r["dir"])   # a live run may have moved on meanwhile
+            if len(fresh) > r["count"]:
+                self._replay = dict(r, steps=fresh, count=len(fresh))
+            else:
+                self._replay = dict(r, playing=False)
+                self.replayTimer.stop()
+                self.replayChanged.emit()
+                return
+        self._replay_set(self._replay["at"] + 1)
+
+    @Slot(int)
+    def replaySeek(self, at):
+        """the scrubber: show step `at` (0-based) and stop playing"""
+        if self._replay:
+            self.replayTimer.stop()
+            self._replay_set(at, playing=False)
+
+    @Slot()
+    def replayToggle(self):
+        r = self._replay
+        if not r:
+            return
+        if r.get("playing"):
+            self.replayTimer.stop()
+            self._replay = dict(r, playing=False)
+            self.replayChanged.emit()
+        else:
+            self._replay_set(0 if r["at"] >= r["count"] - 1 else r["at"], playing=True)
+            self.replayTimer.start()
+
+    @Slot()
+    def replayLive(self):
+        """stop replaying and go back to the run's latest model"""
+        self._end_replay()
+        self.cmd("seek 0")
+
+    def _end_replay(self):
+        if self._replay:
+            self.replayTimer.stop()
+            self._replay = {}
+            self.replayChanged.emit()
+
+    def rewind_run(self, r):
+        """REWIND HERE (pane 1 or a split pane): an open script run goes back to the replay's step; the
+        modeller is told by a note. True when sent."""
+        live = read_state(r["dir"])
+        if live.get("state") not in live_runs.OPEN or not run_is_live(r["dir"], live):
+            self.set_status("only an open run can rewind; this one has ended")
+            return False
+        try:
+            live_runs.rewind_open(r["dir"], r["rev"], r["op"])
+        except (OSError, ValueError) as e:
+            self.set_status("rewind: " + str(e))
+            return False
+        self.set_status("rewound to step %d: the run builds on it from here" % r["rev"])
+        return True
+
+    @Slot()
+    def replayRewind(self):
+        if self._replay and self.rewind_run(self._replay):
+            self.replayLive()                   # back to the live model, which is now that step
+
+    @Slot(str)
+    def addNote(self, text):
+        """a note on the step on screen: kept with the run for whoever models next (geppetto-notes /
+        geppetto-live print it); a run still going also gets it as a direction right away"""
+        r = self._replay
+        if not r or not text.strip():
+            return
+        try:
+            note = live_runs.add_note(r["dir"], r["rev"], r["op"], text)
+        except (OSError, ValueError) as e:
+            self.set_status("note: " + str(e))
+            return
+        # a script run takes no directions: the Claude session behind it gets the note (geppetto-live wait, its
+        # next `more`, or claude_gate's hook at its next tool call); other modellers run geppetto-notes --follow
+        script = os.path.basename(r["dir"]).startswith("script-")
+        sent = "" if not script else "; sent to Claude" if claude_gate.session_for_run(r["dir"]) else "; the modeller picks it up"
+        if not sent and (r["dir"] in self.jobs or run_is_live(r["dir"], read_state(r["dir"]))):
+            try:
+                send_command(r["dir"], "instruct", text="note on step %d (%s): %s" % (r["rev"], r["op"][:200], note["text"]))
+                sent = "; sent to the run"
+            except (OSError, ValueError):
+                pass
+        self._replay = dict(r, notes=live_runs.notes(r["dir"]))
+        self.replayChanged.emit()
+        self.set_status("note kept on step %d%s" % (r["rev"], sent))
+
+
+    # ---- research runs ---------------------------------------------------------------------
+    @Slot()
+    def scanRuns(self):
+        for directory in list(self.stop_requests):
+            self.tryCancel(directory)
+        out = []
+        if os.path.isdir(RUNS):
+            for name in sorted(os.listdir(RUNS), reverse=True):
+                d = os.path.join(RUNS, name)
+                if name.startswith(".") or not os.path.isdir(d):
+                    continue
+                files = set(os.listdir(d))
+                r = {"dir": d, "name": name, "status": "running" if d in self.jobs else "unknown",
+                     "score": -1, "best": "", "sources": 0, "rounds": 0, "prompt": ""}
+                meta = os.path.join(RUNS, name + ".json")
+                try:
+                    j = json.load(open(meta))
+                    r["prompt"] = j.get("prompt", "")
+                    r["bench"] = bool(j.get("bench"))
+                    r["started"] = float(j.get("started", 0) or 0)
+                    r["agentModel"] = str(j.get("agentModel") or "")
+                    # 2026-10-25 who-fix: first scan records who in the run's meta,
+                    # so a later header never shows a blank modeller for a run whose
+                    # starter left no model field. One field only, only when neither
+                    # field is there, never for bench runs; the runner owns the rest.
+                    if not j.get("modeller") and not j.get("model") and not j.get("bench"):
+                        who0 = paneslib.modeller(d)
+                        if who0:
+                            try:
+                                fresh = json.load(open(meta))
+                                if isinstance(fresh, dict) and not fresh.get("modeller") and not fresh.get("model"):
+                                    fresh["modeller"] = who0
+                                    fresh["identitySource"] = "process"
+                                    tmp = meta + ".tmp-who"
+                                    with open(tmp, "w") as fh:
+                                        json.dump(fresh, fh)
+                                    os.replace(tmp, meta)
+                            except (OSError, ValueError):
+                                pass
+                except (OSError, ValueError, AttributeError):
+                    pass
+                r["title"] = run_name(d)                  # a word or two for its book's spine
+                r["spine"] = ""                           # what you lettered on it yourself (right-click the book)
+                try:
+                    r["spine"] = str(json.load(open(meta)).get("spine", ""))
+                except (OSError, ValueError, AttributeError):
+                    pass
+                if not r["prompt"]:
+                    for f in sorted(files):
+                        if f.endswith("-brief.txt"):
+                            r["prompt"] = open(os.path.join(d, f)).read().split("\n")[1][:200]
+                            break
+                for f in sorted(files):
+                    p = os.path.join(d, f)
+                    try:
+                        if f.endswith("-result.json"):
+                            j = json.load(open(p))
+                            r["status"] = j.get("status", r["status"])
+                            r["best"] = os.path.join(d, j.get("best", "")) if j.get("best") else ""
+                            r["rounds"] = len(j.get("rounds", []))
+                            sc = [x.get("score", 0) for x in j.get("rounds", [])]
+                            if sc:
+                                r["score"] = max(sc)
+                        elif f == "stopped.json" and d not in self.jobs:
+                            j = json.load(open(p))
+                            r["status"] = "stopped: " + str(j.get("reason", ""))[:60]
+                            if j.get("bestCheckpoint"):
+                                r["best"] = os.path.join(d, j["bestCheckpoint"])
+                        elif f.endswith("-sources.json"):
+                            r["sources"] += len(json.load(open(p)))
+                        elif f.endswith("-selection.json") and r["score"] < 0:
+                            r["score"] = json.load(open(p)).get("score", -1)
+                    except (OSError, ValueError, AttributeError):
+                        pass
+                r.update(model_sheet.card(d))     # the researcher's model sheet, photos and links, for the card
+                if r["status"] == "unknown" and d not in self.jobs:
+                    r["status"] = "running" if run_is_live(d, read_state(d)) else "ended"
+                if not r["best"]:
+                    eff = sorted(f for f in files if f.endswith(".effigy"))
+                    if eff:
+                        r["best"] = os.path.join(d, eff[-1])
+                live = read_state(d)
+                if live:
+                    self.live_states[d] = live
+                    r["activity"] = activity(live)
+                    r["operation"] = live.get("operation") or ""     # the line being built: the tool wheel's tool
+                    r["latestRevision"] = (live.get("snapshot") or {}).get("revision", 0)
+                    try:                                # when the run last did anything: a quiet run may be stuck
+                        r["lastEvent"] = os.stat(os.path.join(d, ".live", "events.jsonl")).st_mtime
+                    except OSError:
+                        r["lastEvent"] = 0
+                    r["displayedRevision"] = self.displayed_revision if self.watching == d else 0
+                    r["wheelOp"] = live_runs.revision_op(d, r["latestRevision"])   # the op of its latest change: the wheel, unwatched
+                    r["preview"] = preview_path(d, live)
+                    control = control_state(live)
+                    r["paused"] = bool(control.get("paused") or control.get("pauseRequested"))
+                    r["pace"] = control.get("paceSeconds", 0) or 0
+                    r["pendingDirections"] = control.get("pendingDirections", 0) or 0
+                    # an open script run between lines: "open" (takes more) or "held" (a bad line, waiting for its fix)
+                    r["openState"] = live.get("state") if live.get("state") in live_runs.OPEN else ""
+                    r["outcome"] = str(live.get("outcome") or "")[:300]
+                    r["watch"] = live_runs.watch(d, live) if run_is_live(d, live) else {}
+                    if live.get("state") in ("completed", "below-target", "cancelled", "failed"):
+                        r["status"] = r["activity"]
+                    elif run_is_live(d, live):
+                        r["status"] = "running"         # also a run started outside the chest (a script run)
+                else:
+                    r.update(activity="starting" if d in self.jobs else "", operation="", wheelOp="", latestRevision=0, displayedRevision=0, preview="",
+                             paused=False, pace=0, pendingDirections=0, openState="", outcome="", watch={})
+                r["pane"] = self.pane_of(d)             # the viewport pane showing it, 0 for none
+                # who is building it: the session's title (its Claude Code transcript), else the model named in its meta
+                r["modeller"] = paneslib.modeller(d)
+                r["script"] = paneslib.script_label(d)
+                r["phase"] = live.get("state", "")
+                r["who"] = r["modeller"]
+                if r["pane"] or r["status"] == "running":
+                    r["telemetry"] = agent_activity.telemetry(d, live, r)
+                    observed_phase = r["telemetry"]["buildPhase"]
+                    if r["status"] == "running" and observed_phase:
+                        r["openState"] = observed_phase if observed_phase in live_runs.OPEN else ""
+                        effective = dict(live, state=observed_phase, operation=r["telemetry"]["operation"],
+                                         outcome=r["telemetry"]["outcome"])
+                        r["watch"] = live_runs.watch(d, effective)
+                else:
+                    r["telemetry"] = {}
+                r["waiting"] = d in self.waiting and r["pane"] == 0   # live, but every pane is busy
+                r["collapsed"] = self.collapsed.get(d, r["status"] != "running" and r["pane"] == 0)
+                log = os.path.join(RUNS, name + ".log")
+                r["log"] = ""
+                try:
+                    with open(log, "rb") as f:
+                        f.seek(max(0, os.path.getsize(log) - 400))
+                        tail = [x for x in f.read().decode(errors="replace").splitlines() if x.strip() and not x.startswith("@")]
+                        r["log"] = tail[-1][:120] if tail else ""
+                except OSError:
+                    pass
+                if not r.get("bench"):          # your bench copies stay off the list: what you KEEP goes in MODELING
+                    out.append(r)
+        out.sort(key=lambda r: r["status"] != "running")    # live runs on top
+        dirs = {r["dir"] for r in out}
+        if self.seen_runs is None:
+            # 2026-10-25 fix cluster 2 (startup): snapshot the pre-start runs and
+            # never auto-follow them this session. The old branch added every
+            # running pre-start run to auto_pending and relied on the first
+            # autoFollow() to clear it; that left the set itself unguarded for
+            # any later scan that re-adds a dir. Cards still list these runs.
+            self._startup_runs = set(dirs)
+        else:
+            self.auto_pending |= (dirs - self.seen_runs) - self._startup_runs
+        self.seen_runs = dirs
+        if out != self._runs:
+            self._runs = out
+            self.runsChanged.emit()
+        if self.auto_pending or self.waiting:
+            QTimer.singleShot(0, self.autoFollow)
+        self.tidy_panes()
+        self.auto_shrink()
+
+    # a pane is only emptied once its owner has been gone this long: quiet for 5 min is somebody thinking or
+    # waiting on po, not somebody gone, and a pane that empties under a working session is worse than a stale one
+    FREE_AFTER = 1800.0
+    MODEL_LEAVE = FREE_AFTER                    # a model opened by nobody we can name: freed after this long untouched
+
+    def owner_gone(self, info, now):
+        return bool(info) and info["presence"] == "left" and now - (info.get("seen") or 0) >= self.FREE_AFTER
+
+    def tidy_panes(self, now=None):
+        """who is in each pane; a pane whose owner is long gone and whose run is over is freed, so AUTO can shrink"""
+        now = time.time() if now is None else now
+        for pn in self.panes[:self._layout - 1]:
+            pn.refresh_owner(now)
+        if self.watching or self.model:
+            pane_owner.owner("", self.watching, self._p1_since, live=bool(self._replay) or self.run_live(self.watching), now=now)
+        for p in self.panes[:self._layout - 1]:
+            info = p.refresh_owner(now)
+            if not self.owner_gone(info, now) or p._replay or (p.run and self.run_live(p.run)):
+                continue
+            if p.model and not p.owner_session and now - p.since < self.MODEL_LEAVE:
+                continue
+            freed_what = paneslib.script_label(p.run) if p.run else (p.model.split("/")[-1] if p.model else "")
+            self.set_status("pane %d freed: %s left%s" % (p.number, info.get("title") or paneslib.modeller(p.run) or "its owner", " \u2014 " + freed_what if freed_what else ""))
+            p.clear()
+            p.refresh_owner(now)
+        info = {}
+        if self.watching:
+            info = pane_owner.owner("", self.watching, self._p1_since, live=bool(self._replay) or self.run_live(self.watching), now=now)
+        if info != self._p1_owner:
+            self._p1_owner = info
+            self.p1OwnerChanged.emit()
+        if (self.owner_gone(info, now) and self._layout > 1 and not self._replay
+                and not self.run_live(self.watching)):
+            freed1_what = paneslib.script_label(self.watching) if self.watching else (self.model.split("/")[-1] if self.model else "")
+            self.set_status("pane 1 freed: %s left%s" % (info.get("title") or "its owner", " \u2014 " + freed1_what if freed1_what else ""))
+            self.stopWatching()
+        self.save_panes()
+
+    def save_panes(self):
+        """what panes 2-4 show and who put it there, so a restarted chest puts it all back"""
+        if getattr(self, "_quitting", False):
+            return                          # quitting: quit_all() already deleted PANES_SAVED; never recreate it
+        if not getattr(self, "_panes_restored", False):
+            return                          # startup: don't overwrite what restore_panes hasn't read yet
+        now = [{"n": p.number, "run": p.run, "model": p.model, "session": p.owner_session, "since": p.since}
+               for p in self.panes if p.run or p.model]
+        now += [e for k, e in sorted(self._parked.items()) if k not in {x["n"] for x in now}]
+        if now == getattr(self, "_saved_panes", None):
+            return
+        self._saved_panes = now
+        try:
+            makedirs_private(os.path.dirname(PANES_SAVED))
+            with open_private(PANES_SAVED + ".tmp") as f:
+                json.dump(now, f)
+            os.replace(PANES_SAVED + ".tmp", PANES_SAVED)
+        except OSError:
+            pass
+
+    def restore_panes(self):
+        """a restart: each pane gets back the run or model it had (if it is still there, and its owner isn't long gone)"""
+        self._panes_restored = True
+        try:
+            saved = json.load(open(PANES_SAVED))
+        except (OSError, ValueError):
+            return
+        # 2026-10-24: a fresh start never brings back a run session (live, paused, or
+        # finished) - that is what looked like people already modelling. Static models
+        # still restore as before; finished runs stay on their cards to open by hand.
+        entries = saved if isinstance(saved, list) else []
+        entries = [e for e in entries if not (isinstance(e, dict) and e.get("run"))]
+        self.put_back(entries)
+
+    def put_back(self, entries):
+        """give empty shown panes back what they showed: [{n, run, model, session, since}]"""
+        now = time.time()
+        for e in entries:
+            n = e.get("n") if isinstance(e, dict) else None
+            if n not in (2, 3, 4):
+                continue
+            if n > self._layout:
+                self._parked[n] = e         # hidden by the layout: comes back when it grows
+                continue
+            p = self.panes[n - 2]
+            if p.run or p.model:
+                continue                    # a live run already took it
+            run, model = e.get("run") or "", e.get("model") or ""
+            if run and os.path.isdir(run) and not self.pane_of(run):
+                if p.show(run):
+                    p.since, p.owner_session = e.get("since") or now, e.get("session") or ""
+            elif model and os.path.isfile(model) and os.path.abspath(model) != DEFAULT_MODEL:   # the character starts in pane 1 only
+                p.openModel(model, "", e.get("session") or "")
+                p.since = e.get("since") or now
+            if self.owner_gone(p.refresh_owner(now), now):
+                p.clear()                   # nobody left to want it
+
+    def autoFollow(self):
+        if getattr(self, "_fresh_start", False):
+            # 2026-10-24: runs already going when the chest opened are not placed in
+            # panes; only runs that appear after this start (seen_runs already set)
+            # will be followed. Their cards still list them.
+            self._fresh_start = False
+            self.auto_pending.clear()
+            self.waiting = []
+            return
+        # 2026-10-25 fix cluster 2 (startup): defence in depth at the placement
+        # gate. A pre-start run that reached auto_pending by any other path
+        # (a later caller, a merged worker's sweep re-adding it) is dropped
+        # here, never placed. Waiting is NOT filtered here on purpose: a run
+        # in waiting got there by an in-session move (_apply_layout) or by
+        # autoFollow itself, i.e. after an explicit placement, so dropping it
+        # would break a user's own pane move.
+        self.auto_pending -= getattr(self, "_startup_runs", set())
+        """a run that started after the chest did: put it in an EMPTY pane and bring the chest to the front.
+        A pane showing a live run (or a replay, or your bench) is never taken: with every pane busy the run
+        waits on its card ("waiting for a pane") until one frees up or po drags it into one."""
+        for d in sorted(self.auto_pending):
+            state = read_state(d)
+            if not os.path.isdir(d) or (state and not state.get("runId") and not run_is_live(d, state)):
+                self.auto_pending.discard(d)
+            elif state.get("runId"):        # live, or a short run already done: either way po should see it
+                self.auto_pending.discard(d)
+                self.collapsed.pop(d, None)
+                if d != self._bench.get("dir") and not self.pane_of(d) and d not in self.waiting:
+                    self.waiting.append(d)
+        placed = False
+        for d in list(self.waiting):
+            if not os.path.isdir(d) or self.pane_of(d):
+                self.waiting.remove(d)
+                continue
+            live = self.run_live(d)
+            n = self.free_pane(d)
+            if not n and self._auto and self._layout < 4:
+                # AUTO: make room, nobody loses their pane. Growing the layout runs autoFollow again, which
+                # places this run (and the rest of the queue) itself: carrying on here would remove d twice
+                self._apply_layout(2 if self._layout == 1 else 4)
+                if placed:
+                    kwin_raise()
+                return
+            if not n and not live:
+                self.waiting.remove(d)      # a finished run doesn't queue for a pane: its card has it
+                continue
+            if not n:
+                self.set_status("%s waits for a pane: every pane shows a live run" % os.path.basename(d))
+                break
+            self.waiting.remove(d)
+            self.showRunIn(d, n)
+            placed = True
+        if placed:
+            kwin_raise()
+
+    SHRINK_AFTER = 8.0      # s a pane stays up after its run ends: the sticker flies, po sees the finished model
+
+    def auto_shrink(self):
+        """AUTO: back down to the fewest panes the busy ones need, once they have been enough for a while"""
+        if not self._auto or self._layout == 1 or self.waiting or self.auto_pending:
+            self._shrink_at = 0.0
+            return
+        busy = sum(1 for n in range(1, self._layout + 1) if self.pane_busy(n))
+        need = 1 if busy <= 1 else 2 if busy == 2 else 4
+        # live runs move into the panes left (_apply_layout queues them); a model a session opened can't move
+        # and a finished run stays while whoever made it is still about
+        held = max((p.number for p in self.panes[:self._layout - 1]
+                    if p.model or (p.run and p._owner.get("presence") in ("here", "idle"))), default=1)
+        need = max(need, 1 if held <= 1 else 2 if held == 2 else 4)
+        if need >= self._layout:
+            self._shrink_at = 0.0
+            return
+        now = time.monotonic()
+        if not self._shrink_at:
+            self._shrink_at = now
+        elif now - self._shrink_at >= self.SHRINK_AFTER:
+            self._shrink_at = 0.0
+            # busy panes the smaller layout hides go back to waiting and land in its free panes
+            self._apply_layout(need)
+
+    # ---- split viewport: 1, 2 or 4 panes, each with a run of its own ---------------------------
+    def run_live(self, d):
+        return d in self.jobs or run_is_live(d, read_state(d))
+
+    def pane_of(self, d):
+        """the pane number (1-4) showing run d, 0 for none"""
+        if not d:
+            return 0
+        if self.watching == d:
+            return 1
+        return next((p.number for p in self.panes[:self._layout - 1] if p.run == d), 0)
+
+    def paneVerb(self, rest, session=""):
+        """`host.py pane N VERB ...`: so several sessions can each work in their own pane at once.
+        session: the sender's CLAUDE_CODE_SESSION_ID, so the pane header names them and frees the pane when they leave"""
+        bits = rest.split(" ", 2)
+        try:
+            n = int(bits[0])
+        except ValueError:
+            return "pane N model|clip|cmd|clear ..."
+        if not 2 <= n <= 4:
+            return "pane must be 2-4 (pane 1 is the plain verbs)"
+        verb, arg = (bits + ["", ""])[1], (bits + ["", ""])[2]
+        if self._layout < n:
+            self.setViewLayout(2 if n == 2 else 4)
+            self._auto = True                      # keep AUTO: the pane holds a model, so it counts as busy
+            self.panesChanged.emit()
+        pane = self.panes[n - 2]
+        if pane.model and verb in ("clip", "cmd") and (not session or session == pane.owner_session):
+            pane.touch(session)
+        if verb == "model":
+            path, _, clip = arg.partition(" ")
+            path = os.path.abspath(os.path.expanduser(path))
+            if not os.path.isfile(path):
+                return "no such model: " + path
+            pane.openModel(path, os.path.abspath(os.path.expanduser(clip)) if clip else "", session)
+            self.set_status("pane %d: %s" % (n, os.path.basename(path)))
+        elif verb == "clip":
+            pane.cmd("clip " + os.path.abspath(os.path.expanduser(arg)))
+        elif verb == "cmd":
+            pane.cmd(arg)
+        elif verb == "clear":
+            pane.clear()
+        elif verb == "face":                       # pane N face [shut]: the Face Poser on this pane
+            self.faceOpen(0 if arg.strip() == "shut" else n)
+        else:
+            return "pane N model|clip|cmd|face|clear ..."
+        return "ok"
+
+    @Slot(int, result=bool)
+    def paneBusy(self, n):
+        """a live run, a replay or your bench in pane n: it can't be given to another run"""
+        return 1 <= n <= 4 and self.pane_busy(n)
+
+    def pane_busy(self, n):
+        if n == 1:
+            if self._mine and not self.watching and self.model and self.proc is not None and self.proc.state() != QProcess.NotRunning:
+                return True                 # po's own scene: a run never takes it over
+            return bool(self._replay) or self.bench_alive() or (bool(self.watching) and self.run_live(self.watching))
+        return self.panes[n - 2].busy()
+
+    def pane_shows(self, n):
+        """the run pane n shows (finished or not), "" for none"""
+        return self.watching if n == 1 else self.panes[n - 2].run
+
+    def free_pane(self, d=""):
+        """a shown pane with nothing live in it, 0 when all are busy. For run d: the pane showing the last run
+        of the same modeller first (a session keeps its pane), then an empty one, then one showing an old result"""
+        free = [n for n in range(1, self._layout + 1) if not self.pane_busy(n)]
+        who = paneslib.modeller(d) if d else ""
+        if who:
+            mine = [n for n in free if self.pane_shows(n) and paneslib.modeller(self.pane_shows(n)) == who]
+            if mine:
+                return mine[0]
+        empty = [n for n in free if not self.pane_shows(n)]
+        return (empty or free or [0])[0]
+
+    def pane_setup(self):
+        """what a fresh pane viewer is told: pane 1's camera when they are linked.
+        autoframe 0: ServeMode still frames the first model once, then the camera
+        stays across revisions until the user turns TRACK on."""
+        return ["autoframe 0"] + (["view %g %g" % self.cam] if self._link and self.cam else [])
+
+    @Slot(str, result=str)
+    def runWho(self, d):
+        """the modeller building run d (a pane's header)"""
+        return paneslib.modeller(d) if d else ""
+
+    @Slot(str, result=str)
+    def runScript(self, d):
+        """run d's script as folder/file, or its prompt"""
+        return paneslib.script_label(d) if d else ""
+
+    @Slot(str, int)
+    def showRunIn(self, d, n):
+        """put run d in pane n (1-4), live; it leaves whichever pane had it"""
+        d = os.path.abspath(d)
+        n = max(1, min(self._layout, n))
+        if d in self.waiting:
+            self.waiting.remove(d)
+        for p in self.panes:
+            if p.run == d and p.number != n:
+                p.clear()
+        if n == 1:
+            if self.bench_alive():
+                self.set_status("pane 1 has your edit: KEEP or close it first, or put the run in another pane")
+                return
+            self.watchRun(d)
+        else:
+            if self.watching == d:
+                self.stopWatching()
+            if self.panes[n - 2].show(d):
+                self.set_status("pane %d: %s" % (n, os.path.basename(d)))
+        self.collapsed.pop(d, None)
+        self.scanRuns()
+
+    @Slot(str, int)
+    def replayIn(self, d, n):
+        """WATCH/REPLAY on a run card, into pane n"""
+        if n <= 1:
+            self.replayRun(d)
+        else:
+            self.panes[n - 2].replayRun(d)
+        self.scanRuns()
+
+    @Slot(int)
+    def clearPane(self, n):
+        if n == 1:
+            if self._bench.get("dir") and self.bench_alive():
+                self._clear_note = "pane 1 has your edit: KEEP or close it first"
+                self.clearNoteChanged.emit()
+                self.set_status("pane 1 has your edit: KEEP or close it first")
+                return
+            self.stopWatching()
+            self.stop()
+            self.model = ""
+            self._info = {}
+            self.infoChanged.emit()
+            self.panesChanged.emit()
+            self._clear_note = ""
+            self.clearNoteChanged.emit()
+            self.set_status("pane 1 cleared")
+        elif 2 <= n <= 4:
+            self.panes[n - 2].clear()
+            self.scanRuns()
+
+    @Slot(str)
+    def setScheme(self, name):
+        """the chest's enamel colour: one of art/schemes/<name>/ (baked by bake.py --schemes), or "red" for stock"""
+        name = (name or "red").strip().lower()
+        if name != "red" and not os.path.isdir(os.path.join(HERE, "art", "schemes", name)):
+            self.set_status("no colour scheme %r: bake it with bake.py --schemes %s" % (name, name))
+            return
+        self._scheme = name
+        self._save_view_prefs()
+        self.schemeChanged.emit()
+        self.set_status("colour scheme: " + name)
+
+    @Slot(int)
+    def setViewLayout(self, n):
+        """1, 2 or 4 panes, picked by hand: AUTO goes off. 0 is AUTO"""
+        self._solo = 0
+        if n == 0:
+            self._auto = True
+            self._shrink_at = 0.0
+            self._save_view_prefs()
+            self.panesChanged.emit()
+            self.set_status("viewports: AUTO, a pane for each live run")
+            self.scanRuns()
+            return
+        if n not in (1, 2, 4):
+            self.set_status("viewports takes AUTO, 1, 2 or 4")
+            return
+        self._auto = False
+        self._apply_layout(n)
+
+    def _apply_layout(self, n):
+        """show n panes. Panes the layout hides let their live runs go back to waiting for a pane, and
+        a live run moves from a hidden pane into a free shown one before anything else"""
+        if n == self._layout:
+            self._save_view_prefs()
+            self.panesChanged.emit()
+            return
+        moved = []
+        for p in self.panes[n - 1:]:
+            if p.run and (self.run_live(p.run) or p.busy()) and p.run not in self.waiting:
+                moved.append(p.run)
+            elif p.run or p.model:
+                # a hidden pane keeps what it showed: growing the layout again gives it back
+                self._parked[p.number] = {"n": p.number, "run": p.run, "model": p.model,
+                                          "session": p.owner_session, "since": p.since}
+            if p.alive() or p.run or p.model:
+                p.shut()
+        self.waiting[:0] = moved
+        if self._solo > n:
+            self._solo = 0
+        grew = n > self._layout
+        self._layout = n
+        if grew:
+            back = [self._parked.pop(k) for k in sorted(self._parked) if k <= n]
+            self.put_back(back)
+        self._save_view_prefs()
+        self.panesChanged.emit()
+        self.set_status("viewports: %s%d pane%s" % ("AUTO, " if self._auto else "", n, "" if n == 1 else "s"))
+        self.scanRuns()
+        if self.waiting:
+            self.autoFollow()
+
+    @Slot(int)
+    def setSolo(self, n):
+        """1 pane, the one po picks: pane n full size, the others stay in their places hidden (nothing moves)"""
+        if n not in (1, 2, 3, 4):
+            return
+        self._auto = False
+        if n > self._layout:
+            self._apply_layout(2 if n == 2 else 4)
+        self._solo = n
+        self._save_view_prefs()
+        self.panesChanged.emit()
+        self.set_status("viewports: only pane %d, the others keep going hidden" % n)
+
+    @Slot(bool)
+    def setLinkCameras(self, on):
+        self._link = bool(on)
+        self._save_view_prefs()
+        if self._link and self.cam:
+            self.camAll("view %g %g" % self.cam)
+        self.panesChanged.emit()
+        self.set_status("cameras linked: turning one pane turns them all" if self._link else "each pane has its own camera")
+
+    @Slot(str)
+    def camAll(self, line):
+        """a camera move for every shown pane (link cameras)"""
+        self.cmd(line)
+        for p in self.panes[:self._layout - 1]:
+            p.cmd(line)
+
+    @Slot(int, int)
+    def setViewSize(self, w, h):
+        """pane 1 was resized by the layout: render at its size, so it isn't stretched"""
+        w, h = max(16, int(w)), max(16, int(h))
+        if (w, h) != self.view_size:
+            self.view_size = (w, h)
+            self.cmd("size %d %d" % (w, h))
+
+    def _save_view_prefs(self):
+        try:
+            makedirs_private(os.path.dirname(VIEW_PREFS))
+            with open_private(VIEW_PREFS + ".tmp") as f:
+                json.dump({"layout": self._layout, "link": self._link, "auto": self._auto, "solo": self._solo,
+                           "scheme": self._scheme}, f)
+            os.replace(VIEW_PREFS + ".tmp", VIEW_PREFS)
+        except OSError:
+            self.set_status("could not save the viewport layout")
+
+    def paneSticker(self, pane, data, w, h):
+        """a run finishing in pane 2-4: its sticker, cut and filed like pane 1's"""
+        got = stickerlib.cut(data, w, h)
+        if got is None:
+            return
+        rgba, (x, y, sw, sh) = got
+        path = os.path.join(pane.run, "sticker.png")
+        if not QImage(rgba.tobytes(), sw, sh, sw * 4, QImage.Format_RGBA8888).save(path):
+            self.set_status("sticker: could not write " + path)
+            return
+        self._landing = [path] + [f for f in self._filed if f != path]
+        self.paneStickerMade.emit(pane.number, "file://" + path, x / w, y / h, sw / w, sh / h)
+
+    def note_sent(self, r, text):
+        """a note left in pane 2-4: a research run still going gets it as a direction too"""
+        script = os.path.basename(r["dir"]).startswith("script-")
+        sent = "" if not script else "; sent to Claude" if claude_gate.session_for_run(r["dir"]) else "; the modeller picks it up"
+        if not sent and self.run_live(r["dir"]):
+            try:
+                send_command(r["dir"], "instruct", text="note on step %d (%s): %s" % (r["rev"], r["op"][:200], text.strip()))
+                sent = "; sent to the run"
+            except (OSError, ValueError):
+                pass
+        self.set_status("note kept on step %d%s" % (r["rev"], sent))
+
+    def _save_model_preferences(self):
+        self._model_preferences = {"chat": self._chat_model, "research": self.ai_model, "claude": self._claude_model}
+        try:
+            makedirs_private(os.path.dirname(self._preferences_path))
+            temporary = self._preferences_path + ".tmp"
+            with open_private(temporary) as f:
+                json.dump(self._model_preferences, f)
+            os.replace(temporary, self._preferences_path)
+        except OSError:
+            self.set_status("could not save model selection")
+
+    @Slot(str)
+    def setAiModel(self, model_id):
+        model = chatlib.find(model_id, self._chat_models)
+        if model and model.get("research", True) and model.get("available", True):
+            self.ai_model = model_id
+            self._save_model_preferences()
+            self.runsChanged.emit()
+
+    @Slot()
+    def cycleAiModel(self):
+        names = [m["id"] for m in self.researchModels if m.get("available", True)]
+        if names:
+            self.setAiModel(names[(names.index(self.ai_model) + 1) % len(names)] if self.ai_model in names else names[0])
+
+    @Slot(str, result=bool)
+    def startResearch(self, prompt):
+        return bool(self.beginResearch(prompt))
+
+    def beginResearch(self, prompt, model_id=None):
+        """research only: refs/ photos and a model sheet, never a model. Returns the run folder, or ''"""
+        prompt = prompt.strip()
+        if not prompt:
+            return ""
+        model = chatlib.find(model_id or self.ai_model, self._chat_models)
+        if not model:
+            self.set_status("select a research model first")
+            return ""
+        try:
+            connection = chatlib.research_arguments(model)
+        except RuntimeError as e:
+            self.set_status(str(e))
+            return ""
+        if self._notice_gate(model, "research", research=True):
+            self._pending_notice = ("research", prompt, model_id)
+            self.set_status("first, in plain words: the money, and what leaves this machine")
+            return ""
+        makedirs_private(RUNS)
+        slug = re.sub(r"[^a-z0-9]+", "-", prompt.lower()).strip("-")[:32] or "run"
+        name = time.strftime("%Y%m%d-%H%M%S-") + str(time.time_ns() % 1000000) + "-" + slug
+        d = os.path.join(RUNS, name)
+        with open_private(os.path.join(RUNS, name + ".json")) as f:
+            json.dump({"prompt": prompt, "model": model["label"], "started": time.time()}, f)
+        # Minimal env, not the whole process environment (audit G2): baseline + research's
+        # own search keys + only the selected model's key. See chatlib.research_env.
+        env = chatlib.research_env({k: self.env.value(k) for k in chatlib.RESEARCH_ENV_BASE}, model)
+        # its own session, so restarting the chest does not kill a research run; its pid goes in the
+        # run's .json, which run_is_live checks, and STOP/PAUSE go through the run's control files as before
+        try:
+            with open_private(os.path.join(RUNS, name + ".log"), "ab") as log:
+                # NOTE (audit G1, remaining): the prompt still travels in argv because the
+                # terminal CLI's only prompt contract is --prompt (AiCli.cs) — no --prompt-file
+                # or stdin option exists to switch to. The key never travels this way
+                # (--key-env name only, value in env above). Closing this needs a C# CLI change.
+                p = subprocess.Popen([EXE, "--ai", "research"] + connection + ["--out", d, "--prompt", prompt],
+                                     stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, env=env, start_new_session=True)
+        except OSError:
+            self.set_status("research process failed to start; check the desktop executable")
+            return ""
+        with open_private(os.path.join(RUNS, name + ".json")) as f:
+            json.dump({"prompt": prompt, "model": model["label"], "started": time.time(), "pid": p.pid}, f)
+        self.set_status("research started: " + model["label"])
+        self.scanRuns()
+        return d
+
+    @Slot(str)
+    def toggleRun(self, d):
+        """fold or unfold a run card"""
+        r = next((r for r in self._runs if r["dir"] == d), None)
+        self.collapsed[d] = not (r["collapsed"] if r else False)
+        self.scanRuns()
+
+    @Slot(str, str)
+    def renameRun(self, d, title):
+        """letter a book's spine yourself (empty: back to the made-up title); kept in the run's .json"""
+        d = os.path.abspath(d)
+        if os.path.dirname(d) != RUNS or not os.path.isdir(d):
+            self.set_status("not a research run")
+            return
+        meta = d + ".json"
+        try:
+            j = json.load(open(meta))
+            if not isinstance(j, dict):
+                j = {}
+        except (OSError, ValueError):
+            j = {}
+        title = " ".join(title.split())[:60]
+        if title:
+            j["spine"] = title
+        else:
+            j.pop("spine", None)
+        try:
+            with open_private(meta + ".tmp") as f:
+                json.dump(j, f, indent=2)
+            os.replace(meta + ".tmp", meta)
+        except OSError as e:
+            self.set_status("rename: " + str(e))
+            return
+        self.set_status("renamed: " + title if title else "spine title back to its own")
+        self.scanRuns()
+
+    @Slot(str)
+    def clearRun(self, d):
+        """CLEAR on a finished run card: move the run out of the drawer into research/.cleared (nothing is deleted)"""
+        err = self.clear_one(d)
+        self.set_status(err or "cleared %s (kept in %s)" % (os.path.basename(d), os.path.join(RUNS, ".cleared")))
+        if not err:
+            self.scanRuns()
+
+    @Slot(result=int)
+    def clearFinished(self):
+        """the eraser: every run that isn't building goes to research/.cleared (nothing is deleted)"""
+        n = sum(1 for r in list(self._runs) if not self.clear_one(r["dir"]))
+        self.set_status("erased %d finished run(s) (kept in %s)" % (n, os.path.join(RUNS, ".cleared")))
+        self.scanRuns()
+        return n
+
+    def clear_one(self, d):
+        """move one run (dir, .json, .log) into research/.cleared; returns why not, or "" """
+        d = os.path.abspath(d)
+        if os.path.dirname(d) != RUNS or not os.path.isdir(d):
+            return "not a research run"
+        # really building, not just a journal left saying so by a run that died
+        if d in self.jobs or run_is_live(d, read_state(d)):
+            return "run is still going; STOP it first"
+        if self.watching == d:
+            self.stopWatching()
+        bin_dir = os.path.join(RUNS, ".cleared")
+        makedirs_private(bin_dir)
+        try:
+            for src in (d, d + ".json", d + ".log"):
+                if os.path.exists(src):
+                    os.replace(src, os.path.join(bin_dir, os.path.basename(src)))
+        except OSError as e:
+            return "clear: " + str(e)
+        return ""
+
+    @Slot(str)
+    def stopResearch(self, d):
+        if not d:
+            return
+        p = self.jobs.get(d)
+        live = read_state(d)
+        if live.get("state") in live_runs.OPEN and run_is_live(d, live):
+            live_runs.close_open(d)             # an open script run between lines: close it, it ends completed
+            self.set_status("run closed")
+        elif p is not None or run_is_live(d, live):
+            self.stop_requests[d] = time.monotonic()
+            self.tryCancel(d)
+        # the Claude session that started this run stops too (claude_gate.py, its hook)
+        session = claude_gate.session_for_run(d)
+        if session:
+            claude_gate.set_gate(session, "stopped", "run " + os.path.basename(d))
+
+    def live_command(self, d, command, done, **fields):
+        if d not in self.jobs and not run_is_live(d, read_state(d)):
+            self.set_status("run is not active")
+            return False
+        try:
+            send_command(d, command, **fields)
+        except (OSError, ValueError) as e:
+            self.set_status(str(e))
+            return False
+        self.set_status(done)
+        return True
+
+    @Slot(str)
+    def togglePause(self, d):
+        if not d:
+            return
+        control = control_state(read_state(d))
+        session = claude_gate.session_for_run(d)
+        if control.get("paused") or control.get("pauseRequested"):
+            if live_runs.run_meta(d).get("script"):
+                # Resume alone must not skip a queued edit. A continue line is the
+                # inbox item that lets the preserved tail run after that edit.
+                directory = os.path.join(d, ".live", "inbox")
+                live_runs.makedirs_private(directory)
+                name = "%019d%s.txt" % (time.time_ns() // 100 + 621355968000000000, uuid.uuid4().hex[:6])
+                path = os.path.join(directory, name)
+                with open(path + ".tmp", "x") as stream:
+                    stream.write("# continue after pause\n")
+                os.replace(path + ".tmp", path)
+            if self.live_command(d, "resume", "resume requested") and claude_gate.gate(session).get("state") == "paused":
+                claude_gate.clear_gate(session)
+        elif self.live_command(d, "pause", "pausing after the current operation") and session:
+            claude_gate.set_gate(session, "paused", "run " + os.path.basename(d))   # Claude waits at its next tool call
+
+    @Slot(str)
+    def stepRun(self, d):
+        """while paused: let the run make its next change, then hold again"""
+        self.live_command(d, "step", "one step")
+
+    @Slot(str)
+    def cyclePace(self, d):
+        seconds = next_pace(control_state(read_state(d)).get("paceSeconds", 0))
+        self.live_command(d, "pace", "build pace: " + ("normal" if seconds == 0 else "%gs between operations" % seconds), seconds=seconds)
+
+    @Slot(str, float)
+    def setPace(self, d, seconds):
+        """Set the viewport's exact step delay through the existing run protocol."""
+        self.live_command(d, "pace", "build pace: " + ("full speed" if seconds == 0 else "%gs between operations" % seconds), seconds=seconds)
+
+    @Slot(str, str)
+    def sendDirection(self, d, text):
+        self.live_command(d, "instruct", "direction sent", text=text)
+
+    def tryCancel(self, directory):
+        try:
+            request_cancel(directory)
+            self.set_status("stop requested; waiting for cancellation acknowledgement")
+            self.stop_requests.pop(directory, None)
+        except (OSError, ValueError):
+            # Startup may not have created the run identity yet. Retry without killing
+            # the parent and leaving its native rebuild process orphaned.
+            if time.monotonic() - self.stop_requests.get(directory, time.monotonic()) > 10:
+                self.set_status("stop pending: run has not published its control identity")
+
+
+    # ---- the CLAUDE card ---------------------------------------------------------------------
+    # which model the card talks to. A Claude (claude-cli) model goes through the Claude Code
+    # session (tools, ALLOW/DENY, PAUSE); any other model in the catalogue (Grok, a local Ollama
+    # model, an API model) is asked through chat.py and answers in the same log.
+    claudeModel = Property(str, lambda self: self._claude_model, notify=claudeChanged)
+    claudeMode = Property(str, lambda self: self._chat_mode, notify=chatChanged)
+
+    def _claude_mode_supported(self):
+        return build_execution.capabilities(self._claude_model_record())["plan"]
+
+    claudeModeSupported = Property(bool, _claude_mode_supported, notify=claudeChanged)
+    claudeBuildSupported = Property(bool, lambda self: build_execution.capabilities(self._claude_model_record())["build"], notify=claudeChanged)
+    claudePlanSupported = Property(bool, lambda self: build_execution.capabilities(self._claude_model_record())["plan"], notify=claudeChanged)
+    claudeResearch = Property("QVariantMap", lambda self: self._claude_research or {}, notify=claudeChanged)
+    claudeResearchPrompt = Property(bool, lambda self: self._claude_research_prompt, notify=claudeChanged)
+
+    @Slot()
+    def requestClaudeResearch(self):
+        if self.claude.status in ("working", "starting", "paused"):
+            self.set_status("cannot pick research while busy — try again after the current turn finishes")
+            self.claude._add("note", "cannot pick research while busy — try again after the current turn finishes")
+            self.claudeChanged.emit()
+            return
+        self._claude_research_prompt = True
+        self.claudeChanged.emit()
+
+    @Slot(bool, bool, bool)
+    def setClaudeResearch(self, papers, photos, models):
+        if self.claude.status in ("working", "starting", "paused"):
+            self.set_status("research choice not saved: still busy — pick again after the current turn finishes")
+            self.claude._add("note", "research choice not saved: still busy — pick again after the current turn finishes")
+            self.claudeChanged.emit()
+            return
+        self._claude_research = dict(papers=bool(papers), photos=bool(photos), models=bool(models))
+        self._claude_research_prompt = False
+        self.claude.set_research_policy(research_consent.policy(self._claude_research))
+        self.claudeChanged.emit()
+
+    @Slot(str)
+    def setClaudeMode(self, mode):
+        if (mode not in ("build", "plan") or not self._claude_mode_supported()
+                or self.claude.status in ("working", "starting", "paused")):
+            return
+        if not build_execution.capabilities(self._claude_model_record())[mode]:
+            return
+        self._chat_mode = mode
+        self.claude.set_mode(mode)
+        self.chatChanged.emit()
+
+    def _claude_model_record(self):
+        return chatlib.find(self._claude_model, self._chat_models)
+
+    def _apply_claude_persona(self, record):
+        """The picked Claude model's persona (its chat.py system/system_file), or '' for a plain model.
+        Without this the card talks to ClaudeLink, which never sees chat.py's system prompts."""
+        persona = ""
+        if record is not None and record.get("kind") == "claude-cli":
+            try:
+                persona = chatlib._extra_system(record)
+            except Exception:
+                persona = ""
+        self.claude.set_persona(persona)
+
+    @Slot(str)
+    def setClaudeModel(self, model_id):
+        model = chatlib.find(model_id, self._chat_models)
+        if model is None or not model.get("available", True):
+            # Picker rejection, named: previously this returned silently,
+            # so a picked model that was unknown or unavailable simply
+            # never took effect with no trace of which id was expected.
+            self.set_status("cannot pick model: %s is not available" % model_id)
+            self.claude._add("note", "Model not picked: %s was not found or is not available; the previous model is still selected." % model_id)
+            self.claudeChanged.emit()
+            return
+        if self.claude.status in ("working", "starting", "paused"):
+            return
+        self._claude_model = model_id
+        if not build_execution.capabilities(model)["build"]:
+            self._chat_mode = "plan"
+            self.chatChanged.emit()
+        self.claude.set_model(model["model"] if model["kind"] == "claude-cli" else "")
+        self._apply_claude_persona(model)
+        self._save_model_preferences()
+        self.claudeChanged.emit()
+
+    @Slot()
+    def refreshMuseTracker(self):
+        """Re-read the Muse bridge tracker status (local files only).
+
+        Primary source is the per-turn file for the current turn
+        (self._muse_turn_id, set by the turn-id persistence work);
+        latest.json is used only when no current turn is tracked. This
+        function never assigns self._muse_turn_id itself.
+        """
+        import time as _time
+        from datetime import datetime as _datetime
+
+        def _epoch(value):
+            if isinstance(value, bool):
+                return 0.0
+            if isinstance(value, (int, float)):
+                return float(value) if value == value and abs(value) != float("inf") else 0.0
+            if isinstance(value, str):
+                text = value.strip()
+                if not text:
+                    return 0.0
+                try:
+                    return float(text)
+                except ValueError:
+                    pass
+                try:
+                    return _datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+                except ValueError:
+                    return 0.0
+            return 0.0
+
+        try:
+            seat_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "muse-seat")
+            status_dir = os.path.join(seat_dir, "status")
+            current = getattr(self, "_muse_turn_id", "") or ""
+            if current:
+                path = os.path.join(status_dir, current + ".json")
+                try:
+                    with open(path, encoding="utf-8") as f:
+                        data = json.load(f)
+                    if not isinstance(data, dict) or (data.get("turn_id") and data.get("turn_id") != current):
+                        data = None
+                except (OSError, ValueError):
+                    data = None
+                if data is None:
+                    # Do not fall back to latest.json for a known turn: that
+                    # is how a previous turn's stage/timestamps were shown.
+                    if self._muse_tracker and self._muse_tracker.get("turn_id") != current:
+                        self._muse_tracker = {}
+                        self.museTrackerChanged.emit()
+                    return
+            else:
+                path = os.path.join(status_dir, "latest.json")
+                try:
+                    with open(path, encoding="utf-8") as f:
+                        data = json.load(f)
+                    if not isinstance(data, dict):
+                        data = {}
+                except (OSError, ValueError):
+                    data = {}
+        except OSError:
+            data = {}
+        if not data:
+            if self._muse_tracker:
+                self._muse_tracker = {}
+                self.museTrackerChanged.emit()
+            return
+        turn = data.get("turn_id") or ""
+        stage = data.get("stage") or ""
+        # A response file means the reply is written, even if the worker did not update status.
+        # Scoped to this turn's file only, never to latest.json's turn.
+        try:
+            res_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "muse-seat", "responses", turn + ".json")
+            if turn and os.path.isfile(res_path):
+                stage = "Reply written"
+        except OSError:
+            pass
+        # Inference, not a worker claim: picked up and still working for a while means Thinking/Building.
+        now = _time.time()
+        picked = _epoch(data.get("picked_up_at"))
+        if stage == "Picked up" and picked and now - picked >= 10:
+            stage = "Building" if (data.get("mode") or "") == "build" else "Thinking"
+        sent = _epoch(data.get("sent_at"))
+        elapsed = int(max(0, now - sent)) if sent else 0
+        elapsed_text = ("%dm %02ds" % (elapsed // 60, elapsed % 60)) if elapsed >= 60 else ("%ds" % elapsed)
+        last = _epoch(data.get("last_check"))
+        last_text = _time.strftime("%H:%M:%S", _time.localtime(last)) if last else ""
+        out = {"turn_id": turn, "session_id": data.get("session_id") or "", "mode": data.get("mode") or "",
+               "stage": stage, "elapsed": elapsed, "elapsed_text": elapsed_text,
+               "last_check": last, "last_check_text": last_text,
+               "picked_up_at": picked, "replied_at": _epoch(data.get("replied_at"))}
+        self._muse_tracker = out
+        self.museTrackerChanged.emit()
+
+    @Slot()
+    def checkMuseReply(self):
+        """CHECK hook: refresh tracker, then deliver an already-written orphan reply if one exists. No-op while a turn is live/busy (redeliver guards that)."""
+        self.refreshMuseTracker()
+        self.redeliver_orphaned_muse_turn()
+
+    @Slot(str, result=bool)
+    def claudeSend(self, text):
+        if not (text or "").strip():
+            return False
+        if self.claude.status in ("working", "starting", "paused"):
+            if self._claude_research is None:
+                self.set_status("cannot send: still working — tap Stop to cancel, then pick research (Apply or Skip) and send again")
+                self.claude._add("note", "cannot send: still working — tap Stop to cancel, then pick research (Apply or Skip) and send again")
+            else:
+                self.set_status("cannot send: still working — tap Stop to cancel, then send again")
+                self.claude._add("note", "cannot send: still working — tap Stop to cancel, then send again")
+            self.claudeChanged.emit()
+            return False
+        if self._claude_research is None:
+            if self.claude.status in ("working", "starting", "paused"):
+                self.set_status("cannot send: still working — research cannot be picked while busy, try after the current turn finishes")
+                self.claude._add("note", "cannot send: still working — research cannot be picked while busy, try after the current turn finishes")
+                self.claudeChanged.emit()
+                return False
+            self.requestClaudeResearch()
+            self.set_status("cannot send: pick research first — Apply or Skip research, then send again")
+            self.claude._add("note", "cannot send: pick research first — Apply or Skip research, then send again")
+            self.claudeChanged.emit()
+            return False
+        model = self._claude_model_record()
+        if model is None or not model.get("available", True):
+            self.set_status("cannot send: no available model — pick one first")
+            self.claude._add("note", "Choose an available model before sending. No provider was contacted.")
+            self.claudeChanged.emit()
+            return False
+        if model["kind"] == "claude-cli":
+            self.claude.set_mode(self._chat_mode)
+            self.claude.send(text)
+        else:
+            return self._other_send(model, text)
+        return True
+
+    def _muse_seat_base(self):
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), "muse-seat")
+
+    def _muse_write_json_atomic(self, path, data):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(data, ensure_ascii=False))
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+
+    def _muse_pending_path(self):
+        return os.path.join(self._muse_seat_base(), "host-pending.json")
+
+    def _muse_pending_file(self, turn):
+        return os.path.join(self._muse_seat_base(), "host-pending", turn + ".json")
+
+    def _muse_delivered_path(self, turn):
+        return os.path.join(self._muse_seat_base(), "delivered", turn + ".json")
+
+    def _muse_has_delivered(self, turn):
+        return bool(turn) and os.path.isfile(self._muse_delivered_path(turn))
+
+    def _muse_write_delivered(self, turn, session_id, outcome):
+        if not turn:
+            return
+        path = self._muse_delivered_path(turn)
+        if os.path.isfile(path):
+            return
+        self._muse_write_json_atomic(path, {"turn_id": turn, "session_id": session_id, "outcome": outcome, "delivered_at": time.time()})
+
+    def _muse_delete_pending(self, turn):
+        if not turn:
+            return
+        try:
+            os.unlink(self._muse_pending_file(turn))
+        except OSError:
+            pass
+        staging = self._muse_pending_path()
+        try:
+            if os.path.isfile(staging):
+                with open(staging, encoding="utf-8") as f:
+                    data = json.load(f)
+                if not isinstance(data, dict) or data.get("turn_id") in ("", turn):
+                    os.unlink(staging)
+        except (OSError, ValueError):
+            pass
+
+    def _muse_on_seat_system(self, turn_id, session_id, request_id):
+        if not turn_id:
+            return
+        if request_id != self._other_request:
+            return
+        with self._muse_pending_lock:
+            old = getattr(self, "_muse_current_turn", "") or ""
+            if old and old != turn_id and not self._muse_has_delivered(old):
+                self._muse_delete_pending(old)
+            self._muse_current_turn = turn_id
+            self._muse_current_session = session_id
+            self._muse_turn_id = turn_id
+            staging = self._muse_pending_path()
+            fields = None
+            try:
+                if os.path.isfile(staging):
+                    with open(staging, encoding="utf-8") as f:
+                        fields = json.load(f)
+                    if not isinstance(fields, dict):
+                        fields = None
+            except (OSError, ValueError):
+                fields = None
+            if fields is None:
+                fields = getattr(self, "_muse_pending_fields", None) or {}
+            pending = dict(fields)
+            pending.update({"turn_id": turn_id, "session_id": session_id})
+            pending.setdefault("user_text", "")
+            pending.setdefault("mode", "")
+            pending.setdefault("model_label", "")
+            pending.setdefault("model_id", "")
+            pending.setdefault("sent_at", time.time())
+            self._muse_write_json_atomic(self._muse_pending_file(turn_id), pending)
+            try:
+                os.unlink(staging)
+            except OSError:
+                pass
+
+    def _other_send(self, model, text):
+        """Ask a non-Claude model: its reply streams into the card's log like Claude's would."""
+        text = (text or "").strip()[:8000]
+        if not text:
+            return False
+        if self.claude.status in ("working", "starting"):
+            # Same wording as claudeSend's busy gate, so a dropped send is
+            # visible in the top status and in the panel log, not silent.
+            self.set_status("cannot send: still working — tap Stop to cancel, then send again")
+            self.claude._add("note", "cannot send: still working — tap Stop to cancel, then send again")
+            self.claudeChanged.emit()
+            return False
+        self._muse_tracker = {}
+        self.museTrackerChanged.emit()
+        self._muse_current_turn = ""
+        self._muse_current_session = ""
+        self._muse_pending_fields = {}
+        link = self.claude
+        link._add("you", text)
+        history = [{"role": "you" if m["role"] == "you" else "model", "text": m["text"]}
+                   for m in link.messages if m["role"] in ("you", "claude") and m.get("text")][-8:]
+        reply = link._add("claude", "", live=True, label=model["label"])
+        link._set("working")
+        self._other_cancel = cancel = threading.Event()
+        self._other_request += 1
+        request_id = self._other_request
+        api = chatlib.effigy_reference(text)
+        mode = self._chat_mode
+        model = dict(model, research_policy=research_consent.policy(self._claude_research))
+        _sent_at = time.time()
+        _pending = {"turn_id": "", "session_id": "", "user_text": text, "mode": mode,
+                    "model_label": model.get("label", ""), "model_id": model.get("id", ""),
+                    "sent_at": _sent_at}
+        self._muse_pending_fields = dict(_pending)
+        self._muse_write_json_atomic(self._muse_pending_path(), _pending)
+        def work():
+            got = ""
+            last = 0.0
+            error = ""
+            try:
+                for chunk in chatlib.stream(model, history, cancel, api=api, session=self._other_session, mode=mode,
+                                             turn_callback=lambda tid, sid, _rid=request_id: self._muse_on_seat_system(tid, sid, _rid)):
+                    if cancel.is_set():
+                        # Cancelled, not finished: still run the normal
+                        # completion cleanup (live row + status) via the
+                        # Qt-thread signal. If Stop/New already bumped
+                        # _other_request, _other_done drops this stale id,
+                        # so the Stop/New cleanup is not redone.
+                        self.otherAnswer.emit(request_id, got, "")
+                        return
+                    got += chunk
+                    if chunk and time.monotonic() - last >= 0.05:
+                        self.otherChunk.emit(request_id, got)
+                        last = time.monotonic()
+                if not got.strip():
+                    error = model["label"] + " sent back no text"
+            except Exception as e:
+                error = str(e)
+            self.otherAnswer.emit(request_id, got, error)
+        threading.Thread(target=work, daemon=True).start()
+        return True
+
+    def _other_row(self):
+        for m in reversed(self.claude.messages):
+            if m["role"] == "claude" and m.get("live"):
+                return m
+        return None
+
+    @Slot(int, str)
+    def _other_chunk(self, request_id, text):
+        row = self._other_row()
+        if request_id == self._other_request and row is not None:
+            row["text"] = text
+            self.claudeChanged.emit()
+
+    @Slot(int, str, str)
+    def _other_done(self, request_id, text, error):
+        if request_id != self._other_request:
+            return
+        link = self.claude
+        row = self._other_row()
+        if row is not None:
+            row["text"] = text
+            row["live"] = False
+            if not text:
+                with link.lock:
+                    link.messages.remove(row)
+        if error:
+            if ("BUILD_GATE_NO_RECEIPTS" in error
+                    or "Build did not produce a verified saved revision" in error
+                    or "This connection has no execution tools" in error
+                    or "no Build receipt can be produced" in error):
+                # Build gate refusal, not a dropped send: no verified saved
+                # revision was produced, so no build was sent or claimed.
+                # Kept distinct from the generic "refused:" note so a
+                # gate refusal is never mistaken for a send that vanished.
+                link._add("note", "Build gate refused — no verified saved revision was produced, so no build was sent or claimed. This is not a dropped send: " + error)
+                self.set_status("Build gate refused: no verified saved revision — nothing was built")
+            else:
+                link._add("note", "refused: " + error)
+        if link.status == "working":
+            link._set("idle")
+        self.claudeChanged.emit()
+        _turn = self._muse_current_turn
+        if _turn:
+            _outcome = "delivered" if (text and text.strip() and not error) else ("refused" if error else "error")
+            self._muse_write_delivered(_turn, self._muse_current_session, _outcome)
+            self._muse_delete_pending(_turn)
+            self._muse_current_turn = ""
+            self._muse_current_session = ""
+
+    @Slot()
+    def redeliver_orphaned_muse_turn(self):
+        """Deliver a Muse reply that arrived after a restart, exactly once. Idempotent."""
+        link = self.claude
+        if link.status in ("working", "starting", "paused"):
+            return
+        if self._other_row() is not None:
+            return
+        pending_turns = []
+        staging = self._muse_pending_path()
+        try:
+            if os.path.isfile(staging):
+                with open(staging, encoding="utf-8") as f:
+                    sdata = json.load(f)
+                if isinstance(sdata, dict):
+                    if not sdata.get("turn_id"):
+                        try:
+                            os.unlink(staging)
+                        except OSError:
+                            pass
+                    else:
+                        pending_turns.append(sdata)
+        except (OSError, ValueError):
+            pass
+        pdir = os.path.join(self._muse_seat_base(), "host-pending")
+        try:
+            names = sorted(os.listdir(pdir))
+        except OSError:
+            names = []
+        for name in names:
+            if not name.endswith(".json"):
+                continue
+            try:
+                with open(os.path.join(pdir, name), encoding="utf-8") as f:
+                    pdata = json.load(f)
+                if isinstance(pdata, dict) and pdata.get("turn_id"):
+                    if pdata["turn_id"] not in [p.get("turn_id") for p in pending_turns]:
+                        pending_turns.append(pdata)
+            except (OSError, ValueError):
+                continue
+        pending_turns.sort(key=lambda p: p.get("sent_at") or 0)
+        for pending in pending_turns:
+            turn = pending.get("turn_id") or ""
+            if not turn:
+                continue
+            if self._muse_has_delivered(turn):
+                self._muse_delete_pending(turn)
+                continue
+            res_path = os.path.join(self._muse_seat_base(), "responses", turn + ".json")
+            try:
+                with open(res_path, encoding="utf-8") as f:
+                    rdata = json.load(f)
+                text = (rdata.get("result") or rdata.get("text") or "").strip()
+            except (OSError, ValueError):
+                continue
+            if (pending.get("mode") or "") == "build":
+                self._muse_write_delivered(turn, pending.get("session_id") or "", "held-build-unverified")
+                self._muse_delete_pending(turn)
+                link._add("note", "A Build reply for turn %s arrived after a restart, but its receipt could not be re-verified in this host, so it is not shown as a completed build. Send the build again if you still want it." % turn)
+                self.claudeChanged.emit()
+                continue
+            if not text:
+                self._muse_write_delivered(turn, pending.get("session_id") or "", "error")
+                self._muse_delete_pending(turn)
+                link._add("note", "A Muse reply for turn %s arrived after a restart but was empty." % turn)
+                self.claudeChanged.emit()
+                continue
+            self._muse_write_delivered(turn, pending.get("session_id") or "", "delivered")
+            if pending.get("user_text"):
+                link._add("you", pending["user_text"])
+            link._add("claude", text, label=pending.get("model_label") or "")
+            self._muse_delete_pending(turn)
+            if link.status == "working":
+                link._set("idle")
+            self.claudeChanged.emit()
+
+    @Slot()
+    def claudeStop(self):
+        model = self._claude_model_record()
+        if self.claude.status in ("working", "starting", "paused") and (model is None or model["kind"] != "claude-cli"):
+            self._other_cancel.set()
+            self._other_request += 1
+            if self._muse_current_turn:
+                self._muse_delete_pending(self._muse_current_turn)
+                self._muse_current_turn = ""
+                self._muse_current_session = ""
+            self._other_done(self._other_request, (self._other_row() or {}).get("text", ""), "")
+            self.claude._set("stopped")
+            self.claude._add("note", "stopped")
+            return
+        self.claude.stop()
+
+    @Slot()
+    def claudePause(self):
+        self.claude.pause()
+
+    @Slot(bool)
+    def claudeAnswer(self, allow):
+        self.claude.answer(allow)
+
+    @Slot()
+    def claudeNew(self):
+        self._other_cancel.set()
+        self._other_request += 1
+        if self._muse_current_turn:
+            self._muse_delete_pending(self._muse_current_turn)
+            self._muse_current_turn = ""
+            self._muse_current_session = ""
+        # Finalize the cancelled other-model turn (live row + status)
+        # before fresh() clears the log; _other_done with the bumped id
+        # passes its stale guard, and the worker's later otherAnswer for
+        # the old id is dropped, so this cleanup runs exactly once.
+        self._other_done(self._other_request, (self._other_row() or {}).get("text", ""), "")
+        self._muse_tracker = {}
+        self.museTrackerChanged.emit()
+        self._other_session = str(uuid.uuid4())
+        self.claude.fresh()
+        self._claude_research = None
+        self._claude_research_prompt = False
+        self.claude.set_research_policy(research_consent.policy(None))
+        self.claudeChanged.emit()
+
+    def _poll_pictures(self):
+        new = self.claudeFeed.poll(self.claude.session)
+        if new:
+            self.claudePicturesChanged.emit()
+            self.claudePicture.emit(new[-1]["path"])       # a burst pops only its last picture
+
+    # ---- the chat window (research drawer) -------------------------------------------------
+    @Slot()
+    def refreshChat(self):
+        if self._catalogue_busy:
+            return
+        self._catalogue_busy = True
+        self.chatChanged.emit()
+        def discover():
+            try:
+                catalogue = chatlib.models()
+            except Exception:
+                catalogue = []
+            self.modelsAnswer.emit(catalogue)
+        threading.Thread(target=discover, daemon=True).start()
+
+    @Slot(object)
+    def _models_done(self, catalogue):
+        self._chat_models = catalogue
+        self._catalogue_busy = False
+        available = [m for m in catalogue if m.get("available", True)]
+        wanted = self._chat_model or self._model_preferences.get("chat", "")
+        self._chat_model = wanted if any(m["id"] == wanted for m in available) else (available[0]["id"] if available else "")
+        wanted = self._claude_model or self._model_preferences.get("claude", "") or "claude/opus"
+        if not any(m["id"] == wanted for m in available):
+            claude = [m for m in available if m["kind"] == "claude-cli"]
+            wanted = claude[0]["id"] if claude else (available[0]["id"] if available else "")
+        self._claude_model = wanted
+        picked = chatlib.find(wanted, available)
+        self.claude.set_model(picked["model"] if picked and picked["kind"] == "claude-cli" else "")
+        self._apply_claude_persona(picked)
+        self.claudeChanged.emit()
+        research = [m for m in available if m.get("research", True)]
+        if not any(m["id"] == self.ai_model for m in research):
+            self.ai_model = research[0]["id"] if research else ""
+        self.chatChanged.emit()
+        self.runsChanged.emit()
+        if not catalogue:
+            self.set_status("no models found; start Ollama or configure a provider")
+
+    @Slot(str)
+    def setChatModel(self, model_id):
+        model = chatlib.find(model_id, self._chat_models)
+        if model and model.get("available", True) and not self._chat_busy:
+            self._chat_model = model_id
+            self._save_model_preferences()
+            self.chatChanged.emit()
+
+    @Slot()
+    def toggleChatMode(self):
+        self._chat_mode = "plan" if self._chat_mode == "build" else "build"
+        self.set_status(f"chat mode: {self._chat_mode.upper()}")
+        self.chatChanged.emit()
+
+    @Slot(str)
+    def setChatMode(self, mode):
+        if mode in ("build", "plan"):
+            self._chat_mode = mode
+            self.chatChanged.emit()
+
+    @Slot()
+    def stopChat(self):
+        self._chat_cancel.set()
+        self._chat_request += 1  # ignore late chunks/completion from the cancelled request
+        self._chat_busy = False
+        self.chatChanged.emit()
+
+    # ---- attached chat pictures (audit G5): stored copies live only as long as the chat ----
+    def _forget_chat_images(self, paths):
+        """Delete stored chat-image copies; only files inside CHAT_IMAGES are ever touched."""
+        folder = os.path.abspath(CHAT_IMAGES)
+        for path in paths or []:
+            try:
+                if os.path.dirname(os.path.abspath(path)) == folder:
+                    os.unlink(path)
+            except OSError:
+                pass
+
+    def _sweep_chat_images(self):
+        """Startup sweep: every stored copy predates this session, so none of them are kept."""
+        try:
+            names = os.listdir(CHAT_IMAGES)
+        except OSError:
+            return
+        self._forget_chat_images([os.path.join(CHAT_IMAGES, n) for n in names])
+
+    def _trim_chat(self):
+        """self._chat = self._chat[-40:], plus G5: a dropped message's pictures go with it."""
+        dropped, self._chat = self._chat[:-40], self._chat[-40:]
+        self._forget_chat_images([p for m in dropped for p in m.get("images", [])])
+
+    @Slot()
+    def clearChat(self):
+        self.stopChat()
+        self._forget_chat_images(list(self._chat_pending) +
+                                 [p for m in self._chat for p in m.get("images", [])])
+        self._chat = []
+        self._chat_pending = []
+        self._chat_session = str(uuid.uuid4())
+        self.chatChanged.emit()
+
+    def _chat_image_path(self, spec):
+        spec = (spec or "").strip()
+        if spec.startswith("file:"):
+            spec = QUrl(spec).toLocalFile()
+        return os.path.abspath(os.path.expanduser(spec)) if spec else ""
+
+    def _store_chat_image(self, image, source=""):
+        if image is None or image.isNull():
+            self.set_status("not a picture" + ("" if not source else ": " + os.path.basename(source)))
+            return ""
+        if len(self._chat_pending) >= 4:
+            self.set_status("four pictures is the limit for one message")
+            return ""
+        edge = 1280
+        if max(image.width(), image.height()) > edge:
+            image = image.scaled(edge, edge, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        image = image.convertToFormat(QImage.Format_RGB32)
+        folder = CHAT_IMAGES
+        try:
+            makedirs_private(folder)
+            path = os.path.join(folder, uuid.uuid4().hex + ".jpg")
+            if not image.save(path, "JPEG", 82):
+                raise OSError("could not write the picture")
+            os.chmod(path, 0o600)          # audit G5/G6: QImage.save lands umask-default; the copy is private
+        except OSError as e:
+            self.set_status("picture: " + str(e))
+            return ""
+        self._chat_pending.append(path)
+        self.chatChanged.emit()
+        self.set_status("picture added")
+        return path
+
+    @Slot(str, result=bool)
+    def attachChatImage(self, spec):
+        path = self._chat_image_path(spec)
+        if not path or not os.path.isfile(path):
+            self.set_status("no such picture")
+            return False
+        return bool(self._store_chat_image(QImage(path), path))
+
+    @Slot(result=bool)
+    def pasteChatImage(self):
+        clip = QGuiApplication.clipboard()
+        image = clip.image()
+        if not image.isNull():
+            return bool(self._store_chat_image(image))
+        mime = clip.mimeData()
+        added = False
+        if mime is not None and mime.hasUrls():
+            for url in mime.urls():
+                if url.isLocalFile() and self.attachChatImage(url.toLocalFile()):
+                    added = True
+        return added
+
+    @Slot(int)
+    def removeChatImage(self, index):
+        if 0 <= index < len(self._chat_pending):
+            self._forget_chat_images([self._chat_pending.pop(index)])
+            self.chatChanged.emit()
+
+    @Slot(str)
+    def sendChat(self, text):
+        text = (text or "").strip()[:8000]
+        images = list(self._chat_pending)
+        if (not text and not images) or self._chat_busy:
+            return
+        model = chatlib.find(self._chat_model, self._chat_models)
+        if model is None:
+            self.set_status("no chat model is selected")
+            return
+        if self._notice_gate(model, "chat"):
+            self._pending_notice = ("chat", text)
+            self.set_status("first, in plain words: the money, and what leaves this machine")
+            return
+        if not text:
+            text = "What is in this picture?"
+        message = {"role": "you", "text": text}
+        if images:
+            message["images"] = images
+        self._chat.append(message)
+        self._chat_pending = []
+        history = [dict(m) for m in self._chat if m["role"] in ("you", "model") and (m.get("text") or m.get("images"))]
+        self._chat.append({"role": "model", "text": "", "label": model["label"]})
+        self._trim_chat()
+        self._chat_busy = True
+        self._chat_request += 1
+        self._chat_cancel = threading.Event()
+        self.chatChanged.emit()
+        self._chat_reply(model, history)
+
+    def _chat_reply(self, model, history):
+        request_id, cancel = self._chat_request, self._chat_cancel
+        api = chatlib.effigy_reference(history[-1]["text"] if history else "")
+        def work():
+            text = ""
+            last_update = 0.0
+            try:
+                for chunk in chatlib.stream(model, history, cancel, api=api, session=self._chat_session, mode=self._chat_mode):
+                    if cancel.is_set():
+                        return
+                    text += chunk
+                    if chunk and time.monotonic() - last_update >= 0.05:
+                        self.chatChunk.emit(request_id, text)
+                        last_update = time.monotonic()
+                error = "" if text.strip() else "the model sent back no text"
+            except Exception as e:
+                error = str(e)
+            self.chatAnswer.emit(request_id, text, error)
+        threading.Thread(target=work, daemon=True).start()
+
+    @Slot(int, str)
+    def _chat_chunk(self, request_id, text):
+        if request_id == self._chat_request and self._chat_busy and self._chat:
+            self._chat[-1] = dict(self._chat[-1], text=text)
+            self.chatChanged.emit()
+
+    @Slot(int, str, str)
+    def _chat_done(self, request_id, text, error):
+        if request_id != self._chat_request:
+            return
+        self._chat_busy = False
+        if self._chat and self._chat[-1]["role"] == "model":
+            if text:
+                self._chat[-1] = dict(self._chat[-1], text=text)
+            else:
+                self._chat.pop()
+        if error:
+            self._chat.append({"role": "error", "text": error})
+        self._trim_chat()
+        self.chatChanged.emit()
+
+    # ---- the drawing tool (Linework) -------------------------------------------------------
+    def drawing_running(self):
+        """is the drawing tool up? ask the socket it listens on"""
+        sock = QLocalSocket()
+        sock.connectToServer(self.drawing_key)
+        return sock.waitForConnected(400)
+
+    def drawing_send(self, path=""):
+        """hand a file to the drawing tool: it opens it and comes up. False if it isn't up."""
+        sock = QLocalSocket()
+        sock.connectToServer(self.drawing_key)
+        if not sock.waitForConnected(400):
+            return False
+        sock.write(((path + "\n") if path else "\n").encode())
+        sock.flush()
+        sock.waitForBytesWritten(400)
+        sock.disconnectFromServer()
+        return True
+
+    def drawing_start(self, path=""):
+        """start the drawing tool; if it is already up it raises its own window"""
+        program = self.drawing_program()
+        if not os.path.isfile(program):
+            self.set_status("no drawing tool: " + program)
+            return False
+        args = [path] if path else []
+        try:
+            ok, _pid = QProcess.startDetached(program, args, os.path.expanduser("~"))
+        except (OSError, ValueError) as e:
+            self.set_status("drawing tool: " + str(e))
+            return False
+        if not ok:
+            self.set_status("the drawing tool would not start")
+            return False
+        self.set_status("drawing up" + ("" if not path else ": " + os.path.basename(path)))
+        return True
+
+    @Slot()
+    def refreshTools(self):
+        """what the tool drawer shows: the drawings, and whether the tool is up"""
+        self._drawings = drawing_gallery()
+        self._drawing_open = self.drawing_running()
+        self.toolsChanged.emit()
+
+    @Slot()
+    def openDrawingTool(self):
+        """the pencil: bring the drawing tool up (it raises its window if it is already up)"""
+        if not os.path.isfile(self.drawing_program()):
+            self.set_status("no drawing tool on this machine")
+            return
+        if self.drawing_send():
+            self.set_status("drawing is up")
+            self._drawing_open = True
+        elif self.drawing_start():
+            self._drawing_open = True
+        self.toolsChanged.emit()
+
+    @Slot(str)
+    def openDrawingFile(self, path):
+        """open one of the drawings in the drawing tool"""
+        path = os.path.abspath(os.path.expanduser(path))
+        if not os.path.isfile(path):
+            self.set_status("no such drawing: " + os.path.basename(path))
+            return
+        if self.drawing_send(path):
+            self.set_status("opened " + os.path.basename(path))
+            self._drawing_open = True
+        elif self.drawing_start(path):
+            self._drawing_open = True
+        self.toolsChanged.emit()
+
+    @Slot()
+    def openDrawingsFolder(self):
+        """the DRAWINGS folder in the tool drawer: show where the drawings live, in the file manager"""
+        try:
+            os.makedirs(DRAWING_DIR, exist_ok=True)
+        except OSError as e:
+            self.set_status("drawings folder: " + str(e))
+            return
+        if QDesktopServices.openUrl(QUrl.fromLocalFile(DRAWING_DIR)):
+            self.set_status("drawings: " + DRAWING_DIR)
+        else:
+            self.set_status("could not open " + DRAWING_DIR)
+
+
+def pane_args(args):
+    """`pane N model PATH [CLIP]` / `pane N clip PATH`: paths made absolute here, where the caller's cwd is"""
+    if len(args) >= 3 and args[1] in ("model", "clip"):
+        args = args[:2] + [os.path.abspath(os.path.expanduser(a)) for a in args[2:4]]
+    return " ".join(args)
+
+
+def main():
+    if len(sys.argv) > 1 and sys.argv[1] in ("snap", "quit", "open", "shut", "page", "cmd", "mask", "clip", "draw", "tools", "replay", "layout", "scheme", "vpmenu", "face", "folder", "openfiled", "placefiled", "drag", "where", "research", "scroll", "sheet", "pane"):
+        app = QCoreApplication(sys.argv)
+        cmd = sys.argv[1] + (" " + os.path.abspath(sys.argv[2]) if sys.argv[1] in ("snap", "clip", "replay", "sheet") else
+                             " " + pane_args(sys.argv[2:]) if sys.argv[1] == "pane" else
+                             " " + " ".join(sys.argv[2:]) if len(sys.argv) > 2 else "")
+        session = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+        if sys.argv[1] == "pane" and session:
+            cmd = "as %s %s" % ("".join(c for c in session if c.isalnum() or c == "-"), cmd)   # who sent it: the pane names them
+        sys.exit(0 if send(cmd) else 1)
+
+    from PySide6.QtQml import QQmlApplicationEngine
+    from PySide6 import QtQuick  # noqa: F401  (so the root window comes back as a QQuickWindow)
+    app = QGuiApplication(sys.argv)
+    model = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else None
+    if send("model " + model if model else "raise"):
+        return
+    app.setApplicationName("Geppetto")
+    app.setDesktopFileName("geppetto")
+    icon = os.path.join(PROJECT, "geppetto.svg")
+    if os.path.exists(icon):
+        app.setWindowIcon(QIcon(icon))
+
+    global HOST
+    HOST = host = Host()
+    qmlRegisterType(Viewport, "Geppetto", 1, 0, "Viewport")
+    eng = QQmlApplicationEngine()
+    eng.rootContext().setContextProperty("host", host)
+    eng.load(QUrl.fromLocalFile(os.path.join(HERE, "cabinet.qml")))
+    if not eng.rootObjects():
+        sys.exit(1)
+    host.window = eng.rootObjects()[0]
+    host.scanRuns()
+    host.refreshTools()
+    host.refreshChat()
+    host.restore_panes()               # panes 2-4 come back on what they showed before the restart
+    host.autoFollow()                  # a run still building when the chest opens: boot straight into watching it
+    host.redeliver_orphaned_muse_turn()  # orphaned Muse turn from before the restart, if its reply has landed
+    if model:
+        host.openModel(model)
+    elif not host.watching:
+        # 2026-10-25: default scene empty, user request — no pants.effigy load at startup.
+        # Pane 1 starts empty, open to any run.
+        # A model passed on the command line still loads via the `if model:` branch above.
+        host.set_status("pane 1 is open: any run can land in it")
+    app.aboutToQuit.connect(host.quit_all)
+    app.aboutToQuit.connect(host.benchClose)
+    app.aboutToQuit.connect(host.stop)
+    app.aboutToQuit.connect(host.claude.close)
+    app.aboutToQuit.connect(lambda: [p.shut() for p in host.panes])
+
+    # single instance + a tiny command channel (raise / model PATH / snap PATH / open|shut NAME / wheel / pick KEY / card K=V / apply / undo / keep [NAME] / folder / openfiled N / view edit|run / seek N / quit)
+    def chest_busy():
+        """~/.cache/geppetto/chest-busy, written by a session while it drives the chest live (pid first): its
+        text while that pid is alive, else empty"""
+        try:
+            text = open(os.path.expanduser("~/.cache/geppetto/chest-busy")).read().strip()
+            os.kill(int(text.split()[0]), 0)
+            return text
+        except Exception:
+            return ""
+
+    QLocalServer.removeServer(SOCK)
+    server = QLocalServer()
+    server.listen(SOCK)
+
+    def on_conn():
+        c = server.nextPendingConnection()
+
+        def on_read():
+            msg = bytes(c.readAll()).decode().strip()
+            reply = "ok"
+            owner = ""
+            if msg.startswith("as "):                      # as SESSION VERB ...: the client named its session
+                _, owner, msg = (msg.split(" ", 2) + ["", ""])[:3]
+            if msg == "raise" or msg.startswith("model "):
+                host.window.show()          # no raise_/requestActivate: never take focus from what po is typing in
+                kwin_raise()
+                if msg.startswith("model "):
+                    host.openModel(msg[6:])
+                    host._mine = False             # a session showed it: pane 1 stays open to runs
+                    host.panesChanged.emit()
+            elif msg == "mask":
+                m = host.window.mask()
+                reply = "%d rects, bounds %s, window %dx%d" % (m.rectCount(), m.boundingRect().getRect(), host.window.width(), host.window.height())
+            elif msg.startswith("pane "):                  # pane N model PATH [CLIP] | clip PATH | cmd LINE | clear: work in pane 2-4, not pane 1
+                reply = host.paneVerb(msg[5:], owner)
+            elif msg.startswith("clip "):
+                host.playClip(msg[5:])
+            elif msg.startswith("replay "):
+                host.replayRun(msg[7:])
+            elif msg.startswith("cmd "):
+                host.cmd(msg[4:])
+            elif msg.startswith("snap "):
+                reply = "saved" if host.snap(msg[5:]) else "snap failed"
+            elif msg.startswith(("open ", "shut ")):
+                name = msg[5:].strip()
+                name = DRAWER_ALIASES.get(name, name)      # the outliner drawer is the tools drawer now
+                d = host.window.findChild(QObject, name)
+                if name == "chat":                         # the chat, in its own window, not unrolled over the model
+                    host.window.setProperty("chatOut", msg[:4] == "open")
+                elif name == "claude":                     # Claude, in its own window
+                    host.window.setProperty("claudeOpen", msg[:4] == "open")
+                elif d is None:
+                    reply = "no such drawer"
+                else:
+                    QMetaObject.invokeMethod(d, "setOpen", Q_ARG("QVariant", msg[:4] == "open"))
+            elif msg.startswith("page "):                  # page keys|time: the timeline drawer's page switch
+                host.window.findChild(QObject, "timelineFloor").setProperty("page", 1 if msg[5:].strip() == "keys" else 0)
+            elif msg == "draw":
+                host.openDrawingTool()
+            elif msg.startswith("draw "):
+                what = msg[5:].strip()
+                host.openDrawingFile(drawing_resolve(DRAWING_DIR, what) or what)
+            elif msg.startswith("sheet"):                 # sheet [RUN_DIR]: a research run's model sheet over the viewport; bare: shut
+                host.window.setProperty("sheetDir", os.path.abspath(msg[5:].strip()) if msg[5:].strip() else "")
+            elif msg in ("face", "face shut"):           # the Face Poser on pane 1 (pane N face for the others)
+                host.faceOpen(0 if msg == "face shut" else 1)
+            elif msg == "undo":
+                host.benchUndo()
+            elif msg in ("view edit", "view run"):         # the EDIT/RUN key
+                host.benchView(msg == "view edit")
+            elif msg.startswith("scheme "):                # scheme NAME: the chest's enamel colour
+                host.setScheme(msg[7:])
+            elif msg.startswith("layout "):                # layout 1|2|4: the viewport's panes
+                host.setViewLayout(int(msg[7:]))
+            elif msg.startswith("seek "):                  # scrub the replay to step N
+                host.replaySeek(int(msg[5:]))
+            elif msg == "keep" or msg.startswith("keep "):   # the card's KEEP [as NAME]
+                reply = host.benchKeep(msg[5:].strip()) or host._bench.get("error", "nothing kept")
+            elif msg == "where":                           # what's on screen: watched run, replay, bench
+                reply = json.dumps({"watching": host.watching, "replay": host._replay.get("dir", ""), "playing": host._replay.get("playing"),
+                                    "bench": {k: host._bench.get(k) for k in ("dir", "alive", "ready", "busy", "error", "view")}})
+            elif msg == "drag":                            # what the run/slip drag tag holds right now
+                d = host.window.findChild(QObject, "runDrag")
+                reply = "visible=%s over=%s run=%s filed=%s" % (d.property("visible"), d.property("over"),
+                                                               d.property("run") is not None, d.property("filed") is not None)
+            elif msg.startswith("placefiled "):            # placefiled N X Y: drag slip N out of the folder, let go at window X,Y
+                i, x, y = msg[11:].split()
+                d = host.window.findChild(QObject, "runDrag")
+                QMetaObject.invokeMethod(d, "beginSlip", Q_ARG("QVariant", folder_entry(host._filed[int(i)])), Q_ARG("QVariant", int(i)))
+                QMetaObject.invokeMethod(d, "moveTo", Q_ARG("QVariant", {"x": float(x), "y": float(y)}))
+                QMetaObject.invokeMethod(d, "finish")
+            elif msg.startswith("openfiled "):             # a slip out of the folder, on screen
+                host.openFiled(int(msg[10:]))
+            elif msg.startswith("research "):             # research [model=ID] PROMPT: a model sheet run; replies with its folder
+                words = msg[9:].strip()
+                model_id = None
+                if words.startswith("model="):
+                    model_id, _, words = words[6:].partition(" ")
+                reply = host.beginResearch(words, model_id) or "research did not start: " + host._status
+            elif msg.startswith("scroll "):                # scroll NAME X Y: a Flickable/ListView (by objectName) to that offset
+                name, _, xy = msg[7:].strip().partition(" ")
+                f = host.window.findChild(QObject, name)
+                if f is None:
+                    reply = "no such thing"
+                else:
+                    x, _, y = xy.partition(" ")
+                    f.setProperty("contentX", float(x or 0)); f.setProperty("contentY", float(y or 0))
+            elif msg == "tools":
+                host.refreshTools()
+                reply = "%d drawing(s)" % len(host._drawings)
+            elif msg == "quit" and chest_busy():          # another session is driving the chest live: don't pull it away
+                reply = "busy, not quitting: " + chest_busy() + " (quit force to override)"
+            elif msg in ("quit", "quit force"):
+                c.write(b"bye")
+                c.flush()
+                app.quit()
+                return
+            c.write(reply.encode())
+            c.flush()
+        c.readyRead.connect(on_read)
+    server.newConnection.connect(on_conn)
+
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()

@@ -133,26 +133,34 @@ public static class Primitives
 		return m;
 	}
 
-	/// <summary>Cylinder about Z. Sides are quads; the caps are single n-gons rather than triangle
-	/// fans, because Catmull-Clark turns an n-gon into n clean quads and turns a fan into a mess
-	/// around a high-valence hub.</summary>
+	/// <summary>Cylinder about Z. All quads, closed, with no n-gon caps and no pole fan.
+	/// Each cap is a central square plus four radial patches (two steps from the square edge
+	/// to the rim), so every cap face is a quad with low skew. Segments are rounded up to a
+	/// multiple of 8, because the four patches meet at the 45-degree diagonals and each patch
+	/// needs a whole number of rim segments. One honest limit remains: a tall cylinder's side
+	/// quads are long (height vs. arc length, e.g. 2 vs. 0.196 at radius 1, height 2, 32
+	/// segments), so topology still flags side-quad aspect and edge-length CV. That is
+	/// inherent to the shape — square side quads would need ~height/arc side rows — not a
+	/// defect in the caps, which are now all quads.</summary>
 	public static PolyMesh Cylinder( float radius = 0.5f, float height = 1f, int segments = 16, int material = 0 )
 	{
-		segments = Math.Max( 3, segments );
+		segments = Math.Max( 8, segments );
 
+		if ( segments % 8 != 0 )
+			segments += 8 - segments % 8;
+
+		var k = segments / 4; // rim segments per quadrant patch
 		var m = new PolyMesh();
 		var hz = height * 0.5f;
 
-		for ( var i = 0; i < segments; i++ )
-		{
-			var a = i / (float)segments * MathF.Tau;
-			m.AddVertex( new Vec3( MathF.Cos( a ) * radius, MathF.Sin( a ) * radius, -hz ) );
-		}
+		var bottom = new int[segments];
+		var top = new int[segments];
 
 		for ( var i = 0; i < segments; i++ )
 		{
 			var a = i / (float)segments * MathF.Tau;
-			m.AddVertex( new Vec3( MathF.Cos( a ) * radius, MathF.Sin( a ) * radius, hz ) );
+			bottom[i] = m.AddVertex( new Vec3( MathF.Cos( a ) * radius, MathF.Sin( a ) * radius, -hz ) );
+			top[i] = m.AddVertex( new Vec3( MathF.Cos( a ) * radius, MathF.Sin( a ) * radius, hz ) );
 		}
 
 		for ( var i = 0; i < segments; i++ )
@@ -162,35 +170,102 @@ public static class Primitives
 			var u1 = (i + 1) / (float)segments;
 
 			m.AddFace(
-				new[] { i, next, segments + next, segments + i },
+				new[] { bottom[i], bottom[next], top[next], top[i] },
 				new[] { new Vec2( u0, 0 ), new Vec2( u1, 0 ), new Vec2( u1, 1 ), new Vec2( u0, 1 ) },
 				material );
 		}
 
-		// Bottom cap runs backwards so its normal points -Z.
-		var bottom = new int[segments];
-		var bottomUV = new Vec2[segments];
+		Vec2 UV( Vec3 v ) => new( v.x / (2f * radius) + 0.5f, v.y / (2f * radius) + 0.5f );
 
-		for ( var i = 0; i < segments; i++ )
+		void Cap( int[] rim, float z, bool flip )
 		{
-			bottom[i] = segments - 1 - i;
-			var a = (segments - 1 - i) / (float)segments * MathF.Tau;
-			bottomUV[i] = new Vec2( MathF.Cos( a ) * 0.5f + 0.5f, MathF.Sin( a ) * 0.5f + 0.5f );
+			// Central square, corners at the 45-degree diagonals, radius 0.5 * radius,
+			// tiled as a k x k grid so its edges are subdivided exactly where the patches
+			// meet it. A single central quad would leave the patch chord segments hanging
+			// as open edges (the quad edge is one edge, the patches use k sub-edges).
+			var c = 0.5f * radius * MathF.Sqrt( 0.5f );
+			var gridPos = new Vec3[k + 1, k + 1];
+			var grid = new int[k + 1, k + 1];
+
+			for ( var iy = 0; iy <= k; iy++ )
+			for ( var ix = 0; ix <= k; ix++ )
+			{
+				gridPos[ix, iy] = new Vec3( -c + 2f * c * ix / k, -c + 2f * c * iy / k, z );
+				grid[ix, iy] = m.AddVertex( gridPos[ix, iy] );
+			}
+
+			// Intermediate ring at 0.75 * radius, one vertex per rim segment, shared by patches.
+			var ring = new int[segments];
+			var ringPos = new Vec3[segments];
+
+			for ( var i = 0; i < segments; i++ )
+			{
+				var a = i / (float)segments * MathF.Tau;
+				ringPos[i] = new Vec3( MathF.Cos( a ) * radius * 0.75f, MathF.Sin( a ) * radius * 0.75f, z );
+				ring[i] = m.AddVertex( ringPos[i] );
+			}
+
+			void Quad( int a, int b, int cc, int d, Vec3 pa, Vec3 pb, Vec3 pc, Vec3 pd )
+			{
+				if ( flip )
+					m.AddFace( new[] { a, d, cc, b }, new[] { UV( pa ), UV( pd ), UV( pc ), UV( pb ) }, material );
+				else
+					m.AddFace( new[] { a, b, cc, d }, new[] { UV( pa ), UV( pb ), UV( pc ), UV( pd ) }, material );
+			}
+
+			// Central grid faces: +Z winding, flipped for the bottom cap.
+			for ( var iy = 0; iy < k; iy++ )
+			for ( var ix = 0; ix < k; ix++ )
+				Quad( grid[ix, iy], grid[ix + 1, iy], grid[ix + 1, iy + 1], grid[ix, iy + 1],
+					gridPos[ix, iy], gridPos[ix + 1, iy], gridPos[ix + 1, iy + 1], gridPos[ix, iy + 1] );
+
+			for ( var q = 0; q < 4; q++ )
+			{
+				var qNext = (q + 1) % 4;
+				// Rim segment index of this patch start angle (45 + q*90 degrees).
+				var start = segments / 8 + q * k;
+
+				// Row 0 vertices are the central grid edge for this patch, so the
+				// patch and the centre grid share every vertex on that edge.
+				// q = 0 top edge (y = +c, x +c -> -c), 1 left edge (x = -c, y +c -> -c),
+				// 2 bottom edge (y = -c, x -c -> +c), 3 right edge (x = +c, y -c -> +c).
+				var row0Pos = new Vec3[k + 1];
+				var row0Idx = new int[k + 1];
+
+				for ( var tt = 0; tt <= k; tt++ )
+				{
+					var (gx, gy) = q switch
+					{
+						0 => (k - tt, k),
+						1 => (0, k - tt),
+						2 => (tt, 0),
+						_ => (k, tt),
+					};
+					row0Pos[tt] = gridPos[gx, gy];
+					row0Idx[tt] = grid[gx, gy];
+				}
+
+				for ( var t = 0; t < k; t++ )
+				{
+					var s0 = (start + t) % segments;
+					var s1 = (start + t + 1) % segments;
+					var a0 = row0Idx[t];
+					var b0 = row0Idx[t + 1];
+					var a1 = ring[s0];
+					var b1 = ring[s1];
+					var a2 = rim[s0];
+					var b2 = rim[s1];
+
+					// The patch walks outward first, then around the ring: +Z like the
+					// central grid. Walking around first wound every annular patch inward.
+					Quad( a0, a1, b1, b0, row0Pos[t], ringPos[s0], ringPos[s1], row0Pos[t + 1] );
+					Quad( a1, a2, b2, b1, ringPos[s0], m.Positions[a2], m.Positions[b2], ringPos[s1] );
+				}
+			}
 		}
 
-		m.AddFace( bottom, bottomUV, material );
-
-		var top = new int[segments];
-		var topUV = new Vec2[segments];
-
-		for ( var i = 0; i < segments; i++ )
-		{
-			top[i] = segments + i;
-			var a = i / (float)segments * MathF.Tau;
-			topUV[i] = new Vec2( MathF.Cos( a ) * 0.5f + 0.5f, MathF.Sin( a ) * 0.5f + 0.5f );
-		}
-
-		m.AddFace( top, topUV, material );
+		Cap( bottom, -hz, flip: true );
+		Cap( top, hz, flip: false );
 
 		return m;
 	}
@@ -328,6 +403,243 @@ public static class Primitives
 			m.AddFace( new[] { ib + n, ib + i, it + i, it + n }, UV( i ), material );  // inner wall, reversed
 			m.AddFace( new[] { ot + i, ot + n, it + n, it + i }, UV( i ), material );  // top annulus
 			m.AddFace( new[] { ib + i, ib + n, ob + n, ob + i }, UV( i ), material );  // bottom annulus
+		}
+
+		return m;
+	}
+    /// <summary>Ring about Z, in the XY plane (same orientation as SdfTorus).
+    /// All quads, closed, genus 1 like Tube. UV u goes round the ring,
+    /// v goes round the tube.</summary>
+    public static PolyMesh Torus(
+        float major = 1f, float minor = 0.5f,
+        int ringSegments = 32, int tubeSegments = 16, int material = 0)
+    {
+        ringSegments = Math.Max(3, ringSegments);
+        tubeSegments = Math.Max(3, tubeSegments);
+        if (minor >= major)
+            throw new ArgumentException("minor must be smaller than major");
+        var m = new PolyMesh();
+        for (var i = 0; i < ringSegments; i++)
+        {
+            var u = i / (float)ringSegments * MathF.Tau;
+            for (var j = 0; j < tubeSegments; j++)
+            {
+                var v = j / (float)tubeSegments * MathF.Tau;
+                var cx = MathF.Cos(u) * major;
+                var cy = MathF.Sin(u) * major;
+                m.AddVertex(new Vec3(
+                    cx + MathF.Cos(u) * MathF.Cos(v) * minor,
+                    cy + MathF.Sin(u) * MathF.Cos(v) * minor,
+                    MathF.Sin(v) * minor));
+            }
+        }
+        for (var i = 0; i < ringSegments; i++)
+        {
+            var ni = (i + 1) % ringSegments;
+            for (var j = 0; j < tubeSegments; j++)
+            {
+                var nj = (j + 1) % tubeSegments;
+                var a = i * tubeSegments + j;
+                var b = ni * tubeSegments + j;
+                var c = ni * tubeSegments + nj;
+                var d = i * tubeSegments + nj;
+                m.AddFace(new[] { a, b, c, d },
+                    new[] {
+                        new Vec2(i / (float)ringSegments, j / (float)tubeSegments),
+                        new Vec2((i + 1) / (float)ringSegments, j / (float)tubeSegments),
+                        new Vec2((i + 1) / (float)ringSegments, (j + 1) / (float)tubeSegments),
+                        new Vec2(i / (float)ringSegments, (j + 1) / (float)tubeSegments) },
+                    material);
+            }
+        }
+        return m;
+    }
+
+	/// <summary>Cone about Z, centred on the origin: circular base at -height/2,
+	/// apex at +height/2. Side faces are triangles (unavoidable at a true apex,
+	/// same as the Wedge ends); the base cap is a single n-gon like Cylinder.</summary>
+	public static PolyMesh Cone( float radius = 0.5f, float height = 1f, int segments = 16, int material = 0 )
+	{
+		segments = Math.Max( 3, segments );
+
+		if ( radius <= 0f )
+			throw new ArgumentException( "radius must be greater than 0" );
+		if ( height <= 0f )
+			throw new ArgumentException( "height must be greater than 0" );
+
+		var m = new PolyMesh();
+		var hz = height * 0.5f;
+
+		for ( var i = 0; i < segments; i++ )
+		{
+			var a = i / (float)segments * MathF.Tau;
+			m.AddVertex( new Vec3( MathF.Cos( a ) * radius, MathF.Sin( a ) * radius, -hz ) );
+		}
+
+		var apex = m.AddVertex( new Vec3( 0f, 0f, hz ) );
+
+		for ( var i = 0; i < segments; i++ )
+		{
+			var next = (i + 1) % segments;
+			var u0 = i / (float)segments;
+			var u1 = (i + 1) / (float)segments;
+			// Same order as the Cylinder side, with the top ring collapsed to the apex.
+			m.AddFace(
+				new[] { i, next, apex },
+				new[] { new Vec2( u0, 0 ), new Vec2( u1, 0 ), new Vec2( (u0 + u1) * 0.5f, 1 ) },
+				material );
+		}
+
+		// Base cap runs backwards so its normal points -Z (same as Cylinder).
+		var bottom = new int[segments];
+		var bottomUV = new Vec2[segments];
+		for ( var i = 0; i < segments; i++ )
+		{
+			bottom[i] = segments - 1 - i;
+			var a = (segments - 1 - i) / (float)segments * MathF.Tau;
+			bottomUV[i] = new Vec2( MathF.Cos( a ) * 0.5f + 0.5f, MathF.Sin( a ) * 0.5f + 0.5f );
+		}
+		m.AddFace( bottom, bottomUV, material );
+
+		return m;
+	}
+
+	/// <summary>Capsule about Z, centred on the origin. Height is the TOTAL height
+	/// (pole to pole); the straight cylinder section between the two cap centres is
+	/// height - 2*radius, so height must be at least twice the radius. Segments go
+	/// round the capsule, Divisions (capSegments) are the profile steps from pole
+	/// to equator on each cap. Side and cap walls are quads; only the two pole
+	/// fans are triangles. UV u goes round, v goes pole to pole.</summary>
+	public static PolyMesh Capsule( float radius = 0.5f, float height = 2f, int segments = 16, int capSegments = 4, int material = 0 )
+	{
+		segments = Math.Max( 3, segments );
+		capSegments = Math.Max( 1, capSegments );
+
+		if ( radius <= 0f )
+			throw new ArgumentException( "radius must be greater than 0" );
+		if ( height < 2f * radius )
+			throw new ArgumentException( "height must be at least twice the radius for a capsule" );
+
+		var m = new PolyMesh();
+		var cyl = height - 2f * radius; // distance between cap centres
+		var halfCyl = cyl * 0.5f;
+		var total = height;
+
+		float V( float z ) => (z + total * 0.5f) / total;
+
+		// Layout: 0 = bottom pole, then bottom intermediate rings (equator -> pole),
+		// bottom equator ring, top equator ring, top intermediate rings (equator -> pole),
+		// last = top pole. Intermediate rings exclude pole and equator.
+		var poleBottom = m.AddVertex( new Vec3( 0f, 0f, -halfCyl - radius ) );
+
+		int Ring( float ringRadius, float z )
+		{
+			var start = -1;
+			for ( var i = 0; i < segments; i++ )
+			{
+				var a = i / (float)segments * MathF.Tau;
+				var idx = m.AddVertex( new Vec3( MathF.Cos( a ) * ringRadius, MathF.Sin( a ) * ringRadius, z ) );
+				if ( start < 0 ) start = idx;
+			}
+			return start;
+		}
+
+		var bottomRings = new int[capSegments]; // [0] = equator-side intermediate? filled below
+		// Build bottom intermediates equator -> pole: step k=1..capSegments-1,
+		// theta from pi/2 down toward 0.
+		var bottomInter = new System.Collections.Generic.List<int>();
+		for ( var k = 1; k < capSegments; k++ )
+		{
+			var theta = MathF.PI * 0.5f - k * (MathF.PI * 0.5f) / capSegments;
+			bottomInter.Add( Ring( radius * MathF.Sin( theta ), -halfCyl - radius * MathF.Cos( theta ) ) );
+		}
+		var bottomEquator = Ring( radius, -halfCyl );
+		var topEquator = Ring( radius, halfCyl );
+		var topInter = new System.Collections.Generic.List<int>();
+		for ( var k = 1; k < capSegments; k++ )
+		{
+			var theta = MathF.PI * 0.5f - k * (MathF.PI * 0.5f) / capSegments;
+			topInter.Add( Ring( radius * MathF.Sin( theta ), halfCyl + radius * MathF.Cos( theta ) ) );
+		}
+		var poleTop = m.AddVertex( new Vec3( 0f, 0f, halfCyl + radius ) );
+		_ = bottomRings;
+
+		Vec2[] QuadUV( int i, float v0, float v1 ) => new[]
+		{
+			new Vec2( i / (float)segments, v0 ),
+			new Vec2( (i + 1) / (float)segments, v0 ),
+			new Vec2( (i + 1) / (float)segments, v1 ),
+			new Vec2( i / (float)segments, v1 ),
+		};
+
+		// Straight side, same order as the Cylinder side. Skipped when the
+		// cylinder section is zero (height == 2*radius): the caps then meet
+		// directly at the equator and zero-area side quads would be wrong.
+		if ( cyl > 1e-6f )
+		for ( var i = 0; i < segments; i++ )
+		{
+			var n = (i + 1) % segments;
+			m.AddFace( new[] { bottomEquator + i, bottomEquator + n, topEquator + n, topEquator + i },
+				QuadUV( i, V( -halfCyl ), V( halfCyl ) ), material );
+		}
+
+		// Top cap: ring sequence equator -> pole. Quads in Cylinder-side order.
+		var topSeq = new System.Collections.Generic.List<int> { topEquator };
+		topSeq.AddRange( topInter );
+		for ( var r = 0; r < topSeq.Count - 1; r++ )
+		{
+			var lo = topSeq[r];
+			var hi = topSeq[r + 1];
+			// v from the lo ring's z: recover from ring order is messy, so use
+			// profile fraction instead: v rises from equator toward the pole.
+			var v0 = 0.5f + (r / (float)capSegments) * 0.5f;
+			var v1 = 0.5f + ((r + 1) / (float)capSegments) * 0.5f;
+			for ( var i = 0; i < segments; i++ )
+			{
+				var n = (i + 1) % segments;
+				m.AddFace( new[] { lo + i, lo + n, hi + n, hi + i }, QuadUV( i, v0, v1 ), material );
+			}
+		}
+		{
+			var last = topSeq[topSeq.Count - 1];
+			for ( var i = 0; i < segments; i++ )
+			{
+				var n = (i + 1) % segments;
+				m.AddFace( new[] { last + i, last + n, poleTop },
+					new[] { new Vec2( i / (float)segments, 1f ), new Vec2( (i + 1) / (float)segments, 1f ), new Vec2( (i + 0.5f) / segments, 1f ) },
+					material );
+			}
+		}
+
+		// Bottom cap: same ring sequence equator -> pole, winding reversed
+		// (viewed from below, the CCW direction flips — same as the Cylinder base cap).
+		var botSeq = new System.Collections.Generic.List<int> { bottomEquator };
+		botSeq.AddRange( bottomInter );
+		for ( var r = 0; r < botSeq.Count - 1; r++ )
+		{
+			var lo = botSeq[r];
+			var hi = botSeq[r + 1];
+			var v1 = 0.5f - (r / (float)capSegments) * 0.5f;
+			var v0 = 0.5f - ((r + 1) / (float)capSegments) * 0.5f;
+			for ( var i = 0; i < segments; i++ )
+			{
+				var n = (i + 1) % segments;
+				// Corner order is reversed vs the top cap, so UVs follow the corners:
+				// lo+n -> u1, lo+i -> u0, hi+i -> u0, hi+n -> u1; v1 is equator-side.
+				m.AddFace( new[] { lo + n, lo + i, hi + i, hi + n },
+					new[] { new Vec2( (i + 1) / (float)segments, v1 ), new Vec2( i / (float)segments, v1 ), new Vec2( i / (float)segments, v0 ), new Vec2( (i + 1) / (float)segments, v0 ) },
+					material );
+			}
+		}
+		{
+			var last = botSeq[botSeq.Count - 1];
+			for ( var i = 0; i < segments; i++ )
+			{
+				var n = (i + 1) % segments;
+				m.AddFace( new[] { last + n, last + i, poleBottom },
+					new[] { new Vec2( (i + 1) / (float)segments, 0f ), new Vec2( i / (float)segments, 0f ), new Vec2( (i + 0.5f) / segments, 0f ) },
+					material );
+			}
 		}
 
 		return m;

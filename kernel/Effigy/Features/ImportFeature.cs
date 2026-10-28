@@ -301,8 +301,12 @@ public class ImportFeature : Feature
 		{
 			FailOn( "Source",
 				"No mesh file to import",
-				"An Import needs a Wavefront OBJ or an FBX, and this one has no source path.",
-				"Pick an .obj or .fbx file" );
+				ReferenceBodies
+					? "A Wearer needs a mesh file, and this one has no source path. Wearing is only a label, not a file path."
+					: "An Import needs a Wavefront OBJ or an FBX, and this one has no source path.",
+				ReferenceBodies
+					? "Use source= for the .obj/.fbx file; wearing= is only the label saying where the body came from"
+					: "Pick an .obj or .fbx file" );
 		}
 		else
 		{

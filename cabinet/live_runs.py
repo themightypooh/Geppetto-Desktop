@@ -79,6 +79,13 @@ PACES = (0, 1, 3, 5, 10)
 TERMINAL = ("completed", "below-target", "cancelled", "failed")
 OPEN = ("open", "held", "checkpoint")     # a script run that finished its lines (or held at a bad one) and takes more (geppetto-live more);
                                           # "checkpoint" is a run gated at a stage checkpoint (Lane D): it takes a continue, not more lines
+# "revision" is a committed-revision event, not a finished run: it was in
+# neither TERMINAL nor OPEN, so host scans had no defined behaviour for it
+# (e.g. the 702a second run, rev 55, state "revision", process gone). Treat it
+# as open-or-stale: reusable via `more` while its process is alive, stale once
+# that process is gone. TERMINAL and OPEN are left unchanged so existing
+# membership checks keep their meaning.
+OPEN_OR_STALE = OPEN + ("revision",)
 
 
 def close_open(root):
@@ -89,6 +96,121 @@ def close_open(root):
     tmp = os.path.join(directory, name + ".close.tmp")
     open(tmp, "w").close()
     os.replace(tmp, tmp[:-4])
+
+
+def _state_name(state):
+    if isinstance(state, dict):
+        return state.get("state", "")
+    return state if isinstance(state, str) else ""
+
+
+def is_terminal(state):
+    return _state_name(state) in TERMINAL
+
+
+def is_open(state):
+    return _state_name(state) in OPEN
+
+
+def is_revision(state):
+    return _state_name(state) == "revision"
+
+
+def is_open_or_stale(state):
+    """OPEN plus "revision": a run that takes more/close, or is stale if dead."""
+    return _state_name(state) in OPEN_OR_STALE
+
+
+def run_pid(root):
+    """The pid recorded in the run's sibling <run>.json meta, or None if none."""
+    try:
+        pid = run_meta(root).get("pid")
+        return int(pid) if pid is not None else None
+    except (ValueError, TypeError):
+        return None
+
+
+def run_alive(root):
+    """True if the recorded pid is alive, False if recorded but dead, None if unknown."""
+    pid = run_pid(root)
+    if pid is None:
+        return None
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _stale_path(root):
+    return os.path.join(root, ".live", "stale.json")
+
+
+def is_stale(root, state=None):
+    """A "revision" run is stale only when it is known dead: a stale marker exists,
+    or its recorded pid is dead. Unknown-pid revision runs are NOT stale, so a
+    live run between lines is never mistaken for a dead one."""
+    if state is None:
+        state = read_state(root)
+    if not is_revision(state):
+        return False
+    if os.path.isfile(_stale_path(root)):
+        return True
+    return run_alive(root) is False
+
+
+def mark_stale(root, reason=""):
+    """Record, without rewriting latest.json/events.jsonl, that a revision-state run
+    is closed-for-scan because its process is gone. The runner never published a
+    terminal event, so this marker must not be presented as one."""
+    state = read_state(root)
+    record = {"run": os.path.basename(root.rstrip(os.sep)), "runId": state.get("runId"),
+              "state": state.get("state"), "reason": reason or "revision-state run, process gone",
+              "time": time.strftime("%Y-%m-%dT%H:%M:%S")}
+    path = _stale_path(root)
+    makedirs_private(os.path.dirname(path))
+    tmp = path + "." + uuid.uuid4().hex + ".tmp"
+    try:
+        with open(tmp, "x") as stream:
+            json.dump(record, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+    return path
+
+
+def close_run(root):
+    """Close a run explicitly, for gate failure, cancel, or quit. Returns
+    "terminal" (already terminal, no action), "stale" (revision-state with a dead
+    process: close entry written plus a stale marker, so scans must not resurrect
+    it), or "closed" (close inbox entry written for a live non-terminal run, which
+    the runner takes between lines and then records its own terminal state)."""
+    state = read_state(root)
+    if is_terminal(state):
+        return "terminal"
+    close_open(root)
+    if is_stale(root, state):
+        mark_stale(root, "close_run: revision-state run, process gone")
+        return "stale"
+    return "closed"
+
+
+def reuse_run(root):
+    """The run to reuse on a gate retry, or None. A revision/open run with a live
+    (or unknown, unproven-dead) process is reusable via `more`; a terminal or stale
+    run is not, so a retry must not silently start a second run alongside a
+    reusable one. A stale run's snapshot is kept; any replacement run must
+    explicitly supersede it, not duplicate it."""
+    state = read_state(root)
+    if not state.get("runId"):
+        return None
+    if is_terminal(state) or is_stale(root, state):
+        return None
+    return root if is_open_or_stale(state) else None
 
 
 def continue_checkpoint(root, note=""):
@@ -583,8 +705,8 @@ def wait_notes(root, poll=0.5, sleep=time.sleep, alive=None):
         found = take_notes(root)
         if found:
             return notes_text(found, root)
-        state = read_state(root).get("state")
-        if state in TERMINAL or (alive is not None and not alive()):
+        current = read_state(root)
+        if current.get("state") in TERMINAL or (alive is not None and not alive()) or is_stale(root, current):
             found = take_notes(root)            # a note left just before CLOSE still counts
             return notes_text(found, root) if found else None
         sleep(poll)

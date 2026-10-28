@@ -51,6 +51,9 @@ public static class Program
 		string modelPath = arguments.Model, clipPath = arguments.Clip, screenshotPath = arguments.Screenshot;
 		bool stats = arguments.Stats, animate = arguments.Animate, isoView = arguments.Iso;
 		if ( arguments.WatchRun is not null ) return ServeMode.Run( arguments );
+		// --empty serve needs no model file at all: skip the model-exists check below,
+		// which would otherwise demand the default FBX just to throw it away in ServeMode.
+		if ( arguments.Empty && arguments.Serve ) return ServeMode.Run( arguments );
 		if ( !System.IO.File.Exists( modelPath ) ) throw new System.IO.FileNotFoundException( "Model file not found.", modelPath );
 		if ( clipPath is not null && !System.IO.File.Exists( clipPath ) ) throw new System.IO.FileNotFoundException( "Clip file not found.", clipPath );
 		if ( !modelPath.EndsWith( ".fbx", StringComparison.OrdinalIgnoreCase ) && !modelPath.EndsWith( ".effigy", StringComparison.OrdinalIgnoreCase ) )

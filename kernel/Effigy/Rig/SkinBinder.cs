@@ -31,6 +31,76 @@ public readonly struct BodyRange
 }
 
 /// <summary>
+/// <summary>How a per-vertex weight set is rescaled. See <see cref="SkinBinder.Normalize"/>.</summary>
+public enum SkinNormalizeMode
+{
+	/// <summary>Rescale so the weights sum to 1 — the partition of unity every other step assumes.
+	/// This is what <see cref="SkinWeights.Blend"/> and the binders already produce, so it is the
+	/// default and re-applying it changes nothing.</summary>
+	Sum,
+
+	/// <summary>Rescale so the strongest influence is exactly 1, keeping the ratios between bones.
+	/// The set then sums to more than 1: it is NOT a partition of unity and <c>Validate</c> will
+	/// flag it. It is for overlay/additive layers, where the strongest bone must drive at full
+	/// strength rather than being diluted by how many bones share the vertex.</summary>
+	Strongest,
+
+	/// <summary>No rescaling at all — tidy copy only (duplicates merged, non-positive and
+	/// relatively negligible influences dropped, strongest first). For preview and diagnostics:
+	/// what the raw influences actually are before any normalisation hides them. Also not a
+	/// partition of unity in general.</summary>
+	None,
+}
+
+/// <summary>What happens to a vertex that ends up with no weights at all. A vertex with no
+/// weights does not move in <see cref="SkinBinder.Deform"/> — it stays on its bind position — so
+/// an unweighted vertex is a hole in the rig, not a crash, and these modes are the authoring-time
+/// answers for closing it.</summary>
+public enum UnweightedMode
+{
+	/// <summary>Leave empty vertices empty. The historical behaviour everywhere: <c>Deform</c>
+	/// keeps them on bind, <c>TransferFrom</c> keeps whatever the target already had.</summary>
+	Keep,
+
+	/// <summary>Assign the nearest bone segment at full weight. Needs a skeleton; without one this
+	/// throws rather than guessing. Produces a complete rig in one pass, at the cost of rigid
+	/// seams where the fill meets painted weights — follow with <c>SmoothWeights</c> if that
+	/// shows.</summary>
+	NearestBone,
+
+	/// <summary>Fill from mesh neighbours: an empty vertex takes the blend of its non-empty
+	/// neighbours, repeated until no more fill. Respects the surface the way smoothing does —
+	/// weight flows around a limb rather than through space — but an island of empty vertices
+	/// with no weighted neighbour stays empty. Needs no skeleton.</summary>
+	NeighbourAverage,
+}
+
+/// <summary>Options for <see cref="SkinBinder.TransferFrom(PolyMesh, PolyMesh, TransferOptions, Skeleton)"/>.
+/// Every field defaults to the historical behaviour, so the options overload with a default
+/// <see cref="TransferOptions"/> is the old call exactly.</summary>
+public sealed class TransferOptions
+{
+	/// <summary>Vertices further than this from the source keep what they had (or nothing).
+	/// Default is unbounded, as before.</summary>
+	public float MaxDistance = float.MaxValue;
+
+	/// <summary>Exponent on the inverse-distance corner blend: a corner at distance d contributes
+	/// 1/d^<c>Falloff</c>. 1 is the historical blend; higher values sharpen toward the nearest
+	/// corner, lower values soften across the face. Must be positive.</summary>
+	public float Falloff = 1f;
+
+	/// <summary>How much of the transferred weights replaces what the target already had: 1 is a
+	/// full replace (historical), 0 keeps the existing weights entirely, in-between blends the
+	/// two by this factor. Clamped to [0, 1].</summary>
+	public float Mix = 1f;
+
+	/// <summary>What happens to vertices the surface pass did not reach (beyond
+	/// <see cref="MaxDistance"/>). <see cref="UnweightedMode.Keep"/> is historical.
+	/// <see cref="UnweightedMode.NearestBone"/> needs the skeleton argument to
+	/// <c>TransferFrom</c>; without it, it throws rather than guessing.</summary>
+	public UnweightedMode Unweighted = UnweightedMode.Keep;
+}
+
 /// Generating skin weights, so nobody has to paint them.
 ///
 /// TWO FAMILIES. This file holds the cheap ones: distance to the bone SEGMENT (BindRigid,
@@ -141,6 +211,71 @@ public static partial class SkinBinder
 	}
 
 	/// <summary>
+	/// <summary>
+	/// <see cref="BindSmooth(PolyMesh, Skeleton, float, float)"/> with a normalisation mode.
+	/// <see cref="SkinNormalizeMode.Sum"/> delegates to the old call and is identical to it.
+	/// <see cref="SkinNormalizeMode.Strongest"/> rescales each vertex so its strongest bone is 1;
+	/// <see cref="SkinNormalizeMode.None"/> returns the raw influences tidied (duplicates merged,
+	/// non-positive and relatively negligible influences dropped, strongest first) without
+	/// rescaling. Neither of the latter is a partition of unity — they are for overlay layers and
+	/// diagnostics, not for export.
+	/// </summary>
+	public static SkinWeights BindSmooth( PolyMesh mesh, Skeleton skeleton, SkinNormalizeMode normalize, float falloff = 2f, float cutoff = 0.02f )
+	{
+		if ( normalize == SkinNormalizeMode.Sum )
+			return BindSmooth( mesh, skeleton, falloff, cutoff );
+
+		RequireBones( skeleton );
+
+		if ( falloff <= 0f )
+			throw new ArgumentOutOfRangeException( nameof( falloff ), "Falloff must be positive" );
+
+		var weights = new SkinWeights();
+		var segments = Segments( skeleton );
+		var distances = new float[segments.Length];
+
+		foreach ( var p in mesh.Positions )
+		{
+			var nearest = float.MaxValue;
+
+			for ( var b = 0; b < segments.Length; b++ )
+			{
+				distances[b] = DistanceToSegment( p, segments[b].Head, segments[b].Tail );
+				nearest = MathF.Min( nearest, distances[b] );
+			}
+
+			// Same on-bone snap as the old call: the limit of the formula, and the expected answer.
+			if ( nearest < 1e-6f )
+			{
+				var onBone = Array.IndexOf( distances, nearest );
+				weights.Vertices.Add( new[] { new BoneWeight( onBone < 0 ? 0 : onBone, 1f ) } );
+				continue;
+			}
+
+			var acc = new Dictionary<int, float>();
+			var strongest = 0f;
+
+			for ( var b = 0; b < segments.Length; b++ )
+			{
+				var influence = 1f / MathF.Pow( distances[b], falloff );
+				acc[b] = influence;
+				strongest = MathF.Max( strongest, influence );
+			}
+
+			var floor = strongest * cutoff;
+
+			foreach ( var b in new List<int>( acc.Keys ) )
+			{
+				if ( acc[b] < floor )
+					acc.Remove( b );
+			}
+
+			weights.Vertices.Add( FinishMode( acc, normalize ) );
+		}
+
+		return weights;
+	}
+
 	/// Bind whole bodies to named bones — the parametric path.
 	///
 	/// Every vertex of a bound body gets that bone at full weight. Bodies with no mapping fall back
@@ -328,6 +463,182 @@ public static partial class SkinBinder
 		return best;
 	}
 
+	/// <summary>
+	/// Rescale every vertex's weights by <paramref name="mode"/>, returning a NEW set — the input
+	/// is never mutated. Duplicates are merged by summing, non-positive and relatively negligible
+	/// influences are dropped, and each set comes back strongest first, matching the order
+	/// <c>Prune</c> and the binders guarantee (SmdWriter reads weights[0] as the parent bone).
+	/// Empty sets stay empty in every mode: there is nothing to rescale, and inventing a bone
+	/// would be worse than the hole.
+	/// </summary>
+	public static SkinWeights Normalize( SkinWeights weights, SkinNormalizeMode mode = SkinNormalizeMode.Sum )
+	{
+		if ( weights is null ) throw new ArgumentNullException( nameof( weights ) );
+
+		var result = new SkinWeights();
+
+		foreach ( var w in weights.Vertices )
+		{
+			var acc = new Dictionary<int, float>();
+
+			if ( w is not null )
+			{
+				foreach ( var bw in w )
+				{
+					if ( bw.Weight <= 0f ) continue;
+					acc.TryGetValue( bw.Bone, out var existing );
+					acc[bw.Bone] = existing + bw.Weight;
+				}
+			}
+
+			result.Vertices.Add( FinishMode( acc, mode ) );
+		}
+
+		return result;
+	}
+
+	/// <summary>
+	/// Close the holes in a weight set: every vertex with no influences gets one, by
+	/// <paramref name="mode"/>. Returns the filled set (a NEW set — the input is never mutated)
+	/// and how many vertices were filled. <see cref="UnweightedMode.Keep"/> returns a clone and 0.
+	/// <see cref="UnweightedMode.NearestBone"/> needs <paramref name="skeleton"/>; the other modes
+	/// accept a null skeleton. Vertices <c>NeighbourAverage</c> cannot reach — an island of empty
+	/// vertices with no weighted neighbour — stay empty; chain it with <c>NearestBone</c> if a
+	/// complete rig matters more than surface flow.
+	/// </summary>
+	public static (SkinWeights Weights, int Filled) FillUnweighted( PolyMesh mesh, SkinWeights weights, Skeleton skeleton, UnweightedMode mode = UnweightedMode.NearestBone )
+	{
+		if ( mesh is null ) throw new ArgumentNullException( nameof( mesh ) );
+		if ( weights is null ) throw new ArgumentNullException( nameof( weights ) );
+		if ( weights.Count != mesh.VertexCount )
+			throw new ArgumentException( $"{weights.Count} weight sets for {mesh.VertexCount} vertices", nameof( weights ) );
+
+		if ( mode == UnweightedMode.Keep )
+			return (weights.Clone(), 0);
+
+		if ( mode == UnweightedMode.NearestBone )
+		{
+			RequireBones( skeleton );
+
+			var filled = new SkinWeights();
+			var count = 0;
+
+			for ( var v = 0; v < mesh.VertexCount; v++ )
+			{
+				var w = weights[v];
+
+				if ( w is { Length: > 0 } )
+				{
+					filled.Vertices.Add( (BoneWeight[])w.Clone() );
+					continue;
+				}
+
+				filled.Vertices.Add( new[] { new BoneWeight( NearestBone( mesh.Positions[v], skeleton ), 1f ) } );
+				count++;
+			}
+
+			return (filled, count);
+		}
+
+		if ( mode != UnweightedMode.NeighbourAverage )
+			throw new ArgumentOutOfRangeException( nameof( mode ), $"Unknown unweighted mode {mode}" );
+
+		var neighbours = mesh.BuildVertexEdges();
+		var current = weights.Clone();
+		var total = 0;
+
+		// Snapshot semantics per pass: fills are computed from the state at the pass start, so a
+		// line of empty vertices fills from both ends inward one step per pass rather than in
+		// whatever order the loop happens to visit them. Passes stop when one fills nothing.
+		while ( true )
+		{
+			var next = current.Clone();
+			var filledThisPass = 0;
+
+			for ( var v = 0; v < mesh.VertexCount; v++ )
+			{
+				if ( current[v] is { Length: > 0 } )
+					continue;
+
+				var terms = new List<(BoneWeight[] Weights, float Coefficient)>();
+
+				foreach ( var e in neighbours[v] )
+				{
+					var n = e.A == v ? e.B : e.A;
+
+					if ( current[n] is { Length: > 0 } own )
+						terms.Add( (own, 1f) );
+				}
+
+				if ( terms.Count == 0 )
+					continue;
+
+				next[v] = SkinWeights.Blend( terms );
+				filledThisPass++;
+			}
+
+			current = next;
+			total += filledThisPass;
+
+			if ( filledThisPass == 0 )
+				break;
+		}
+
+		return (current, total);
+	}
+
+	/// <summary>Same tidy rule as <see cref="SkinWeights.Finish"/> — drop non-positive and
+	/// relatively negligible influences, strongest first — then rescale by mode. <c>Sum</c> is
+	/// exactly <c>Finish</c>'s rescale; the other modes only change the divisor. Kept separate so
+	/// <c>BindSmooth</c>'s non-default modes and <c>Normalize</c> share one definition.</summary>
+	static BoneWeight[] FinishMode( Dictionary<int, float> acc, SkinNormalizeMode mode )
+	{
+		var total = 0f;
+
+		foreach ( var v in acc.Values )
+		{
+			if ( v > 0f )
+				total += v;
+		}
+
+		if ( total <= 0f )
+			return Array.Empty<BoneWeight>();
+
+		var floor = total * 1e-6f;
+		var kept = new List<(int Bone, float Weight)>();
+		var strongest = 0f;
+		var sum = 0f;
+
+		foreach ( var (bone, v) in acc )
+		{
+			if ( v > floor )
+			{
+				kept.Add( (bone, v) );
+				strongest = MathF.Max( strongest, v );
+				sum += v;
+			}
+		}
+
+		if ( kept.Count == 0 )
+			return Array.Empty<BoneWeight>();
+
+		var divisor = mode switch
+		{
+			SkinNormalizeMode.Sum => sum,
+			SkinNormalizeMode.Strongest => strongest,
+			_ => 1f,
+		};
+
+		kept.Sort( ( a, b ) => b.Weight.CompareTo( a.Weight ) );
+
+		var result = new BoneWeight[kept.Count];
+
+		for ( var i = 0; i < kept.Count; i++ )
+			result[i] = new BoneWeight( kept[i].Bone, kept[i].Weight / divisor );
+
+		return result;
+	}
+
 	// --- helpers -----------------------------------------------------------------------------
 
 	static void RequireBones( Skeleton skeleton )
@@ -375,12 +686,38 @@ public static partial class SkinBinder
 	/// Vertices further than <paramref name="maxDistance"/> from the source keep what they had (or
 	/// nothing). Returns how many were reached.
 	/// </summary>
-	public static int TransferFrom( PolyMesh target, PolyMesh source, float maxDistance = float.MaxValue )
+	public static int TransferFrom( PolyMesh target, PolyMesh source, float maxDistance = float.MaxValue ) =>
+		TransferFrom( target, source, new TransferOptions { MaxDistance = maxDistance } );
+
+	/// <summary>
+	/// <see cref="TransferFrom(PolyMesh, PolyMesh, float)"/> with options. Defaults reproduce the
+	/// old call exactly: <c>Falloff</c> 1 uses the historical 1/d blend bit-for-bit, <c>Mix</c> 1
+	/// takes the transferred weights verbatim, and <c>Unweighted</c> <c>Keep</c> leaves unreached
+	/// vertices alone. <c>Falloff</c> sharpens or softens the corner blend; <c>Mix</c> below 1
+	/// blends the transfer into what the target already had instead of replacing it — for a
+	/// garment that already carries paint worth keeping. <c>Unweighted</c> closes the holes the
+	/// surface pass leaves: <c>NeighbourAverage</c> fills from reached neighbours along the
+	/// surface, <c>NearestBone</c> pins the rest to the nearest bone but needs
+	/// <paramref name="skeleton"/> — without it, it throws rather than guessing. The return is
+	/// still how many vertices the surface pass reached; filled vertices are not counted there.
+	/// </summary>
+	public static int TransferFrom( PolyMesh target, PolyMesh source, TransferOptions options, Skeleton skeleton = null )
 	{
 		if ( target is null )
 			throw new ArgumentNullException( nameof( target ) );
 		if ( source is null || !source.IsRigged )
 			throw new InvalidOperationException( "The body to copy weights from has no skin weights. Rig it first." );
+		if ( options is null )
+			throw new ArgumentNullException( nameof( options ) );
+		if ( float.IsNaN( options.Falloff ) || float.IsInfinity( options.Falloff ) || options.Falloff <= 0f )
+			throw new ArgumentOutOfRangeException( nameof( options ), "Transfer falloff must be positive" );
+		if ( float.IsNaN( options.Mix ) || float.IsInfinity( options.Mix ) )
+			throw new ArgumentOutOfRangeException( nameof( options ), "Transfer mix must be finite" );
+
+		var mix = Math.Clamp( options.Mix, 0f, 1f );
+
+		if ( options.Unweighted == UnweightedMode.NearestBone && skeleton is null )
+			throw new InvalidOperationException( "Transfer with NearestBone unweighted handling needs a skeleton" );
 
 		var tree = MeshBVH.Build( source );
 		var weights = target.IsRigged ? target.Skin.Clone() : new SkinWeights( target.VertexCount );
@@ -388,8 +725,15 @@ public static partial class SkinBinder
 
 		for ( var v = 0; v < target.VertexCount; v++ )
 		{
-			if ( tree.NearestSurface( source, target.Positions[v], maxDistance ) is not { } hit )
+			if ( tree.NearestSurface( source, target.Positions[v], options.MaxDistance ) is not { } hit )
 				continue;
+
+			if ( mix <= 0f )
+			{
+				// Mix 0 keeps the existing weights bit-for-bit — not even tidied by a blend.
+				reached++;
+				continue;
+			}
 
 			var face = source.Faces[hit.FaceIndex];
 			var terms = new List<(BoneWeight[] Weights, float Coefficient)>();
@@ -408,7 +752,8 @@ public static partial class SkinBinder
 					break;
 				}
 
-				var k = 1f / d;
+				// Falloff 1 uses the historical 1/d bit-for-bit; other exponents go through Pow.
+				var k = options.Falloff == 1f ? 1f / d : 1f / MathF.Pow( d, options.Falloff );
 				terms.Add( (source.Skin[corner], k) );
 				total += k;
 			}
@@ -416,11 +761,19 @@ public static partial class SkinBinder
 			for ( var i = 0; i < terms.Count; i++ )
 				terms[i] = (terms[i].Weights, terms[i].Coefficient / total);
 
-			weights[v] = SkinWeights.Blend( terms );
+			var transferred = SkinWeights.Blend( terms );
+
+			weights[v] = mix >= 1f
+				? transferred
+				: SkinWeights.Blend( (weights[v], 1f - mix), (transferred, mix) );
 			reached++;
 		}
+
+		if ( options.Unweighted != UnweightedMode.Keep )
+			weights = FillUnweighted( target, weights, skeleton, options.Unweighted ).Weights;
 
 		target.Skin = weights;
 		return reached;
 	}
+
 }

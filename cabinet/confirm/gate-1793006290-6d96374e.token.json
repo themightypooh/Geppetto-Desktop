@@ -1,0 +1,13 @@
+{
+  "id": "gate-1793006290-6d96374e",
+  "pid": 4149599,
+  "registered_at": 1793006311.860525,
+  "run": "/home/poo/.local/share/geppetto/research/script-her-separate-20261026-051831-4149582",
+  "script": "/home/poo/workspace/her-separate/her-separate.txt",
+  "script_hash": "ed41a2c857d229557b531aae0b27cbc9d139d4bb24e4f797118a4a2739cc593a",
+  "session": "efae35e2-ef00-4411-85ac-438925c99245",
+  "subject": "blonde woman, separate shirt, pants, socks, undies and bra, arcade character method, full body",
+  "used_at": 1793006311.77898,
+  "worker": "subagent-her-separate-attempt4",
+  "yes_at": 1793006311.4333143
+}

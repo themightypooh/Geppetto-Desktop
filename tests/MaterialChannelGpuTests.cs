@@ -44,12 +44,12 @@ internal static class MaterialChannelGpuTests
 			using var regular = ViewportMesh.FromPolyMesh( Plane(), _ => "test" );
 			using var mirror = ViewportMesh.FromPolyMesh( Plane( mirror: true ), _ => "test" );
 			using var degenerate = ViewportMesh.FromPolyMesh( Plane( degenerate: true ), _ => "test" );
-			Check( ViewportMesh.FloatsPerVertex == 20, "tangent vec4 stride" );
+			Check( ViewportMesh.FloatsPerVertex == 24, "tangent vec4 stride" );
 			Check( regular.Vertices[19] == -mirror.Vertices[19], "mirrored island handedness" );
 			foreach ( var mesh in new[] { regular, mirror, degenerate } )
 				for ( int c = 0; c < 4; c++ )
 				{
-					var tangent = new Vector3( mesh.Vertices[c * 20 + 16], mesh.Vertices[c * 20 + 17], mesh.Vertices[c * 20 + 18] );
+					var tangent = new Vector3( mesh.Vertices[c * 24 + 16], mesh.Vertices[c * 24 + 17], mesh.Vertices[c * 24 + 18] );
 					Check( float.IsFinite( tangent.Length() ) && tangent.Length() > .99f && tangent.Length() < 1.01f,
 						"tangent fallback must be finite and unit length" );
 				}

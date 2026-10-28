@@ -1,0 +1,2 @@
+# part	model	pivot x	y	z	size x	y	z
+walkie_pro	out/walkie_pro.vmdl	-0.005	0.02	0	1.77	0.75	5.46

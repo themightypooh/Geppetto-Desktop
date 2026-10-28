@@ -1,0 +1,10 @@
+add Primitive name=BrokenSlab shape=Box width=3 depth=3 height=0.35 position=3,1.2,2 rotationaxis=1,0,0 rotation=-18 materialslot=0
+add Primitive name=DeskBlock shape=Box width=4 depth=1 height=0.75 position=-1,0.775,2.5 materialslot=3
+add Primitive name=Debris1 shape=Box width=1 depth=0.8 height=0.5 position=3.5,0.65,0 materialslot=2
+add Primitive name=Debris2 shape=Box width=0.8 depth=0.6 height=0.4 position=4.5,0.6,3 materialslot=2
+add Primitive name=Rebar1 shape=Cylinder radius=0.05 height=1.6 position=2.8,1.2,4.8 rotationaxis=1,0,0 rotation=12 materialslot=2
+material 0 color=#7a7568 rough=0.95 metal=0
+material 1 color=#b8b2a4 rough=0.9 metal=0
+material 2 color=#3a332c rough=0.95 metal=0.2
+material 3 color=#8a8578 rough=0.85 metal=0.05
+save one_floor_slice.effigy

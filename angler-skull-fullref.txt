@@ -1,0 +1,2 @@
+refimage top angler-full.jpg height=134.2 offset=46,15.4 depth=-1 opacity=0.6
+save angler_skull_v8.effigy

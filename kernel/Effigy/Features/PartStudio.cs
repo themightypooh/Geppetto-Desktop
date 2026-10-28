@@ -43,6 +43,25 @@ public sealed class RebuildReport
 /// declare what they read — but not before it actually hurts, because the correctness of "editing
 /// upstream cannot be affected by downstream state" is worth more than the memory.
 /// </summary>
+/// <summary>A picture landmark: a named pixel in one view. The world
+/// point is recomputed from the current picture placement on read, so
+/// calibrating after marking moves the mark with the picture.</summary>
+public sealed class RefMark
+{
+	public string View = "front";
+	public string Name = "";
+	public float Px, Py;
+	public string Tag = "";
+	public int ImgW, ImgH;
+}
+
+/// <summary>One section's state in the tracing checklist.</summary>
+public sealed class RefStep
+{
+	public string Name = "";
+	public string State = "todo";
+}
+
 public sealed class PartStudio
 {
 	public List<Feature> Features = new();
@@ -80,6 +99,33 @@ public sealed class PartStudio
 	/// export writes it as the slot's .vmat. Absent means the slot has no look of its own.
 	/// </summary>
 	public Dictionary<int, SlotLook> MaterialLooks = new();
+
+	/// <summary>Hitboxes and attachments named in scripts (`hitbox`, `attachment` verbs),
+	/// saved with the document and emitted on skinned export. They used to be spec-only:
+	/// the verbs logged the VMDL node text and kept nothing, so no export ever carried
+	/// them. Bones are validated at verb time and again at export; a spec whose bone is
+	/// gone from the skeleton is skipped with a log line, never written blind.</summary>
+	public List<VmdlDocument.Hitbox> Hitboxes = new();
+	public List<VmdlDocument.Attachment> Attachments = new();
+
+	/// <summary>Body groups named in scripts (`bodygroup` verb), saved with the document
+	/// the same way hitboxes and attachments are. Replacing by name: one group per name.</summary>
+	public List<VmdlDocument.BodyGroup> BodyGroups = new();
+
+	/// <summary>Break pieces named by the `breakpieces` verb from Fracture shards, saved
+	/// with the document. Mass is |signed mesh volume| x density (bounds volume when the
+	/// shard mesh has no volume), and is logged as such — it is a starting mass, not a
+	/// measured engine mass.</summary>
+	public List<VmdlDocument.BreakPiece> BreakPieces = new();
+
+	/// <summary>Ragdoll limits set by the `ragdoll_limit` verb, saved with the document.
+	/// The `ragdoll` verb builds its joints from these instead of an empty set.</summary>
+	public List<RigLimit> RagdollLimits = new();
+
+	/// <summary>Authored particle cues (see ParticleCue): the numbers a
+	/// runtime effect needs, saved with the document like hitboxes and
+	/// attachments. Geppetto simulates nothing from them.</summary>
+	public List<ParticleCue> ParticleCues = new();
 
 	/// <summary>The name for a slot, falling back to the .vmat a Flesh Material wrote for it, then
 	/// the numbered default. Pass this straight to any of the exporters.
@@ -140,6 +186,13 @@ public sealed class PartStudio
 	/// state like the pivot: nothing in the rebuild reads them, they are only drawn.
 	/// </summary>
 	public List<ReferenceImage> ReferenceImages = new();
+
+	/// <summary>Picture landmarks, stored by pixel so calibrating later moves
+	/// them with the picture (world points are recomputed on read).</summary>
+	public List<RefMark> RefMarks = new();
+
+	/// <summary>Section checklist state for the tracing workflow.</summary>
+	public List<RefStep> RefSteps = new();
 
 	/// <summary>
 	/// THE MODEL'S PIVOT, in the same coordinates every feature builds in.
@@ -259,6 +312,8 @@ public sealed class PartStudio
 	{
 		public List<Body> Bodies;
 		public Dictionary<string, Sketch> Sketches;
+		/// <summary>Sketch feature names by id, carried like Sketches: without it an incremental rebuild resuming from cache would find the sketch but not its name, and consumer logs would fall back to ids.</summary>
+		public Dictionary<string, string> SketchNames;
 
 		/// <summary>Carried like everything else a feature can see. Left out, an incremental
 		/// rebuild that resumes from the cache would find the sketch but not what it is attached
@@ -276,27 +331,35 @@ public sealed class PartStudio
 		/// from the cache has to find the curve drawn above it.</summary>
 		public Dictionary<string, Spline3> Splines;
 		public string LastSplineId;
+		public Dictionary<int, SlotLook> SlotLooks;
+		public Dictionary<string, List<ParticleBakeEvent>> ParticleBakes;
 
 		public static Snapshot Of( FeatureContext ctx ) => new()
 		{
 			Bodies = ctx.Bodies.Select( b => b.Clone() ).ToList(),
 			Sketches = ctx.Sketches.ToDictionary( kv => kv.Key, kv => kv.Value.Clone() ),
+			SketchNames = new Dictionary<string, string>( ctx.SketchNames ),
 			SketchHostBodies = new Dictionary<string, string>( ctx.SketchHostBodies ),
 			Planes = ctx.Planes.ToDictionary( kv => kv.Key, kv => kv.Value.Clone() ),
 			PlaneHostBodies = new Dictionary<string, string>( ctx.PlaneHostBodies ),
 			Splines = ctx.Splines.ToDictionary( kv => kv.Key, kv => new Spline3 { Points = new List<Vec3>( kv.Value.Points ), Closed = kv.Value.Closed, Smooth = kv.Value.Smooth } ),
 			LastSplineId = ctx.LastSplineId,
+			SlotLooks = ctx.SlotLooks.ToDictionary( kv => kv.Key, kv => kv.Value.Clone() ),
+			ParticleBakes = ctx.ParticleBakes.ToDictionary( kv => kv.Key, kv => kv.Value.Select( e => new ParticleBakeEvent { Kind = e.Kind, Position = e.Position, Normal = e.Normal, Speed = e.Speed, Step = e.Step, Particle = e.Particle } ).ToList() ),
 		};
 
 		public void RestoreInto( FeatureContext ctx )
 		{
 			ctx.Bodies = Bodies.Select( b => b.Clone() ).ToList();
 			ctx.Sketches = Sketches.ToDictionary( kv => kv.Key, kv => kv.Value.Clone() );
+			ctx.SketchNames = new Dictionary<string, string>( SketchNames );
 			ctx.SketchHostBodies = new Dictionary<string, string>( SketchHostBodies );
 			ctx.Planes = Planes.ToDictionary( kv => kv.Key, kv => kv.Value.Clone() );
 			ctx.PlaneHostBodies = new Dictionary<string, string>( PlaneHostBodies );
 			ctx.Splines = Splines.ToDictionary( kv => kv.Key, kv => new Spline3 { Points = new List<Vec3>( kv.Value.Points ), Closed = kv.Value.Closed, Smooth = kv.Value.Smooth } );
 			ctx.LastSplineId = LastSplineId;
+			ctx.SlotLooks = SlotLooks.ToDictionary( kv => kv.Key, kv => kv.Value.Clone() );
+			ctx.ParticleBakes = ParticleBakes.ToDictionary( kv => kv.Key, kv => kv.Value.Select( e => new ParticleBakeEvent { Kind = e.Kind, Position = e.Position, Normal = e.Normal, Speed = e.Speed, Step = e.Step, Particle = e.Particle } ).ToList() );
 		}
 	}
 
@@ -555,6 +618,20 @@ public sealed class PartStudio
 			Features[i].Error = null;
 			Features[i].Warning = null;
 			Features[i].Diagnostic = null;
+		}
+
+		foreach ( var kv in ctx.SlotLooks )
+		{
+			if ( !MaterialLooks.TryGetValue( kv.Key, out var existing ) )
+				MaterialLooks[kv.Key] = kv.Value.Clone();
+			else
+			{
+				if ( string.IsNullOrEmpty( existing.AlbedoMap ) ) existing.AlbedoMap = kv.Value.AlbedoMap;
+				if ( string.IsNullOrEmpty( existing.NormalMap ) ) existing.NormalMap = kv.Value.NormalMap;
+				if ( string.IsNullOrEmpty( existing.RoughnessMap ) ) existing.RoughnessMap = kv.Value.RoughnessMap;
+				if ( string.IsNullOrEmpty( existing.AoMap ) ) existing.AoMap = kv.Value.AoMap;
+				if ( string.IsNullOrEmpty( existing.Preset ) ) existing.Preset = kv.Value.Preset;
+			}
 		}
 
 		Bodies = ctx.Bodies;

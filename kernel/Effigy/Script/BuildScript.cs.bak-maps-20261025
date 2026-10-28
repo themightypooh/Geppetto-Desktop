@@ -1,0 +1,3209 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Text;
+using Effigy.Render;
+
+namespace Effigy;
+
+/// <summary>
+/// A build script: what to add to the studio, in order, in one text file that runs headlessly
+/// and in the editor alike.
+///
+///   # a comment
+///   add Primitive name=Torso shape=Box sizex=20 sizey=12 sizez=30 position=@ground+0,0,15
+///   add Part name=Buckle part=Buckle size=6 length=4 position=@Torso.front+1,0,-6
+///   add Spline name=Cable points=@Torso.back;-10,4,20;-14,0,8 radius=0.8
+///   add CurveDeform bodies=Tail
+///   add Import name=Scan source=scan.fbx
+///   set Torso sizez=32
+///   fix Torso all
+///   remedy Stroke1                       (press a failing feature's fix button: Subdivide above, …)
+///   add Stroke bodies=Sac … inkey=sac_swell   (sculpt into a finished shape key)
+///   render out/torso.png view=sheet [clip=y>0]   (clip= keeps one side of a plane, to see inside)
+///   describe
+///   clearance Button Shell min=0.02      (gap, or overlap volume and depth; no names = every pair)
+///   match front reference.png out/match.png
+///   bake Cage Sculpt out/bake size=2048 maps=normal,ao,curvature,cavity,height ss=2 vmat=1
+///
+/// `add TYPE` takes a feature type (Primitive, Spline, Part, Profile, Transform, Mirror,
+/// Subdivide…) and `key=value` pairs naming its parameters by label or field. Anywhere a point
+/// goes, `@landmark` or `@landmark+dx,dy,dz` names a place on the model — a body's side, a
+/// bone, the ground — resolved by <see cref="ModelMeasure.TryLandmark"/> against the model AS
+/// BUILT SO FAR, so a part can sit on the body the line before it made.
+///
+/// Every command runs a rebuild when it changes the model, and a feature that fails stops the
+/// script with the feature's own diagnostic — its cause and its remedies — so what comes back
+/// is what to change, not a stack trace.
+/// </summary>
+public static partial class BuildScript
+{
+	public sealed class Result
+	{
+		public bool Ok = true;
+		public List<string> Log = new();
+		public List<string> Written = new();
+		public string Error;
+		public int ErrorLine;
+
+		/// <summary>Where each body turns or stands, by body name, set with `pivot`. Export moves the
+		/// body so this point is its model origin, and the layout says where that point was.</summary>
+		public Dictionary<string, Vec3> Pivots = new( StringComparer.OrdinalIgnoreCase );
+
+		/// <summary>Run-local weight locks, by body id: bone indices a `weight lock` pinned for this
+		/// script run. Like Pivots, this is run state, not document state — a later rebuild from the
+		/// feature tree does not keep it, and neither does a later script run.</summary>
+		public Dictionary<string, HashSet<int>> WeightLocks = new( StringComparer.OrdinalIgnoreCase );
+
+		public override string ToString()
+		{
+			var sb = new StringBuilder();
+			foreach ( var line in Log ) sb.AppendLine( line );
+			if ( Error is not null ) sb.AppendLine( $"ERROR line {ErrorLine}: {Error}" );
+			return sb.ToString().TrimEnd();
+		}
+	}
+
+	/// <summary>Run <paramref name="text"/> against <paramref name="studio"/>. Files a `render`,
+	/// `match` or `save` writes go under <paramref name="baseDir"/> when their path is relative.</summary>
+	public static Result Run( PartStudio studio, string text, string baseDir = null ) => Run( studio, text, baseDir, null, null );
+
+	/// <summary>Lane P carry-up from the desktop mirror: the verbs that change the
+	/// document. A live run publishes a revision after each of these, and only these.</summary>
+	public static bool Mutates( string verb ) =>
+		verb?.ToLowerInvariant() is "add" or "edit" or "set" or "remove" or "remedy" or "material" or "facematerial" or "refimage";
+
+	/// <summary>Lane P carry-up from the desktop mirror: the first word of a script
+	/// line, lower case; null for a blank line or a comment.</summary>
+	public static string VerbOf( string line )
+	{
+		line = (line ?? "").Trim();
+		if ( line.Length == 0 || line.StartsWith( '#' ) ) return null;
+		var tokens = Tokenise( line );
+		return tokens.Count == 0 ? null : tokens[0].ToLowerInvariant();
+	}
+
+	/// <summary>Run with a hook either side of each command, for a caller that paces the script or
+	/// publishes what each line did. The hooks get the 1-based line number, the verb and the line;
+	/// an exception from a hook is the caller's, so it is not caught as the line's error.</summary>
+	public static Result Run( PartStudio studio, string text, string baseDir,
+		Action<int, string, string> before, Action<int, string, string> after ) => Run( studio, text, baseDir, before, after, new Result() );
+
+	/// <summary>Run into an existing <paramref name="result"/>, for a caller that feeds one document
+	/// script in pieces: a pivot set by an earlier piece still counts at a later export. Its log keeps
+	/// growing; Ok, Error and ErrorLine are this piece's.</summary>
+	public static Result Run( PartStudio studio, string text, string baseDir,
+		Action<int, string, string> before, Action<int, string, string> after, Result result )
+	{
+		result.Ok = true;
+		result.Error = null;
+		result.ErrorLine = 0;
+		baseDir ??= Directory.GetCurrentDirectory();
+
+		if ( studio is null )
+		{
+			result.Ok = false;
+			result.Error = "No studio.";
+			return result;
+		}
+
+		var lines = (text ?? "").Replace( "\r\n", "\n" ).Split( '\n' );
+
+		for ( var i = 0; i < lines.Length; i++ )
+		{
+			var line = lines[i].Trim();
+
+			if ( line.Length == 0 || line.StartsWith( '#' ) )
+				continue;
+
+			var tokens = Tokenise( line );
+			var verb = tokens.Count > 0 ? tokens[0].ToLowerInvariant() : "";
+			before?.Invoke( i + 1, verb, line );
+
+			try
+			{
+				if ( !Command( studio, tokens, baseDir, result ) )
+				{
+					result.Ok = false;
+					result.ErrorLine = i + 1;
+					return result;
+				}
+			}
+			catch ( Exception e )
+			{
+				result.Ok = false;
+				result.ErrorLine = i + 1;
+				result.Error = e.Message;
+				return result;
+			}
+
+			after?.Invoke( i + 1, verb, line );
+		}
+
+		return result;
+	}
+
+	static bool Command( PartStudio studio, List<string> tokens, string baseDir, Result r )
+	{
+		if ( tokens.Count == 0 )
+			return true;
+
+		var verb = tokens[0].ToLowerInvariant();
+		var args = tokens.Skip( 1 ).ToList();
+
+		switch ( verb )
+		{
+			case "add":
+			{
+				if ( args.Count == 0 )
+					return Fail( r, "add needs a feature type: add Primitive shape=Box …" );
+
+				var feature = Create( args[0] );
+
+				if ( feature is null )
+					return Fail( r, $"No feature type '{args[0]}'. Types: {string.Join( ", ", FeatureTypeNames() )}." );
+
+				var pairs = Pairs( args.Skip( 1 ) );
+
+				// inkey=sac_swell: into that finished shape key, just above its End Shape Key.
+				pairs.Remove( "inkey", out var intoKey );
+
+				if ( !Assign( studio, feature, pairs, r ) )
+					return false;
+
+				if ( intoKey is not null )
+				{
+					if ( !ShapeKeyEdit.AddToKey( studio, intoKey, feature, out var whyKey ) )
+						return Fail( r, whyKey );
+				}
+				else
+				{
+					studio.Add( feature );
+				}
+
+				// add Import source=leg.fbx - the path is the script's, like save and export, and an
+				// FBX's skeleton becomes the rig when there is none yet, as picking it in the editor does.
+				if ( feature is ImportFeature import && !string.IsNullOrWhiteSpace( import.Source.Value ) )
+				{
+					import.BindSource( Resolve( baseDir, import.Source.Value.Trim() ) );
+
+					if ( ImportFeature.InstallSkeleton( studio, import, out var rigMessage ) > 0 || rigMessage.Length > 0 )
+						r.Log.Add( rigMessage );
+				}
+
+				return RebuildAndCheck( studio, feature, r, $"added {feature.TypeName} '{feature.Name ?? feature.Id}'" + (intoKey is null ? "" : $" into shape key {intoKey}") );
+			}
+
+			case "edit":
+			{
+				// edit Torso extrude select=normal:up distance=4 — an EditOp feature, replayed on every rebuild.
+				if ( args.Count < 2 )
+					return Fail( r, $"edit needs a body and an operation: edit Torso extrude select=normal:up distance=4. Operations: {string.Join( ", ", EditOpFeature.Operations.Select( o => Normalise( o ) ) )}." );
+
+				if ( ModelMeasure.FindBody( studio, args[0] ) is null )
+					return Fail( r, $"No body called '{args[0]}'. Bodies: {string.Join( ", ", studio.Bodies.Select( b => b.Name ?? b.Id ) )}." );
+
+				var op = Array.FindIndex( EditOpFeature.Operations, o => Normalise( o ) == Normalise( args[1] ) );
+
+				if ( op < 0 )
+					return Fail( r, $"No edit operation '{args[1]}'. Operations: {string.Join( ", ", EditOpFeature.Operations.Select( o => Normalise( o ) ) )}." );
+
+				var feature = new EditOpFeature();
+				feature.Op.Index = op;
+				var pairs = Pairs( args.Skip( 2 ) );
+				pairs["bodies"] = args[0];
+				pairs.TryAdd( "name", $"{args[0]} {Normalise( EditOpFeature.Operations[op] )}" );
+
+				if ( !Assign( studio, feature, pairs, r ) )
+					return false;
+
+				studio.Add( feature );
+				return RebuildAndCheck( studio, feature, r, $"{Normalise( EditOpFeature.Operations[op] )} on {args[0]}" );
+			}
+
+			case "set":
+			{
+				if ( args.Count < 2 )
+					return Fail( r, "set needs a feature name and key=value pairs." );
+
+				var feature = FindFeature( studio, args[0] );
+
+				if ( feature is null )
+					return Fail( r, $"No feature called '{args[0]}'. Features: {string.Join( ", ", studio.Features.Select( f => f.Name ?? f.TypeName ) )}." );
+
+				if ( !Assign( studio, feature, Pairs( args.Skip( 1 ) ), r ) )
+					return false;
+
+				studio.MarkDirty( feature );
+				return RebuildAndCheck( studio, feature, r, $"set {feature.Name ?? feature.TypeName}" );
+			}
+
+			case "remove":
+			{
+				if ( args.Count < 1 )
+					return Fail( r, "remove needs a feature name." );
+
+				var feature = FindFeature( studio, args[0] );
+
+				if ( feature is null )
+					return Fail( r, $"No feature called '{args[0]}'." );
+
+				studio.Remove( feature );
+				studio.Rebuild();
+				r.Log.Add( $"removed {feature.Name ?? feature.TypeName}" );
+				return true;
+			}
+
+			case "remedy":
+				if ( args.Count > 0 && args[0].Equals( "all", StringComparison.OrdinalIgnoreCase ) )
+					return RemedyAll( studio, r );
+			{
+				// remedy Stroke1 [2] [folder=out/tex]: press the fix button on a feature's diagnostic.
+				if ( args.Count < 1 )
+					return Fail( r, "remedy needs a feature name: remedy Stroke1 (the first fix), remedy Stroke1 2, remedy Flesh folder=out/tex" );
+
+				var feature = FindFeature( studio, args[0] );
+
+				if ( feature is null )
+					return Fail( r, $"No feature called '{args[0]}'." );
+
+				studio.Rebuild();
+				var actions = feature.Diagnostic?.Actions ?? new List<RemedyAction>();
+
+				if ( actions.Count == 0 )
+					return Fail( r, feature.Diagnostic is null
+						? $"{feature.Name} has no problem to fix."
+						: $"{feature.Name}: {feature.Diagnostic.Problem}. It has no one-click fix; its advice is: {string.Join( "; ", feature.Diagnostic.Remedies )}." );
+
+				var options = Pairs( args.Skip( 1 ).Where( a => a.Contains( '=' ) ) );
+				var pick = args.Skip( 1 ).FirstOrDefault( a => !a.Contains( '=' ) );
+				var n = pick is not null && int.TryParse( pick, out var parsed ) ? parsed : 1;
+
+				if ( n < 1 || n > actions.Count )
+					return Fail( r, $"{feature.Name} has {actions.Count} fix(es): {string.Join( ", ", actions.Select( ( a, i ) => $"{i + 1} {a.Label}" ) )}." );
+
+				var outcome = FeatureRemedy.Apply( studio, feature, actions[n - 1], options.GetValueOrDefault( "folder" ) );
+
+				if ( !outcome.Ok )
+					return Fail( r, outcome.Message );
+
+				studio.Rebuild();
+				r.Log.Add( outcome.Message + (feature.Diagnostic is null ? $" {feature.Name} builds cleanly now."
+					: $" {feature.Name} still says: {feature.Diagnostic.Problem}.") );
+				return true;
+			}
+
+			case "var":
+			{
+				// Lane E: var length=32 — a named value in the studio's variable table, so
+				// later lines can write sizex=#length (or #length/2) instead of a literal.
+				// A var that does not evaluate (unknown name, a cycle) fails the script
+				// here, rather than silently holding a stale value through the build.
+				if ( args.Count != 1 || !args[0].Contains( '=' ) )
+					return Fail( r, "var needs name=expr: var length=32, var wall=#length/2." );
+
+				var eq = args[0].IndexOf( '=' );
+				var varName = args[0][..eq].Trim();
+				var expr = args[0][(eq + 1)..].Trim();
+
+				if ( !VariableResolver.IsLegalName( varName ) )
+					return Fail( r, $"var {varName}: a variable name starts with a letter or _ and holds letters, digits and _." );
+
+				if ( !studio.SetVariable( varName, expr ) )
+					return Fail( r, $"var {varName}: could not store '{expr}'." );
+
+				float resolved = 0f;
+				if ( !string.IsNullOrWhiteSpace( expr )
+					&& !VariableResolver.TryResolve( studio.Variables, varName, out resolved ) )
+					return Fail( r, $"var {varName}={expr}: {VariableResolver.Explain( studio.Variables, expr, varName ) ?? "it does not evaluate"}." );
+
+				r.Log.Add( string.IsNullOrWhiteSpace( expr ) ? $"var {varName} cleared" : $"var {varName} = {resolved:0.###}" );
+				return true;
+			}
+
+			case "rebuild":
+				studio.Rebuild();
+				r.Log.Add( "rebuilt" );
+				return true;
+
+			case "fix":
+			{
+				if ( args.Count < 2 )
+					return Fail( r, "fix needs a body (or all) and the fixes: fix Torso loose holes normals" );
+
+				var targets = args[0].Equals( "all", StringComparison.OrdinalIgnoreCase )
+					? studio.Bodies.ToList()
+					: new List<Body> { ModelMeasure.FindBody( studio, args[0] ) };
+
+				if ( targets.Count == 0 || targets[0] is null )
+					return Fail( r, $"No body called '{args[0]}'. Bodies: {string.Join( ", ", studio.Bodies.Select( b => b.Name ?? b.Id ) )}." );
+
+				foreach ( var body in targets )
+					foreach ( var line in MeshFix.Apply( body.Mesh, args.Skip( 1 ) ) )
+						r.Log.Add( $"{body.Name ?? body.Id} {line}" );
+
+				return true;
+			}
+
+			case "render":
+			{
+				if ( args.Count < 1 )
+					return Fail( r, "render needs an output path: render out/model.png view=sheet" );
+
+				var path = Resolve( baseDir, args[0] );
+				var opts = Pairs( args.Skip( 1 ) );
+
+				if ( opts.TryGetValue( "shade", out var shade ) )
+					return RenderShaded( studio, path, opts, shade, r );
+
+				var viewName = opts.GetValueOrDefault( "view", "sheet" );
+				var size = (int)Number( opts.GetValueOrDefault( "size", "512" ) );
+				var options = new RenderOptions
+				{
+					Wireframe = Truthy( opts.GetValueOrDefault( "wire", "1" ) ),
+					Bones = Truthy( opts.GetValueOrDefault( "bones", "0" ) ),
+					Labels = Truthy( opts.GetValueOrDefault( "labels", "1" ) ),
+					Grid = Truthy( opts.GetValueOrDefault( "grid", "1" ) ),
+					FocusBodyId = opts.TryGetValue( "focus", out var focus ) ? ModelMeasure.FindBody( studio, focus )?.Id : null,
+				};
+
+				var bodies = studio.Bodies;
+				if ( opts.TryGetValue( "clip", out var clipSpec ) )
+				{
+					if ( !ClipPlane.TryParse( clipSpec, out var plane, out var clipWhy ) )
+						return Fail( r, clipWhy );
+					bodies = bodies.Select( b => b.Mesh is null ? b : new Body( b.Id, b.Name, MeshClip.Section( b.Mesh, plane ) )
+						{ Visible = b.Visible, FeatureId = b.FeatureId, IsGarment = b.IsGarment, IsGarmentDetail = b.IsGarmentDetail, IsReference = b.IsReference, Layer = b.Layer, LayerAllowance = b.LayerAllowance } ).ToList();
+				}
+
+				Directory.CreateDirectory( Path.GetDirectoryName( Path.GetFullPath( path ) ) ?? "." );
+
+				ModelRender.Named( bodies, viewName, size, options, studio.Rig ).SavePng( path );
+
+				r.Written.Add( path );
+				r.Log.Add( $"rendered {viewName} to {path}" );
+				return true;
+			}
+
+			case "turnaround":
+			{
+				// turnaround out/turn [shade=clay|material] [size=512] [views=front,quarter,side,back] [name=x] [focus=Body] [clip=y>0]
+				// File ▸ Render Turnaround, from a script: the sheet and one picture per view.
+				if ( args.Count < 1 )
+					return Fail( r, "turnaround needs a folder: turnaround out/turn [shade=clay|material] [size=512] [views=front,quarter,side,back] [name=model] [focus=Body]" );
+
+				var folder = Resolve( baseDir, args[0] );
+				var opts = Pairs( args.Skip( 1 ) );
+
+				foreach ( var key in opts.Keys )
+					if ( key is not ("shade" or "size" or "views" or "name" or "focus" or "elevation" or "ss" or "aa" or "preset" or "clip" or "backdrop") )
+						return Fail( r, $"turnaround has no option '{key}'. Options: shade, size, views, name, focus, elevation, ss, aa, preset, clip, backdrop." );
+
+				var look = opts.GetValueOrDefault( "shade", "clay" ).ToLowerInvariant();
+				if ( look is not ("clay" or "material") )
+					return Fail( r, $"shade={look}: use shade=clay (form only) or shade=material (what the materials make it look like)." );
+
+				var options = new TurnaroundOptions
+				{
+					Clay = look == "clay",
+					Size = (int)Number( opts.GetValueOrDefault( "size", "512" ) ),
+					Elevation = Number( opts.GetValueOrDefault( "elevation", "12" ) ),
+					Supersample = (int)Number( opts.GetValueOrDefault( "ss", "1" ) ),
+					Coverage = (int)Number( opts.GetValueOrDefault( "aa", "16" ) ),
+				};
+
+				if ( opts.TryGetValue( "views", out var viewList ) )
+					options.Views = viewList.Split( ',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries );
+
+				if ( opts.TryGetValue( "focus", out var focusName ) )
+				{
+					var focusBody = ModelMeasure.FindBody( studio, focusName );
+					if ( focusBody is null )
+						return Fail( r, $"focus={focusName}: no body called that." );
+					options.FocusBodyId = focusBody.Id;
+				}
+
+				if ( opts.TryGetValue( "backdrop", out var flat ) )
+				{
+					// backdrop=key (pure magenta) or #rrggbb: flat, no floor, so the views key out into sprites
+					var hex = flat.Equals( "key", StringComparison.OrdinalIgnoreCase ) ? "ff00ff" : flat.TrimStart( '#' );
+					if ( hex.Length != 6 || !int.TryParse( hex, System.Globalization.NumberStyles.HexNumber, null, out var rgb ) )
+						return Fail( r, $"backdrop={flat}: use backdrop=key (magenta) or backdrop=#rrggbb." );
+					float Lin( int c ) => MathF.Pow( c / 255f, 2.2f );
+					options.Backdrop = new Vec3( Lin( rgb >> 16 & 255 ), Lin( rgb >> 8 & 255 ), Lin( rgb & 255 ) );
+				}
+
+				if ( opts.TryGetValue( "clip", out var turnClip ) )
+				{
+					if ( !ClipPlane.TryParse( turnClip, out var plane, out var clipWhy ) )
+						return Fail( r, clipWhy );
+					options.Clip = plane;
+				}
+
+				if ( opts.TryGetValue( "preset", out var preset ) && (options.Fallback = FleshMaterial.Preset( preset )) is null )
+					return Fail( r, $"No material preset '{preset}'. Presets: {string.Join( ", ", FleshMaterial.Presets )}." );
+
+				var turned = Turnaround.Write( studio, folder, opts.GetValueOrDefault( "name", "model" ), options );
+				r.Log.AddRange( turned.Log );
+
+				if ( !turned.Ok )
+					return Fail( r, turned.Error );
+
+				r.Written.AddRange( turned.Written );
+				return true;
+			}
+
+			case "describe":
+				r.Log.Add( ModelMeasure.Describe( studio ) );
+				return true;
+
+			case "measure":
+			case "at":
+			{
+				if ( args.Count < 1 )
+					return Fail( r, "measure needs a landmark or a point: measure Torso.top" );
+
+				if ( !Point( studio, args[0], out var p, out var why ) )
+					return Fail( r, why );
+
+				r.Log.Add( ModelMeasure.At( studio, p ) );
+				return true;
+			}
+
+			case "distance":
+			{
+				if ( args.Count < 2 )
+					return Fail( r, "distance needs two landmarks: distance Hand_L Hand_R" );
+
+				if ( !Point( studio, args[0], out var a, out var whyA ) ) return Fail( r, whyA );
+				if ( !Point( studio, args[1], out var b, out var whyB ) ) return Fail( r, whyB );
+
+				var d = b - a;
+				r.Log.Add( $"{args[0]} to {args[1]}: {d.Length:0.###} (dx {d.x:0.###}, dy {d.y:0.###}, dz {d.z:0.###})" );
+				return true;
+			}
+
+			case "symmetry":
+			{
+				foreach ( var body in args.Count > 0 ? new[] { ModelMeasure.FindBody( studio, args[0] ) } : studio.Bodies.ToArray() )
+				{
+					if ( body?.Mesh is null ) continue;
+					var reading = SymmetryCheck.Measure( body.Mesh, int.MaxValue );
+					r.Log.Add( $"{body.Name ?? body.Id}: left-right symmetry error {reading.ErrorY * 100f:0.#}% of width (across X = 0: {reading.ErrorX * 100f:0.#}%)" );
+				}
+
+				return true;
+			}
+
+			case "clearance":
+				return ClearanceReport( studio, args, r );
+
+			case "topology":
+				return Topology( studio, args, r );
+
+			case "section":
+				return Section( studio, args, r );
+
+			case "flex":
+				return Flex( studio, args, baseDir, r );
+
+			case "match":
+			{
+				// match front=ref_front.png side=ref_side.png [out=dir]: several views, one combined score.
+				if ( args.Count > 0 && args[0].Contains( '=' ) )
+					return MatchViews( studio, args, baseDir, r );
+
+				if ( args.Count < 2 )
+					return Fail( r, "match needs a view and a reference PNG: match front ref.png [out.png]" );
+
+				var view = RenderView.Named( args[0] );
+
+				if ( view is null )
+					return Fail( r, $"No view called '{args[0]}'." );
+
+				var refPath = Resolve( baseDir, args[1] );
+
+				if ( !File.Exists( refPath ) )
+					return Fail( r, $"No reference image at {refPath}." );
+
+				const int size = 256;
+				var (w, h, rgb, alpha) = Raster.LoadPng( refPath );
+				var reference = ReferenceMatch.ReferenceSilhouette( w, h, rgb, alpha, size, out var aspect );
+				var match = ReferenceMatch.Compare( studio.Bodies, view, reference, aspect, size );
+
+				r.Log.Add( match.Report );
+
+				if ( args.Count > 2 )
+				{
+					var outPath = Resolve( baseDir, args[2] );
+					Directory.CreateDirectory( Path.GetDirectoryName( Path.GetFullPath( outPath ) ) ?? "." );
+					match.Diff.SavePng( outPath );
+					r.Written.Add( outPath );
+				}
+
+				return true;
+			}
+
+			case "save":
+			{
+				if ( args.Count < 1 )
+					return Fail( r, "save needs a path." );
+
+				var path = Resolve( baseDir, args[0] );
+				Directory.CreateDirectory( Path.GetDirectoryName( Path.GetFullPath( path ) ) ?? "." );
+				StudioDocument.WriteFile( studio, path );
+				r.Written.Add( path );
+				r.Log.Add( $"saved {path}" );
+				return true;
+			}
+
+			case "refimage":
+				return RefImage( studio, args, baseDir, r );
+
+			case "echo":
+				r.Log.Add( string.Join( " ", args ) );
+				return true;
+
+			case "facematerial":
+			{
+				// Lane P carry-up from the desktop mirror: facematerial slot=2 faces=Box:0,0,6:0,0,1;… — what the bench writes when picked faces go
+				// onto a slot (s&box's face menu). Replays as the same FaceMaterialEdit on the history.
+				var pairs = Pairs( args );
+				const string usage = "facematerial slot=N faces=Body:x,y,z:nx,ny,nz;…";
+
+				foreach ( var key in pairs.Keys )
+					if ( key is not ("slot" or "faces") )
+						return Fail( r, $"facematerial: unexpected '{key}'. Use: {usage}" );
+
+				if ( !pairs.TryGetValue( "slot", out var slotText ) || !int.TryParse( slotText, out var faceSlot ) || faceSlot < 0 )
+					return Fail( r, "facematerial needs slot=N (0 or more; 0 takes the faces off their slot)." );
+
+				if ( !AssignFaceSlots( studio, faceSlot, pairs.GetValueOrDefault( "faces" ), out var changed, out var already, out var whySlots ) )
+					return Fail( r, whySlots );
+
+				r.Log.Add( changed == 0
+					? $"{already} face(s) already on {studio.NameForSlot( faceSlot )}"
+					: $"{changed} face(s) -> {studio.NameForSlot( faceSlot )}" + (already > 0 ? $" ({already} already there)" : "") );
+				return true;
+			}
+
+			case "material":
+			{
+				// material 1 materials/alley/brass.vmat — what slot 1 is exported as.
+				// material 2 [materials/pad/grip.vmat] preset=soft_rubber color=#202024 rough=0.8 metal=0 emit=#ff2010
+				// — and what it looks like: the renderers and the viewer shade with it, export writes it as the .vmat.
+				const string usage = "material SLOT [path.vmat] [preset=name] [color=#rrggbb] [rough=0..1] [metal=0..1] [emit=#rrggbb|none]";
+
+				if ( args.Count < 2 || !int.TryParse( args[0], out var slot ) )
+					return Fail( r, $"material needs a slot number and a .vmat path or a look: {usage}" );
+
+				var path = args.Skip( 1 ).FirstOrDefault( a => !a.Contains( '=' ) );
+				var pairs = Pairs( args.Skip( 1 ).Where( a => a.Contains( '=' ) ) );
+
+				foreach ( var key in pairs.Keys )
+					if ( !SlotLook.IsKey( key ) )
+						return Fail( r, $"material has no option '{key}'. {usage}. Presets: {SlotLook.PresetList}" );
+
+				if ( path is not null )
+				{
+					studio.MaterialNames[slot] = path;
+					r.Log.Add( $"slot {slot} is {path}" );
+				}
+
+				if ( pairs.Count > 0 )
+				{
+					var look = SlotLook.Parse( pairs, studio.MaterialLooks.GetValueOrDefault( slot ), out var error );
+					if ( look is null ) return Fail( r, $"material {slot}: {error}" );
+					studio.MaterialLooks[slot] = look;
+					r.Log.Add( $"slot {slot} looks {look.Describe()}" );
+				}
+
+				studio.MarkDirty( 0 );
+				return true;
+			}
+
+			case "pivot":
+			{
+				// pivot Bob3 @Beam.bottom — the point this part turns about, which export makes its origin.
+				// pivot model @ground — the whole model's origin (Object ▸ Set Origin in the editor).
+				// Both are SAVED with the document now (PartStudio.BodyOrigins / Origin), not only kept
+				// for this run's export; r.Pivots still carries them so a run's export reads the same.
+				if ( args.Count < 2 )
+					return Fail( r, "pivot needs a body (or model) and a point: pivot Arm @Hub.centre, pivot model @ground" );
+
+				var pivotBody = ModelMeasure.FindBody( studio, args[0] );
+				var whole = pivotBody is null && args[0].Equals( "model", StringComparison.OrdinalIgnoreCase );
+
+				if ( pivotBody is null && !whole )
+					return Fail( r, $"No body called '{args[0]}'. Name a body, or say model for the whole model's origin." );
+
+				if ( !Point( studio, args[1], out var p, out var why ) )
+					return Fail( r, why );
+
+				if ( whole )
+				{
+					StudioOrigin.SetModel( studio, OriginTarget.Point, null, p, out var said );
+					r.Log.Add( said );
+					return true;
+				}
+
+				r.Pivots[args[0]] = p;
+				studio.BodyOrigins[pivotBody.Id] = p;
+				return true;
+			}
+
+			case "export":
+				return Export( studio, args, baseDir, r );
+
+			case "corrective":
+				return Corrective( studio, args, r );
+
+			case "bake":
+				return Bake( studio, args, baseDir, r );
+
+			case "paintmaps":
+			{
+				// paintmaps Torso out/tex [name=torso] [assets=root] [bump=2] — the painted texture set.
+				if ( args.Count < 2 )
+					return Fail( r, "paintmaps needs a painted body and a folder: paintmaps Torso out/tex [name=x] [assets=root] [bump=2]" );
+
+				var body = ModelMeasure.FindBody( studio, args[0] );
+
+				if ( body?.Mesh is null )
+					return Fail( r, $"No body called '{args[0]}'. Bodies: {string.Join( ", ", studio.Bodies.Select( b => b.Name ?? b.Id ) )}." );
+
+				if ( body.Mesh.Paint is null )
+					return Fail( r, $"{args[0]} has no paint to write. Add a paint layer first: add Paint bodies={args[0]} fill=1 color=0.4,0.3,0.2" );
+
+				var opts = Pairs( args.Skip( 2 ) );
+				var dir = Resolve( baseDir, args[1] );
+				var root = opts.TryGetValue( "assets", out var assets ) ? assets : baseDir;
+				var bump = opts.TryGetValue( "bump", out var bumpText ) ? Number( bumpText ) : PaintTextureSet.DefaultBumpStrength;
+				var name = Safe( opts.GetValueOrDefault( "name", (body.Name ?? body.Id) + "_paint" ) );
+
+				foreach ( var path in PaintTextureSet.Write( body.Mesh.Paint, dir, name,
+					p => Path.GetRelativePath( root, p ).Replace( '\\', '/' ), bump ) )
+				{
+					r.Written.Add( path );
+					r.Log.Add( $"wrote {path}" );
+				}
+
+				return true;
+			}
+
+			case "checkpoint":
+				return CheckpointVerb( studio, args, r );
+
+			case "fit_profile":
+				return FitProfileVerb( studio, args, baseDir, r );
+
+			case "reproject":
+				return ReprojectVerb( studio, args, r );
+
+			case "retopo":
+				return RetopoVerb( studio, args, r );
+
+			case "transfer":
+				return TransferVerb( studio, args, r );
+
+			case "weight":
+				return WeightVerb( studio, args, r );
+
+			case "sculpt":
+				return SculptVerb( studio, args, r );
+
+			case "facerig":
+				return FaceRigVerb( studio, args, baseDir, r );
+
+			case "playermodel":
+				return PlayermodelVerb( studio, args, baseDir, r );
+
+			case "export_cloth":
+				return ExportClothVerb( studio, args, baseDir, r );
+
+			case "spritesheet":
+				return SpritesheetVerb( studio, args, baseDir, r );
+
+			case "attachment":
+				return AttachmentVerb( studio, args, r );
+
+			case "hitbox":
+				return HitboxVerb( studio, args, r );
+
+			case "bodygroup":
+				return BodyGroupVerb( studio, args, r );
+
+			case "ragdoll":
+				return RagdollVerb( studio, args, r );
+
+			case "lod_chain":
+				return LodChainVerb( studio, args, r );
+
+			case "lint":
+				return LintVerb( studio, args, baseDir, r );
+
+			default:
+				// Rig verbs (bone, chain, rig, bind, skin, twist, mirror bones, subdivide) - BuildScriptRig.cs.
+				if ( RigCommand( studio, verb, args, baseDir, r, out var handled ) )
+					return handled;
+
+				return Fail( r, $"Unknown command '{verb}'. Commands: {string.Join( ", ", VerbNames )}." );
+		}
+	}
+
+	const string ExportUsage = "export folder [split=1] [assets=root] [name=x] [lods=0|1|0.5,0.25] [loddistance=a,b] "
+		+ "[collision=none|auto|hulls|render] [surface=default] [skin=auto|0|1] [fbx=0|1] [wrinkles=0|1]";
+
+	/// <summary>
+	/// `export`: the .vmdl and the mesh files it loads, the same set the editor's Compile writes.
+	///
+	///   lods=      0 (default) none; 1 = half and a quarter detail (the editor's set); or a list of
+	///              triangle ratios, 0.5,0.25. loddistance= the switch distances in units; by default
+	///              6, 15, 30… times the model's diagonal. Static levels are triangulated .obj files;
+	///              a skinned model gets skinned .dmx/.smd levels on the same skeleton, shape keys kept.
+	///              Every level holds UV seams and material borders.
+	///   collision= none (default, what export always wrote); auto = the editor's choice (exact shapes
+	///              from the history, else a hull per body; on a skinned model a hull per body on the
+	///              bone that drives it); hulls = one hull per body; render = physics from the render mesh.
+	///   skin=      auto (default): skinned when the studio has bones and the export is not split.
+	///              Skinned writes .dmx (what the vmdl loads) and .smd, bound like the editor's export.
+	///   wrinkles=1 wrinkle maps (skinned only): each shape key's squash/stretch per vertex in the .dmx,
+	///              the squish normal/AO maps as {name}_squish_normal.png/_squish_ao.png, and F_WRINKLE on
+	///              each Effigy .vmat the model uses (found under the assets root).
+	///   fbx=1      also a binary .fbx of each model, skinned when the model is, for Blender and other DCCs.
+	///              The .vmdl still loads the .obj/.dmx, whose import ModelDoc has been measured on.
+	/// </summary>
+	static bool Export( PartStudio studio, List<string> args, string baseDir, Result r )
+	{
+		// export models/civic_art/orrery split=1 assets=C:/proj/Assets name=orrery
+		if ( args.Count < 1 )
+			return Fail( r, $"export needs a folder under the assets root: {ExportUsage}" );
+
+		var folder = args[0].Replace( '\\', '/' ).Trim( '/' );
+		var opts = Pairs( args.Skip( 1 ) );
+
+		foreach ( var key in opts.Keys )
+			if ( key is not ("split" or "assets" or "name" or "lods" or "loddistance" or "collision" or "surface" or "skin" or "fbx" or "wrinkles") )
+				return Fail( r, $"export has no option '{key}'. {ExportUsage}" );
+
+		var root = opts.TryGetValue( "assets", out var assets ) ? assets : baseDir;
+		var split = Truthy( opts.GetValueOrDefault( "split", "0" ) );
+		var name = opts.GetValueOrDefault( "name", folder.Contains( '/' ) ? folder[(folder.LastIndexOf( '/' ) + 1)..] : folder );
+		var collision = opts.GetValueOrDefault( "collision", "none" ).ToLowerInvariant();
+		var surface = opts.GetValueOrDefault( "surface", "default" );
+		var fbx = Truthy( opts.GetValueOrDefault( "fbx", "0" ) );
+		var hasRig = studio.Rig is { Count: > 0 };
+
+		if ( collision is not ("none" or "auto" or "hulls" or "render") )
+			return Fail( r, $"collision={collision}: use none, auto, hulls or render." );
+
+		var skinText = opts.GetValueOrDefault( "skin", "auto" ).ToLowerInvariant();
+		bool skin;
+
+		if ( skinText == "auto" )
+			skin = hasRig && !split;
+		else if ( skinText is "1" or "0" or "true" or "false" or "on" or "off" or "yes" or "no" )
+			skin = Truthy( skinText );
+		else
+			return Fail( r, $"skin={skinText}: use auto, 1 or 0." );
+
+		if ( skin && !hasRig )
+			return Fail( r, "skin=1, but the studio has no bones to skin to. Build a rig first, or export without skin=." );
+
+		if ( skin && split )
+			return Fail( r, "skin=1 with split=1: a skinned model is one mesh on one skeleton. Export it whole, or split it as static parts (skin=0)." );
+
+		var wrinkles = Truthy( opts.GetValueOrDefault( "wrinkles", "0" ) );
+
+		if ( wrinkles && !skin )
+			return Fail( r, "wrinkles=1 needs a skinned export: shape keys, and the wrinkle data that rides on them, only go out in the skinned .dmx. Build a rig (or pass skin=1), and do not split." );
+
+		if ( !TryLods( opts, out var ratios, out var lodDistances, out var whyLods ) )
+			return Fail( r, whyLods );
+
+		var bodies = studio.Bodies.Where( b => b?.Mesh is not null && b.Mesh.Faces.Count > 0 && b.Visible && !b.IsReference ).ToList();
+
+		if ( bodies.Count == 0 )
+			return Fail( r, "Nothing to export: no visible bodies." );
+
+		var dir = Path.Combine( root, folder );
+		Directory.CreateDirectory( dir );
+		SlotLook.WriteVmats( studio, root, r.Log, r.Written );
+
+		var layout = new StringBuilder();
+		layout.AppendLine( "# part\tmodel\tpivot x\ty\tz\tsize x\ty\tz" );
+
+		Vec3 DefaultPivot( Vec3 min, Vec3 max ) => new( (min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f, min.z );
+
+		// The model's saved origin (Object ▸ Set Origin, or `pivot model`) when it has been moved off
+		// the world centre; otherwise the bottom centre, which is what export always did. A model
+		// whose origin was put back at the world centre therefore still exports bottom-centred here.
+		Vec3 ModelPivot( PartStudio s, Vec3 min, Vec3 max ) => StudioOrigin.HasModelOrigin( s ) ? s.Origin : DefaultPivot( min, max );
+
+		if ( split )
+		{
+			foreach ( var body in bodies )
+			{
+				var partName = Safe( body.Name ?? body.Id );
+				var mesh = body.Mesh.Clone();
+				var (min, max) = ModelMeasure.Bounds( mesh );
+				var pivot = r.Pivots.TryGetValue( body.Name ?? "", out var p ) ? p
+					: StudioOrigin.TryBody( studio, body, out var saved ) ? saved
+					: DefaultPivot( min, max );
+
+				MeshTransform.Apply( mesh, Xform.Translate( -pivot ) );
+				var physics = StaticPhysics( studio, collision, surface, pivot, b => b.Id == body.Id, r, partName );
+				WriteStatic( studio, mesh, dir, folder, partName, physics, ratios, lodDistances, fbx, r );
+				layout.AppendLine( $"{body.Name ?? body.Id}\t{folder}/{partName}.vmdl\t{N( pivot.x )}\t{N( pivot.y )}\t{N( pivot.z )}\t{N( max.x - min.x )}\t{N( max.y - min.y )}\t{N( max.z - min.z )}" );
+			}
+		}
+		else if ( skin )
+		{
+			// The editor's bind, in the editor's order: weights from the unpivoted mesh and bones,
+			// then both shifted together, so the weights still say what they said.
+			var (mesh, ranges) = studio.ToMeshWithBodies( b => bodies.Contains( b ) );
+			var skeleton = studio.Rig;
+			var weights = SkinBinder.BindBodies( mesh, ranges, studio.BodyBoneMap, skeleton );
+			weights = SkinBinder.SmoothWeights( mesh, weights );
+
+			if ( studio.WeightPaint is { Count: > 0 } paint )
+			{
+				paint.Apply( mesh, weights, skeleton, out var missing );
+				if ( paint.IsStale ) r.Log.Add( $"export: painted weights not used - the mesh changed since they were painted ({paint.Count} vertices)" );
+				else if ( missing.Count > 0 ) r.Log.Add( $"export: painted weights for missing bone(s) {string.Join( ", ", missing.Take( 4 ) )} were not used" );
+			}
+
+			mesh.Skin = weights;
+
+			// The writers keep 4 bones a vertex (s&box's GPU skinning reads no more); say when that costs something.
+			if ( weights.CapWarning( DmxWriter.MaxInfluences ) is { } capped )
+				r.Log.Add( "export: " + capped );
+
+			// Corrective shapes from the weights just bound, before the pivot moves mesh and bones together.
+			foreach ( var line in CorrectiveMorph.BuildAll( mesh, skeleton, studio.Correctives, DmxWriter.MaxInfluences ) )
+				r.Log.Add( "export: " + line );
+
+			// Morphs only play on materials that turn them on. Effigy's own flesh vmats on these bodies get the switch.
+			if ( mesh.HasMorphs )
+				foreach ( var vmatPath in studio.Features.OfType<FleshMaterialFeature>().Where( f => !f.Suppressed )
+					.SelectMany( f => f.Written ).Where( w => w.EndsWith( ".vmat", StringComparison.OrdinalIgnoreCase ) && File.Exists( w ) ) )
+				{
+					var text = File.ReadAllText( vmatPath );
+					if ( !VmatMorph.IsOn( text ) && VmatMorph.Enable( text ) is { } on )
+					{
+						File.WriteAllText( vmatPath, on );
+						r.Log.Add( $"export: {Path.GetFileName( vmatPath )}: F_MORPH_SUPPORTED on, for the morphs" );
+					}
+				}
+
+			var (min, max) = ModelMeasure.Bounds( mesh );
+			var pivot = r.Pivots.TryGetValue( name, out var p ) ? p : ModelPivot( studio, min, max );
+			var shapes = collision is "auto" or "hulls" ? BoneHulls( studio, skeleton ) : null;
+
+			MeshTransform.Apply( mesh, Xform.Translate( -pivot ) );
+			skeleton = Pivoted( skeleton, pivot );
+
+			if ( shapes is not null )
+				foreach ( var shape in shapes ) Shift( shape, -pivot );
+
+			var physics = collision switch
+			{
+				"render" => VmdlPhysics.MeshFromRender( surface ),
+				"none" => "",
+				_ => VmdlPhysics.ShapeList( shapes, surface ),
+			};
+
+			if ( collision is "auto" or "hulls" && physics.Length == 0 )
+			{
+				physics = VmdlPhysics.MeshFromRender( surface );
+				r.Log.Add( "export: no body made a hull, so collision is the render mesh (static: it will not follow the bones)" );
+			}
+
+			var safe = Safe( name );
+			var dmxPath = Path.Combine( dir, safe + ".dmx" );
+			var smdPath = Path.Combine( dir, safe + ".smd" );
+			Dictionary<string, float[]> wrinkleValues = null;
+
+			if ( wrinkles )
+			{
+				var made = WrinkleMaps.WriteForExport( mesh, dir, folder, safe, slot =>
+				{
+					var material = studio.NameForSlot( slot );
+					return material.EndsWith( ".vmat", StringComparison.OrdinalIgnoreCase ) ? Path.Combine( root, material ) : null;
+				} );
+
+				wrinkleValues = made.Values.Count > 0 ? made.Values : null;
+				r.Written.AddRange( made.Written );
+				r.Log.Add( $"export: wrinkle maps for {made.Values.Count} shape key(s), on {made.MaterialsOn.Count} material(s)" );
+				r.Log.AddRange( made.Notes.Select( n => $"export: wrinkle maps: {n}" ) );
+
+				if ( made.Values.Count == 0 )
+					return Fail( r, $"wrinkles=1: {made.Notes.FirstOrDefault()}" );
+			}
+
+			DmxWriter.WriteFile( mesh, dmxPath, skeleton, materialName: studio.NameForSlot, modelName: safe, wrinkles: wrinkleValues );
+			SmdWriter.WriteFile( mesh, smdPath, skeleton, materialName: studio.NameForSlot );
+
+			// Driven shape keys: their drivers into the model's .ctrlrig, for Marionette and the player.
+			var drivers = MorphDriver.FromMesh( mesh );
+
+			if ( MorphDriver.WriteRigFile( Path.Combine( dir, safe + ".ctrlrig" ), drivers, $"{folder}/{safe}.vmdl" ) )
+				r.Log.Add( $"export: {drivers.Count} morph driver(s) written to {safe}.ctrlrig" );
+			var vmdlPath = Path.Combine( dir, safe + ".vmdl" );
+			var skinMaterials = VmdlMaterials.GroupList( studio, mesh );
+			r.Written.AddRange( new[] { dmxPath, smdPath } );
+
+			if ( ratios.Count > 0 )
+			{
+				// Skinned levels: each decimated with its weights and shape keys carried, on the
+				// same pivoted skeleton as the full mesh.
+				var levels = LodExport.WriteSkinned( mesh, skeleton, dir, folder, safe, studio.NameForSlot, ratios, lodDistances, wrinkles: wrinkles );
+				var (files, switchAt) = LodExport.VmdlLists( $"{folder}/{safe}.dmx", levels );
+				File.WriteAllText( vmdlPath, VmdlDocument.SkinnedWithLods( files, switchAt, skeleton, physics, skinMaterials ) );
+				levels.ForEach( l => r.Written.AddRange( l.Files ) );
+				r.Log.Add( $"export: {safe} skinned LODs: {Decimate.TriangleCount( mesh )} tris, then {LodExport.Describe( levels )}" );
+
+				if ( Decimate.TriangleCount( mesh ) < LodExport.MinimumTriangles )
+					r.Log.Add( $"export: note: {safe} is only {Decimate.TriangleCount( mesh )} triangles, so its LODs save next to nothing" );
+			}
+			else
+				File.WriteAllText( vmdlPath, VmdlDocument.Skinned( $"{folder}/{safe}.dmx", skeleton, physics, skinMaterials ) );
+
+			r.Written.Add( vmdlPath );
+
+			// Shape keys went into the DMX (DmxMorphs); their materials need F_MORPH_SUPPORTED or the
+			// GPU never applies them - the editor's Compile does the same (EnableMorphMaterials).
+			if ( mesh.HasMorphs )
+			{
+				r.Log.Add( $"export: {mesh.ValidMorphs.Count()} shape key(s) written to the .dmx as flex controls" );
+
+				foreach ( var line in VmatMorph.EnableFiles( mesh, studio.NameForSlot, n => n.EndsWith( ".vmat", StringComparison.OrdinalIgnoreCase ) ? Path.Combine( root, n ) : null ) )
+					r.Log.Add( $"export: {line}" );
+
+				if ( fbx )
+					r.Log.Add( "export: note: the .fbx carries no shape keys; the .dmx the .vmdl loads does" );
+			}
+
+			if ( fbx )
+			{
+				var fbxPath = Path.Combine( dir, safe + ".fbx" );
+				FbxWriter.WriteBinaryFile( mesh, fbxPath, skeleton, studio.NameForSlot, safe );
+				r.Written.Add( fbxPath );
+			}
+
+			r.Log.Add( $"export: {safe} skinned to {skeleton.Count} bone(s), {mesh.VertexCount} vertices; collision {Said( collision, physics )}{(fbx ? "; .fbx too" : "")}" );
+			layout.AppendLine( $"{name}\t{folder}/{safe}.vmdl\t{N( pivot.x )}\t{N( pivot.y )}\t{N( pivot.z )}\t{N( max.x - min.x )}\t{N( max.y - min.y )}\t{N( max.z - min.z )}" );
+		}
+		else
+		{
+			var mesh = new PolyMesh();
+			foreach ( var body in bodies )
+				MeshTransform.Append( mesh, body.Mesh );
+
+			var (min, max) = ModelMeasure.Bounds( mesh );
+			var pivot = r.Pivots.TryGetValue( name, out var p ) ? p : ModelPivot( studio, min, max );
+			MeshTransform.Apply( mesh, Xform.Translate( -pivot ) );
+			var physics = StaticPhysics( studio, collision, surface, pivot, b => bodies.Contains( b ), r, Safe( name ) );
+			WriteStatic( studio, mesh, dir, folder, Safe( name ), physics, ratios, lodDistances, fbx, r );
+			layout.AppendLine( $"{name}\t{folder}/{Safe( name )}.vmdl\t{N( pivot.x )}\t{N( pivot.y )}\t{N( pivot.z )}\t{N( max.x - min.x )}\t{N( max.y - min.y )}\t{N( max.z - min.z )}" );
+		}
+
+		var layoutPath = Path.Combine( dir, "layout.txt" );
+		File.WriteAllText( layoutPath, layout.ToString() );
+		r.Written.Add( layoutPath );
+		r.Log.Add( $"exported {(split ? bodies.Count : 1)} model(s) to {dir}; layout in layout.txt" );
+		return true;
+	}
+
+	/// <summary>`lods=1` is the editor's pair; `lods=0.5,0.25` names the ratios; `loddistance=` the
+	/// switch distances (default multiples of the model's diagonal, filled in by WriteStatic).</summary>
+	static bool TryLods( Dictionary<string, string> opts, out List<float> ratios, out List<float> distances, out string why )
+	{
+		ratios = new List<float>();
+		distances = null;
+		why = null;
+		var text = opts.GetValueOrDefault( "lods", "0" ).Trim();
+
+		if ( text is "0" or "" or "off" or "no" or "false" )
+		{
+			if ( opts.ContainsKey( "loddistance" ) ) { why = "loddistance= without lods=: say which levels to make, e.g. lods=0.5,0.25."; return false; }
+			return true;
+		}
+
+		if ( text is "1" or "on" or "yes" or "true" )
+			ratios.AddRange( new[] { 0.5f, 0.25f } );
+		else
+		{
+			foreach ( var part in text.Split( ',', StringSplitOptions.RemoveEmptyEntries ) )
+			{
+				if ( !TryNumber( part, out var ratio ) || ratio <= 0f || ratio >= 1f )
+				{
+					why = $"lods={text}: each level is a share of the triangles between 0 and 1, e.g. lods=0.5,0.25 (or lods=1 for that pair).";
+					return false;
+				}
+
+				if ( ratios.Count > 0 && ratio >= ratios[^1] )
+				{
+					why = $"lods={text}: each level must be coarser than the one before it.";
+					return false;
+				}
+
+				ratios.Add( ratio );
+			}
+		}
+
+		if ( opts.TryGetValue( "loddistance", out var distText ) )
+		{
+			distances = new List<float>();
+
+			foreach ( var part in distText.Split( ',', StringSplitOptions.RemoveEmptyEntries ) )
+			{
+				if ( !TryNumber( part, out var d ) || d <= 0f || (distances.Count > 0 && d <= distances[^1]) )
+				{
+					why = $"loddistance={distText}: rising distances in units, one per level.";
+					return false;
+				}
+
+				distances.Add( d );
+			}
+
+			if ( distances.Count != ratios.Count )
+			{
+				why = $"loddistance= has {distances.Count} distance(s) for {ratios.Count} level(s): give one per level.";
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	/// <summary>One static model: its mesh, any LOD meshes, the .vmdl that loads them, and an .fbx
+	/// when asked. Materials bound from the studio's slots.</summary>
+	static void WriteStatic( PartStudio studio, PolyMesh mesh, string dir, string folder, string name, string physics,
+		List<float> ratios, List<float> distances, bool fbx, Result r )
+	{
+		// Triangulated the bake's way (NormalBake.FaceTriangles), as the editor's static compile is.
+		var objPath = Path.Combine( dir, name + ".obj" );
+
+		// OBJ has no shape keys. Say so rather than drop them without a word, as the editor does.
+		if ( mesh.HasMorphs )
+			r.Log.Add( $"export: warning: {mesh.ValidMorphs.Count()} shape key(s) on {name} were left out: a static model exports as OBJ, which has no morphs. "
+				+ "Export it skinned (add a bone, and no skin=0 or split=1) to keep them in the .dmx." );
+
+		ObjWriter.WriteFile( mesh, objPath, name, materialName: studio.NameForSlot, triangulate: true );
+		r.Written.Add( objPath );
+
+		var materials = VmdlMaterials.GroupList( studio, mesh );
+		var vmdlPath = Path.Combine( dir, name + ".vmdl" );
+
+		if ( ratios.Count > 0 )
+		{
+			var full = Decimate.TriangleCount( mesh );
+			var levels = LodExport.WriteStatic( mesh, dir, folder, name, studio.NameForSlot, ratios, distances );
+			var (files, switchAt) = LodExport.VmdlLists( $"{folder}/{name}.obj", levels );
+			levels.ForEach( l => r.Written.AddRange( l.Files ) );
+
+			File.WriteAllText( vmdlPath, VmdlDocument.StaticWithLods( files, switchAt, physics, materials ) );
+			r.Log.Add( $"export: {name} LODs: {full} tris, then {LodExport.Describe( levels )}" );
+
+			if ( full < LodExport.MinimumTriangles )
+				r.Log.Add( $"export: note: {name} is only {full} triangles, so its LODs save next to nothing" );
+		}
+		else
+			File.WriteAllText( vmdlPath, VmdlDocument.Static( $"{folder}/{name}.obj", physics, materials ) );
+
+		r.Written.Add( vmdlPath );
+
+		if ( fbx )
+		{
+			var fbxPath = Path.Combine( dir, name + ".fbx" );
+			FbxWriter.WriteBinaryFile( mesh, fbxPath, materialName: studio.NameForSlot, modelName: name );
+			r.Written.Add( fbxPath );
+		}
+	}
+
+	/// <summary>The PhysicsShapeList for a static model, already shifted onto its pivot.</summary>
+	static string StaticPhysics( PartStudio studio, string collision, string surface, Vec3 pivot, Func<Body, bool> include, Result r, string name )
+	{
+		if ( collision == "none" )
+			return "";
+
+		if ( collision == "render" )
+		{
+			r.Log.Add( $"export: {name} collision from the render mesh" );
+			return VmdlPhysics.MeshFromRender( surface );
+		}
+
+		List<CollisionShape> shapes;
+		string how;
+
+		if ( collision == "auto" )
+		{
+			var report = CollisionBuilder.Build( studio );
+			shapes = report.Shapes.Where( s => s.BodyId is null || include( studio.Bodies.FirstOrDefault( b => b.Id == s.BodyId ) ?? new Body( s.BodyId, null, null ) ) ).ToList();
+			how = report.ToString();
+		}
+		else
+		{
+			shapes = CollisionBuilder.HullsPerBody( studio ).Where( s => s.BodyId is null || include( studio.Bodies.First( b => b.Id == s.BodyId ) ) ).ToList();
+			how = $"{shapes.Count} hull(s), one per body";
+		}
+
+		foreach ( var shape in shapes )
+			Shift( shape, -pivot );
+
+		var node = VmdlPhysics.ShapeList( shapes, surface );
+
+		if ( node.Length == 0 )
+		{
+			r.Log.Add( $"export: {name}: no collision shape could be built ({how}), so collision is the render mesh" );
+			return VmdlPhysics.MeshFromRender( surface );
+		}
+
+		r.Log.Add( $"export: {name} collision {how}" );
+		return node;
+	}
+
+	/// <summary>A skinned model's collision: one hull per body on the bone that drives it - the
+	/// assigned bone, else the nearest, as the editor's export does.</summary>
+	static List<CollisionShape> BoneHulls( PartStudio studio, Skeleton skeleton )
+	{
+		var shapes = CollisionBuilder.HullsPerBody( studio );
+
+		foreach ( var shape in shapes )
+		{
+			if ( shape.BodyId is not null && studio.BodyBoneMap.TryGetValue( shape.BodyId, out var named ) && skeleton.IndexOf( named ) >= 0 )
+			{
+				shape.Bone = named;
+				continue;
+			}
+
+			var centre = shape.Position;
+
+			if ( shape.Points is { Count: > 0 } points )
+			{
+				centre = Vec3.Zero;
+				foreach ( var q in points ) centre += q;
+				centre /= points.Count;
+			}
+
+			shape.Bone = skeleton.Bones[SkinBinder.NearestBone( centre, skeleton )].Name;
+		}
+
+		return shapes;
+	}
+
+	static void Shift( CollisionShape shape, Vec3 offset )
+	{
+		shape.Position += offset;
+
+		if ( shape.Points is null )
+			return;
+
+		for ( var i = 0; i < shape.Points.Count; i++ )
+			shape.Points[i] += offset;
+	}
+
+	/// <summary>The skeleton moved with the mesh onto the pivot: root bones only, children follow.</summary>
+	static Skeleton Pivoted( Skeleton skeleton, Vec3 pivot )
+	{
+		var copy = skeleton.Clone();
+		var shift = Xform.Translate( -pivot );
+
+		foreach ( var bone in copy.Bones )
+			if ( bone.Parent < 0 )
+				bone.Local = shift * bone.Local;
+
+		return copy;
+	}
+
+	static string Said( string collision, string physics ) =>
+		collision == "none" ? "none" : physics.Contains( "PhysicsMeshFromRender" ) ? "from the render mesh"
+			: $"{System.Text.RegularExpressions.Regex.Matches( physics, "PhysicsShape(Box|Sphere|Cylinder|Hull)\"" ).Count} hull(s) on their bones";
+
+	/// <summary>`maps=normal,ao,curvature,cavity,height,thickness` or `maps=all`.</summary>
+	static bool BakeMapList( string text, out BakeMaps maps, out string why )
+	{
+		maps = BakeMaps.None;
+		why = null;
+
+		foreach ( var part in text.Split( new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries ) )
+		{
+			var map = part.Trim().ToLowerInvariant() switch
+			{
+				"all" => BakeMaps.All,
+				"normal" or "normals" => BakeMaps.Normal,
+				"ao" or "occlusion" or "ambientocclusion" => BakeMaps.AmbientOcclusion,
+				"curvature" or "curv" => BakeMaps.Curvature,
+				"cavity" => BakeMaps.Cavity,
+				"height" => BakeMaps.Height,
+				"thickness" => BakeMaps.Thickness,
+				"bentnormal" or "bent" => BakeMaps.BentNormal,
+				"objectnormal" or "worldnormal" or "object" => BakeMaps.ObjectNormal,
+				"position" or "pos" => BakeMaps.Position,
+				"id" or "materialid" or "matid" => BakeMaps.MaterialId,
+				"everything" => BakeMaps.Everything,
+				_ => BakeMaps.None,
+			};
+
+			if ( map == BakeMaps.None )
+			{
+				why = $"maps: '{part.Trim()}' is not a bake. Maps: normal, ao, curvature, cavity, height, thickness, bentnormal, objectnormal, position, id, all (the first six), everything.";
+				return false;
+			}
+
+			maps |= map;
+		}
+
+		if ( maps == BakeMaps.None )
+		{
+			why = "maps: name at least one of normal, ao, curvature, cavity, height, thickness.";
+			return false;
+		}
+
+		return true;
+	}
+
+	static string Safe( string name )
+	{
+		var sb = new StringBuilder();
+		foreach ( var c in (name ?? "part").Trim().ToLowerInvariant() )
+			sb.Append( char.IsLetterOrDigit( c ) ? c : '_' );
+		return sb.Length == 0 ? "part" : sb.ToString();
+	}
+
+	static string N( float v ) => v.ToString( "0.###", CultureInfo.InvariantCulture );
+
+	static bool RebuildAndCheck( PartStudio studio, Feature feature, Result r, string did )
+	{
+		studio.Rebuild();
+
+		if ( feature.Error is not null )
+		{
+			var d = feature.Diagnostic;
+			var sb = new StringBuilder();
+			sb.Append( $"{feature.TypeName} '{feature.Name ?? feature.Id}' failed: {feature.Error}" );
+
+			if ( d is not null )
+			{
+				if ( !string.IsNullOrEmpty( d.Cause ) ) sb.Append( $" Because: {d.Cause}" );
+				foreach ( var remedy in d.Remedies ) sb.Append( $" Try: {remedy}." );
+			}
+
+			return Fail( r, sb.ToString() );
+		}
+
+		r.Log.Add( did + (feature.Warning is not null ? $" (note: {feature.Warning})" : "" ) );
+		return true;
+	}
+
+	static bool Fail( Result r, string message )
+	{
+		r.Error = message;
+		return false;
+	}
+
+	// --- assigning parameters ---------------------------------------------------------------------
+
+	static bool Assign( PartStudio studio, Feature feature, Dictionary<string, string> pairs, Result r )
+	{
+		// Lane E: a face/edge selection names bodies, so `bodies=` is applied before any
+		// faces=/edges= that needs it, whatever order the script wrote them in.
+		var ordered = pairs.ToList();
+		var bodiesFirst = ordered.Where( p => Normalise( p.Key ) is "bodies" or "body" ).ToList();
+		ordered = bodiesFirst.Concat( ordered.Where( p => !bodiesFirst.Contains( p ) ) ).ToList();
+
+		// Lane P carry-up from the desktop mirror: add Fillet faces=Box:0,0,6:0,0,1 — a face selection on an edge tool is the faces' rims.
+		if ( TakesFacesAsEdges( feature ) && pairs.TryGetValue( "faces", out var faceText ) )
+		{
+			var faces = new List<FaceRef>();
+
+			if ( !ParseFaces( studio, faceText, faces, out var whyFaces ) )
+				return Fail( r, $"faces: {whyFaces}" );
+
+			feature.ApplyGeometrySelection( faces, Array.Empty<string>(), studio.Bodies );
+		}
+
+		// Lane E: align=/tilt= state. tilt is a modifier of align, so it is held until
+		// align has a frame to tilt, whichever order the two arrive in.
+		Xform? alignFrame = null;
+		string pendingTilt = null;
+
+		foreach ( var (key, value) in ordered )
+		{
+			if ( key == "faces" && TakesFacesAsEdges( feature ) )
+				continue;
+
+			if ( key == "name" )
+			{
+				feature.Name = value;
+				continue;
+			}
+
+			// Lane E: align=@Body.station(...) — orient the feature to a surface frame.
+			if ( key == "align" )
+			{
+				if ( !ApplyAlign( studio, feature, value, pendingTilt, out var alignWhy, out var frame ) )
+					return Fail( r, $"align: {alignWhy}" );
+				alignFrame = frame;
+				continue;
+			}
+
+			if ( key == "tilt" )
+			{
+				pendingTilt = value;
+				if ( alignFrame is { } frame )
+				{
+					// Re-apply the last align with this tilt on top.
+					if ( !ApplyAlignFrame( feature, frame, pendingTilt, out var tiltWhy ) )
+						return Fail( r, $"tilt: {tiltWhy}" );
+				}
+				continue;
+			}
+
+			// Lane E: a Paint feature's stroke list is `strokes=`; `stroke=` is its singular.
+			var lookupKey = Normalise( key ) == "stroke" ? "strokes" : key;
+
+			if ( feature is IScriptValueReader reader && reader.HandlesScriptValue( lookupKey, value, out var readError ) )
+			{
+				if ( readError is not null )
+					return Fail( r, $"{key}: {readError}" );
+
+				continue;
+			}
+
+			var target = FindParam( feature, lookupKey, out var field );
+
+			if ( target is null && field is null )
+				return Fail( r, $"{feature.TypeName} has no parameter '{key}'. It has: {string.Join( ", ", ParamNames( feature ) )}." );
+
+			try
+			{
+				if ( target is not null && !AssignParam( studio, target, value, out var why ) )
+					return Fail( r, $"{key}: {why}" );
+
+				if ( target is null && !AssignField( studio, feature, field, value, out var whyField ) )
+					return Fail( r, $"{key}: {whyField}" );
+			}
+			catch ( Exception e )
+			{
+				return Fail( r, $"{key}: {e.Message}" );
+			}
+		}
+
+		return true;
+	}
+
+	/// <summary>
+	/// Lane E `align=`: resolve a surface/station landmark to its frame and orient the
+	/// feature by it. Axis+angle features (Primitive, Transform) take the frame's
+	/// axis-angle; a Vec3 rotation/euler feature takes its Euler degrees; a Profile takes
+	/// the frame's normal as its custom Along direction with the roll that turns its
+	/// width onto the frame's Y. `tilt=pitch,yaw,roll` (degrees, rx,ry,rz) is applied in
+	/// the feature's own frame, after the surface frame.
+	/// </summary>
+	static bool ApplyAlign( PartStudio studio, Feature feature, string value, string tilt, out string why, out Xform frame )
+	{
+		why = null;
+		frame = Xform.Identity;
+
+		// align=@Body.station(0.17,78);tilt=10,0,0 — the tilt rides inside the one token.
+		var tiltInValue = tilt;
+		var landmark = value;
+		var tiltAt = value.IndexOf( ";tilt=", StringComparison.OrdinalIgnoreCase );
+		if ( tiltAt >= 0 )
+		{
+			landmark = value[..tiltAt];
+			tiltInValue = value[(tiltAt + 6)..];
+		}
+
+		if ( !landmark.StartsWith( '@' ) )
+		{
+			why = $"align={value}: give a surface landmark, e.g. align=@Body.station(0.17,78) or align=@Body.surface(0,0,+z).";
+			return false;
+		}
+
+		var landmarkName = landmark[1..];
+		// A .euler suffix names the same frame; the frame itself is what align needs.
+		if ( landmarkName.EndsWith( ".euler", StringComparison.OrdinalIgnoreCase ) )
+			landmarkName = landmarkName[..^6];
+
+		if ( !ModelMeasure.TryLandmarkFrame( studio, landmarkName, out _, out var normal, out _, out why ) )
+			return false;
+
+		var bodyName = landmarkName.Split( '.' )[0];
+		frame = ModelMeasure.FrameXform( normal, LongAxisForAlign( studio, bodyName ) );
+		return ApplyAlignFrame( feature, frame, tiltInValue, out why );
+	}
+
+	static Vec3 LongAxisForAlign( PartStudio studio, string bodyName )
+	{
+		var body = ModelMeasure.FindBody( studio, bodyName );
+		if ( body?.Mesh is not null )
+		{
+			var (min, max) = ModelMeasure.Bounds( body.Mesh );
+			var size = max - min;
+			return size.x >= size.y && size.x >= size.z ? new Vec3( 1, 0, 0 )
+				: size.y >= size.z ? new Vec3( 0, 1, 0 ) : new Vec3( 0, 0, 1 );
+		}
+		return new Vec3( 1, 0, 0 );
+	}
+
+	static bool ApplyAlignFrame( Feature feature, Xform frame, string tilt, out string why )
+	{
+		why = null;
+		var composed = frame;
+
+		if ( !string.IsNullOrWhiteSpace( tilt ) )
+		{
+			var parts = tilt.Split( ',' ).Select( a => a.Trim() ).ToArray();
+			if ( parts.Length != 3
+				|| !float.TryParse( parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var rx )
+				|| !float.TryParse( parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var ry )
+				|| !float.TryParse( parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var rz ) )
+			{
+				why = $"tilt={tilt}: give pitch,yaw,roll in degrees, e.g. tilt=10,0,0.";
+				return false;
+			}
+			var tiltXform = Xform.Rotate( new Vec3( 0, 0, 1 ), rz * MathF.PI / 180f )
+				* Xform.Rotate( new Vec3( 0, 1, 0 ), ry * MathF.PI / 180f )
+				* Xform.Rotate( new Vec3( 1, 0, 0 ), rx * MathF.PI / 180f );
+			composed = frame * tiltXform;
+		}
+
+		var parameters = feature.Parameters.Concat( feature.AdvancedParameters ).Distinct().ToList();
+		var axisParam = parameters.OfType<Vec3Param>().FirstOrDefault( p => p.Label.ToLowerInvariant().Contains( "axis" ) );
+		var angleParam = parameters.OfType<FloatParam>().FirstOrDefault( p =>
+			p.Label.Equals( "Rotation", StringComparison.OrdinalIgnoreCase )
+			|| p.Label.Equals( "Angle", StringComparison.OrdinalIgnoreCase ) );
+
+		if ( axisParam is not null && angleParam is not null )
+		{
+			var (axis, angle) = ModelMeasure.FrameAxisAngle( composed );
+			axisParam.Value = axis;
+			angleParam.Value = angle;
+			angleParam.Expr = null;
+			return true;
+		}
+
+		var eulerParam = parameters.OfType<Vec3Param>().FirstOrDefault( p =>
+			p.Label.Equals( "Rotation", StringComparison.OrdinalIgnoreCase )
+			|| p.Label.Equals( "Euler", StringComparison.OrdinalIgnoreCase ) );
+		if ( eulerParam is not null )
+		{
+			eulerParam.Value = ModelMeasure.FrameEuler( composed );
+			return true;
+		}
+
+		if ( feature is ProfileFeature profile )
+		{
+			// Grow along the surface normal, with the roll that turns the profile's
+			// width (local y, via ProfileBody.Turn) onto the frame's Y.
+			var turn = ProfileBody.Turn( composed.Z, 0f );
+			var width0 = turn.TransformDirection( new Vec3( 0, 1, 0 ) );
+			var roll = MathF.Atan2( Vec3.Dot( Vec3.Cross( width0, composed.Y ), composed.Z ), Vec3.Dot( width0, composed.Y ) ) * 180f / MathF.PI;
+			profile.Along.Index = ProfileBody.AxisCustom;
+			profile.AlongDirection.Value = composed.Z;
+			profile.Roll.Value = roll;
+			profile.Roll.Expr = null;
+			return true;
+		}
+
+		why = $"align= does not apply to {feature.TypeName}: it has no rotation axis+angle, rotation vector, or profile direction to set. (A Fin is placed by its root/tip points, not a frame, so align does not apply to it.)";
+		return false;
+	}
+
+	static bool AssignParam( PartStudio studio, IParam param, string value, out string why )
+	{
+		why = null;
+
+		switch ( param )
+		{
+			case FloatParam f:
+				// Lane E: a number, or a #variable expression (var length=32, then
+				// sizex=#length or sizex=#length/2). An expression that names a variable
+				// stays as Expr so a later var change moves the feature on rebuild.
+				if ( !TryNumber( value, out var fv ) )
+				{
+					if ( !Expression.TryEvaluate( value, f.Unit, VariableResolver.Bind( studio.Variables ), out fv ) )
+					{ why = $"'{value}' is not a number or a #variable expression."; return false; }
+					f.Value = fv;
+					f.Expr = value.Contains( '#' ) ? value : null;
+					return true;
+				}
+				f.Value = fv;
+				f.Expr = null;
+				return true;
+
+			case IntParam i:
+				if ( !TryNumber( value, out var iv ) )
+				{
+					if ( !Expression.TryEvaluate( value, null, VariableResolver.Bind( studio.Variables ), out iv ) )
+					{ why = $"'{value}' is not a number or a #variable expression."; return false; }
+				}
+				i.Value = (int)MathF.Round( iv );
+				return true;
+
+			case BoolParam b:
+				b.Value = Truthy( value );
+				return true;
+
+			case ChoiceParam c:
+			{
+				var index = Array.FindIndex( c.Options, o => string.Equals( o, value, StringComparison.OrdinalIgnoreCase )
+					|| string.Equals( o.Replace( ' ', '_' ), value, StringComparison.OrdinalIgnoreCase ) );
+
+				// "Left" for "Left (y)", "box" for "Box": the start of an option, then anywhere in it.
+				if ( index < 0 )
+					index = Array.FindIndex( c.Options, o => o.StartsWith( value, StringComparison.OrdinalIgnoreCase ) );
+
+				if ( index < 0 )
+					index = Array.FindIndex( c.Options, o => o.Contains( value, StringComparison.OrdinalIgnoreCase ) );
+
+				if ( index < 0 && int.TryParse( value, out var n ) && n >= 0 && n < c.Options.Length )
+					index = n;
+
+				if ( index < 0 ) { why = $"'{value}' is not one of {string.Join( ", ", c.Options )}."; return false; }
+				c.Index = index;
+				return true;
+			}
+
+			case Vec3Param v:
+				if ( !Point( studio, value, out var p, out why ) ) return false;
+				v.Value = p;
+				return true;
+
+			case StringParam s:
+				// A selection rule names places by landmark; those resolve now, against the model as
+				// built so far, like every other point in a script, so the feature stores numbers.
+				if ( s.Label == "Select" && value.Contains( '@' ) )
+				{
+					if ( !ResolveLandmarks( studio, value, out var resolved, out why ) ) return false;
+					value = resolved;
+				}
+
+				s.Value = value;
+				return true;
+
+			case BodySelectionParam bodies:
+			{
+				bodies.BodyIds.Clear();
+
+				foreach ( var name in value.Split( new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries ) )
+				{
+					var body = ModelMeasure.FindBody( studio, name.Trim() );
+					if ( body is null ) { why = $"No body called '{name.Trim()}'. Bodies: {string.Join( ", ", studio.Bodies.Select( b => b.Name ?? b.Id ) )}."; return false; }
+					bodies.BodyIds.Add( body.Id );
+				}
+
+				return true;
+			}
+		}
+
+		why = $"a {param.GetType().Name} cannot be set from a script.";
+		return false;
+	}
+
+	static bool AssignField( PartStudio studio, Feature feature, FieldInfo field, string value, out string why )
+	{
+		why = null;
+
+		// Lane E (Backlog G1): lists whose current value is null (Paint.Strokes) or
+		// whose items are geometry references cannot be switched on by value, so they
+		// are matched by field type first. See ParseFaceRefs / ParseEdgeRefs / ParseStrokes.
+		if ( field.FieldType == typeof( List<FaceRef> ) )
+		{
+			if ( !ParseFaceRefs( studio, feature, value, out var faces, out why ) ) return false;
+			field.SetValue( feature, faces );
+			return true;
+		}
+		if ( field.FieldType == typeof( List<EdgeRef> ) )
+		{
+			if ( !ParseEdgeRefs( studio, feature, value, out var edges, out why ) ) return false;
+			field.SetValue( feature, edges );
+			return true;
+		}
+		if ( field.FieldType == typeof( List<PaintStroke> ) )
+		{
+			if ( !ParseStrokes( studio, feature, value, out var strokes, out why ) ) return false;
+			if ( feature is PaintFeature paint ) paint.ReplaceStrokes( strokes );
+			else field.SetValue( feature, strokes );
+			return true;
+		}
+		if ( field.FieldType == typeof( List<int> ) )
+		{
+			// Shell.OpenFaces: face indices, from a plain list or a face selection.
+			var ints = new List<int>();
+			var plain = value.Split( new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries )
+				.Select( p => p.Trim() ).ToList();
+			if ( plain.Count > 0 && plain.All( p => int.TryParse( p, out _ ) ) )
+			{
+				ints.AddRange( plain.Select( int.Parse ) );
+				field.SetValue( feature, ints );
+				return true;
+			}
+			if ( !ParseFaceRefs( studio, feature, value, out var faces, out why ) ) return false;
+			var targets = SelectionTargets( studio, feature );
+			foreach ( var face in faces )
+			{
+				var body = targets.FirstOrDefault( b => b.Id == face.BodyId );
+				if ( body?.Mesh is null ) continue;
+				if ( FacePlane.TryResolveFace( targets, face, out _, out var index ) && !ints.Contains( index ) )
+					ints.Add( index );
+			}
+			field.SetValue( feature, ints );
+			return true;
+		}
+
+		var current = field.GetValue( feature );
+
+		switch ( current )
+		{
+			case List<Vec3> points:
+			{
+				points.Clear();
+
+				foreach ( var part in value.Split( ';', StringSplitOptions.RemoveEmptyEntries ) )
+				{
+					if ( !Point( studio, part.Trim(), out var p, out why ) ) return false;
+					points.Add( p );
+				}
+
+				return true;
+			}
+
+			case List<Vec2> pairs:
+			{
+				pairs.Clear();
+
+				foreach ( var part in value.Split( ';', StringSplitOptions.RemoveEmptyEntries ) )
+				{
+					var xy = part.Split( ',' );
+					if ( xy.Length != 2 || !TryNumber( xy[0], out var x ) || !TryNumber( xy[1], out var y ) ) { why = $"'{part}' is not a pair a,b."; return false; }
+					pairs.Add( new Vec2( x, y ) );
+				}
+
+				return true;
+			}
+
+			case string:
+			{
+				// A field holding another feature's id — a path sketch, a spline — takes its name.
+				var other = FindFeature( studio, value );
+				field.SetValue( feature, other?.Id ?? value );
+				return true;
+			}
+
+			case List<string> texts:
+			{
+				texts.Clear();
+				foreach ( var part in value.Split( new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries ) )
+					texts.Add( FindFeature( studio, part.Trim() )?.Id ?? part.Trim() );
+				return true;
+			}
+		}
+
+		why = $"a {field.FieldType.Name} cannot be set from a script.";
+		return false;
+	}
+
+	// --- Lane E: face / edge / stroke selections ------------------------------------------------
+
+	static List<Body> SelectionTargets( PartStudio studio, Feature feature )
+	{
+		foreach ( var param in feature.Parameters.Concat( feature.AdvancedParameters ) )
+		{
+			if ( param is BodySelectionParam selection && selection.BodyIds.Count > 0 )
+			{
+				var bodies = studio.Bodies.Where( b => b?.Mesh is not null && selection.BodyIds.Contains( b.Id ) ).ToList();
+				if ( bodies.Count > 0 ) return bodies;
+			}
+		}
+		return studio.Bodies.Where( b => b?.Mesh is not null ).ToList();
+	}
+
+	static string TranslateSelectorRule( string rule )
+	{
+		rule = (rule ?? "").Trim();
+		if ( rule.StartsWith( "box:", StringComparison.OrdinalIgnoreCase ) )
+		{
+			var nums = rule[4..].Split( ',' ).Select( a => a.Trim() ).ToArray();
+			if ( nums.Length == 6 && nums.All( n => float.TryParse( n, NumberStyles.Float, CultureInfo.InvariantCulture, out _ ) ) )
+			{
+				var v = nums.Select( n => float.Parse( n, CultureInfo.InvariantCulture ) ).ToArray();
+				var lo = new[] { MathF.Min( v[0], v[3] ), MathF.Min( v[1], v[4] ), MathF.Min( v[2], v[5] ) };
+				var hi = new[] { MathF.Max( v[0], v[3] ), MathF.Max( v[1], v[4] ), MathF.Max( v[2], v[5] ) };
+				return $"x:{lo[0]}..{hi[0]}&y:{lo[1]}..{hi[1]}&z:{lo[2]}..{hi[2]}";
+			}
+			return rule;
+		}
+		if ( rule.StartsWith( "sharp:", StringComparison.OrdinalIgnoreCase ) )
+		{
+			var arg = rule[6..].Trim().TrimStart( '>', '<', '=' );
+			if ( arg.EndsWith( "deg", StringComparison.OrdinalIgnoreCase ) ) arg = arg[..^3];
+			return $"sharp:{arg}";
+		}
+		return rule;
+	}
+
+	static bool SideFaceIndex( PartStudio studio, Body body, string side, out int index, out string why )
+	{
+		why = null;
+		index = -1;
+		var dir = side switch
+		{
+			"top" => new Vec3( 0, 0, 1 ),
+			"bottom" => new Vec3( 0, 0, -1 ),
+			"front" => new Vec3( 1, 0, 0 ),
+			"back" => new Vec3( -1, 0, 0 ),
+			"left" => new Vec3( 0, 1, 0 ),
+			"right" => new Vec3( 0, -1, 0 ),
+			_ => Vec3.Zero,
+		};
+		if ( dir.LengthSquared < 1e-12f )
+		{
+			why = $"'{side}' is not a side for a face: use top, bottom, front, back, left or right, or a selector rule (normal:up, box:…, sharp:…).";
+			return false;
+		}
+		if ( !ModelMeasure.TryLandmark( studio, $"{body.Name ?? body.Id}.{side}", out var landmark, out why ) )
+			return false;
+
+		var best = -1;
+		var bestDistance = float.MaxValue;
+		var bestDot = -2f;
+		for ( var i = 0; i < body.Mesh.Faces.Count; i++ )
+		{
+			var face = body.Mesh.Faces[i];
+			var normal = body.Mesh.FaceNormal( face );
+			var dot = Vec3.Dot( normal.Normal, dir );
+			if ( dot < 0.7f )
+			{
+				if ( dot > bestDot ) bestDot = dot;
+				continue;
+			}
+			var distance = (body.Mesh.FaceCentroid( face ) - landmark).Length;
+			if ( distance < bestDistance ) { bestDistance = distance; best = i; }
+		}
+		if ( best >= 0 ) { index = best; return true; }
+		// No face points that way at all: take the closest-facing one and say so via the
+		// caller (a fillet on a sphere's "top" still has a topmost face).
+		for ( var i = 0; i < body.Mesh.Faces.Count; i++ )
+		{
+			var dot = Vec3.Dot( body.Mesh.FaceNormal( body.Mesh.Faces[i] ).Normal, dir );
+			if ( dot > bestDot ) { bestDot = dot; best = i; }
+		}
+		if ( best < 0 ) { why = $"{body.Name ?? body.Id} has no faces."; return false; }
+		index = best;
+		return true;
+	}
+
+	static bool ParseFaceRefs( PartStudio studio, Feature feature, string value, out List<FaceRef> refs, out string why )
+	{
+		why = null;
+		refs = new List<FaceRef>();
+		var seen = new HashSet<string>();
+
+		void Add( Body body, int faceIndex, List<FaceRef> into )
+		{
+			var face = body.Mesh.Faces[faceIndex];
+			var key = $"{body.Id}|{faceIndex}";
+			if ( !seen.Add( key ) ) return;
+			into.Add( new FaceRef( body.Id, body.Mesh.FaceCentroid( face ), body.Mesh.FaceNormal( face ) ) );
+		}
+
+		foreach ( var raw in value.Split( ';', StringSplitOptions.RemoveEmptyEntries ) )
+		{
+			var spec = raw.Trim();
+			if ( spec.Length == 0 ) continue;
+
+			if ( spec.StartsWith( '@' ) )
+			{
+				var inner = spec[1..];
+				var dot = inner.IndexOf( '.' );
+				var bodyName = dot < 0 ? inner : inner[..dot];
+				var rest = dot < 0 ? "" : inner[(dot + 1)..].Trim();
+				var body = ModelMeasure.FindBody( studio, bodyName );
+				if ( body?.Mesh is null ) { why = $"No body called '{bodyName}'."; return false; }
+
+				if ( rest.Length == 0 )
+				{
+					for ( var i = 0; i < body.Mesh.Faces.Count; i++ ) Add( body, i, refs );
+					continue;
+				}
+				if ( rest.ToLowerInvariant() is "top" or "bottom" or "front" or "back" or "left" or "right" )
+				{
+					if ( !SideFaceIndex( studio, body, rest.ToLowerInvariant(), out var index, out why ) ) return false;
+					Add( body, index, refs );
+					continue;
+				}
+				if ( !MeshSelector.TryParse( TranslateSelectorRule( rest ), out var selector, out why ) ) return false;
+				foreach ( var i in selector.Faces( body.Mesh ) ) Add( body, i, refs );
+				continue;
+			}
+
+			// A viewport face pick sends a FaceRef token (Body:x,y,z:nx,ny,nz); accept it directly.
+			if ( spec.Count( c => c == ':' ) == 2 )
+			{
+				var bits = spec.Split( ':' );
+				var body = ModelMeasure.FindBody( studio, bits[0].Trim() );
+				if ( body?.Mesh is null ) { why = $"No body called '{bits[0].Trim()}'."; return false; }
+				if ( !Point( studio, bits[1].Trim(), out var p, out why ) ) return false;
+				if ( !ModelMeasure.TryParseVec3( bits[2].Trim(), out var n ) || n.LengthSquared < 1e-12f ) { why = $"'{bits[2]}' is not a normal nx,ny,nz."; return false; }
+				if ( !FacePlane.TryResolveFace( new[] { body }, new FaceRef( body.Id, p, n ), out var hitBody, out var faceIndex ) )
+				{ why = $"No face of {body.Name ?? body.Id} faces {bits[2].Trim()} near {bits[1].Trim()}."; return false; }
+				Add( hitBody, faceIndex, refs );
+				continue;
+			}
+
+			if ( !MeshSelector.TryParse( TranslateSelectorRule( spec ), out var bare, out why ) ) return false;
+			foreach ( var body in SelectionTargets( studio, feature ) )
+				foreach ( var i in bare.Faces( body.Mesh ) ) Add( body, i, refs );
+		}
+
+		if ( refs.Count == 0 )
+		{
+			why = $"faces={value}: no face matched. {MeshSelector.Help}";
+			return false;
+		}
+		return true;
+	}
+
+	static bool ParseEdgeRefs( PartStudio studio, Feature feature, string value, out List<EdgeRef> refs, out string why )
+	{
+		why = null;
+		refs = new List<EdgeRef>();
+		var seen = new HashSet<string>();
+
+		void AddEdge( Body body, EdgeKey key, List<EdgeRef> into )
+		{
+			var a = body.Mesh.Positions[key.A];
+			var b = body.Mesh.Positions[key.B];
+			var mid = (a + b) * 0.5f;
+			var dir = b - a;
+			var k = $"{body.Id}|{mid.x:0.###},{mid.y:0.###},{mid.z:0.###}|{dir.Normal.x:0.###},{dir.Normal.y:0.###},{dir.Normal.z:0.###}";
+			if ( !seen.Add( k ) ) return;
+			into.Add( new EdgeRef( body.Id, mid, dir ) );
+		}
+
+		foreach ( var raw in value.Split( ';', StringSplitOptions.RemoveEmptyEntries ) )
+		{
+			var spec = raw.Trim();
+			if ( spec.Length == 0 ) continue;
+
+			if ( spec.StartsWith( '@' ) )
+			{
+				var inner = spec[1..];
+				var dot = inner.IndexOf( '.' );
+				var bodyName = dot < 0 ? inner : inner[..dot];
+				var rest = dot < 0 ? "" : inner[(dot + 1)..].Trim();
+				var body = ModelMeasure.FindBody( studio, bodyName );
+				if ( body?.Mesh is null ) { why = $"No body called '{bodyName}'."; return false; }
+
+				if ( rest.Length == 0 )
+				{
+					foreach ( var key in body.Mesh.BuildEdgeFaces().Keys ) AddEdge( body, key, refs );
+					continue;
+				}
+				if ( rest.ToLowerInvariant() is "top" or "bottom" or "front" or "back" or "left" or "right" )
+				{
+					if ( !SideFaceIndex( studio, body, rest.ToLowerInvariant(), out var index, out why ) ) return false;
+					foreach ( var edge in FacePlane.CaptureBoundary( body, index ) )
+						if ( seen.Add( $"{edge.BodyId}|{edge.Point.x:0.###},{edge.Point.y:0.###},{edge.Point.z:0.###}" ) ) refs.Add( edge );
+					continue;
+				}
+				if ( !MeshSelector.TryParse( TranslateSelectorRule( rest ), out var selector, out why ) ) return false;
+				foreach ( var pair in selector.Edges( body.Mesh ) ) AddEdge( body, pair.Key, refs );
+				continue;
+			}
+
+			// A viewport edge pick sends an EdgeRef token (Body:x,y,z:nx,ny,nz); accept it directly.
+			if ( spec.Count( c => c == ':' ) == 2 )
+			{
+				var bits = spec.Split( ':' );
+				var body = ModelMeasure.FindBody( studio, bits[0].Trim() );
+				if ( body?.Mesh is null ) { why = $"No body called '{bits[0].Trim()}'."; return false; }
+				if ( !ModelMeasure.TryParseVec3( bits[1].Trim(), out var p ) ) { why = $"'{bits[1]}' is not a point x,y,z."; return false; }
+				if ( !ModelMeasure.TryParseVec3( bits[2].Trim(), out var d ) || d.LengthSquared < 1e-12f ) { why = $"'{bits[2]}' is not a direction x,y,z."; return false; }
+				var edgeRef = new EdgeRef( body.Id, p, d );
+				var key = $"{edgeRef.BodyId}|{edgeRef.Point.x:0.###},{edgeRef.Point.y:0.###},{edgeRef.Point.z:0.###}";
+				if ( seen.Add( key ) ) refs.Add( edgeRef );
+				continue;
+			}
+
+			if ( !MeshSelector.TryParse( TranslateSelectorRule( spec ), out var bare, out why ) ) return false;
+			foreach ( var body in SelectionTargets( studio, feature ) )
+				foreach ( var pair in bare.Edges( body.Mesh ) ) AddEdge( body, pair.Key, refs );
+		}
+
+		if ( refs.Count == 0 )
+		{
+			why = $"edges={value}: no edge matched. {MeshSelector.Help}";
+			return false;
+		}
+		return true;
+	}
+
+	/// <summary>
+	/// Lane E stroke syntax, per the roadmap: one stroke per `;`, each
+	/// `[@channel] [#rrggbb] [r=] [str=] [falloff=] (x,y,z)->(x,y,z)…`. Path points are
+	/// projected onto the target body's surface through its BVH, so a stroke drawn
+	/// through space lands on the skin with the skin's normal at each point.
+	/// </summary>
+	static bool ParseStrokes( PartStudio studio, Feature feature, string value, out List<PaintStroke> strokes, out string why )
+	{
+		why = null;
+		strokes = new List<PaintStroke>();
+
+		foreach ( var raw in value.Split( ';', StringSplitOptions.RemoveEmptyEntries ) )
+		{
+			var spec = raw.Trim();
+			if ( spec.Length == 0 ) continue;
+
+			var paren = spec.IndexOf( '(' );
+			if ( paren < 0 ) { why = $"stroke '{spec}': give a path, e.g. stroke=\"#182836 r=0.8 str=0.9 (0,-10,2)->(0,15,1.8)\"."; return false; }
+			var header = spec[..paren].Trim();
+			var pathText = spec[paren..];
+
+			var stroke = new PaintStroke();
+			Body target = null;
+
+			foreach ( var token in header.Split( (char[])null, StringSplitOptions.RemoveEmptyEntries ) )
+			{
+				if ( token.StartsWith( '@' ) )
+				{
+					stroke.Channel = token[1..].ToLowerInvariant() switch
+					{
+						"color" or "colour" => PaintChannel.Color,
+						"roughness" or "rough" => PaintChannel.Roughness,
+						"metalness" or "metal" or "metallic" => PaintChannel.Metalness,
+						"height" => PaintChannel.Height,
+						"mask" => PaintChannel.Mask,
+						_ => stroke.Channel,
+					};
+					continue;
+				}
+				if ( token.StartsWith( '#' ) && token.Length is 7 or 9
+					&& int.TryParse( token[1..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var rgb ) )
+				{
+					stroke.R = ((rgb >> 16) & 255) / 255f;
+					stroke.G = ((rgb >> 8) & 255) / 255f;
+					stroke.B = (rgb & 255) / 255f;
+					stroke.A = token.Length == 9 ? ((rgb >> 24) & 255) / 255f : 1f;
+					continue;
+				}
+				var eq = token.IndexOf( '=' );
+				if ( eq > 0 )
+				{
+					var k = token[..eq].ToLowerInvariant();
+					var v = token[(eq + 1)..];
+					switch ( k )
+					{
+						case "color" or "colour":
+							if ( v.StartsWith( '#' ) && int.TryParse( v[1..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var c ) )
+							{ stroke.R = ((c >> 16) & 255) / 255f; stroke.G = ((c >> 8) & 255) / 255f; stroke.B = (c & 255) / 255f; }
+							break;
+						case "r" or "radius":
+							if ( !float.TryParse( v, NumberStyles.Float, CultureInfo.InvariantCulture, out var rad ) ) { why = $"stroke r={v}: a radius in units."; return false; }
+							stroke.Radius = rad;
+							break;
+						case "str" or "strength":
+							if ( !float.TryParse( v, NumberStyles.Float, CultureInfo.InvariantCulture, out var str ) ) { why = $"stroke str={v}: a strength 0..1."; return false; }
+							stroke.Strength = str;
+							break;
+						case "spacing":
+							if ( !float.TryParse( v, NumberStyles.Float, CultureInfo.InvariantCulture, out var sp ) ) { why = $"stroke spacing={v}: a number."; return false; }
+							stroke.Spacing = sp;
+							break;
+						case "falloff":
+							stroke.Falloff = v.ToLowerInvariant() switch
+							{
+								"linear" => BrushFalloff.Linear,
+								"sharp" => BrushFalloff.Sharp,
+								"constant" => BrushFalloff.Constant,
+								_ => BrushFalloff.Smooth,
+							};
+							break;
+						case "erase":
+							stroke.Erase = Truthy( v );
+							break;
+						case "bodies" or "body":
+							target = ModelMeasure.FindBody( studio, v );
+							if ( target is null ) { why = $"stroke bodies={v}: no body called that."; return false; }
+							break;
+						case "channel":
+							stroke.Channel = v.ToLowerInvariant() switch
+							{
+								"roughness" or "rough" => PaintChannel.Roughness,
+								"metalness" or "metal" => PaintChannel.Metalness,
+								"height" => PaintChannel.Height,
+								"mask" => PaintChannel.Mask,
+								_ => PaintChannel.Color,
+							};
+							break;
+					}
+					continue;
+				}
+				var named = ModelMeasure.FindBody( studio, token );
+				if ( named is not null ) target = named;
+			}
+
+			target ??= SelectionTargets( studio, feature ).FirstOrDefault();
+			if ( target?.Mesh is null ) { why = $"stroke '{spec}': no body to paint — add a body first, or say bodies=Name."; return false; }
+
+			var points = new List<Vec3>();
+			foreach ( var part in pathText.Split( "->", StringSplitOptions.RemoveEmptyEntries ) )
+			{
+				var p = part.Trim().Trim( '(', ')' );
+				if ( !Point( studio, part.Trim(), out var pt, out var pointWhy ) && !ModelMeasure.TryParseVec3( p, out pt ) )
+				{ why = $"stroke path '{part.Trim()}': {pointWhy}"; return false; }
+				points.Add( pt );
+			}
+			if ( points.Count < 2 ) { why = $"stroke '{spec}': a path needs at least two points, (a)->(b)."; return false; }
+
+			var bvh = MeshBVH.Build( target.Mesh );
+			var (tmin, tmax) = ModelMeasure.Bounds( target.Mesh );
+			var reach = MathF.Max( (tmax - tmin).Length, 1f );
+			foreach ( var p in points )
+			{
+				if ( bvh.NearestSurface( target.Mesh, p, reach ) is not { } near )
+				{ why = $"stroke point {p.x:0.###},{p.y:0.###},{p.z:0.###} is {reach:0.###} or more from {target.Name ?? target.Id}'s skin, so it cannot be projected onto it."; return false; }
+				stroke.Path.Add( new PaintStrokePoint( near.Point, near.Normal.Normal ) );
+			}
+
+			strokes.Add( stroke );
+		}
+
+		if ( strokes.Count == 0 ) { why = "stroke: give at least one stroke."; return false; }
+		return true;
+	}
+
+	static IParam FindParam( Feature feature, string key, out FieldInfo field )
+	{
+		field = null;
+		var wanted = Normalise( key );
+
+		foreach ( var param in feature.Parameters.Concat( feature.AdvancedParameters ) )
+			if ( Normalise( param.Label ) == wanted )
+				return param;
+
+		foreach ( var f in feature.GetType().GetFields( BindingFlags.Public | BindingFlags.Instance ) )
+		{
+			if ( Normalise( f.Name ) != wanted )
+				continue;
+
+			if ( f.GetValue( feature ) is IParam p )
+				return p;
+
+			field = f;
+			return null;
+		}
+
+		return null;
+	}
+
+	static IEnumerable<string> ParamNames( Feature feature )
+	{
+		foreach ( var p in feature.Parameters.Concat( feature.AdvancedParameters ).Distinct() )
+			yield return p.Label;
+
+		foreach ( var f in feature.GetType().GetFields( BindingFlags.Public | BindingFlags.Instance ) )
+			if ( f.GetValue( feature ) is not IParam && f.Name is not ("Id" or "Name" or "Suppressed" or "Visible") )
+				yield return f.Name;
+	}
+
+	static string Normalise( string s ) => (s ?? "").ToLowerInvariant().Replace( " ", "" ).Replace( "_", "" ).Replace( "'", "" );
+
+	// --- points and landmarks ---------------------------------------------------------------------
+
+	/// <summary>`x,y,z`, `@landmark`, or `@landmark+dx,dy,dz` / `@landmark-dx,dy,dz`. A landmark
+	/// can be `@Body.surface(x,y,+z)`, the skin seen from +z at x,y, and `.normal` after it.
+	/// Lane E: `@Body.station(s, angle)` (see <see cref="ModelMeasure.TryStation"/>) and a
+	/// normal inset suffix — `@Body.station(0.17,78)-0.08n` moves the point 0.08 inward
+	/// along the skin's normal (+n is outward) — so a thing never floats or clips.</summary>
+	public static bool Point( PartStudio studio, string text, out Vec3 point, out string why )
+	{
+		why = null;
+		point = Vec3.Zero;
+		text = (text ?? "").Trim();
+
+		if ( !text.StartsWith( '@' ) )
+		{
+			if ( ModelMeasure.TryParseVec3( text, out point ) )
+				return true;
+
+			// A bare name is a landmark too.
+			return ModelMeasure.TryLandmark( studio, text, out point, out why );
+		}
+
+		// Lane E: the normal inset suffix. It must follow a surface/station landmark
+		// (the only landmarks that carry a normal), e.g. station(...)-0.08n.
+		if ( text.EndsWith( 'n' ) )
+		{
+			var closeParen = text.LastIndexOf( ')' );
+			if ( closeParen > 0 )
+			{
+				var signAt = -1;
+				for ( var i = closeParen + 1; i < text.Length - 1; i++ )
+					if ( text[i] is '+' or '-' ) signAt = i;
+				if ( signAt > 0 )
+				{
+					var number = text[(signAt + 1)..^1];
+					if ( float.TryParse( number, NumberStyles.Float, CultureInfo.InvariantCulture, out var inset ) )
+					{
+						var landmarkName = text[1..signAt];
+						if ( !ModelMeasure.TryLandmarkFrame( studio, landmarkName, out point, out var normal, out _, out why ) )
+							return false;
+						var signed = text[signAt] == '-' ? -inset : inset;
+						point += normal * signed;
+						return true;
+					}
+				}
+			}
+		}
+
+		var body = text[1..];
+		var offset = Vec3.Zero;
+		// `@Shell.surface(0,0,+z)+0,0,1`: the signs inside the brackets are the landmark's own.
+		var close = body.LastIndexOf( ')' );
+		var plus = body.IndexOfAny( new[] { '+', '-' }, Math.Max( 1, close + 1 ) );
+
+		if ( plus > 0 )
+		{
+			var sign = body[plus] == '-' ? -1f : 1f;
+			var offsetText = body[(plus + 1)..];
+			body = body[..plus];
+
+			if ( !ModelMeasure.TryParseVec3( offsetText, out offset ) )
+			{
+				why = $"'{offsetText}' after the landmark is not an offset dx,dy,dz.";
+				return false;
+			}
+
+			offset *= sign;
+		}
+
+		if ( !ModelMeasure.TryLandmark( studio, body, out point, out why ) )
+			return false;
+
+		point += offset;
+		return true;
+	}
+
+	/// <summary>Every `@landmark[+dx,dy,dz]` in a selection rule, as `x,y,z`. A landmark runs to the
+	/// next `~`, `&amp;`, `|` or the end.</summary>
+	static bool ResolveLandmarks( PartStudio studio, string text, out string resolved, out string why )
+	{
+		why = null;
+		var sb = new StringBuilder();
+		var i = 0;
+
+		while ( i < text.Length )
+		{
+			if ( text[i] != '@' )
+			{
+				sb.Append( text[i++] );
+				continue;
+			}
+
+			var end = text.IndexOfAny( new[] { '~', '&', '|' }, i );
+			if ( end < 0 ) end = text.Length;
+
+			if ( !Point( studio, text[i..end], out var p, out why ) )
+			{
+				resolved = text;
+				return false;
+			}
+
+			sb.Append( $"{N( p.x )},{N( p.y )},{N( p.z )}" );
+			i = end;
+		}
+
+		resolved = sb.ToString();
+		return true;
+	}
+
+	// --- features by type and name ----------------------------------------------------------------
+
+	static Feature Create( string typeName )
+	{
+		var wanted = Normalise( typeName );
+
+		foreach ( var type in FeatureTypes() )
+		{
+			var name = Normalise( type.Name );
+			var bare = name.EndsWith( "feature" ) ? name[..^7] : name;
+
+			if ( name == wanted || bare == wanted )
+				return (Feature)Activator.CreateInstance( type );
+		}
+
+		return null;
+	}
+
+	/// <summary>A new feature by the name a script uses ("Subdivide", "UVProject", "UV project"), or null.</summary>
+	public static Feature CreateFeature( string typeName ) => string.IsNullOrWhiteSpace( typeName ) ? null : Create( typeName );
+
+	/// <summary>Set a feature's parameters from script-style key=value pairs, as `add` does.</summary>
+	public static bool Configure( PartStudio studio, Feature feature, IEnumerable<KeyValuePair<string, string>> pairs, out string why )
+	{
+		var r = new Result();
+		var ok = Assign( studio, feature, pairs.ToDictionary( p => p.Key, p => p.Value ), r );
+		why = r.Error;
+		return ok;
+	}
+
+	static IEnumerable<Type> FeatureTypes() => typeof( Feature ).Assembly.GetTypes()
+		.Where( t => t.IsSubclassOf( typeof( Feature ) ) && !t.IsAbstract )
+		.OrderBy( t => t.Name, StringComparer.Ordinal );
+
+	/// <summary>A feature type's parameters, one per line, with what each takes — the help a script
+	/// author reads before writing `add`.</summary>
+	public static string Describe( string typeName )
+	{
+		var feature = Create( typeName );
+
+		if ( feature is null )
+			return $"No feature type '{typeName}'. Types: {string.Join( ", ", FeatureTypeNames() )}.";
+
+		var sb = new StringBuilder();
+		sb.AppendLine( $"{feature.TypeName} (add {typeName})" );
+
+		foreach ( var param in feature.Parameters.Concat( feature.AdvancedParameters ).Distinct() )
+		{
+			var key = Normalise( param.Label );
+			var kind = param switch
+			{
+				FloatParam f => $"number, default {f.Value}" + (f.Min > float.MinValue ? $", min {f.Min}" : "") + (f.Max < float.MaxValue ? $", max {f.Max}" : ""),
+				IntParam i => $"whole number, default {i.Value}, {i.Min}..{i.Max}",
+				BoolParam b => $"on/off, default {(b.Value ? "on" : "off")}",
+				ChoiceParam c => $"one of {string.Join( "|", c.Options )}, default {c.Value}",
+				Vec3Param v => $"point x,y,z or @landmark, default {v.Value.x},{v.Value.y},{v.Value.z}",
+				StringParam => "text",
+				BodySelectionParam => "body names, comma-separated (empty = every body)",
+				_ => param.GetType().Name,
+			};
+			sb.AppendLine( $"  {key} = {kind}" );
+		}
+
+		foreach ( var f in feature.GetType().GetFields( BindingFlags.Public | BindingFlags.Instance ) )
+		{
+			if ( f.GetValue( feature ) is IParam || f.Name is "Id" or "Name" or "Suppressed" or "Visible" )
+				continue;
+
+			var kind = f.FieldType == typeof( List<Vec3> ) ? "points x,y,z;x,y,z;… (landmarks allowed)"
+				: f.FieldType == typeof( List<Vec2> ) ? "pairs a,b;a,b;…"
+				: f.FieldType == typeof( string ) ? "a feature name"
+				: f.FieldType == typeof( List<string> ) ? "feature names, comma-separated"
+				: f.FieldType == typeof( List<FaceRef> ) ? "faces: @Body.top, normal:up, box:x0,y0,z0,x1,y1,z1, sharp:>35deg, index:1,2 (separate with ;)"
+				: f.FieldType == typeof( List<EdgeRef> ) ? "edges: @Body.top, normal:up, box:…, sharp:>35deg, index:… (separate with ;)"
+				: f.FieldType == typeof( List<PaintStroke> ) ? "strokes: \"#rrggbb r=0.8 str=0.9 (x,y,z)->(x,y,z)\" (separate with ;)"
+				: f.FieldType == typeof( List<int> ) ? "indices 1,2,5 or a face selection"
+				: null;
+
+			if ( kind is not null )
+				sb.AppendLine( $"  {Normalise( f.Name )} = {kind}" );
+		}
+
+		sb.AppendLine( "  name = what to call it" );
+		return sb.ToString().TrimEnd();
+	}
+
+	public static IEnumerable<string> FeatureTypeNames() =>
+		FeatureTypes().Select( t => t.Name.EndsWith( "Feature" ) ? t.Name[..^7] : t.Name );
+
+	static Feature FindFeature( PartStudio studio, string name )
+	{
+		if ( string.IsNullOrWhiteSpace( name ) )
+			return null;
+
+		if ( name.StartsWith( '#' ) && int.TryParse( name[1..], out var index ) && index >= 1 && index <= studio.Features.Count )
+			return studio.Features[index - 1];
+
+		return studio.Features.FirstOrDefault( f => f.Id == name )
+			?? studio.Features.LastOrDefault( f => string.Equals( f.Name, name, StringComparison.OrdinalIgnoreCase ) )
+			?? studio.Features.LastOrDefault( f => string.Equals( f.Name?.Replace( ' ', '_' ), name, StringComparison.OrdinalIgnoreCase ) )
+			?? studio.Features.LastOrDefault( f => string.Equals( f.TypeName, name, StringComparison.OrdinalIgnoreCase ) );
+	}
+
+	// --- lexing -------------------------------------------------------------------------------------
+
+	static List<string> Tokenise( string line )
+	{
+		var tokens = new List<string>();
+		var sb = new StringBuilder();
+		var quoted = false;
+
+		foreach ( var c in line )
+		{
+			if ( c == '"' ) { quoted = !quoted; continue; }
+
+			if ( char.IsWhiteSpace( c ) && !quoted )
+			{
+				if ( sb.Length > 0 ) { tokens.Add( sb.ToString() ); sb.Clear(); }
+				continue;
+			}
+
+			sb.Append( c );
+		}
+
+		if ( sb.Length > 0 )
+			tokens.Add( sb.ToString() );
+
+		return tokens;
+	}
+
+	/// <summary>
+	/// `render out.png shade=material|clay [views=4] [size=512] [elevation=12] [preset=Wet gore] [focus=Body] [label=OURS] [clip=y>0]`:
+	/// a lit turnaround through ShadedRender, for judging how a thing LOOKS (wet, glossy, translucent)
+	/// rather than measuring it. shade=material shows each body as its Flesh Material feature baked it
+	/// (maps or per-vertex); a body with none shows its paint layers if it has any, else takes
+	/// `preset=` evaluated per vertex, else its vertex colours, else clay.
+	/// </summary>
+	static bool RenderShaded( PartStudio studio, string path, Dictionary<string, string> opts, string shade, Result r )
+	{
+		var mode = shade.Trim().ToLowerInvariant();
+		if ( mode is not ("clay" or "material" or "flesh" or "wet") )
+			return Fail( r, $"shade={shade}: use shade=material (what the materials make it look like) or shade=clay (form only)." );
+
+		var views = (int)Number( opts.GetValueOrDefault( "views", "4" ) );
+		var size = (int)Number( opts.GetValueOrDefault( "size", "512" ) );
+		var elevation = Number( opts.GetValueOrDefault( "elevation", "12" ) );
+		var focus = opts.TryGetValue( "focus", out var f ) ? ModelMeasure.FindBody( studio, f ) : null;
+		FleshStack fallback = null;
+		if ( opts.TryGetValue( "preset", out var presetName ) && (fallback = FleshMaterial.Preset( presetName )) is null )
+			return Fail( r, $"No material preset '{presetName}'. Presets: {string.Join( ", ", FleshMaterial.Presets )}." );
+
+		// The scene Render Turnaround draws, so the script's sheet and the editor's match.
+		var scene = Turnaround.Scene( studio, mode == "clay", focus?.Id, fallback, r.Log );
+
+		if ( opts.TryGetValue( "clip", out var clipSpec ) )
+		{
+			if ( !ClipPlane.TryParse( clipSpec, out var plane, out var clipWhy ) )
+				return Fail( r, clipWhy );
+			scene.Clip = plane;
+		}
+
+		if ( scene.Items.Count == 0 )
+			return Fail( r, focus is null ? "Nothing to render: no visible body has faces." : $"{focus.Name ?? focus.Id} has no faces to render." );
+
+		Directory.CreateDirectory( Path.GetDirectoryName( Path.GetFullPath( path ) ) ?? "." );
+		scene.Coverage = (int)Number( opts.GetValueOrDefault( "aa", "16" ) );
+		ShadedRender.Sheet( scene, views, size, elevation, (int)Number( opts.GetValueOrDefault( "ss", "1" ) ), opts.GetValueOrDefault( "label", "OURS" ) ).SavePng( path );
+		r.Written.Add( path );
+		r.Log.Add( $"rendered shade={mode}, {Math.Clamp( views, 1, 12 )} views, to {path}" );
+		return true;
+	}
+
+	/// <summary>
+	///   corrective bone=elbow_L angle=90 [axis=x,y,z]   add (or replace) a corrective shape on a bone
+	///   corrective remove bone=elbow_L [angle=90]        take it (or every one on that bone) off
+	///   corrective                                       list them
+	/// Built into the model at export (CorrectiveMorph) from the export's own weights.
+	/// </summary>
+	static bool Corrective( PartStudio studio, List<string> args, Result r )
+	{
+		if ( args.Count > 0 && args[0].Equals( "auto", StringComparison.OrdinalIgnoreCase ) )
+			return AutoCorrective( studio, args.Skip( 1 ).ToList(), r );
+		var remove = args.Count > 0 && args[0].Equals( "remove", StringComparison.OrdinalIgnoreCase );
+		var opts = Pairs( remove ? args.Skip( 1 ) : args );
+
+		if ( opts.Count == 0 )
+		{
+			r.Log.Add( studio.Correctives.Count == 0 ? "no corrective shapes"
+				: string.Join( "\n", studio.Correctives.Select( c => $"corrective {c.MorphName}: bone {c.Bone}, {c.Angle:0}°" ) ) );
+			return true;
+		}
+
+		if ( !opts.TryGetValue( "bone", out var bone ) || string.IsNullOrWhiteSpace( bone ) )
+			return Fail( r, "corrective needs bone=: corrective bone=elbow_L angle=90" );
+
+		float? angle = null;
+		if ( opts.TryGetValue( "angle", out var angleText ) )
+		{
+			if ( !float.TryParse( angleText, NumberStyles.Float, CultureInfo.InvariantCulture, out var a ) || a <= 0f || a > 170f )
+				return Fail( r, $"angle={angleText}: a bend in degrees, above 0 and up to 170." );
+			angle = a;
+		}
+
+		if ( remove )
+		{
+			var n = studio.Correctives.RemoveAll( c => c.Bone == bone && (angle is null || MathF.Abs( c.Angle - angle.Value ) < 0.5f) );
+			if ( n == 0 ) return Fail( r, $"no corrective shape on '{bone}'{(angle is null ? "" : $" at {angle:0}°")} to remove." );
+			r.Log.Add( $"removed {n} corrective shape(s) from {bone}" );
+			return true;
+		}
+
+		if ( studio.Rig.IndexOf( bone ) < 0 )
+			return Fail( r, $"No bone '{bone}'. Bones: {string.Join( ", ", studio.Rig.Bones.Select( b => b.Name ).Take( 20 ) )}." );
+
+		var shape = new CorrectiveShape { Bone = bone, Angle = angle ?? 90f };
+		if ( opts.TryGetValue( "axis", out var axisText ) )
+		{
+			var c = axisText.Split( ',' );
+			if ( c.Length != 3 || !c.All( x => float.TryParse( x, NumberStyles.Float, CultureInfo.InvariantCulture, out _ ) ) )
+				return Fail( r, $"axis={axisText}: a direction x,y,z (the joint's hinge), or leave it out to pick one." );
+			shape.Axis = new Vec3( float.Parse( c[0], CultureInfo.InvariantCulture ), float.Parse( c[1], CultureInfo.InvariantCulture ), float.Parse( c[2], CultureInfo.InvariantCulture ) );
+		}
+
+		studio.Correctives.RemoveAll( c => c.MorphName == shape.MorphName );
+		studio.Correctives.Add( shape );
+		r.Log.Add( $"corrective {shape.MorphName}: built into the model at export" );
+		return true;
+	}
+
+	/// <summary>Lane P carry-up from the desktop mirror: parse a face selection
+	/// Body:x,y,z:nx,ny,nz;… into FaceRefs, resolving each face on its body.</summary>
+	public static bool ParseFaces( PartStudio studio, string value, List<FaceRef> faceRefs, out string why )
+	{
+		why = null;
+		faceRefs.Clear();
+
+		foreach ( var part in (value ?? "").Split( ';', StringSplitOptions.RemoveEmptyEntries ) )
+		{
+			var bits = part.Split( ':' );
+			if ( bits.Length != 3 ) { why = $"'{part}' is not a face Body:x,y,z:nx,ny,nz."; return false; }
+
+			var body = ModelMeasure.FindBody( studio, bits[0].Trim() );
+			if ( body is null ) { why = $"No body called '{bits[0].Trim()}'. Bodies: {string.Join( ", ", studio.Bodies.Select( b => b.Name ?? b.Id ) )}."; return false; }
+			if ( !Point( studio, bits[1].Trim(), out var p, out why ) ) return false;
+			if ( !ModelMeasure.TryParseVec3( bits[2].Trim(), out var n ) || n.LengthSquared < 1e-12f ) { why = $"'{bits[2]}' is not a normal nx,ny,nz."; return false; }
+
+			if ( !FacePlane.TryResolveFace( new[] { body }, new FaceRef( body.Id, p, n ), out var hit, out var faceIndex ) )
+			{ why = $"No face of {body.Name ?? body.Id} faces {bits[2].Trim()} near {bits[1].Trim()}."; return false; }
+
+			faceRefs.Add( FacePlane.Capture( hit, faceIndex, p ) );
+		}
+
+		return true;
+	}
+
+	/// <summary>The feature stores edges (Fillet, Chamfer) and was handed faces: each face becomes its surface
+	/// rim, through the same Feature.ApplyGeometrySelection the s&box editor calls for "select the
+	/// top, then Fillet" (FacePlane.CaptureBoundary). Also names the faces' bodies, as s&box does.</summary>
+	static bool TakesFacesAsEdges( Feature feature ) =>
+		feature is FilletFeature or ChamferFeature;
+
+	/// <summary>Lane P carry-up from the desktop mirror: facematerial slot=N faces=Body:x,y,z:nx,ny,nz;… — the face menu's "put these faces on slot N"
+	/// (FaceMaterialEdit.Assign per face; slot 0 detaches), which edits the FaceMaterial features in the
+	/// history rather than the mesh. Every face resolves before anything changes, so a bad one changes
+	/// nothing. Faces already on the slot are skipped. Rebuilds once when anything changed.</summary>
+	public static bool AssignFaceSlots( PartStudio studio, int slot, string faces, out int changed, out int already, out string why )
+	{
+		changed = 0;
+		already = 0;
+		why = null;
+
+		if ( slot < 0 ) { why = "facematerial needs slot=N (0 or more; 0 takes the faces off their slot)."; return false; }
+		if ( string.IsNullOrWhiteSpace( faces ) ) { why = "facematerial needs faces=Body:x,y,z:nx,ny,nz;… (select faces first)."; return false; }
+
+		var refs = new List<FaceRef>();
+		if ( !ParseFaces( studio, faces, refs, out why ) ) return false;
+
+		var picks = new List<(string Body, int Face, FaceRef Reference)>();
+
+		foreach ( var reference in refs )
+		{
+			if ( !FacePlane.TryResolveFace( studio.Bodies, reference, out var body, out var index ) )
+			{ why = $"facematerial: a face in the selection no longer resolves on {reference.BodyId}. Select it again."; return false; }
+
+			picks.Add( (body.Id, index, reference) );
+		}
+
+		if ( picks.Count == 0 ) { why = "facematerial: no faces given."; return false; }
+
+		foreach ( var (bodyId, index, reference) in picks )
+		{
+			var mesh = studio.Bodies.First( b => b.Id == bodyId ).Mesh;
+
+			if ( index < mesh.FaceCount && mesh.Faces[index].Material == slot )
+			{
+				already++;
+				continue;
+			}
+
+			if ( slot == 0 ? FaceMaterialEdit.Detach( studio, bodyId, index ) : FaceMaterialEdit.Assign( studio, bodyId, index, reference, slot ) )
+				changed++;
+			else if ( slot != 0 )
+			{ why = "facematerial: a face couldn't be found in the history. Rebuild and try again."; return false; }
+		}
+
+		if ( changed > 0 )
+			studio.Rebuild();
+
+		return true;
+	}
+
+	static Dictionary<string, string> Pairs( IEnumerable<string> tokens )
+	{
+		var pairs = new Dictionary<string, string>( StringComparer.OrdinalIgnoreCase );
+
+		foreach ( var token in tokens )
+		{
+			var eq = token.IndexOf( '=' );
+
+			if ( eq <= 0 )
+				throw new ArgumentException( $"'{token}' is not key=value." );
+
+			pairs[token[..eq].Trim().ToLowerInvariant()] = token[(eq + 1)..].Trim();
+		}
+
+		return pairs;
+	}
+
+	static bool TryNumber( string text, out float value ) =>
+		float.TryParse( (text ?? "").Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out value );
+
+	static float Number( string text ) => TryNumber( text, out var v ) ? v : throw new ArgumentException( $"'{text}' is not a number." );
+
+	static bool Truthy( string text ) => (text ?? "").Trim().ToLowerInvariant() is "1" or "true" or "on" or "yes";
+
+	static string Resolve( string baseDir, string path ) => Path.IsPathRooted( path ) ? path : Path.Combine( baseDir, path );
+	// --- Lane P: verb inventory ---------------------------------------------------------------
+	// The single maintained list of script verbs. ApiCatalog reads this; the unknown-
+	// command error prints it. A verb added to Command's switch but not here is a
+	// docs bug — keep the two together.
+	public static readonly string[] VerbNames = {
+		"add", "edit", "set", "remove", "remedy", "remedy all", "var", "rebuild", "fix",
+		"render", "turnaround", "describe", "measure", "at", "distance", "symmetry",
+		"clearance", "topology", "section", "flex", "match", "save", "echo", "refimage", "material", "facematerial",
+		"pivot", "export", "corrective", "corrective auto", "bake", "paintmaps",
+		"checkpoint", "fit_profile", "reproject", "retopo", "transfer", "weight", "sculpt",
+		"facerig", "playermodel", "export_cloth", "spritesheet", "attachment",
+		"hitbox", "bodygroup", "ragdoll", "lod_chain", "lint",
+		"bone", "chain", "subdivide", "twist", "mirror bones", "rig", "bind", "skin",
+		"play", "cables",
+	};
+
+	public static readonly string[] RigVerbNames = {
+		"bone", "chain", "subdivide", "twist", "mirror bones", "rig", "bind", "skin",
+		"play", "cables", "weight", "corrective auto", "facerig", "playermodel",
+	};
+
+	// --- Lane P: new script verbs -----------------------------------------------------------
+	// Run-time mesh operations (retopo, transfer, weight) follow the `fix` verb's
+	// precedent: they act on the studio's currently built meshes and log what they did.
+	// They are NOT features, so a later rebuild from the feature tree does not keep
+	// them — a feature-based persistence for retopo/transfer is follow-up work, and
+	// the log says so rather than pretending otherwise.
+
+	static bool CheckpointVerb( PartStudio studio, List<string> args, Result r )
+	{
+		if ( args.Count == 0 )
+			return Fail( r, "checkpoint needs a title: checkpoint \"Stage 1\" [focus=Body] [vars=length]" );
+		var title = args[0];
+		var opts = Pairs( args.Skip( 1 ) );
+		r.Log.Add( $"checkpoint: {title}"
+			+ ( opts.TryGetValue( "focus", out var focus ) ? $" focus={focus}" : "" )
+			+ ( opts.TryGetValue( "vars", out var vars ) ? $" vars={vars}" : "" )
+			+ " (headless: logged and continued — the desktop ScriptLive gate is what pauses for the user)" );
+		return true;
+	}
+
+	static bool FitProfileVerb( PartStudio studio, List<string> args, string baseDir, Result r )
+	{
+		if ( args.Count < 1 )
+			return Fail( r, "fit_profile needs a body: fit_profile Body side=refs/side.png [top=refs/top.png] [length=60] [stations=16]" );
+		var name = args[0];
+		var opts = Pairs( args.Skip( 1 ) );
+		if ( !opts.TryGetValue( "side", out var side ) || string.IsNullOrWhiteSpace( side ) )
+			return Fail( r, "fit_profile needs side=: fit_profile Body side=refs/side.png" );
+		var stations = opts.TryGetValue( "stations", out var st ) && int.TryParse( st, out var sn ) ? sn : 16;
+		ReferenceMatch.ProfileCurves curves;
+		try
+		{
+			var (sw, sh, srgb, salpha) = Raster.LoadPng( Resolve( baseDir, side ) );
+			if ( opts.TryGetValue( "top", out var top ) && !string.IsNullOrWhiteSpace( top ) )
+			{
+				var (tw, th, trgb, talpha) = Raster.LoadPng( Resolve( baseDir, top ) );
+				curves = ReferenceMatch.ExtractProfileCurvesFromViews( sw, sh, srgb, salpha, tw, th, trgb, talpha, stations );
+			}
+			else
+			{
+				curves = ReferenceMatch.ExtractProfileCurves( sw, sh, srgb, salpha, stations );
+			}
+		}
+		catch ( Exception e ) { return Fail( r, $"fit_profile could not read the reference: {e.Message}" ); }
+		// Curves are normalised (s and extents in units of the major axis), so scale by
+		// the user's chosen model length. Default 60: the length is a product decision,
+		// not something a side photo can know — the log states it plainly.
+		var length = opts.TryGetValue( "length", out var lt ) ? Number( lt ) : 60f;
+		string Scale( string curve )
+		{
+			if ( string.IsNullOrWhiteSpace( curve ) ) return curve;
+			var parts = curve.Split( ';', StringSplitOptions.RemoveEmptyEntries );
+			var scaled = new List<string>();
+			foreach ( var part in parts )
+			{
+				var pair = part.Split( ',' );
+				if ( pair.Length != 2 || !float.TryParse( pair[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var s )
+					|| !float.TryParse( pair[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v ) )
+					return curve;
+				scaled.Add( $"{s * length:0.###},{v * length:0.###}" );
+			}
+			return string.Join( ";", scaled );
+		}
+		var topCurve = Scale( curves.Top );
+		var bottomCurve = Scale( curves.Bottom );
+		var frontCurve = Scale( curves.Front );
+		var existing = studio.Features.OfType<ProfileFeature>().LastOrDefault( f => string.Equals( f.Name, name, StringComparison.OrdinalIgnoreCase ) );
+		if ( existing is not null )
+		{
+			existing.Top.Value = topCurve;
+			existing.Bottom.Value = bottomCurve;
+			if ( frontCurve.Length > 0 ) existing.Front.Value = frontCurve;
+			studio.MarkDirty( existing );
+			studio.Rebuild();
+			r.Log.Add( $"fit_profile: updated Profile '{name}' from {side} (length {length}, {curves.Stations} stations)"
+				+ ( frontCurve.Length == 0 ? " — front is empty from a single view; add top= for width" : "" ) );
+			return true;
+		}
+		var feature = new ProfileFeature { Name = name };
+		feature.Top.Value = topCurve;
+		feature.Bottom.Value = bottomCurve;
+		if ( frontCurve.Length > 0 ) feature.Front.Value = frontCurve;
+		studio.Add( feature );
+		return RebuildAndCheck( studio, feature, r, $"fit_profile: new Profile '{name}' from {side} (length {length}, {curves.Stations} stations)" );
+	}
+
+	static bool ReprojectVerb( PartStudio studio, List<string> args, Result r )
+	{
+		if ( args.Count < 2 )
+			return Fail( r, "reproject needs two bodies: reproject LowCage HighSculpt [levels=3]" );
+		var low = ModelMeasure.FindBody( studio, args[0] );
+		var high = ModelMeasure.FindBody( studio, args[1] );
+		if ( low?.Mesh is null ) return Fail( r, $"No body called '{args[0]}'." );
+		if ( high?.Mesh is null ) return Fail( r, $"No body called '{args[1]}'." );
+		var opts = Pairs( args.Skip( 2 ) );
+		var levels = opts.TryGetValue( "levels", out var lv ) && int.TryParse( lv, out var ln ) ? ln : 3;
+		MultiresSculpt projected;
+		ReprojectionReport report;
+		try { projected = SculptReprojection.ProjectOntoMultires( low.Mesh, high.Mesh, levels, out report ); }
+		catch ( Exception e ) { return Fail( r, $"reproject failed: {e.Message}" ); }
+		var sculptFeature = studio.Features.OfType<SculptFeature>()
+			.LastOrDefault( f => f.Bodies.BodyIds.Contains( low.Id ) || f.Bodies.BodyIds.Count == 0 );
+		if ( sculptFeature is null )
+		{
+			sculptFeature = new SculptFeature { Name = $"{low.Name ?? low.Id} sculpt" };
+			sculptFeature.Bodies.BodyIds.Add( low.Id );
+			studio.Add( sculptFeature );
+		}
+		sculptFeature.Levels.Value = levels;
+		sculptFeature.LoadDeltas( SculptBlob.Write( projected ) );
+		studio.MarkDirty( sculptFeature );
+		return RebuildAndCheck( studio, sculptFeature, r, $"reproject: {low.Name ?? low.Id} <- {high.Name ?? high.Id} ({report})" );
+	}
+
+	static bool RetopoVerb( PartStudio studio, List<string> args, Result r )
+	{
+		if ( args.Count < 1 )
+			return Fail( r, "retopo needs a body: retopo Body [targets=4000,1500,500] or [target=4000]" );
+		var body = ModelMeasure.FindBody( studio, args[0] );
+		if ( body?.Mesh is null ) return Fail( r, $"No body called '{args[0]}'." );
+		var opts = Pairs( args.Skip( 1 ) );
+		var targetText = opts.GetValueOrDefault( "target", opts.GetValueOrDefault( "targets", "4000" ) );
+		var first = targetText.Split( ',' )[0];
+		if ( !int.TryParse( first, out var target ) || target <= 0 )
+			return Fail( r, $"targets={targetText}: the first value is the retopo target face count." );
+		var options = new QuadRemesh.Options { TargetFaces = target };
+		QuadRemesh.Result result;
+		try { result = QuadRemesh.Run( body.Mesh, options ); }
+		catch ( Exception e ) { return Fail( r, $"retopo failed: {e.Message}" ); }
+		body.Mesh = result.Mesh;
+		r.Log.Add( $"retopo: {body.Name ?? body.Id} -> {result} (run-time mesh operation, like fix: a later rebuild from features does not keep it; export lods= covers the LOD targets {targetText})" );
+		return true;
+	}
+
+	static bool TransferVerb( PartStudio studio, List<string> args, Result r )
+	{
+		if ( args.Count < 2 )
+			return Fail( r, "transfer needs two bodies: transfer SourceBody TargetBody [channels=weights,uvs,morphs]" );
+		var source = ModelMeasure.FindBody( studio, args[0] );
+		var target = ModelMeasure.FindBody( studio, args[1] );
+		if ( source?.Mesh is null ) return Fail( r, $"No body called '{args[0]}'." );
+		if ( target?.Mesh is null ) return Fail( r, $"No body called '{args[1]}'." );
+		var opts = Pairs( args.Skip( 2 ) );
+		var channels = ( opts.GetValueOrDefault( "channels", "weights" ) ).Split( ',', StringSplitOptions.RemoveEmptyEntries )
+			.Select( c => c.Trim().ToLowerInvariant() ).ToHashSet();
+		var notes = new List<string>();
+		if ( channels.Contains( "weights" ) )
+		{
+			try { notes.Add( $"weights: {SkinBinder.TransferFrom( target.Mesh, source.Mesh )} vertices reached" ); }
+			catch ( Exception e ) { return Fail( r, $"transfer weights failed: {e.Message}" ); }
+		}
+		if ( channels.Contains( "uvs" ) )
+		{
+			// Lane P fix: UVs live per Face, not on PolyMesh — a direct copy only
+			// works when the face counts match, and copies each face's UVs in order.
+			if ( source.Mesh.Faces.Count != target.Mesh.Faces.Count )
+				return Fail( r, "transfer uvs: source and target face counts must match for a direct UV copy (nearest-surface UV transfer is follow-up)." );
+			for ( var i = 0; i < target.Mesh.Faces.Count; i++ )
+				target.Mesh.Faces[i].UVs = source.Mesh.Faces[i].UVs is { } uv ? (Vec2[])uv.Clone() : null;
+			notes.Add( $"uvs: {target.Mesh.Faces.Count} faces copied" );
+		}
+		if ( channels.Contains( "morphs" ) )
+		{
+			var copied = 0;
+			foreach ( var morph in source.Mesh.ValidMorphs )
+			{
+				if ( morph.Deltas.Length != target.Mesh.Positions.Count ) continue;
+				target.Mesh.Morphs.RemoveAll( m => m?.Name == morph.Name );
+				target.Mesh.Morphs.Add( morph.Clone() );
+				copied++;
+			}
+			notes.Add( $"morphs: {copied} copied (others skipped: vertex count mismatch)" );
+		}
+		r.Log.Add( $"transfer: {source.Name ?? source.Id} -> {target.Name ?? target.Id}: {string.Join( "; ", notes )} (run-time mesh operation, like fix)" );
+		return true;
+	}
+
+	static bool WeightVerb( PartStudio studio, List<string> args, Result r )
+	{
+		if ( args.Count < 2 )
+			return Fail( r, "weight needs a body and an operation: weight Body smooth | transfer FromBody | lock bone=Bone | unlock bone=Bone | ramp bone=Bone mode=linear|radial ... | island [max=0.10]" );
+		var body = ModelMeasure.FindBody( studio, args[0] );
+		if ( body?.Mesh is null ) return Fail( r, $"No body called '{args[0]}'." );
+		var op = args[1].ToLowerInvariant();
+		switch ( op )
+		{
+			case "smooth":
+			{
+				if ( !body.Mesh.IsRigged ) return Fail( r, $"{body.Name ?? body.Id} has no skin weights to smooth. Rig it first (bind)." );
+				var before = body.Mesh.Skin.Clone();
+				var smoothed = SkinBinder.SmoothWeights( body.Mesh, body.Mesh.Skin );
+				if ( LocksFor( r, body.Id ) is { Count: > 0 } locked )
+					for ( var v = 0; v < smoothed.Count; v++ )
+						smoothed[v] = RestoreLockedWeights( before[v], smoothed[v], locked );
+				body.Mesh.Skin = smoothed;
+				r.Log.Add( $"weight: smoothed skin weights on {body.Name ?? body.Id}" + ( LocksFor( r, body.Id ) is { Count: > 0 } ? " (locked bones held)" : "" ) + " (run-time mesh operation, like fix)" );
+				return true;
+			}
+			case "transfer":
+			{
+				if ( args.Count < 3 ) return Fail( r, "weight transfer needs a source body: weight Body transfer FromBody" );
+				var source = ModelMeasure.FindBody( studio, args[2] );
+				if ( source?.Mesh is null ) return Fail( r, $"No body called '{args[2]}'." );
+				try
+				{
+					var reached = SkinBinder.TransferFrom( body.Mesh, source.Mesh );
+					r.Log.Add( $"weight: transferred skin weights {source.Name ?? source.Id} -> {body.Name ?? body.Id} ({reached} vertices reached) (run-time mesh operation, like fix)" );
+					return true;
+				}
+				catch ( Exception e ) { return Fail( r, $"weight transfer failed: {e.Message}" ); }
+			}
+			case "lock":
+			case "unlock":
+			{
+				if ( !body.Mesh.IsRigged ) return Fail( r, $"{body.Name ?? body.Id} has no skin weights to lock. Rig it first (bind)." );
+				var opts = Pairs( args.Skip( 2 ) );
+				if ( !opts.TryGetValue( "bone", out var boneText ) || !TryWeightBone( studio, boneText, out var bone ) )
+					return Fail( r, $"weight {op} needs a bone: weight {body.Name ?? body.Id} {op} bone=BoneName (bones: {string.Join( ", ", studio.Rig.Bones.Select( b => b.Name ) )})." );
+				var locks = LocksFor( r, body.Id, create: true );
+				if ( op == "lock" ) locks.Add( bone );
+				else locks.Remove( bone );
+				r.Log.Add( $"weight: {( op == "lock" ? "locked" : "unlocked" )} bone '{studio.Rig.Bones[bone].Name}' on {body.Name ?? body.Id} (run-local: this script run only, lost on rebuild)" );
+				return true;
+			}
+			case "ramp":
+			{
+				if ( !body.Mesh.IsRigged ) return Fail( r, $"{body.Name ?? body.Id} has no skin weights to ramp. Rig it first (bind)." );
+				var opts = Pairs( args.Skip( 2 ) );
+				if ( !opts.TryGetValue( "bone", out var boneText ) || !TryWeightBone( studio, boneText, out var bone ) )
+					return Fail( r, $"weight ramp needs a bone: weight {body.Name ?? body.Id} ramp bone=BoneName mode=linear|radial ... (bones: {string.Join( ", ", studio.Rig.Bones.Select( b => b.Name ) )})." );
+				if ( LocksFor( r, body.Id ) is { } lk && lk.Contains( bone ) )
+					return Fail( r, $"weight ramp: bone '{studio.Rig.Bones[bone].Name}' is locked on {body.Name ?? body.Id}; unlock it first (weight {body.Name ?? body.Id} unlock bone={studio.Rig.Bones[bone].Name})." );
+				var mode = opts.GetValueOrDefault( "mode", "linear" ).ToLowerInvariant();
+				SkinWeights ramped;
+				try
+				{
+					if ( mode == "linear" )
+					{
+						if ( !opts.TryGetValue( "origin", out var oText ) || !ModelMeasure.TryParseVec3( oText, out var origin ) )
+							return Fail( r, "weight ramp linear needs origin=x,y,z direction=x,y,z [from=a] [to=b]" );
+						if ( !opts.TryGetValue( "direction", out var dText ) || !ModelMeasure.TryParseVec3( dText, out var direction ) )
+							return Fail( r, "weight ramp linear needs direction=x,y,z (non-zero) origin=x,y,z [from=a] [to=b]" );
+						var from = opts.TryGetValue( "from", out var fText ) ? Number( fText ) : 0f;
+						var to = opts.TryGetValue( "to", out var tText ) ? Number( tText ) : 1f;
+						ramped = WeightRamp.ApplyLinear( body.Mesh, body.Mesh.Skin, bone, origin, direction, from, to );
+					}
+					else if ( mode == "radial" )
+					{
+						if ( !opts.TryGetValue( "center", out var cText ) || !ModelMeasure.TryParseVec3( cText, out var center ) )
+							return Fail( r, "weight ramp radial needs center=x,y,z radius=r [feather=f]" );
+						if ( !opts.TryGetValue( "radius", out var radText ) )
+							return Fail( r, "weight ramp radial needs center=x,y,z radius=r [feather=f]" );
+						var radius = Number( radText );
+						var feather = opts.TryGetValue( "feather", out var feText ) ? Number( feText ) : 0f;
+						ramped = WeightRamp.ApplyRadial( body.Mesh, body.Mesh.Skin, bone, center, radius, feather );
+					}
+					else return Fail( r, $"weight ramp mode '{mode}': linear or radial." );
+				}
+				catch ( Exception e ) { return Fail( r, $"weight ramp failed: {e.Message}" ); }
+				body.Mesh.Skin = ramped;
+				r.Log.Add( $"weight: {mode} ramp on bone '{studio.Rig.Bones[bone].Name}' for {body.Name ?? body.Id} (run-time mesh operation, like fix)" );
+				return true;
+			}
+			case "island":
+			{
+				if ( !body.Mesh.IsRigged ) return Fail( r, $"{body.Name ?? body.Id} has no skin weights for islands. Rig it first (bind)." );
+				var opts = Pairs( args.Skip( 2 ) );
+				var max = opts.TryGetValue( "max", out var mText ) ? Number( mText ) : 0.10f;
+				var before = body.Mesh.Skin.Clone();
+				WeightEdit edit;
+				try { edit = WeightEdit.Run( body.Mesh, body.Mesh.Skin, studio.Rig, max ); }
+				catch ( Exception e ) { return Fail( r, $"weight island failed: {e.Message}" ); }
+				if ( edit is null )
+				{
+					r.Log.Add( $"weight: no rigid islands on {body.Name ?? body.Id} (single component, or none under max={max}; size rule only — WeightEdit.Run takes no name list)" );
+					return true;
+				}
+				if ( LocksFor( r, body.Id ) is { Count: > 0 } locked )
+					for ( var v = 0; v < body.Mesh.Skin.Count; v++ )
+						body.Mesh.Skin[v] = RestoreLockedWeights( before[v], body.Mesh.Skin[v], locked );
+				r.Log.Add( $"weight: rigid islands on {body.Name ?? body.Id}: {edit.Count} vertices bound 100% to their nearest bone (run-time mesh operation, like fix)" );
+				return true;
+			}
+			default:
+				return Fail( r, $"No weight operation '{op}'. Available: smooth, transfer, lock, unlock, ramp, island." );
+		}
+	}
+
+	/// <summary>Bone by name or index, for the weight verb. Names come from the studio rig.</summary>
+	static bool TryWeightBone( PartStudio studio, string text, out int bone )
+	{
+		bone = -1;
+		if ( int.TryParse( text, out var idx ) && idx >= 0 && idx < studio.Rig.Count ) { bone = idx; return true; }
+		bone = studio.Rig.IndexOf( text );
+		return bone >= 0;
+	}
+
+	/// <summary>Run-local locks for a body, or null when none were set (create: make the set).</summary>
+	static HashSet<int> LocksFor( Result r, string bodyId, bool create = false )
+	{
+		if ( r.WeightLocks.TryGetValue( bodyId, out var locks ) ) return locks;
+		if ( !create ) return null;
+		locks = new HashSet<int>();
+		r.WeightLocks[bodyId] = locks;
+		return locks;
+	}
+
+	/// <summary>WeightPaintSession.RestoreLocked, mirrored for script ops: locked bones keep
+	/// their pre-op value on every vertex and the rest rescale to fill what is left, so the
+	/// partition of unity survives. A locked bone that had no influence stays at 0.</summary>
+	static BoneWeight[] RestoreLockedWeights( BoneWeight[] before, BoneWeight[] current, HashSet<int> locked )
+	{
+		if ( locked is null || locked.Count == 0 ) return current;
+		var lockedBefore = new Dictionary<int, float>();
+		foreach ( var w in before )
+			if ( locked.Contains( w.Bone ) ) lockedBefore[w.Bone] = w.Weight;
+		var result = new Dictionary<int, float>();
+		var lockedSum = 0f;
+		foreach ( var w in current )
+		{
+			if ( !locked.Contains( w.Bone ) ) continue;
+			var v = lockedBefore.TryGetValue( w.Bone, out var pv ) ? pv : 0f;
+			if ( v > 0f ) { result[w.Bone] = v; lockedSum += v; }
+		}
+		foreach ( var (bone, v) in lockedBefore )
+			if ( v > 0f && !result.ContainsKey( bone ) ) { result[bone] = v; lockedSum += v; }
+		if ( lockedSum >= 1f ) return SkinWeights.Finish( result );
+		var rest = 0f;
+		foreach ( var w in current )
+			if ( !locked.Contains( w.Bone ) ) rest += w.Weight;
+		var scale = rest > 0f ? (1f - lockedSum) / rest : 0f;
+		foreach ( var w in current )
+		{
+			if ( locked.Contains( w.Bone ) || w.Weight <= 0f ) continue;
+			result[w.Bone] = w.Weight * scale;
+		}
+		return SkinWeights.Finish( result );
+	}
+
+	static bool SculptVerb( PartStudio studio, List<string> args, Result r )
+	{
+		if ( args.Count < 2 )
+			return Fail( r, "sculpt needs a body and an operation: sculpt Body dab at=x,y,z dir=x,y,z [brush=draw] [radius=0.25] [strength=0.05]" );
+		var body = ModelMeasure.FindBody( studio, args[0] );
+		if ( body?.Mesh is null ) return Fail( r, $"No body called '{args[0]}'." );
+		if ( args[1].ToLowerInvariant() != "dab" )
+			return Fail( r, $"No sculpt operation '{args[1]}'. Available: dab." );
+		var opts = Pairs( args.Skip( 2 ) );
+		if ( !opts.TryGetValue( "at", out var atText ) || !ModelMeasure.TryParseVec3( atText, out var at ) )
+			return Fail( r, "sculpt dab needs at=x,y,z (a point on or near the surface) and dir=x,y,z (the ray direction, usually the inward normal)." );
+		if ( !opts.TryGetValue( "dir", out var dirText ) || !ModelMeasure.TryParseVec3( dirText, out var dir ) || dir.LengthSquared < 1e-12f )
+			return Fail( r, "sculpt dab needs dir=x,y,z, non-zero." );
+		if ( opts.TryGetValue( "level", out var lvText ) && int.TryParse( lvText, out var lv ) && lv != 0 )
+			return Fail( r, "sculpt dab only works at level=0 (the cage): higher levels change the vertex count, so the dab has nowhere to write back to. Use `add Sculpt levels=N` + `reproject` for multires work, or `add Stroke` for a persistent stroke." );
+		var brush = BrushKind.Draw;
+		if ( opts.TryGetValue( "brush", out var brushText ) && !Enum.TryParse<BrushKind>( brushText, ignoreCase: true, out brush ) )
+			return Fail( r, $"sculpt dab brush '{brushText}' is not a brush kind (draw, inflate, smooth, flatten, pinch, grab, clay, ...)." );
+		var radius = opts.TryGetValue( "radius", out var radText ) ? Number( radText ) : 0.25f;
+		var strength = opts.TryGetValue( "strength", out var strText ) ? Number( strText ) : 0.05f;
+		if ( radius <= 0f ) return Fail( r, "sculpt dab needs radius > 0." );
+		// One click through SculptSession: BeginStroke dabs at the ray hit, EndStroke commits
+		// it as one edit. The ray starts outside the model along -dir from the dab point, so
+		// the hit lands on the surface near `at`. Level 0 only: Evaluate(0) is the cage, so
+		// the edit's vertex indices write straight back onto the body's mesh.
+		var sculpt = new MultiresSculpt( body.Mesh );
+		var session = new SculptSession( sculpt ) { Brush = brush, Radius = radius, Strength = strength };
+		var origin = at - dir.Normal * 100f;
+		SculptEdit edit;
+		try
+		{
+			if ( !session.BeginStroke( origin, dir ) )
+				return Fail( r, $"sculpt dab: ray from {origin} along {dir} missed {body.Name ?? body.Id}; put `at` on the surface and `dir` pointing into it." );
+			edit = session.EndStroke();
+		}
+		catch ( Exception e ) { return Fail( r, $"sculpt dab failed: {e.Message}" ); }
+		if ( edit is null )
+		{
+			r.Log.Add( $"sculpt: dab on {body.Name ?? body.Id} moved nothing (zero strength, or the brush found no vertices in range)" );
+			return true;
+		}
+		edit.Write( body.Mesh, forward: true );
+		r.Log.Add( $"sculpt: {brush} dab on {body.Name ?? body.Id} moved {edit.Count} vertices (run-time mesh operation, like fix: a later rebuild from features does not keep it — `add Stroke` is the persistent stroke)" );
+		return true;
+	}
+
+	static bool AutoCorrective( PartStudio studio, List<string> args, Result r )
+	{
+		var opts = Pairs( args );
+		if ( args.Count < 1 || !opts.TryGetValue( "body", out var bodyName ) )
+		{
+			// `corrective auto Body [bones=...] [angles=...]` — the body may be positional.
+			bodyName = args.FirstOrDefault( a => !a.Contains( '=' ) );
+		}
+		if ( string.IsNullOrWhiteSpace( bodyName ) )
+			return Fail( r, "corrective auto needs a body: corrective auto Body [bones=elbow_L,shoulder_L] [angles=90,140]" );
+		var body = ModelMeasure.FindBody( studio, bodyName );
+		if ( body is null ) return Fail( r, $"No body called '{bodyName}'." );
+		var bones = ( opts.GetValueOrDefault( "bones", "" ) ).Split( ',', StringSplitOptions.RemoveEmptyEntries ).Select( b => b.Trim() ).ToList();
+		var angles = ( opts.GetValueOrDefault( "angles", "90" ) ).Split( ',', StringSplitOptions.RemoveEmptyEntries ).Select( a => a.Trim() ).ToList();
+		if ( bones.Count == 0 )
+			return Fail( r, "corrective auto needs bones=: corrective auto Body bones=elbow_L angles=90" );
+		var made = 0;
+		foreach ( var bone in bones )
+		{
+			if ( studio.Rig.IndexOf( bone ) < 0 )
+				return Fail( r, $"No bone '{bone}'. Bones: {string.Join( ", ", studio.Rig.Bones.Select( b => b.Name ).Take( 20 ) )}." );
+			foreach ( var angle in angles )
+			{
+				if ( !Corrective( studio, new List<string> { $"bone={bone}", $"angle={angle}" }, r ) )
+					return false;
+				made++;
+			}
+		}
+		r.Log.Add( $"corrective auto: {made} corrective shape(s) registered for {body.Name ?? body.Id} (shapes are baked into the model at export from the export weights; sculpted deltas are captured by the editor's pose-space tool, not by this verb)" );
+		return true;
+	}
+
+	static bool FaceRigVerb( PartStudio studio, List<string> args, string baseDir, Result r )
+	{
+		if ( args.Count < 2 || !args[0].Equals( "build", StringComparison.OrdinalIgnoreCase ) )
+			return Fail( r, "facerig needs: facerig build Head [save=path.facerig.json]" );
+		var body = ModelMeasure.FindBody( studio, args[1] );
+		if ( body?.Mesh is null ) return Fail( r, $"No body called '{args[1]}'." );
+		var morphNames = body.Mesh.ValidMorphs.Select( m => m.Name ).ToList();
+		var rig = FaceRig.For( args[1], morphNames );
+		var opts = Pairs( args.Skip( 2 ) );
+		if ( opts.TryGetValue( "save", out var save ) && !string.IsNullOrWhiteSpace( save ) )
+		{
+			var path = Resolve( baseDir, save );
+			rig.Save( path );
+			r.Written.Add( path );
+			r.Log.Add( $"facerig: {rig.Controllers.Count} controllers for {body.Name ?? body.Id} (from {morphNames.Count} morphs), saved to {path}" );
+		}
+		else
+		{
+			r.Log.Add( $"facerig: {rig.Controllers.Count} controllers for {body.Name ?? body.Id} (from {morphNames.Count} morphs): {string.Join( ", ", rig.Controllers.Select( c => c.Name ) )} (add save= to write the sidecar)" );
+		}
+		return true;
+	}
+
+	static bool PlayermodelVerb( PartStudio studio, List<string> args, string baseDir, Result r )
+	{
+		Playermodel.Result built;
+		try { built = Playermodel.Build( studio ); }
+		catch ( Exception e ) { return Fail( r, $"playermodel failed: {e.Message}" ); }
+		var findings = Playermodel.Check( built );
+		r.Log.Add( $"playermodel: {built.Mesh.VertexCount} vertices, {built.Skeleton.Bones.Count} bones, {built.VerticesStranded} stranded, {findings.Count} finding(s)" );
+		if ( args.Count > 0 )
+		{
+			var path = Resolve( baseDir, args[0] );
+			var meshFile = Path.GetFileNameWithoutExtension( path ) + ".dmx";
+			File.WriteAllText( path, Playermodel.Vmdl( meshFile, built.Skeleton ) );
+			r.Written.Add( path );
+			r.Log.Add( $"playermodel: vmdl written to {path}" );
+		}
+		return true;
+	}
+
+	static bool ExportClothVerb( PartStudio studio, List<string> args, string baseDir, Result r )
+	{
+		if ( args.Count < 1 )
+			return Fail( r, "export_cloth needs a path: export_cloth out.cloth.json [material=cloth]" );
+		var opts = Pairs( args.Skip( 1 ) );
+		var material = opts.GetValueOrDefault( "material", "cloth" );
+		var path = Resolve( baseDir, args[0] );
+		string written;
+		try
+		{
+			written = ClothExport.ExportLiveClothToFile( studio, material, path );
+		}
+		catch ( Exception e ) { return Fail( r, $"export_cloth failed: {e.Message}" ); }
+		// Lane P fix: ToFile returns null when the studio has no garment bodies,
+		// and writes nothing — logging "written" then was a lie that sent callers
+		// looking for a file that does not exist. Say so instead.
+		if ( written is null )
+		{
+			r.Log.Add( $"export_cloth: no garment bodies in this studio, nothing written (no .cloth.json created)." );
+			return true;
+		}
+		r.Written.Add( path );
+		r.Log.Add( $"export_cloth: live cloth written to {path} (material {material})" );
+		return true;
+	}
+
+	static bool SpritesheetVerb( PartStudio studio, List<string> args, string baseDir, Result r )
+	{
+		if ( args.Count < 1 )
+			return Fail( r, "spritesheet needs a path: spritesheet out.png [directions=8] [tile=128] [frames=12] [normals=1]" );
+		var opts = Pairs( args.Skip( 1 ) );
+		var directions = opts.TryGetValue( "directions", out var d ) && int.TryParse( d, out var dn ) ? dn : 8;
+		var tile = opts.TryGetValue( "tile", out var t ) && int.TryParse( t, out var tn ) ? tn : 128;
+		if ( directions < 1 || directions > 32 ) return Fail( r, $"directions={directions}: 1..32." );
+		if ( tile < 16 || tile > 1024 ) return Fail( r, $"tile={tile}: 16..1024." );
+		var path = Resolve( baseDir, args[0] );
+		Directory.CreateDirectory( Path.GetDirectoryName( Path.GetFullPath( path ) ) ?? "." );
+		var raster = ModelRender.Turntable( studio.Bodies, tile, directions, new RenderOptions { Wireframe = false }, studio.Rig );
+		raster.SavePng( path );
+		r.Written.Add( path );
+		r.Log.Add( $"spritesheet: {directions} directions at {tile}px to {path}"
+			+ ( opts.TryGetValue( "frames", out var frames ) ? $" (frames={frames} is noted but the static turntable renders one still per direction; animated frames are follow-up)" : "" ) );
+		return true;
+	}
+
+	static bool AttachmentVerb( PartStudio studio, List<string> args, Result r )
+	{
+		if ( args.Count < 1 )
+			return Fail( r, "attachment needs a name: attachment Muzzle bone=Barrel origin=0,0,10 angles=0,0,0" );
+		var opts = Pairs( args.Skip( 1 ) );
+		var bone = opts.GetValueOrDefault( "bone", "" );
+		if ( studio.Rig.IndexOf( bone ) < 0 )
+			return Fail( r, $"No bone '{bone}' for attachment '{args[0]}'." );
+		if ( !Point( studio, opts.GetValueOrDefault( "origin", "0,0,0" ), out var origin, out var why ) )
+			return Fail( r, why );
+		var angles = new Vec3();
+		if ( opts.TryGetValue( "angles", out var at ) )
+		{
+			var c = at.Split( ',' );
+			if ( c.Length != 3 || !c.All( x => float.TryParse( x, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _ ) ) )
+				return Fail( r, $"angles={at}: a direction x,y,z." );
+			angles = new Vec3( float.Parse( c[0], System.Globalization.CultureInfo.InvariantCulture ), float.Parse( c[1], System.Globalization.CultureInfo.InvariantCulture ), float.Parse( c[2], System.Globalization.CultureInfo.InvariantCulture ) );
+		}
+		var node = VmdlDocument.AttachmentList( new[] { new VmdlDocument.Attachment { Name = args[0], ParentBone = bone, Origin = origin, Angles = angles } } );
+		r.Log.Add( $"attachment '{args[0]}' on {bone} — VMDL node (spec, not yet persisted to the document; export does not yet take an attachment spec):\n{node}" );
+		return true;
+	}
+
+	static bool HitboxVerb( PartStudio studio, List<string> args, Result r )
+	{
+		if ( args.Count < 1 )
+			return Fail( r, "hitbox needs a bone: hitbox Bone kind=capsule point0=0,0,0 point1=0,0,10 radius=2" );
+		var bone = args[0];
+		if ( studio.Rig.IndexOf( bone ) < 0 )
+			return Fail( r, $"No bone '{bone}' for hitbox." );
+		var opts = Pairs( args.Skip( 1 ) );
+		var kind = opts.GetValueOrDefault( "kind", "capsule" );
+		if ( !Point( studio, opts.GetValueOrDefault( "point0", "0,0,0" ), out var p0, out var why0 ) ) return Fail( r, why0 );
+		if ( !Point( studio, opts.GetValueOrDefault( "point1", "0,0,0" ), out var p1, out var why1 ) ) return Fail( r, why1 );
+		var hitbox = new VmdlDocument.Hitbox { Bone = bone, Kind = kind, Point0 = p0, Point1 = p1,
+			Radius = opts.TryGetValue( "radius", out var rad ) ? Number( rad ) : 0f,
+			Size = opts.TryGetValue( "size", out var sz ) && Point( studio, sz, out var sizeVec, out _ ) ? sizeVec : new Vec3() };
+		string node;
+		try { node = VmdlDocument.HitboxSetList( new[] { hitbox } ); }
+		catch ( Exception e ) { return Fail( r, e.Message ); }
+		r.Log.Add( $"hitbox on {bone} — VMDL node (spec, not yet persisted to the document):\n{node}" );
+		return true;
+	}
+
+	static bool BodyGroupVerb( PartStudio studio, List<string> args, Result r )
+	{
+		if ( args.Count < 1 )
+			return Fail( r, "bodygroup needs a name: bodygroup Head meshes=Head,Helmet" );
+		var opts = Pairs( args.Skip( 1 ) );
+		var meshes = ( opts.GetValueOrDefault( "meshes", "" ) ).Split( ',', StringSplitOptions.RemoveEmptyEntries ).Select( m => m.Trim() ).ToList();
+		var node = VmdlDocument.BodyGroupList( new[] { new VmdlDocument.BodyGroup { Name = args[0], Meshes = meshes } } );
+		r.Log.Add( $"bodygroup '{args[0]}' — VMDL node (spec, not yet persisted to the document):\n{node}" );
+		return true;
+	}
+
+	static bool RagdollVerb( PartStudio studio, List<string> args, Result r )
+	{
+		if ( studio.Rig.Bones.Count == 0 )
+			return Fail( r, "ragdoll needs a rig: build one first (rig … / bind …)." );
+		var hitboxes = VmdlDocument.HitboxesFromSkeleton( studio.Rig );
+		var joints = VmdlPhysics.JointsFromLimits( studio.Rig, Array.Empty<RigLimit>() );
+		r.Log.Add( $"ragdoll: {hitboxes.Count} hitboxes from the skeleton, {joints.Count} joints from limits"
+			+ $"\n{VmdlDocument.HitboxSetList( hitboxes )}\n{VmdlPhysics.JointList( joints )}"
+			+ "\n(spec, not yet persisted to the document; ragdoll limits are not stored on the skeleton yet, so joints come from an empty limit set)" );
+		return true;
+	}
+
+	static bool LodChainVerb( PartStudio studio, List<string> args, Result r )
+	{
+		// Lane P fix: the body is a bare first arg (lod_chain Body ratios=0.5,0.25),
+		// so only the key=value tokens after it go through Pairs — parsing all of
+		// args threw "'Body' is not key=value" and the verb could never name a body.
+		var opts = Pairs( args.Skip( args.Count > 0 && !args[0].Contains( '=' ) ? 1 : 0 ) );
+		var ratiosText = opts.GetValueOrDefault( "ratios", opts.GetValueOrDefault( "targets", "0.5,0.25" ) );
+		var ratios = new List<float>();
+		foreach ( var piece in ratiosText.Split( ',', StringSplitOptions.RemoveEmptyEntries ) )
+		{
+			if ( !float.TryParse( piece, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ratio ) || ratio <= 0f || ratio >= 1f )
+				return Fail( r, $"lod_chain ratios={ratiosText}: each ratio is a fraction below 1 (e.g. 0.5,0.25)." );
+			ratios.Add( ratio );
+		}
+		var body = args.Count > 0 && !args[0].Contains( '=' ) ? ModelMeasure.FindBody( studio, args[0] ) : null;
+		if ( body?.Mesh is not null )
+		{
+			var levels = LodExport.Build( body.Mesh, ratios );
+			r.Log.Add( $"lod_chain: {body.Name ?? body.Id}: {LodExport.Describe( levels )} (built levels; use export lods= to write them with the model)" );
+		}
+		else
+		{
+			r.Log.Add( $"lod_chain: ratios {ratiosText} (no body named, so no levels were built — use export lods={ratiosText} on export, or name a body: lod_chain Body ratios={ratiosText})" );
+		}
+		return true;
+	}
+
+	static bool LintVerb( PartStudio studio, List<string> args, string baseDir, Result r )
+	{
+		if ( args.Count < 1 )
+			return Fail( r, "lint needs a clip: lint clip.riganim (validates the clip against this rig; MotionLint.AutoFix on AnimClip objects is the anim lane's BuildScriptAnim path)" );
+		RigAnimFile clip;
+		try { clip = RigAnimFile.ReadFile( Resolve( baseDir, args[0] ) ); }
+		catch ( Exception e ) { return Fail( r, $"lint could not read the clip: {e.Message}" ); }
+		var tracks = clip.Tracks ?? new List<RigTrack>();
+		var missing = clip.BoneTracks.Select( t => t.Name ).Distinct()
+			.Where( b => !string.IsNullOrWhiteSpace( b ) && studio.Rig.IndexOf( b ) < 0 ).ToList();
+		// RigAnimFile's own track shape is not the AnimClip shape MotionLint takes, so
+		// this verb validates what the script layer can see: parse + bone binding.
+		// A full motion-lint (seams, pops, foot-slide) needs an AnimClip, which is
+		// built by the anim lane's tooling, not by this verb — the log says so.
+		r.Log.Add( $"lint: {args[0]} parses, {tracks.Count} track(s)"
+			+ ( missing.Count == 0 ? ", every named bone exists on this rig" : $", MISSING bones: {string.Join( ", ", missing )}" ) );
+		return missing.Count == 0;
+	}
+	static bool RemedyAll( PartStudio studio, Result r )
+	{
+		var (applied, skipped, log) = FeatureRemedy.RemedyAll( studio );
+		foreach ( var line in log ) r.Log.Add( line );
+		r.Log.Add( $"remedy all: {applied} applied, {skipped} skipped" );
+		studio.Rebuild();
+		return true;
+	}
+
+}

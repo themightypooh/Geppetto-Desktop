@@ -1,5 +1,194 @@
 # Assignment and evidence board
 
+## PA1 — chat provider sign-in again (2026-10-26)
+
+Direct user assignment for Geppetto Desktop chat, explicitly scoped UI permission.
+Solo ownership: new `cabinet/provider_auth.py`, new `tests/test_provider_auth.py`,
+provider account footer only in `cabinet/ClaudePanel.qml`, auth initialization,
+properties/slots and send guards only in `cabinet/host.py`, matching appearance
+fixture stubs if needed. Preserve other chat/gate work. Native CLI auth only;
+no credential-file edits, automatic account changes, paid requests or chest restart.
+Verify using mocked CLI processes and offscreen Qt at three scales.
+
+Implemented (2026-10-27); running-chest deployment/live OAuth not exercised.
+Provider picker has Sign in again for Claude (including personas), Codex, Grok,
+Cursor and OpenCode. Fixed native CLI argv runs in a waiting terminal; user must
+confirm there before logout/login. OpenCode adds an account for the selected
+integration without deleting saved accounts. Other providers show local/key/app
+guidance, not a fake login. No credentials read/captured, conversation reset or
+background sign-out. Concurrent chat sends are blocked until the terminal closes;
+completion/error refreshes discovery and unlocks. No visible launch/restart.
+
+Evidence: `env -u DISPLAY -u WAYLAND_DISPLAY -u LD_LIBRARY_PATH -u LD_PRELOAD
+QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software
+CHAT_APPEARANCE_SNAP_DIR=/tmp/opencode/provider-auth-screens python3 -m unittest
+tests.test_provider_auth tests.test_provider_stream -v` exits 0, **19/19**.
+Includes fake native auth commands, cancellation, failure, real QProcess lifecycle
+with harmless Python children, double-click/send guards, exact OpenCode integration,
+actual QML click routing and 75/100/150% screenshots plus enlarged fallback fonts.
+Screenshots inspected in `/tmp/opencode/provider-auth-screens/`; scoped diff check
+exits 0. Broader chat snapshot (49 checks) has two untouched failures: Grok fixture
+expects old permission mode `auto`; old appearance assertion expects removed
+`claudeBuildMode`. Neither was weakened or claimed green. Real provider sign-in
+and terminal/browser account selection remain user-driven, not an automated test.
+Scoped production leases released.
+
+## SH3 — Tamagotchi normals / generator winding (2026-10-26)
+
+User explicitly requested investigating and fixing the normals. Solo scope:
+canonical `~/games/projects/geppetto/Effigy/Primitives.cs`, new canonical
+`Effigy.Tests/NormalOrientationTests.cs`, additive test registration in
+`Effigy.Tests/Program.cs`, and scoped propagation into editor/Desktop mirrors.
+Probe reproduced 96 same-direction shared edges per 24-segment cylinder: central
+cap grid has correct winding, surrounding patches are reversed. Other primitive
+families tested separately; boolean output also under investigation. Preserve
+existing edits, no model-file edits, no live window takeover/restart.
+Extended scoped ownership: `Effigy/CoplanarMerge.cs` planarity check,
+`Effigy/ExactMeshBoolean.cs` input triangulation, `Editor/EffigyEditor/EffigyPreview.cs`
+shared output triangulation and explicit Sandbox.Mesh alias. The Tamagotchi Boolean
+produces merged nonplanar polygons with backward triangles; investigate with the
+exact Grok fixture, not by flipping faces after the fact.
+Also owns `Effigy/NormalBake.cs` geometry-first triangulation fallback and focused
+regressions: a UV fold must not force backward geometric triangles.
+
+Verified: canonical and Desktop kernel normal suites 33/33; hard-surface boolean
+suite 49/49; isolated editor build succeeded with zero errors. The remaining
+screen-pocket exact-boolean depth failure is unresolved and was not hidden by
+dropping fragments. No live editor restart or model files changed.
+
+## SH2 — stop losing live preview steps (2026-10-26)
+
+User follow-up “no timeouts”: fix the preview-order failure, not its deadline.
+Solo scope: `AiLivePreview.cs`, additive tests in `tests/AiLiveTests.cs`, and the
+obsolete backlog claim in `docs/viewport-live-performance.md`. Root cause:
+`MaxBacklog = 3` discards queued revisions that the every-step test awaits.
+Preserve dwell, pending-mesh backpressure, replay and explicit join-to-current.
+No shared chest restart or open-model changes.
+
+Removed `MaxBacklog` and its queue truncation, keeping one pending loaded mesh and
+lightweight ordered paths. Added CPU slow-consumer regression with a 12-revision
+burst. Original hardware-EGL every-revision test kept unchanged, including its
+60-second deadline. Full `ai-live/` now passes 14/14, 0 skipped, including the
+previously timing-out test and the 49k-triangle latency test:
+`dotnet run --project tests/Desktop.Tests.csproj -c Release --artifacts-path
+/tmp/opencode/geppetto-preview-order -- --filter ai-live/ --report
+/tmp/opencode/geppetto-preview-order-after.json` (exit 0).
+Log `/tmp/opencode/geppetto-preview-order-test.log`. Normal Release build also
+passed (exit 0), log `/tmp/opencode/geppetto-preview-order-build.log`.
+Next-launch binaries updated; existing viewer processes retain old loaded code.
+
+## BF1 — remove automatic judging from builds (2026-10-26)
+
+User superseded the quality roadmap: remove extra judge/quality machinery and let
+builders work. Solo scope: `AiCli.cs`, `tests/AiTests.cs`, workflow text only in
+`cabinet/chat_phase.py` and `cabinet/research_consent.py`, with corresponding
+`tests/test_gate_prompt.py`, `tests/test_join_gate_poll.py` and
+`tests/test_research_consent.py` assertions; update `AI.md` to match.
+Preserve execution protocol from the concurrent gate work. Remove automatic rubric,
+vision judging, score vetoes, corrective loops and score-selected rollback from
+the session path; shorten the builder prompt. Keep legacy CLI flags harmless for
+existing launchers; keep manual inspection tools and standalone judge independent.
+Do not touch SH1's healer removal or other sessions' gate/UI work. Preserve file
+sandbox, budgets, cancellation, pane controls and saved output. CPU regression
+verification: **25/25** `ai/` fixtures pass via
+`dotnet run --project tests/Desktop.Tests.csproj -c Release --artifacts-path /tmp/opencode/geppetto-builder-free-build -- --filter ai/ --report /tmp/opencode/geppetto-builder-free-focused.json`
+(exit 0); **19/19** Python prompt/policy/seat-propagation tests pass with
+`env -u DISPLAY -u WAYLAND_DISPLAY -u LD_LIBRARY_PATH -u LD_PRELOAD QT_QPA_PLATFORM=offscreen python3 -m unittest tests.test_gate_prompt tests.test_research_consent.PolicyTests tests.test_join_gate_poll.JoinGatePollTests.test_every_tool_capable_cabinet_seat_gets_the_same_prep -q`
+(exit 0). Also removed the hidden 24-round builder cap; explicit call/time budgets
+still apply. Broader `--filter ai` run: 146 pass, 2 live-preview failures (ordered-frame
+timeout and 502.9 ms vs 500 ms latency); not fixed in this scope. Gate discovery
+after clearing Steam library variables ran 109 checks with 2 failures: one stale
+creative-prompt assertion now updated/passing, and the untouched launcher TERM
+cancellation fixture returns 0 instead of 130 (also fails alone). Logs:
+`/tmp/opencode/geppetto-builder-free-{focused,gates-clean}.log`.
+Scoped diff whitespace checks pass. No shared chest restart, existing chat reset,
+normal-bin deployment or paid requests; build verification uses isolated artifacts.
+
+## SH1 — remove builder healer; repair STEP mutation gates (2026-10-26)
+
+Direct user assignment: “axe healer fix bug”. Solo current session owns
+`AiBuilderHealer.cs`, `tests/AiBuilderHealerTests.cs`, the healer registration
+line in `tests/TestRegistry.cs`, new STEP safety tests, additive fixtures in
+`tests/OpenScriptStepTests.cs`, and only the mutation classifier in both
+`kernel/Effigy/Script/BuildScript.cs` and canonical
+`~/games/projects/geppetto/Effigy/Script/BuildScript.cs`. Regenerate only that
+editor mirror file, preserving all unrelated drift. No chest restart or model edits.
+Also owns additive canonical `Effigy.Tests/StepPlayerTests.cs` regressions.
+
+Implemented: deleted builder healer and its strategy tests/registration; replaced
+with an assembly-absence regression. Both kernel classifiers gate new/unknown verbs
+by default, exempting only named captions/reports/output commands. Regenerated only
+canonical `BuildScript.cs` into `Editor/Effigy` after confirming the classifier was
+its only difference. Actual open-run var/rebuild STEP fixture and production-delegate
+s&box player regressions added. No models or live processes touched/restarted.
+
+Verification: isolated `dotnet run --project tests/Desktop.Tests.csproj -c Release
+--artifacts-path /tmp/opencode/geppetto-step-safety -- --filter step-mutation-safety/`
+first reproduced `bone bypasses STEP` (2 passed/1 failed), then 3/3 passed after fix;
+`--filter open-script-step/` passed 4/4. Reports:
+`/tmp/opencode/geppetto-{step-before,mutation-after,step-after}.json`.
+Canonical `dotnet run --project Effigy.Tests/Effigy.Tests.csproj -c Release
+--artifacts-path /tmp/opencode/geppetto-sbox-step-safety -- --test StepPlayerTests`
+passed 95 checks. Normal desktop `dotnet build Marionette.Desktop.csproj -c Release
+--no-restore -v quiet` succeeded (22 warnings/0 errors), updating next-launch binaries.
+Existing workers retain loaded old code. Broader `ai-live/` verification was NOT clean:
+12 passed/1 failed; hardware-EGL “viewer shows every revision in order” timed out in
+Viewer.Wait (OperationCanceledException). Report `/tmp/opencode/geppetto-ai-live-after.json`.
+No unrelated preview fixes attempted. Engine sbox-cli unavailable at installed path;
+s&box verification is engine-free CPU player testing, not an editor launch.
+
+## CP2 — workshop radio chat redesign (2026-10-25)
+
+Current user assignment: make the chat window more distinctive; explicitly permits
+this scoped UI redesign. Solo ownership: `cabinet/ClaudePanel.qml`, new offscreen
+chat appearance fixture/checks, and chat placement bounds only if needed in
+`cabinet/cabinet.qml`. Preserve all existing model/mode/research/approval/streaming
+wiring and other sessions' edits. Verify offscreen, with screenshots at minimum,
+default and maximum scales and narrow/expanded sizes. No chest restart or real
+conversation/provider calls. In progress.
+
+## CP1 — walkie chat visual pass (2026-10-25)
+
+User explicitly requested a new chat-panel look, superseding the handoff queue's
+no-UI scope for this pass. Solo scoped edits: `cabinet/ClaudePanel.qml`, the
+`placeChatByWalkie` function in `cabinet/cabinet.qml`, and provider selection
+persistence in `cabinet/host.py`. The panel has a bottom grille tail and full
+pixel-assembly opening, with no scan sweep; header, provider choice, mode and
+composer were spaced for compact/default/expanded heights. Pause/Stop were
+removed from this panel. Chat now opens without restoring a provider; favorites
+still persist. Offscreen QML load, chat mode tests, provider-start probe and
+screenshots at three sizes passed. The full cabinet suite has unrelated active
+work failures and is not acceptance evidence. No visible chest restart.
+
+## UIH1 — hanging file menu (2026-10-25)
+
+User-assigned current session. Scoped ownership: the GEPPETTO nameplate menu block in
+`cabinet/cabinet.qml`, new hanging-menu physics/assets/tests under `cabinet/` and `tests/`,
+and a reusable project skill. Preserve all other ongoing UI edits. Verify the moving
+SAVE / SAVE AS hit targets and hover state offscreen at small/default/large scales.
+No chest restart or visible test viewer.
+
+## VS1 — viewport step speed (2026-10-25)
+
+Current angler session owns `cabinet/RunPaceSlider.qml`,
+`tests/test_run_pace_slider.py`, and `handoffs/35-viewport-step-speed.md`.
+Scoped integrations: RunBar only in `cabinet/cabinet.qml`; new `setPace` slot
+beside cyclePace only in `cabinet/host.py`. Preserve all other sessions' edits.
+No restart or real-run control changes for verification. Status: verified in
+offscreen Qt; 7 control/integration checks + 1 protocol check passed.
+Screenshots: `artifacts/viewport-step-speed/`. Live cabinet activation pending
+its next launch; current session left open.
+
+## RC1 — agent reference-image controls (2026-10-25)
+
+User-assigned, current Codex session, in progress. Scoped ownership: new
+`ReferenceImageControl.cs`, `cabinet/reference_control.py`,
+`tests/ReferenceImageControlTests.cs`, `tests/test_reference_control.py`,
+`handoffs/34-reference-control.md`; integration only in `ServeMode.cs`,
+`cabinet/host.py`, `cabinet/panes.py`, `tests/TestRegistry.cs`, and the
+reference subcommand of `~/.local/bin/geppetto-live`. No UI or kernel edits,
+no shared chest restart and no real-run changes.
+
 ## C5 — Build execution proof and usable modes (user escalation)
 
 Current C1 session owns new `cabinet/build_execution.py` and its new tests;
@@ -732,3 +921,50 @@ Sub-element selection (2026-10-22, session local_8502a83f, started from "Tool wh
 - 2026-10-23 Zoopa: rolodex rebuilt to po's spec -- wheel alone, no cradle/spindle/backdrop panel, no ROLODEX tape header, no per-card picking (drag/wheel spin it, click flips one card; settle 180+100ms per card, cap 540). bake_rolodex is spin-only now: frames baked fully opaque over a shaded drum fill (union silhouette, column-filled) so the wheel can fill its stretch of the drawer edge to edge with no wood in any gap; topspin ID frames regenerated with render_frames.py (they were missing -- only .objs remained). QML item is floor-width x 274 with PreserveAspectCrop. Old rolodex_base.png deleted. Backups *.bak-before-rolodex. Tests: 38 run, only the 3 pre-existing failures.
 - 2026-10-23 Zoopa: rolodex WHEEL version rejected by po (drum fill read as a background, slats never read as files). Rebuilt as an ACCORDION FAN FILE per po's reference (expanding file that fans out with dividers): bake_rolodex now draws 19 cream dividers with blue tabs procedurally (fan hinged on a visible spine rivet, tips bleeding off the top, covers in the bottom corners, fully opaque, no wood), 36 frames / 12 flips, front divider leafs to the back per flip. Same QML as the wheel build. Tests: 38 run, only the 3 pre-existing failures.
 - 2026-10-23 Zoopa: rolodex REMOVED from the tools drawer entirely, at po's word (fan scrapped too). QML block, wheel-scroll guard, liveRow anchor and floorExtra 48 -> 8 all reverted/removed; its QML test deleted. bake_rolodex + art + geom entry left in place for the drawer rework to dispose of. Backups *.bak-before-rolodex-removal. Tests: 37 run, only the 3 pre-existing failures. Verified in a drawer shot: clean wood under the drawing kit.
+
+## 2026-10-26 — Geppetto gate and modeling pipeline, Muse implementation handoff (handoffs/36-muse-gate-parallel.md) — COORDINATOR LEASES
+
+Coordinator: Muse (main chat). Chest status at assignment: CLOSED, verified 2026-10-26 ~03:27 EDT
+(pgrep '[c]abinet/host.py', '[g]eppetto-live', '[m]arionette-desktop', '[m]use_seat.py' all
+empty; `python3 cabinet/gate.py state` -> {"pending": []}). Do NOT start/restart the visible
+chest for this assignment; do NOT run a paid provider as a test; no visible viewer in tests.
+Tree was already dirty at assignment (many other workers' files); NO reset/stash/broad cleanup.
+Integration order: coordinator freezes lane A's on-disk/CLI + host-socket contract first;
+lanes B/C/E implement against that contract; D is independent; F audits read-only.
+Merge order: A, then C, then B, then E, then D, resolved serially under the assigned owner.
+Coordinator alone owns shared socket contracts and handoffs/BOARD.md lease entries.
+
+Lane leases (one writer per file, including tests and ~/.local/bin scripts):
+- Lane A — intent registry and approval protocol — agent 65538a53-18c3-4e3e-a79e-fe5f63b62ba7
+  Owns: cabinet/gate.py, tests/test_gate_registry.py (new), cabinet/gate-protocol.md (new, frozen contract doc).
+  Does NOT own: cabinet/host.py, ~/.local/bin/geppetto-live, cabinet/muse_seat.py, cabinet/muse-seat/*.sh.
+- Lane B — live launcher and attach/receipt path — agent 204b429e-96fd-4d52-9a31-eb4a368964ae
+  Owns: ~/.local/bin/geppetto-live (back up first as *.bak-gate-laneB-20261026; preserve
+  more|skip|rewind|close|wait semantics), new isolated harness file(s) under tests/ (new files only).
+  Does NOT own: cabinet/gate.py, cabinet/host.py, cabinet/muse_seat.py, existing test files.
+- Lane C — four-pane reservation and placement — agent 3fed4065-0cc8-4fd6-9d8b-0b2b0e3028ac
+  Owns: cabinet/host.py (gate-reservation/placement sections only), tests/test_gate_panes.py (new).
+  Lease transferred by coordinator for this assignment: cabinet/panes.py (reservation-counting
+  parts only; all other lanes read-only for panes.py).
+  Does NOT own: cabinet/gate.py, ~/.local/bin/geppetto-live, cabinet/muse_seat.py.
+- Lane D — provider-neutral modeling preparation — agent 3e14f43b-cf45-4ec9-b332-f32407053e3d
+  Owns: cabinet/chat_phase.py, prompt injection in cabinet/chat.py and cabinet/claude_link.py
+  (prompt text/injection points only), new prompt test file(s) under tests/.
+  Does NOT own: Muse transport (cabinet/muse_seat.py, cabinet/muse-seat/*.sh), cabinet/gate.py,
+  cabinet/host.py, ~/.local/bin/geppetto-live.
+- Lane E — Muse SSH bridge compatibility — agent b0d55e8a-3ef4-4681-a4fc-f461459634ea
+  Owns: cabinet/muse_seat.py, cabinet/muse-seat/*.sh bridge helpers, tests/test_muse_gate_bridge.py (new).
+  Does NOT own: cabinet/gate.py, cabinet/host.py, ~/.local/bin/geppetto-live.
+- Lane F — independent cancellation and failure audit — agent 2888530c-2b52-45dd-93a1-34dcf351fc0e
+  READ-ONLY. No file lease. May request a lease from the coordinator before any fix; do not patch first.
+  Inspects (read-only): cabinet/build_execution.py, cabinet/claude_gate.py, cabinet/claude_link.py,
+  cabinet/chat.py, cabinet/host.py, cabinet/live_runs.py, wrapper and shutdown path.
+
+Rules for all lanes: tests use temp directories/fixtures only — never real cabinet/confirm,
+never real cabinet/muse-seat/requests|responses, never the user's display. A lane that needs
+a file outside its lease must request it from the coordinator, never patch it independently.
+Real-pane verification is NOT authorised until po explicitly authorises opening the chest;
+fixture results must be labelled fixture-only, and click-to-first-frame must not be claimed
+from token-write or Popen timing.
+Status at lease time: lanes spawned, reading first; editing authorised only on coordinator
+go-ahead sent after this entry. Lane F audit may proceed read-only immediately.

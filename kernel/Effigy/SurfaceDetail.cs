@@ -65,6 +65,34 @@ public sealed class AnchoredFoldOptions
 	public int Seed = 1;
 }
 
+/// <summary>Settings for <see cref="SurfaceDetail.DirectionFolds"/>, in inches.</summary>
+public sealed class DirectionFoldOptions
+{
+	/// <summary>Direction of compression / muscle pull. Fold crests run perpendicular to it.</summary>
+	public Vec3 Direction = new( 0, 1, 0 );
+	/// <summary>Distance between fold crests along the direction.</summary>
+	public float Spacing = 2.2f;
+	/// <summary>Height of a fold's roll; its crease is cut a third of that.</summary>
+	public float Amplitude = 0.35f;
+	/// <summary>Height of the rolled lip on the compressed side of each crease, as a share of Amplitude.</summary>
+	public float Lip = 0.5f;
+	/// <summary>Extra amplitude where the surface faces against the direction (the bunched side), 0..1.</summary>
+	public float Bunch = 0.5f;
+	/// <summary>How much the crests wander (share of spacing) and break along their length.</summary>
+	public float Wander = 0.35f, Break = 0.35f;
+	public int Seed = 1;
+}
+
+/// <summary>Settings for rimmed pore pits pressed into a surface.</summary>
+public sealed class PoreOptions
+{
+	/// <summary>Minimum spacing between pore centres.</summary>
+	public float Spacing = 1f;
+	/// <summary>Depth of each pit (positive number; pits go inward).</summary>
+	public float Depth = 0.05f;
+	public int Seed = 1;
+}
+
 /// <summary>A dome (pustule, cyst, lump) or a pit pressed into a surface.</summary>
 public readonly record struct SurfaceStamp( Vec3 Center, float Radius, float Height );
 
@@ -230,6 +258,54 @@ public static class SurfaceDetail
 			delta[v] = normals[v] * h;
 		}
 		for ( var v = 0; v < n; v++ ) mesh.Positions[v] += delta[v];
+	}
+
+	/// <summary>
+	/// Compression folds: folds whose crests run PERPENDICULAR to a direction of compression or
+	/// muscle pull (forehead lines across the forehead, elbow/knuckle folds across the joint),
+	/// instead of gravity-only SagFolds. Each fold is a crease plus a rolled lip on the
+	/// compressed side, with extra amplitude where the surface faces against the direction
+	/// (the bunched side), wandering and broken along its length. <paramref name="looseness"/>
+	/// 0..1 per vertex scales the pass, exactly like SagFolds.
+	/// </summary>
+	public static void DirectionFolds( PolyMesh mesh, float[] looseness, DirectionFoldOptions o )
+	{
+		var n = mesh.VertexCount;
+		var normals = VertexNormals( mesh );
+		var noise = new Noise3( o.Seed );
+		var dir = o.Direction.LengthSquared > 1e-12f ? o.Direction.Normal : new Vec3( 0, 1, 0 );
+		var delta = new Vec3[n];
+		for ( var v = 0; v < n; v++ )
+		{
+			var loose = looseness[v];
+			if ( loose <= 0f ) continue;
+			var p = mesh.Positions[v];
+			// Phase along the compression direction; crests are perpendicular to it.
+			var t = Vec3.Dot( p, dir ) / o.Spacing + o.Wander * noise.Sample( p * (0.35f / o.Spacing) ) * 2f;
+			var f = t - MathF.Floor( t );
+			var crease = -MathF.Exp( -(f / 0.08f) * (f / 0.08f) ) - MathF.Exp( -((1f - f) / 0.08f) * ((1f - f) / 0.08f) );
+			var belly = MathF.Exp( -((f - 0.72f) / 0.22f) * ((f - 0.72f) / 0.22f) );
+			var lip = o.Lip * MathF.Exp( -((f - 0.15f) / 0.12f) * ((f - 0.15f) / 0.12f) );
+			var broken = Smooth( -0.3f, 0.3f, noise.Sample( p * (0.6f / o.Spacing) + new Vec3( 5.1f, 0, 0 ) ) + (1f - 2f * o.Break) );
+			// Bunched side: surface facing against the pull gets up to (1 + Bunch) amplitude.
+			var bunch = 1f + o.Bunch * MathF.Max( 0f, -Vec3.Dot( normals[v], dir ) );
+			var h = o.Amplitude * (belly + lip + 0.33f * crease) * loose * broken * bunch;
+			delta[v] = normals[v] * h;
+		}
+		for ( var v = 0; v < n; v++ ) mesh.Positions[v] += delta[v];
+	}
+
+	/// <summary>
+	/// Rimmed pore pits: pit centres spread at least <see cref="PoreOptions.Spacing"/> apart
+	/// where <paramref name="density"/> allows, each pressed in as a pit. <see cref="Stamps"/>
+	/// already gives every pit its faint rim, so pores read as pits-with-rims, not dots.
+	/// Density is per vertex 0..1 (a region mask), so pore size/density can vary by region.
+	/// </summary>
+	public static void Pores( PolyMesh mesh, float[] density, PoreOptions o )
+	{
+		var picked = PoissonOnSurface( mesh, o.Spacing, v => v < density.Length && density[v] > 0.01f, o.Seed );
+		var before = mesh.Positions.ToArray();
+		Stamps( mesh, picked.Select( v => new SurfaceStamp( before[v], o.Spacing * 0.45f, -o.Depth * (v < density.Length ? density[v] : 1f) ) ) );
 	}
 
 	/// <summary>

@@ -46,8 +46,6 @@ public sealed class AiLivePreview : IDisposable
     /// run that commits faster than the pace (or a viewer that loads slower than it) still shows every
     /// step in turn instead of jumping to the newest. The latest revision stays as long as it is latest.</summary>
     public const int MinDwellMs = 250;
-    /// <summary>Steps allowed to wait for the viewport before the oldest are skipped to catch up.</summary>
-    public const int MaxBacklog = 3;
     async Task LoadLoop()
     {
         long attempted = 0;                 // the newest revision queued or loaded
@@ -108,9 +106,9 @@ public sealed class AiLivePreview : IDisposable
                                 }
                             }
                             bool free; lock (gate) free = pending is null;
-                            // never fall behind: when more than MaxBacklog steps are waiting, the oldest are passed
-                            // over so the pane stays within a second or so of the run (each still shown in the chest)
-                            while (queue.Count > MaxBacklog) queue.Dequeue();
+                            // Keep every committed step. Only lightweight revision paths queue here;
+                            // pending backpressure keeps at most one loaded mesh waiting for the viewer.
+                            // A slow pane must not silently discard the user's model changes to catch up.
                             if (queue.Count > 0 && free && shown.ElapsedMilliseconds >= MinDwellMs)
                             {
                                 var next = queue.Dequeue();

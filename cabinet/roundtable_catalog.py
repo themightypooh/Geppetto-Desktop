@@ -120,6 +120,7 @@ def choices(discover=True):
                  kind=kind, model=model, endpoint='cli', family=family,
                  group='Roundtable seats' if name else family.title(), available=ready,
                  research=False, vision=False,
+                 capabilities=['chat'] if family == 'zoobie' else ['tools'],
                  bridge=str(NATIVE_SHIM if family in ('codex', 'opencode') else
                             ROOT / 'zoobie_seat.py' if family == 'zoobie' else shim))
         if not ready:
@@ -134,6 +135,41 @@ def choices(discover=True):
         for model in models:
             if isinstance(model, str):
                 out.append(record(family, model))
+    # --- Muse bridge seat (this Muse session, via file bridge, not the muse CLI) ---
+    # The built-in 'muse' family is hidden by default (MODEL_HUB_HIDE=muse) and its
+    # local muse CLI still returns a 402 billing error (2026-10-24), so unhiding it
+    # alone does not work. This separate bridge record uses cabinet/muse_seat.py,
+    # modelled on zoobie_seat.py: prompt to a requests file, Muse answers (and edits
+    # in the request's workspace) to a responses file. Model id is deliberately
+    # 'muse-bridge' (not '') so chat.py's duplicate filter (kind + model) does not
+    # drop it as a duplicate of another roundtable-cli '' model. Capabilities are
+    # chat + plan + build for v2: Build is enabled only because muse_seat.py now
+    # forwards the BuildTurn receipt env (GEPPETTO_BUILD_RECEIPTS/TOKEN) to the
+    # responder, and the responder must run a real geppetto-live build script
+    # with those env vars exported, so geppetto-live itself calls
+    # build_execution.record() and produces a valid receipt. A text-only reply
+    # in Build mode still produces no receipt and is rejected by checked_stream.
+    _muse_bridge = Path(__file__).resolve().with_name('muse_seat.py')
+    out.append(dict(id='roundtable/muse/muse-bridge',
+                    label='Muse · Muse (this chat) · file bridge',
+                    kind='roundtable-cli', model='muse-bridge', endpoint='cli',
+                    family='muse', group='Muse', available=_muse_bridge.is_file(),
+                    research=False, vision=False,
+                    capabilities=['chat', 'plan', 'build'],
+                    bridge=str(_muse_bridge)))
+    # --- Kimi bridge seat (copied from Muse bridge, renamed) ---
+    # Same file bridge as Muse, no Kimi CLI or API in Geppetto: prompt to a
+    # requests file, Kimi answers (and edits in the request's workspace) to a
+    # responses file. Model id is deliberately 'kimi-bridge' (not '') so
+    # chat.py's duplicate filter (kind + model) does not drop it.
+    _kimi_bridge = Path(__file__).resolve().with_name('kimi_seat.py')
+    out.append(dict(id='roundtable/kimi/kimi-bridge',
+                    label='Kimi · Kimi · file bridge',
+                    kind='roundtable-cli', model='kimi-bridge', endpoint='cli',
+                    family='kimi', group='Kimi', available=_kimi_bridge.is_file(),
+                    research=False, vision=False,
+                    capabilities=['chat', 'plan', 'build'],
+                    bridge=str(_kimi_bridge)))
     try:
         seats = json.loads((ROOT / 'roundtable-data/seats.json').read_text())
         names = seats.get('_names', {})
@@ -150,8 +186,13 @@ def choices(discover=True):
     return out
 
 
-def command(model, act=True):
-    """Native providers use our bundled shim; optional seats retain their bridges."""
+def command(model, act=True, effort=None):
+    """Native providers use our bundled shim; optional seats retain their bridges.
+
+    effort is only passed to the bundled shim (Codex/OpenCode), never to a
+    hub seat: hub seats have their own effort handling and this must not
+    change their arguments. None means inherit the user's own setting.
+    """
     if model['family'] == 'zoobie':
         return [sys.executable, model['bridge']]
     provider = {'antigravity': 'agy', 'openai-compat': 'openai'}.get(model['family'], model['family'])
@@ -159,4 +200,6 @@ def command(model, act=True):
     cmd = [sys.executable, bridge, '--provider', provider, '--model', model['model']]
     if act:
         cmd.append('--act')
+    if bridge == str(NATIVE_SHIM) and effort:
+        cmd += ['--effort', effort]
     return cmd

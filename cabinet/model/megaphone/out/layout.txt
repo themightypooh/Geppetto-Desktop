@@ -1,0 +1,2 @@
+# part	model	pivot x	y	z	size x	y	z
+megaphone	out/megaphone.vmdl	-0.288	-0	0.025	3.918	2.235	2.293

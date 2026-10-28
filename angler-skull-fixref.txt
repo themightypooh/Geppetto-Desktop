@@ -1,0 +1,2 @@
+refimage top offset=0,0 height=53.7 opacity=0.6 depth=-1
+save angler_skull_v7.effigy

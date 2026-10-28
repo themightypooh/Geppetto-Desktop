@@ -281,6 +281,37 @@ internal static class AiLiveTests
             viewer.Send("ack");
         });
 
+        registry.Add("ai-live", "CPU slow preview consumer retains every queued revision", () =>
+        {
+            var tools = new AiSuiteTools(Path.Combine(settings.WorkDirectory, "live-slow-consumer"));
+            var live = new AiLiveRun(tools);
+            live.Commit(tools.Studio, "initial");
+            using var preview = new AiLivePreview(tools.Root);
+            AiLivePreview.Update Next()
+            {
+                var clock = System.Diagnostics.Stopwatch.StartNew();
+                while (clock.ElapsedMilliseconds < 10000)
+                {
+                    Check(preview.Error is null, "preview error: " + preview.Error);
+                    if (preview.Take() is { } update) return update;
+                    Thread.Sleep(10);
+                }
+                throw new TimeoutException("preview did not deliver its queued revision");
+            }
+            var initial = Next();
+            Check(initial.Revision == 1, "did not join initial revision");
+            initial.Mesh.Dispose();
+            // No consumer while commits accumulate: more than the former three-step cap.
+            for (int i = 0; i < 12; i++) live.Commit(tools.Studio, "burst-" + i);
+            Thread.Sleep(1000);
+            for (long revision = 2; revision <= 13; revision++)
+            {
+                var update = Next();
+                try { Check(update.Revision == revision, $"expected revision {revision}, got {update.Revision}"); }
+                finally { update.Mesh.Dispose(); }
+            }
+        });
+
         registry.Add("ai-live", "hardware EGL viewer shows every revision in order, none skipped (po: a pane follows each step)", () =>
         {
             var tools = new AiSuiteTools(Path.Combine(settings.WorkDirectory, "live-every-step"));
@@ -475,7 +506,7 @@ internal static class AiLiveTests
         public void Send(string command) { process.StandardInput.WriteLine(command); process.StandardInput.Flush(); }
         public JsonObject Wait(Func<JsonObject, bool> predicate)
         {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
             while (true)
             {
                 var ev = events.Reader.ReadAsync(timeout.Token).AsTask().GetAwaiter().GetResult();

@@ -1,0 +1,32 @@
+effigy 1
+rollback 2147483647
+materiallook 0 color=#e8b417 rough=0.45 metal=0.1
+feature PrimitiveFeature
+	id 78f3a8b0
+	name Body
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position 0 0 1.4
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 1.7
+	param SizeY 0.65
+	param SizeZ 2.8
+	param UniformScale 0
+end
+feature ChamferFeature
+	id 1e4fa28e
+	name CaseChamfer
+	suppressed 0
+	visible 1
+	param AngleThreshold 15
+	bodies Bodies 78f3a8b0b0
+	param Width 0.06
+end

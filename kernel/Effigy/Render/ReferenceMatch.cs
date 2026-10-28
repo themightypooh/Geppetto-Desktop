@@ -48,15 +48,22 @@ public static class ReferenceMatch
 	/// largest connected blob is kept, so labels, a caption, a watermark or a second object do
 	/// not stretch the frame, and an outline drawing is filled in.
 	/// </summary>
-	public static bool[] ReferenceSilhouette( int width, int height, int[] rgb, byte[] alpha, int size, out float aspect )
+	/// <summary>Raw subject classification of a picture, before any
+	/// cleaning, largest-blob selection, filling, or fitting. Trace and
+	/// overlay use this so multi-part subjects keep every blob and
+	/// holes are not filled away. Alpha cut and colour cut default to
+	/// the values ReferenceSilhouette always used (128 and 0.12).</summary>
+	public static bool[] ClassifyMask( int width, int height, int[] rgb, byte[] alpha, float? alphaCutOpt = null, float? colourCutOpt = null )
 	{
+		var alphaCut = (byte)Math.Clamp( alphaCutOpt ?? 128f, 0f, 255f );
+		var colourCut = colourCutOpt ?? 0.12f;
 		var mask = new bool[width * height];
 		var transparent = alpha.Any( a => a < 250 );
 
 		if ( transparent )
 		{
 			for ( var i = 0; i < mask.Length; i++ )
-				mask[i] = alpha[i] >= 128;
+				mask[i] = alpha[i] >= alphaCut;
 		}
 		else
 		{
@@ -134,7 +141,7 @@ public static class ReferenceMatch
 			// With a plain ground the question is only "is this the ground?", so the cut is a fixed
 			// small distance — Otsu would split a white head from a black visor and keep one of them.
 			// Without a plain ground there are two populations, ink and paper, and Otsu finds them.
-			var cut = spread < 0.35f ? 0.12f : Otsu( distance );
+			var cut = spread < 0.35f ? colourCut : Otsu( distance );
 
 			for ( var i = 0; i < mask.Length; i++ )
 				mask[i] = distance[i] > cut;
@@ -152,6 +159,13 @@ public static class ReferenceMatch
 						mask[i] = !mask[i];
 			}
 		}
+
+		return mask;
+	}
+
+	public static bool[] ReferenceSilhouette( int width, int height, int[] rgb, byte[] alpha, int size, out float aspect )
+	{
+		var mask = ClassifyMask( width, height, rgb, alpha );
 
 		// Thin lines — a grid, hatching, a caption's strokes — are not the subject, however far they
 		// are from the ground. Eroding a pixel removes anything one pixel wide; the largest blob is

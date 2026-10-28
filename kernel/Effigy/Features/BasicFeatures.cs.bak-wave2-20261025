@@ -1,0 +1,846 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
+namespace Effigy;
+
+/// <summary>
+/// Creates a primitive solid. Onshape's own Primitives feature works this way — one dropdown, and
+/// the dialog shows only the fields that shape actually has.
+///
+/// Parameters deliberately changes with Shape rather than showing every field greyed out. That is
+/// the behaviour being copied: a box dialog asks for three lengths and nothing else.
+/// </summary>
+public sealed class PrimitiveFeature : Feature
+{
+	public override string TypeName => Shape.Value;
+
+	public readonly ChoiceParam Shape = new( "Shape",
+		new[] { "Box", "Cylinder", "Sphere", "Wedge", "Tube", "Torus", "Plane" } );
+
+	public readonly FloatParam SizeX = new( "Width", 1f, 0.0001f, unit: "u" );
+	public readonly FloatParam SizeY = new( "Depth", 1f, 0.0001f, unit: "u" );
+	public readonly FloatParam SizeZ = new( "Height", 1f, 0.0001f, unit: "u" );
+	public readonly FloatParam Radius = new( "Radius", 0.5f, 0.0001f, unit: "u" );
+	public readonly FloatParam InnerRadius = new( "Inner radius", 0.3f, 0f, unit: "u" );
+    public readonly FloatParam TubeRadius = new( "Tube radius", 0.5f, 0.0001f, unit: "u" );
+	public readonly IntParam Segments = new( "Segments", 16, 3, 512 );
+	public readonly IntParam Divisions = new( "Divisions", 4, 1, 64 );
+	public readonly Vec3Param Position = new( "Position", Vec3.Zero );
+
+	/// <summary>
+	/// Per-axis scale, applied about the primitive's own origin before it is moved into place.
+	///
+	/// NOT THE SAME THING AS THE SIZE PARAMETERS, and worth having alongside them. Width/Depth/
+	/// Height build the shape at a size; this stretches whatever was built, which is the only way
+	/// to get an ellipsoid out of a sphere or an oval tube out of a round one — those are defined
+	/// by a radius and have no per-axis size to set.
+	/// </summary>
+	public readonly Vec3Param Scale = new( "Scale", Vec3.One );
+
+	/// <summary>
+	/// Whether the dialog keeps the three scale axes equal as you edit one of them.
+	///
+	/// A UI CONVENIENCE THAT IS PERSISTED, not something the kernel enforces. Scale stays the
+	/// single truth about the shape — Execute reads all three axes and never consults this — so a
+	/// document always builds exactly what its three numbers say. This only rides along so the
+	/// dialog can remember that you were editing that primitive uniformly.
+	/// </summary>
+	public readonly BoolParam UniformScale = new( "Uniform scale", false );
+
+	public readonly IntParam Material = new( "Material slot", 0, 0, 63 ) { Slider = false };
+
+	/// <summary>A turn about an axis through the primitive's own origin, applied before Position —
+	/// a cylinder lying along x is an axle, a wedge on its side is a roof. Folded away: most
+	/// primitives stand as they come.</summary>
+	public readonly Vec3Param RotationAxis = new( "Rotation axis", new Vec3( 0, 0, 1 ) );
+	public readonly FloatParam RotationAngle = new( "Rotation", 0f, unit: "deg" );
+
+	/// <summary>The slot, folded away with the other features' — a primitive is placed and sized,
+	/// and painted later from the Materials panel.</summary>
+	public override IReadOnlyList<IParam> AdvancedParameters => new IParam[] { RotationAxis, RotationAngle, Material };
+
+	public override IReadOnlyList<IParam> Parameters => Shape.Value switch
+	{
+		"Box" => new IParam[] { Shape, SizeX, SizeY, SizeZ, Position, Scale, UniformScale, RotationAxis, RotationAngle, Material },
+		"Cylinder" => new IParam[] { Shape, Radius, SizeZ, Segments, Position, Scale, UniformScale, RotationAxis, RotationAngle, Material },
+		"Sphere" => new IParam[] { Shape, Radius, Divisions, Position, Scale, UniformScale, RotationAxis, RotationAngle, Material },
+		"Wedge" => new IParam[] { Shape, SizeX, SizeY, SizeZ, Position, Scale, UniformScale, RotationAxis, RotationAngle, Material },
+		"Tube" => new IParam[] { Shape, Radius, InnerRadius, SizeZ, Segments, Position, Scale, UniformScale, RotationAxis, RotationAngle, Material },
+        "Torus" => new IParam[] { Shape, Radius, TubeRadius, Segments, Divisions, Position, Scale, UniformScale, RotationAxis, RotationAngle, Material },
+		"Plane" => new IParam[] { Shape, SizeX, SizeY, Segments, Position, Scale, UniformScale, RotationAxis, RotationAngle, Material },
+		_ => new IParam[] { Shape }
+	};
+
+	protected override void Execute( FeatureContext ctx )
+	{
+		var mesh = Shape.Value switch
+		{
+			"Box" => Primitives.Box( SizeX.Clamped, SizeY.Clamped, SizeZ.Clamped, Material.Clamped ),
+			"Cylinder" => Primitives.Cylinder( Radius.Clamped, SizeZ.Clamped, Segments.Clamped, Material.Clamped ),
+			"Sphere" => Primitives.QuadSphere( Radius.Clamped, Divisions.Clamped, Material.Clamped ),
+			"Wedge" => Primitives.Wedge( SizeX.Clamped, SizeY.Clamped, SizeZ.Clamped, Material.Clamped ),
+			"Tube" => BuildTube(),
+            "Torus" => BuildTorus(),
+			"Plane" => Primitives.Plane( SizeX.Clamped, SizeY.Clamped, Segments.Clamped, Segments.Clamped, Material.Clamped ),
+			_ => throw new FeatureException( new FeatureDiagnostic(
+				DiagnosticSeverity.Error,
+				$"unknown shape '{Shape.Value}'",
+				"The shape dropdown has a value this feature does not build.",
+				"Shape",
+				remedies: new[] { "Pick Box, Cylinder, Sphere, Wedge, Tube, Torus or Plane" } ) )
+		};
+
+		var scale = Scale.Value;
+
+		if ( scale.x == 0f || scale.y == 0f || scale.z == 0f )
+		{
+			FailOn( "Scale",
+				"Scale cannot be zero on any axis",
+				$"Scale is ({scale.x:0.###}, {scale.y:0.###}, {scale.z:0.###}). A zero axis flattens the solid to nothing.",
+				"Set every scale axis to a non-zero value" );
+		}
+
+		// SCALE FIRST, ABOUT THE PRIMITIVE'S OWN ORIGIN. Applied after the translate it would
+		// multiply the position too, so nudging a scaled box would move it by the scale factor and
+		// the number in the Position field would stop meaning where the box is.
+		if ( scale.x != 1f || scale.y != 1f || scale.z != 1f )
+			MeshTransform.Apply( mesh, Xform.Scale( scale ) );
+
+		if ( RotationAngle.Value != 0f && RotationAxis.Value.LengthSquared > 1e-8f )
+			MeshTransform.Apply( mesh, Xform.Rotate( RotationAxis.Value.Normal, RotationAngle.Value * MathF.PI / 180f ) );
+
+		if ( Position.Value.LengthSquared > 0f )
+			MeshTransform.Apply( mesh, Xform.Translate( Position.Value ) );
+
+		ctx.Bodies.Add( new Body( ctx.NewBodyId(), Name, mesh ) );
+	}
+
+	PolyMesh BuildTube()
+	{
+		// Caught here rather than left to Primitives, so the message names the parameter the user
+		// can actually see in the dialog.
+		if ( InnerRadius.Clamped >= Radius.Clamped )
+		{
+			FailOn( "Inner radius",
+				"Inner radius must be smaller than radius",
+				$"Inner radius is {InnerRadius.Clamped:0.###} and radius is {Radius.Clamped:0.###}.",
+				"Reduce Inner radius",
+				"Increase Radius" );
+		}
+
+		return Primitives.Tube( Radius.Clamped, InnerRadius.Clamped, SizeZ.Clamped, Segments.Clamped, Material.Clamped );
+	}
+
+	PolyMesh BuildTorus()
+	{
+		if ( TubeRadius.Clamped >= Radius.Clamped )
+		{
+			FailOn( "Tube radius",
+				"Tube radius must be smaller than radius",
+				$"Tube radius is {TubeRadius.Clamped:0.###} and radius is {Radius.Clamped:0.###}.",
+				"Reduce Tube radius",
+				"Increase Radius" );
+		}
+
+		return Primitives.Torus( Radius.Clamped, TubeRadius.Clamped, Segments.Clamped, Divisions.Clamped, Material.Clamped );
+	}
+}
+
+/// <summary>Move, rotate and scale bodies. Onshape's Transform.</summary>
+public sealed class TransformFeature : Feature
+{
+	public override string TypeName => "Transform";
+
+	public override GeometryKind Accepts => GeometryKind.Body;
+
+	public readonly BodySelectionParam Bodies = new( "Bodies" );
+	public readonly Vec3Param Translate = new( "Translate", Vec3.Zero );
+	public readonly Vec3Param RotationAxis = new( "Rotation axis", new Vec3( 0, 0, 1 ) );
+	public readonly FloatParam RotationAngle = new( "Angle", 0f, unit: "deg" );
+	public readonly Vec3Param Scale = new( "Scale", Vec3.One );
+
+	public override IReadOnlyList<IParam> Parameters =>
+		new IParam[] { Bodies, Translate, RotationAxis, RotationAngle, Scale };
+
+	protected override void Execute( FeatureContext ctx )
+	{
+		var scale = Scale.Value;
+
+		if ( scale.x == 0f || scale.y == 0f || scale.z == 0f )
+		{
+			FailOn( "Scale",
+				"Scale cannot be zero on any axis",
+				$"Scale is ({scale.x:0.###}, {scale.y:0.###}, {scale.z:0.###}). A zero axis flattens the solid to nothing.",
+				"Set every scale axis to a non-zero value" );
+		}
+
+		// A zero axis with an angle used to rotate by nothing at all (Xform.Rotate falls back to the
+		// identity), so the angle field looked broken. No angle, no axis needed.
+		if ( RotationAngle.Value != 0f && RotationAxis.Value.LengthSquared < 1e-12f )
+		{
+			FailOn( "Rotation axis",
+				"Rotation axis can't be zero",
+				$"The angle is {RotationAngle.Value:0.###}°, but the axis (0, 0, 0) points nowhere, so there is nothing to turn about.",
+				"Set Rotation axis to the direction to turn about - (0, 0, 1) turns about up",
+				"Set Angle to 0 to not rotate" );
+		}
+
+		// Scale, then rotate, then translate — the order a user expects, and the one that keeps a
+		// rotation about the origin from being skewed by a non-uniform scale applied after it.
+		var xform =
+			Xform.Translate( Translate.Value )
+			* Xform.Rotate( RotationAxis.Value, RotationAngle.Value * MathF.PI / 180f )
+			* Xform.Scale( scale );
+
+		foreach ( var body in RequireBodies( ctx, Bodies ) )
+			MeshTransform.Apply( body.Mesh, xform );
+	}
+}
+
+/// <summary>Copies along a direction. Onshape's Linear pattern.</summary>
+public sealed class LinearPatternFeature : Feature
+{
+	public override string TypeName => "Linear pattern";
+
+	public override GeometryKind Accepts => GeometryKind.Body;
+
+	public readonly BodySelectionParam Bodies = new( "Bodies" );
+	public readonly Vec3Param Direction = new( "Direction", new Vec3( 1, 0, 0 ) );
+	public readonly FloatParam Spacing = new( "Spacing", 1f, unit: "u" );
+	public readonly IntParam Count = new( "Instances", 3, 1, 4096 );
+	public readonly BoolParam Merge = new( "Merge into one body", false );
+
+	public override IReadOnlyList<IParam> Parameters =>
+		new IParam[] { Bodies, Direction, Spacing, Count, Merge };
+
+	protected override void Execute( FeatureContext ctx )
+	{
+		if ( Direction.Value.LengthSquared < 1e-12f )
+		{
+			FailOn( "Direction",
+				"Direction cannot be zero",
+				"A linear pattern copies along a direction, and this one has no length, so there is nowhere to put the copies.",
+				"Set Direction to the axis you want the copies to run along" );
+		}
+
+		var dir = Direction.Value.Normal;
+		var sources = RequireBodies( ctx, Bodies );
+
+		// Instance 0 is the original, so a count of 3 means the original plus two copies — which
+		// is what Onshape's instance count means too.
+		foreach ( var source in sources )
+		{
+			// Snapshot BEFORE the loop. With Merge on, the loop appends into source.Mesh, so
+			// reading source.Mesh each iteration would copy the copies too and the instance count
+			// would double rather than increment: 6, 12, 24, 48 faces instead of 6, 12, 18, 24.
+			var original = source.Mesh.Clone();
+
+			for ( var i = 1; i < Count.Clamped; i++ )
+			{
+				var copy = MeshTransform.Transformed( original, Xform.Translate( dir * (Spacing.Value * i) ) );
+
+				if ( Merge.Value )
+					MeshWeldMerge.WeldInto( source.Mesh, copy );
+				else
+					ctx.Bodies.Add( new Body( ctx.NewBodyId(), $"{Name} {i}", copy ) );
+			}
+		}
+	}
+}
+
+/// <summary>Copies around an axis. Onshape's Circular pattern.</summary>
+public sealed class CircularPatternFeature : Feature
+{
+	public override string TypeName => "Circular pattern";
+
+	public override GeometryKind Accepts => GeometryKind.Body;
+
+	public readonly BodySelectionParam Bodies = new( "Bodies" );
+	public readonly Vec3Param AxisPoint = new( "Axis through", Vec3.Zero );
+	public readonly Vec3Param AxisDirection = new( "Axis", new Vec3( 0, 0, 1 ) );
+	public readonly IntParam Count = new( "Instances", 4, 1, 4096 );
+	public readonly FloatParam TotalAngle = new( "Angle", 360f, unit: "deg" );
+	public readonly BoolParam Merge = new( "Merge into one body", false );
+
+	public override IReadOnlyList<IParam> Parameters =>
+		new IParam[] { Bodies, AxisPoint, AxisDirection, Count, TotalAngle, Merge };
+
+	protected override void Execute( FeatureContext ctx )
+	{
+		if ( AxisDirection.Value.LengthSquared < 1e-12f )
+		{
+			FailOn( "Axis",
+				"Axis cannot be zero",
+				"A circular pattern spins around an axis, and this one has no length.",
+				"Set Axis to the direction to spin around" );
+		}
+
+		var sources = RequireBodies( ctx, Bodies );
+
+		var count = Count.Clamped;
+
+		// A full turn puts instance N back on instance 0, so the step divides by count. A partial
+		// sweep spreads the instances across the arc inclusive of both ends instead.
+		var full = MathF.Abs( MathF.Abs( TotalAngle.Value ) - 360f ) < 1e-3f;
+		var step = count <= 1 ? 0f : TotalAngle.Value / (full ? count : count - 1);
+
+		foreach ( var source in sources )
+		{
+			// Snapshot before the loop — same compounding trap as the linear pattern.
+			var original = source.Mesh.Clone();
+
+			for ( var i = 1; i < count; i++ )
+			{
+				var xform = Xform.RotateAbout(
+					AxisPoint.Value, AxisDirection.Value, step * i * MathF.PI / 180f );
+
+				var copy = MeshTransform.Transformed( original, xform );
+
+				if ( Merge.Value )
+					MeshWeldMerge.WeldInto( source.Mesh, copy );
+				else
+					ctx.Bodies.Add( new Body( ctx.NewBodyId(), $"{Name} {i}", copy ) );
+			}
+		}
+	}
+}
+
+/// <summary>Reflects bodies in a plane. Onshape's Mirror.</summary>
+public sealed class MirrorFeature : Feature
+{
+	public override string TypeName => "Mirror";
+
+	public override GeometryKind Accepts => GeometryKind.Body;
+
+	public readonly BodySelectionParam Bodies = new( "Bodies" );
+	public readonly Vec3Param PlanePoint = new( "Plane through", Vec3.Zero );
+	public readonly Vec3Param PlaneNormal = new( "Plane normal", new Vec3( 1, 0, 0 ) );
+	public readonly BoolParam KeepOriginal = new( "Keep original", true );
+	public readonly BoolParam Merge = new( "Merge into one body", false );
+
+	public override IReadOnlyList<IParam> Parameters =>
+		new IParam[] { Bodies, PlanePoint, PlaneNormal, KeepOriginal, Merge };
+
+	protected override void Execute( FeatureContext ctx )
+	{
+		if ( PlaneNormal.Value.LengthSquared < 1e-12f )
+		{
+			FailOn( "Plane normal",
+				"Plane normal cannot be zero",
+				"A mirror needs a plane to reflect across, and a zero normal does not define one.",
+				"Set Plane normal to the direction the mirror should face" );
+		}
+
+		var xform = Xform.Mirror( PlanePoint.Value, PlaneNormal.Value );
+		var sources = RequireBodies( ctx, Bodies );
+
+		foreach ( var source in sources )
+		{
+			// MeshTransform.Apply reverses winding for us — the mirror flips handedness, and
+			// without that reversal every mirrored face would point into the solid.
+			var copy = MeshTransform.Transformed( source.Mesh, xform );
+
+			// Bone flip (roadmap J): a mirrored copy used to keep the ORIGINAL side's
+			// bone indices, so a mirrored left arm bent with the right arm's bones.
+			// Remap before the copy is added or welded, so both paths get flipped
+			// weights. Without a rig in the studio there is nothing to flip against,
+			// and weights carry by index as before; a skin whose bone indices do not
+			// belong to this rig is left alone rather than remapped into nonsense.
+			copy.Skin = FlipSkin( copy.Skin, ctx.Rig );
+
+			if ( Merge.Value )
+				MeshWeldMerge.WeldInto( source.Mesh, copy );
+			else
+				ctx.Bodies.Add( new Body( ctx.NewBodyId(), $"{Name}", copy ) );
+		}
+
+		// A merged mirror lives IN the source body, so removing the source would delete
+		// the result — the old code did exactly that for Merge + Keep original off.
+		if ( !KeepOriginal.Value && !Merge.Value )
+		{
+			foreach ( var source in sources )
+				ctx.Bodies.Remove( source );
+		}
+	}
+
+	/// <summary>
+	/// Mirror a skin's bone indices to their mirror partners: every weight on arm_L
+	/// becomes a weight on arm_R, and back, by <see cref="Skeleton.MirrorPartners"/>.
+	/// Centre bones map to themselves, so a spine weight survives unchanged. Null
+	/// skin, an empty rig, or a skin naming bones outside the rig returns the skin
+	/// untouched — flipping against the wrong rig would be worse than not flipping.
+	/// Public so tests can prove the flip without building a whole studio around it.
+	/// </summary>
+	public static SkinWeights FlipSkin( SkinWeights skin, Skeleton rig )
+	{
+		if ( skin is null || rig is null || rig.Count == 0 )
+			return skin;
+
+		var partners = rig.MirrorPartners( out _ );
+
+		foreach ( var weights in skin.Vertices )
+			foreach ( var w in weights )
+				if ( w.Bone < 0 || w.Bone >= partners.Length )
+					return skin;
+
+		var flipped = new SkinWeights();
+
+		foreach ( var weights in skin.Vertices )
+			flipped.Vertices.Add( weights.Select( w => new BoneWeight( partners[w.Bone], w.Weight ) ).ToArray() );
+
+		return flipped;
+	}
+}
+
+/// <summary>
+/// Catmull-Clark subdivision as a history feature.
+///
+/// Onshape has no equivalent, and this is the deliberate place where the tool stops being CAD.
+/// Putting subdivision IN the tree rather than after it is what keeps the pipeline honest: roll
+/// the bar back above this feature and you are editing the low-poly cage, roll it forward and you
+/// see the dense surface. The cage is what the sculpt eventually bakes down onto, so it has to
+/// stay reachable rather than being consumed by an export step.
+/// </summary>
+public sealed class SubdivideFeature : Feature
+{
+	public override string TypeName => "Subdivide";
+
+	/// <summary>Faces as well as bodies: an empty Bodies list means the whole document to Execute,
+	/// so picking is how you say which part - see the refusal in the editor's AddFeature.</summary>
+	public override GeometryKind Accepts => GeometryKind.Face | GeometryKind.Body;
+
+	/// <summary>
+	/// Which faces to subdivide. EMPTY MEANS WHOLE BODY OR ALL FACES, depending on <see cref="AllFaces"/>,
+	/// and the whole-body form is the old behaviour and the honest default — a subdivision surface
+	/// is a property of a cage, not of a corner of one.
+	///
+	/// Picking faces switches the operation from smooth to linear, and the two really are different
+	/// operations rather than a flag on one. See CatmullClark.SubdivideFaces: you cannot apply the
+	/// limit rules to part of a mesh without moving the vertices the rest of it is standing on. So
+	/// this is density where you need it — a face about to be sculpted, a panel about to be bent —
+	/// and the whole-body form remains the one that smooths.
+	///
+	/// Held as FaceRefs, like every other face pick, so the choice survives the rebuild that
+	/// recreates the faces it names.
+	/// </summary>
+	public List<FaceRef> Faces = new();
+
+	public readonly BodySelectionParam Bodies = new( "Bodies" );
+	public readonly IntParam Levels = new( "Levels", 1, 0, 6 );
+
+	/// <summary>
+	/// Subdivide EVERY face, not the whole body. Only read when <see cref="Faces"/> is empty — a
+	/// picked face already names its region, and a pick is more specific than "everything".
+	///
+	/// The whole-body form (this off, no picks) runs the full Catmull-Clark and SMOOTHS: it moves
+	/// the original vertices onto the limit surface. This is the density version of the same idea —
+	/// midpoints and centroids, so the shape stays exactly where it is and every face just gets
+	/// more polygons. You want it when the whole cage is too coarse but the silhouette is already
+	/// right, and it is why it is a tick rather than "pick 40 faces".
+	/// </summary>
+	public readonly BoolParam AllFaces = new( "All faces", false );
+
+	public override IReadOnlyList<IParam> Parameters => new IParam[] { Bodies, Levels, AllFaces };
+
+	/// <summary>What this feature will cost at the current settings, for a UI that warns before
+	/// rather than after. Levels are exponential and the jump from 4 to 6 is 16x.</summary>
+	public (int Vertices, int Faces) PredictCost( IEnumerable<Body> bodies )
+	{
+		var v = 0;
+		var f = 0;
+		var list = bodies as IList<Body> ?? bodies.ToList();
+
+		if ( Faces.Count > 0 )
+		{
+			// Local subdivision only touches the bodies that were picked on, so the bodies it did
+			// not touch still cost exactly what they already are.
+			var picked = Resolve( list, out _ );
+
+			foreach ( var body in list )
+			{
+				var (bv, bf) = picked.TryGetValue( body, out var indices )
+					? CatmullClark.PredictLocalCost( body.Mesh, indices, Levels.Clamped )
+					: (body.Mesh.VertexCount, body.Mesh.FaceCount);
+
+				v += bv;
+				f += bf;
+			}
+
+			return (v, f);
+		}
+
+		foreach ( var body in list.Where( Bodies.Matches ) )
+		{
+			var (bv, bf) = AllFaces.Value
+				? CatmullClark.PredictLocalCost( body.Mesh, AllIndices( body.Mesh ), Levels.Clamped )
+				: CatmullClark.PredictCost( body.Mesh, Levels.Clamped );
+
+			v += bv;
+			f += bf;
+		}
+
+		return (v, f);
+	}
+
+	/// <summary>Picked faces grouped by the body they landed on. <paramref name="lost"/> counts the
+	/// references that no longer resolve — geometry upstream changed under them.</summary>
+	Dictionary<Body, List<int>> Resolve( IEnumerable<Body> bodies, out int lost )
+	{
+		var byBody = new Dictionary<Body, List<int>>();
+		lost = 0;
+
+		foreach ( var reference in Faces )
+		{
+			if ( !FacePlane.TryResolveFace( bodies, reference, out var body, out var faceIndex ) )
+			{
+				lost++;
+				continue;
+			}
+
+			if ( !byBody.TryGetValue( body, out var indices ) )
+				byBody[body] = indices = new List<int>();
+
+			indices.Add( faceIndex );
+		}
+
+		return byBody;
+	}
+
+	protected override void Execute( FeatureContext ctx )
+	{
+		if ( Levels.Clamped == 0 )
+		{
+			// Allowed — it is how you switch the smoothing off without deleting the feature — but
+			// said, so a Subdivide that does nothing does not read as a broken one.
+			Warn( "Levels is 0, so nothing is subdivided",
+				"Each level splits every face into four and smooths; zero levels leaves the part as it is.",
+				"Set Levels to 1 or more to smooth the part" );
+			return;
+		}
+
+		if ( Faces.Count > 0 )
+		{
+			// A picked face already names its body, so the Bodies filter has nothing left to decide and
+			// is not consulted here. Two picks on the same body are subdivided in ONE call rather than
+			// one call each: the second call would be running against a mesh whose face indices the
+			// first has already renumbered.
+			var picked = Resolve( ctx.Bodies, out var lost );
+
+			if ( picked.Count == 0 )
+			{
+				Fail(
+					"None of the picked faces are still there",
+					"Every face this feature subdivides was removed or replaced by a change further up the tree.",
+					"Pick the faces again",
+					"Or clear the picks to subdivide the whole body" );
+			}
+
+			foreach ( var (body, indices) in picked )
+				body.Mesh = CatmullClark.SubdivideFaces( body.Mesh, indices, Levels.Clamped );
+
+			if ( lost > 0 )
+			{
+				Warn(
+					$"{lost} picked {(lost == 1 ? "face is" : "faces are")} no longer there",
+					"A change further up the tree removed or replaced them, so they were skipped.",
+					"Pick them again if the extra density is still wanted" );
+			}
+
+			return;
+		}
+
+		// No picks. AllFaces chooses between densifying every face (linear, shape unchanged) and
+		// the whole-body Catmull-Clark that smooths.
+		foreach ( var body in RequireBodies( ctx, Bodies ) )
+		{
+			if ( AllFaces.Value )
+				body.Mesh = CatmullClark.SubdivideFaces( body.Mesh, AllIndices( body.Mesh ), Levels.Clamped );
+			else
+				body.Mesh = CatmullClark.Subdivide( body.Mesh, Levels.Clamped );
+		}
+	}
+
+	/// <summary>Every face index of a mesh, as a list — the "all faces" version of a pick list.</summary>
+	static int[] AllIndices( PolyMesh mesh )
+	{
+		var all = new int[mesh.FaceCount];
+
+		for ( var i = 0; i < all.Length; i++ )
+			all[i] = i;
+
+		return all;
+	}
+}
+
+/// <summary>
+/// Merge one mesh into another and weld the seam (Backlog B15, A6.2).
+///
+/// Plain <see cref="MeshTransform.Append"/> leaves the two halves topologically separate:
+/// a mirrored half-model keeps its own copy of every centreline vertex, the mirror-plane
+/// faces survive as interior duplicates, and a pattern's closing seam stays split. This
+/// appends, then welds within 1e-3, then drops the interior faces the weld makes
+/// coincident — a face pair with the same vertices in opposite windings is the wall
+/// between two halves of one solid, not a boundary, so both go.
+///
+/// What survives the weld, and what does not: positions, skin weights, vertex colours
+/// and paint ride <see cref="MeshWeld.Weld"/>; morphs and UV2 are remapped here because
+/// that weld drops them, and that drop is exactly the old "mirror drops morphs" bug.
+/// Per-corner UV2 mappings (FaceUV2) do not survive — their indices name the old UV2
+/// list — so the vertex UV2 list is kept and the corner mapping is dropped.
+/// Bone bindings are carried by index, not by name: a PolyMesh has no skeleton, so the
+/// _L/_R bone-name flip cannot happen inside this merge itself. MirrorFeature does it
+/// before the weld (FlipSkin against the studio rig), so a merged mirror arrives here
+/// already flipped; any other caller of WeldInto still gets weights carried faithfully
+/// by index, which is the part this merge owns.
+/// </summary>
+internal static class MeshWeldMerge
+{
+	public static void WeldInto( PolyMesh target, PolyMesh source )
+	{
+		var targetVerts = target.Positions.Count;
+		var targetUv2 = target.HasUV2 ? new List<Vec2>( target.UV2 ) : null;
+		var sourceUv2 = source.HasUV2 ? new List<Vec2>( source.UV2 ) : null;
+
+		MeshTransform.Append( target, source );
+
+		// Seams AFTER Append: Append already shifted the source's seams by the offset,
+		// so this snapshot is in post-append indices, the indices the weld map speaks.
+		var targetSeams = target.Seams is { Count: > 0 } ? new HashSet<EdgeKey>( target.Seams ) : null;
+
+		// Morphs as Append merged them (by name, padded with no offset on the side that
+		// lacks the key) — snapshot before the weld, which would drop them.
+		var morphs = target.Morphs.Select( m => (m.Name, Deltas: (Vec3[])m.Deltas?.Clone(), m.Driver) ).ToList();
+
+		var welded = MeshWeld.Weld( target, 1e-3f );
+
+		// Rebuild the old->welded index map from positions: the weld keeps each
+		// component's lowest-index vertex position exactly, so a spatial lookup on the
+		// welded positions recovers the map without the weld having to return one.
+		var map = WeldMap( target.Positions, welded.Positions, 1e-3f );
+
+		var faces = DropInteriorDuplicates( welded.Faces );
+
+		var used = new bool[welded.VertexCount];
+		foreach ( var f in faces )
+			foreach ( var i in f.Indices )
+				used[i] = true;
+
+		// Compact again after the interior faces go: vertices only those faces used are
+		// kept, in order, and every parallel array follows the same compaction.
+		var compact = new int[welded.VertexCount];
+		Array.Fill( compact, -1 );
+		var survivors = new List<int>();
+
+		for ( var v = 0; v < welded.VertexCount; v++ )
+		{
+			if ( used[v] )
+			{
+				compact[v] = survivors.Count;
+				survivors.Add( v );
+			}
+		}
+
+		var finalMap = new int[target.VertexCount];
+		for ( var v = 0; v < finalMap.Length; v++ )
+			finalMap[v] = map[v] >= 0 && compact[map[v]] >= 0 ? compact[map[v]] : -1;
+
+		target.Positions = survivors.Select( v => welded.Positions[v] ).ToList();
+		target.Faces = faces.Select( f => new Face(
+			f.Indices.Select( i => compact[i] ).ToArray(),
+			(Vec2[])f.UVs.Clone(), f.Material ) ).ToList();
+		target.Skin = welded.Skin is null ? null : new SkinWeights
+		{
+			Vertices = survivors.Select( v => (BoneWeight[])welded.Skin[v].Clone() ).ToList()
+		};
+		target.VertexColors = welded.VertexColors is null ? null
+			: survivors.Select( v => welded.VertexColors[v] ).ToArray();
+		target.Paint = welded.Paint;
+
+		// Morphs: first old vertex to claim a welded slot wins, which is the component's
+		// lowest index — the same survivor the weld kept for positions and weights.
+		var mergedMorphs = new List<MeshMorph>();
+
+		foreach ( var (name, deltas, driver) in morphs )
+		{
+			if ( deltas is null )
+				continue;
+
+			var merged = new Vec3[survivors.Count];
+			var claimed = new bool[survivors.Count];
+
+			for ( var v = 0; v < deltas.Length && v < finalMap.Length; v++ )
+			{
+				var to = finalMap[v];
+
+				if ( to >= 0 && !claimed[to] )
+				{
+					merged[to] = deltas[v];
+					claimed[to] = true;
+				}
+			}
+
+			mergedMorphs.Add( new MeshMorph { Name = name, Deltas = merged, Driver = driver?.Clone() } );
+		}
+
+		target.Morphs = mergedMorphs;
+
+		// UV2, vertex-mapped: target's list padded with the source's, then first-wins
+		// through the same map. The split is by VERTEX count, not by UV2 list length —
+		// a UV2 list may be shorter than its mesh. FaceUV2 (per-corner) cannot follow
+		// the remap, so it is dropped and the vertex list stands.
+		if ( targetUv2 is not null || sourceUv2 is not null )
+		{
+			var preCount = map.Length;
+			var pre = new List<Vec2>( preCount );
+
+			for ( var v = 0; v < preCount; v++ )
+			{
+				if ( v < targetVerts && targetUv2 is not null && v < targetUv2.Count )
+					pre.Add( targetUv2[v] );
+				else if ( v >= targetVerts && sourceUv2 is not null && v - targetVerts < sourceUv2.Count )
+					pre.Add( sourceUv2[v - targetVerts] );
+				else
+					pre.Add( Vec2.Zero );
+			}
+
+			var uv2 = new Vec2[survivors.Count];
+			var claimedUv = new bool[survivors.Count];
+
+			for ( var v = 0; v < pre.Count && v < finalMap.Length; v++ )
+			{
+				var to = finalMap[v];
+
+				if ( to >= 0 && !claimedUv[to] )
+				{
+					uv2[to] = pre[v];
+					claimedUv[to] = true;
+				}
+			}
+
+			target.UV2 = uv2.ToList();
+			target.FaceUV2 = null;
+		}
+
+		if ( targetSeams is not null )
+		{
+			var seams = new HashSet<EdgeKey>();
+
+			foreach ( var e in targetSeams )
+			{
+				var a = e.A < finalMap.Length ? finalMap[e.A] : -1;
+				var b = e.B < finalMap.Length ? finalMap[e.B] : -1;
+
+				if ( a >= 0 && b >= 0 && a != b )
+					seams.Add( new EdgeKey( a, b ) );
+			}
+
+			target.Seams = seams;
+		}
+	}
+
+	static int[] WeldMap( IReadOnlyList<Vec3> oldPositions, IReadOnlyList<Vec3> weldedPositions, float tol )
+	{
+		var cells = new Dictionary<(long, long, long), List<int>>();
+		var scale = 1f / tol;
+
+		for ( var v = 0; v < weldedPositions.Count; v++ )
+		{
+			var p = weldedPositions[v];
+			var key = ((long)MathF.Floor( p.x * scale ), (long)MathF.Floor( p.y * scale ), (long)MathF.Floor( p.z * scale ));
+
+			if ( !cells.TryGetValue( key, out var list ) )
+				cells[key] = list = new List<int>();
+
+			list.Add( v );
+		}
+
+		var map = new int[oldPositions.Count];
+		var tol2 = tol * tol;
+
+		for ( var v = 0; v < oldPositions.Count; v++ )
+		{
+			var p = oldPositions[v];
+			var cell = ((long)MathF.Floor( p.x * scale ), (long)MathF.Floor( p.y * scale ), (long)MathF.Floor( p.z * scale ));
+			map[v] = -1;
+
+			for ( var dx = -1; dx <= 1 && map[v] < 0; dx++ )
+			for ( var dy = -1; dy <= 1 && map[v] < 0; dy++ )
+			for ( var dz = -1; dz <= 1 && map[v] < 0; dz++ )
+			{
+				if ( !cells.TryGetValue( (cell.Item1 + dx, cell.Item2 + dy, cell.Item3 + dz), out var list ) )
+					continue;
+
+				foreach ( var u in list )
+				{
+					if ( (weldedPositions[u] - p).LengthSquared <= tol2 )
+					{
+						map[v] = u;
+						break;
+					}
+				}
+			}
+		}
+
+		return map;
+	}
+
+	/// <summary>
+	/// Drop faces the weld made coincident: within a group sharing one vertex set, a
+	/// pair in opposite windings is an interior wall and the whole group goes; a group
+	/// of same-winding copies keeps one face.
+	/// </summary>
+	static List<Face> DropInteriorDuplicates( IReadOnlyList<Face> faces )
+	{
+		var groups = new Dictionary<string, List<Face>>();
+
+		foreach ( var f in faces )
+		{
+			var key = string.Join( ",", f.Indices.OrderBy( i => i ) );
+			if ( !groups.TryGetValue( key, out var list ) )
+				groups[key] = list = new List<Face>();
+
+			list.Add( f );
+		}
+
+		var result = new List<Face>();
+
+		foreach ( var group in groups.Values )
+		{
+			if ( group.Count == 1 )
+			{
+				result.Add( group[0] );
+				continue;
+			}
+
+			var hasOpposite = false;
+
+			for ( var i = 0; i < group.Count && !hasOpposite; i++ )
+			for ( var j = i + 1; j < group.Count && !hasOpposite; j++ )
+				if ( IsReverseOf( group[i].Indices, group[j].Indices ) )
+					hasOpposite = true;
+
+			if ( !hasOpposite )
+				result.Add( group[0] );
+		}
+
+		return result;
+	}
+
+	static bool IsReverseOf( int[] a, int[] b )
+	{
+		if ( a.Length != b.Length )
+			return false;
+
+		var start = Array.IndexOf( b, a[0] );
+
+		if ( start < 0 )
+			return false;
+
+		for ( var k = 0; k < a.Length; k++ )
+			if ( b[(start - k + a.Length * 2) % a.Length] != a[k] )
+				return false;
+
+		return true;
+	}
+}
