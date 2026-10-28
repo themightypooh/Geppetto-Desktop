@@ -159,6 +159,7 @@ public sealed class GeppettoDocument
 	{
 		var cpu = CpuMesh.FromStudio( Studio, 0, DiskPath );
 		var mesh = EffigyMeshBridge.ToGodotArrayMesh( cpu, Resolver, Studio.MaterialLooks, Path.GetDirectoryName( DiskPath ) );
+		PaintShow.Apply( mesh, cpu, Studio );   // painted textures stay on after the brush is put down
 		var body = characterRoot.FindChild( "Body", true, false ) as MeshInstance3D;
 		if ( body == null ) return;
 		body.Mesh = mesh;

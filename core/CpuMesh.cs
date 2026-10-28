@@ -245,7 +245,7 @@ public sealed class CpuMesh : IDisposable
 		{
 			var (m, ranges) = studio.ToMeshWithBodies( b => b.Visible );
 			if ( studio.Rig is { Count: > 0 } )
-				m.Skin = SkinBinder.BindBodies( m, ranges, studio.BodyBoneMap, studio.Rig );
+				m.Skin = BindLikeExport( studio, m, ranges );
 			mesh = m;
 		}
 
@@ -287,6 +287,37 @@ public sealed class CpuMesh : IDisposable
 		result.Picker = picker;
 		result.ExtractSeconds = sw.Elapsed.TotalSeconds;
 		return result;
+	}
+
+	/// <summary>
+	/// The skin weights the s&amp;box export and pose preview bind (BuildScript's skinned export,
+	/// EffigyWindow's pose preview): BindBodies, then SmoothWeights so joints bend instead of crease,
+	/// then the document's painted weights (<see cref="PartStudio.WeightPaint"/>) laid on top.
+	/// <paramref name="mesh"/>/<paramref name="ranges"/> are the visible bodies; weight paint is stored
+	/// against the merge of every body (what Paint Weights paints on), so when a body is hidden the
+	/// weights are bound on that full merge and the visible bodies' rows sliced back out.
+	/// </summary>
+	public static SkinWeights BindLikeExport( PartStudio studio, PolyMesh mesh, List<BodyRange> ranges )
+	{
+		var rig = studio.Rig;
+		var paint = studio.WeightPaint is { Count: > 0 } p ? p : null;
+		if ( paint is null || mesh.VertexCount == 0 )
+			return SkinBinder.SmoothWeights( mesh, SkinBinder.BindBodies( mesh, ranges, studio.BodyBoneMap, rig ) );
+
+		var (full, fullRanges) = studio.ToMeshWithBodies();
+		var weights = SkinBinder.SmoothWeights( full, SkinBinder.BindBodies( full, fullRanges, studio.BodyBoneMap, rig ) );
+		paint.Apply( full, weights, rig, out _ );
+		if ( full.VertexCount == mesh.VertexCount ) return weights;
+
+		var byId = new Dictionary<string, BodyRange>( StringComparer.Ordinal );
+		foreach ( var r in fullRanges ) byId[r.BodyId] = r;
+		var visible = new SkinWeights();
+		foreach ( var r in ranges )
+		{
+			var src = byId[r.BodyId];
+			for ( int i = 0; i < r.Count; i++ ) visible.Vertices.Add( weights[src.Start + i] );
+		}
+		return visible;
 	}
 
 	/// <summary>Live panes: the extracted pieces of each body from earlier revisions, keyed by a hash of
