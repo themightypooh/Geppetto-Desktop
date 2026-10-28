@@ -129,6 +129,8 @@ public sealed class EffigySaveBridge : IDisposable
 				string? text = Serialize( session, path );
 				if ( text != null && File.ReadAllBytes( path ).AsSpan().SequenceEqual( new UTF8Encoding( false ).GetBytes( text ) ) )
 				{
+					// A mesh edit can change while the text stays the same: its mesh lives beside the file.
+					if ( session.Studio != null ) Effigy.MeshEditSidecar.Save( session.Studio, path );
 					session.MarkSaved( revision, state );
 					return new EffigySaveEntry( path, kind, EffigySaveOutcome.Unchanged );
 				}
