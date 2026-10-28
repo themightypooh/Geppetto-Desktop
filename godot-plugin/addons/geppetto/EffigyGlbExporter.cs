@@ -26,6 +26,10 @@ public partial class EffigyGlbExporter : RefCounted
 	/// <summary>Imports a .effigy (plus its companion .riganim clips) and writes it as .glb.</summary>
 	public static Error ExportEffigy( string effigyPath, string glbPath )
 	{
+		// An open document exports as it is in memory, unsaved model edits and take keys included.
+		string disk = System.IO.Path.GetFullPath( ProjectSettings.GlobalizePath( effigyPath ) );
+		foreach ( var doc in Geppetto.GeppettoDocument.All )
+			if ( doc.DiskPath == disk ) return Geppetto.AnimateExport.ExportGlb( doc, glbPath );
 		var importer = new EffigySceneImporter();
 		var root = importer._ImportScene( effigyPath, 0, new Godot.Collections.Dictionary() ) as Node;
 		if ( root == null )

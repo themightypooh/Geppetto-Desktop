@@ -165,13 +165,6 @@ public partial class GeppettoPlugin
 			case ("Animate", "Light"): return AddSceneNode( new OmniLight3D { Name = "Light", Position = new Vector3( 1, 2, 1 ) } );
 			case ("Animate", "Camera"): return AddSceneNode( new Camera3D { Name = "Camera", Position = new Vector3( 0, 1.5f, 3 ) } );
 
-			case ("Animate", "Export Animation…"):
-				if ( c == null ) return Need();
-				string glb = c.EffigyPath[..^".effigy".Length] + ".glb";
-				var err = EffigyGlbExporter.ExportEffigy( ProjectSettings.GlobalizePath( c.EffigyPath ), ProjectSettings.GlobalizePath( glb ) );
-				GD.Print( $"[Geppetto] Export Animation → {glb}: {err}" );
-				return true;
-
 			case ("Rig", "Rest"):
 				if ( c?.Skeleton == null || c.Rig == null ) return Need();
 				EffigyPoseBridge.ApplyRestPose( c.Rig, c.Skeleton );
