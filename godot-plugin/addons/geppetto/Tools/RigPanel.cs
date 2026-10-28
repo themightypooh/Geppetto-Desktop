@@ -65,6 +65,7 @@ public partial class RigPanel : EditorDock
 	}
 
 	/// <summary>The open panel's character, if any (the Add Bone tool's button text follows it).</summary>
+	internal static RigPanel? Shown => _instance != null && IsInstanceValid( _instance ) ? _instance : null;
 	public static void RefreshOpen() { if ( _instance != null && IsInstanceValid( _instance ) ) _instance.Rebuild(); }
 
 	public RigPanel()

@@ -85,10 +85,14 @@ public partial class GeppettoFeatureTree : EditorDock
 		DefaultSlot = DockSlot.RightUl;
 		Name = "GeppettoFeatures";
 
-		var box = new VBoxContainer { SizeFlagsVertical = SizeFlags.ExpandFill };
-		AddChild( box );
+		// A wrapped label with no width asks for one word per line, which made this dock ~1800 px tall and
+		// pushed the whole editor off screen: labels get a width and two lines, and the dock scrolls.
+		var scroll = new ScrollContainer { HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled, SizeFlagsVertical = SizeFlags.ExpandFill };
+		AddChild( scroll );
+		var box = new VBoxContainer { SizeFlagsVertical = SizeFlags.ExpandFill, SizeFlagsHorizontal = SizeFlags.ExpandFill };
+		scroll.AddChild( box );
 
-		_header = new Label { AutowrapMode = TextServer.AutowrapMode.WordSmart, Text = "Select a Geppetto character in the scene." };
+		_header = Wrapped( "Select a Geppetto character in the scene." );
 		box.AddChild( _header );
 
 		box.AddChild( new Label { Text = "Features", ThemeTypeVariation = "HeaderSmall" } );
@@ -100,7 +104,9 @@ public partial class GeppettoFeatureTree : EditorDock
 		_features.ItemEdited += OnRenamed;
 		box.AddChild( _features );
 
-		box.AddChild( new Label { Text = "Parts (pick the bodies a CAD tool works on; none = all)", AutowrapMode = TextServer.AutowrapMode.WordSmart, ThemeTypeVariation = "HeaderSmall" } );
+		var partsLabel = Wrapped( "Parts (pick the bodies a CAD tool works on; none = all)" );
+		partsLabel.ThemeTypeVariation = "HeaderSmall";
+		box.AddChild( partsLabel );
 		_parts = NewTree( Tree.SelectModeEnum.Multi );
 		_parts.MultiSelected += ( item, col, selected ) => { if ( !_filling ) CollectParts(); };
 		box.AddChild( _parts );
@@ -109,6 +115,14 @@ public partial class GeppettoFeatureTree : EditorDock
 		_menu.IdPressed += id => OnMenu( (Item)(int)id );
 		AddChild( _menu );
 	}
+
+	/// <summary>Wraps to at most two lines, then trims with the full text as a tooltip.</summary>
+	static Label Wrapped( string text ) => new()
+	{
+		Text = text, TooltipText = text, AutowrapMode = TextServer.AutowrapMode.WordSmart, MaxLinesVisible = 2,
+		TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis, CustomMinimumSize = new Vector2( 140, 0 ),
+		SizeFlagsHorizontal = SizeFlags.ExpandFill, MouseFilter = MouseFilterEnum.Pass,
+	};
 
 	static Tree NewTree( Tree.SelectModeEnum mode ) => new()
 	{
@@ -162,6 +176,7 @@ public partial class GeppettoFeatureTree : EditorDock
 		if ( doc == null )
 		{
 			_header.Text = "Select a Geppetto character in the scene to see its features.";
+			_header.TooltipText = _header.Text;
 			_filling = false;
 			return;
 		}
