@@ -52,6 +52,8 @@ public partial class EffigySceneImporter : EditorSceneFormatImporter
 
 			// Slot looks (`materiallook SLOT color=... rough=...`) win over resolver and palette, as in the desktop viewer.
 			var arrayMesh = EffigyMeshBridge.ToGodotArrayMesh( cpuMesh, resolver, studio.MaterialLooks, dir );
+			// Texture paint (Paint layers) bound on the slot materials as embedded ImageTextures, saved with the scene.
+			PaintShow.Apply( arrayMesh, cpuMesh, studio );
 			var meshInstance = new MeshInstance3D
 			{
 				Name = "Body",
