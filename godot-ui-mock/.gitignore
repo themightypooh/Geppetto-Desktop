@@ -1,0 +1,6 @@
+# Godot regenerates everything under .godot/ except the dock layout,
+# which is the point of this mock.
+.godot/*
+!.godot/editor/
+.godot/editor/*
+!.godot/editor/editor_layout.cfg

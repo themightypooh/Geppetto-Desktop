@@ -1,0 +1,56 @@
+[gd_scene load_steps=7 format=3]
+
+[sub_resource type="ProceduralSkyMaterial" id="sky_mat"]
+
+[sub_resource type="Sky" id="sky"]
+sky_material = SubResource("sky_mat")
+
+[sub_resource type="Environment" id="env"]
+background_mode = 2
+sky = SubResource("sky")
+ambient_light_source = 3
+tonemap_mode = 2
+
+[sub_resource type="PlaneMesh" id="floor_mesh"]
+size = Vector2(10, 10)
+
+[sub_resource type="CapsuleMesh" id="body_mesh"]
+radius = 0.35
+height = 1.8
+
+[sub_resource type="Animation" id="idle"]
+resource_name = "idle"
+
+[sub_resource type="AnimationLibrary" id="anims"]
+_data = {
+&"idle": SubResource("idle")
+}
+
+[node name="TestRoom" type="Node3D"]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("env")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.6428, -0.766, 0, 0.766, 0.6428, 0, 5, 0)
+shadow_enabled = true
+
+[node name="Floor" type="MeshInstance3D" parent="."]
+mesh = SubResource("floor_mesh")
+
+[node name="Character" type="Node3D" parent="."]
+
+[node name="Body" type="MeshInstance3D" parent="Character"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+mesh = SubResource("body_mesh")
+
+[node name="Skeleton3D" type="Skeleton3D" parent="Character"]
+
+[node name="AnimationPlayer" type="AnimationPlayer" parent="Character"]
+libraries = {
+&"": SubResource("anims")
+}
+
+[node name="Camera" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.98894, -0.14834, 0, 0.14834, 0.98894, 0, 1.6, 4)
+current = true
