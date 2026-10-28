@@ -172,13 +172,6 @@ public partial class GeppettoPlugin
 				GD.Print( $"[Geppetto] Export Animation → {glb}: {err}" );
 				return true;
 
-			case ("Rig", "Rest"):
-				if ( c?.Skeleton == null || c.Rig == null ) return Need();
-				EffigyPoseBridge.ApplyRestPose( c.Rig, c.Skeleton );
-				_autoKeyBaseline = ReadPose();
-				GD.Print( "[Geppetto] Rest pose applied" );
-				return true;
-
 		}
 		// Everything else lives in the per-workspace tool files (Tools/*.cs).
 		return GeppettoTools.TryRun( new GeppettoToolContext( this, c, ws, tool ) );
