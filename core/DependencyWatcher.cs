@@ -876,7 +876,7 @@ public sealed class DependencyWatcher : IDisposable
 				}
 
 				_reloadedStudio = detachedStudio;
-				var mesh = ViewportMesh.FromStudio( detachedStudio, 0, _session.SourcePath );
+				var mesh = CpuMesh.FromStudio( detachedStudio, 0, _session.SourcePath );
 				MarionettePlayer? player = null;
 				if ( mesh.Rig is { Count: > 0 } )
 				{
@@ -899,7 +899,7 @@ public sealed class DependencyWatcher : IDisposable
 				}
 
 				var imported = Effigy.FbxImport.Read( bytes );
-				var mesh = ViewportMesh.FromFbx( imported, 0, _session.SourcePath );
+				var mesh = CpuMesh.FromFbx( imported, 0, _session.SourcePath );
 				return Task.FromResult<RenderSnapshot?>( new RenderSnapshot( _session.DocumentId, job.CapturedRevision, mesh ) );
 			}
 		}

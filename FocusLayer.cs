@@ -41,7 +41,7 @@ public sealed class FocusLayer : LiveLayer
 
 	/// <summary>Which bodies a step's part name means: the body of that name (or id), else every body whose
 	/// name starts with it (an Import's pieces), ignoring case.</summary>
-	public static List<int> Match( ViewportMesh.BodyPickEntry[] picks, string name )
+	public static List<int> Match( CpuMesh.BodyPickEntry[] picks, string name )
 	{
 		var found = new List<int>();
 		if ( string.IsNullOrWhiteSpace( name ) || picks is null ) return found;

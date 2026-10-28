@@ -59,7 +59,7 @@ public static class HeadlessImageChecks
 	{
 		readonly List<float> _vertices = new();
 		readonly List<uint> _indices = new();
-		readonly List<ViewportMesh.DrawBatch> _batches = new();
+		readonly List<CpuMesh.DrawBatch> _batches = new();
 		public Fixture Quad(string name, Vector3 center, Vector3 right, Vector3 up, Vector3 normal, MaterialPalette.Entry material)
 		{
 			int offset = _indices.Count;
@@ -75,7 +75,7 @@ public static class HeadlessImageChecks
 					uv.X, uv.Y, tangent.X, tangent.Y, tangent.Z, 1f });
 			}
 			_indices.AddRange(new[] { first, first + 1, first + 2, first, first + 2, first + 3 });
-			_batches.Add(new ViewportMesh.DrawBatch(name, material, offset * sizeof(uint), 6));
+			_batches.Add(new CpuMesh.DrawBatch(name, material, offset * sizeof(uint), 6));
 			return this;
 		}
 		public ViewportMesh Mesh() => new()

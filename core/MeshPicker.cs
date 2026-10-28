@@ -107,7 +107,7 @@ public sealed class MeshPicker
 		for ( int i = 0; i < _parts.Count; i++ )
 		{
 			var (min, max) = Bounds( i, palette );
-			if ( !SkeletonOverlay.RayHitsAabb( origin, direction, min, max, out float enter ) || enter > nearest ) continue;
+			if ( !RayMath.RayHitsAabb( origin, direction, min, max, out float enter ) || enter > nearest ) continue;
 			var part = _parts[i];
 			for ( int t = 0; t < part.Triangles.Length; t += 3 )
 			{

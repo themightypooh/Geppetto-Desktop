@@ -30,7 +30,7 @@ public sealed class DocumentLoader
 	public Task Completion { get; private set; } = Task.CompletedTask;
 	public string Path { get; private set; }
 	public string Error { get; private set; }
-	public ViewportMesh Mesh { get; private set; }
+	public CpuMesh Mesh { get; private set; }
 	public MarionettePlayer Player { get; private set; }
 	public DocumentSession Session { get; private set; }
 	public RenderSnapshot Snapshot { get; private set; }

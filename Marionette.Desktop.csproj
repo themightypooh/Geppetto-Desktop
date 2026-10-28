@@ -27,13 +27,14 @@
   -->
   <ItemGroup>
     <ProjectReference Include="kernel/Effigy.Kernel.csproj" />
+    <ProjectReference Include="core/Geppetto.Core.csproj" />
     <!--
       tools/** holds standalone tools with their own project files (for example the
       local chat client). They must not be compiled into the desktop executable.
     -->
-    <Compile Remove="kernel/**;tests/**;tools/**;obj/**;bin/**" />
-    <EmbeddedResource Remove="kernel/**;tools/**" />
-    <None Remove="kernel/**;tools/**" />
+    <Compile Remove="core/**;kernel/**;tests/**;tools/**;obj/**;bin/**" />
+    <EmbeddedResource Remove="core/**;kernel/**;tools/**" />
+    <None Remove="core/**;kernel/**;tools/**" />
   </ItemGroup>
 
   <ItemGroup>

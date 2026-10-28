@@ -764,10 +764,10 @@ public static class ParametricEditService
 				);
 			}
 
-			ViewportMesh mesh;
+			CpuMesh mesh;
 			try
 			{
-				mesh = ViewportMesh.FromStudio( detachedStudio, loadSeconds: 0, sourcePath );
+				mesh = CpuMesh.FromStudio( detachedStudio, loadSeconds: 0, sourcePath );
 			}
 			catch ( Exception ex )
 			{

@@ -46,9 +46,9 @@ public sealed class MeshResourceBudget
 	/// <summary>Texture decodes performed so far. Frozen after upload; draws must not raise it.</summary>
 	public int DecodeCount { get; private set; }
 
-	internal void RecordLoad( double loadSeconds ) => LoadSeconds = loadSeconds;
+	public void RecordLoad( double loadSeconds ) => LoadSeconds = loadSeconds;
 
-	internal void RecordDecode( double seconds, int batchCount, long decodedBytes, int imageCount, int decodeCount )
+	public void RecordDecode( double seconds, int batchCount, long decodedBytes, int imageCount, int decodeCount )
 	{
 		DecodeSeconds = seconds;
 		BatchCount = batchCount;
@@ -57,7 +57,7 @@ public sealed class MeshResourceBudget
 		DecodeCount += decodeCount;
 	}
 
-	internal void RecordUpload( double seconds, long bytes, int textures )
+	public void RecordUpload( double seconds, long bytes, int textures )
 	{
 		UploadSeconds = seconds;
 		GpuTextureBytes = bytes;
@@ -66,7 +66,7 @@ public sealed class MeshResourceBudget
 		Interlocked.Add( ref _liveTextureBytes, bytes );
 	}
 
-	internal void RecordRelease()
+	public void RecordRelease()
 	{
 		Interlocked.Add( ref _liveTextures, -GpuTextureCount );
 		Interlocked.Add( ref _liveTextureBytes, -GpuTextureBytes );

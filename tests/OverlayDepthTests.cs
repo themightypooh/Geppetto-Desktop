@@ -56,7 +56,7 @@ internal static class OverlayDepthTests
 						gl.BindFramebuffer( FramebufferTarget.Framebuffer, target );
 						gl.Viewport( 0, 0, w, h );
 						renderer.Draw( mesh, null!, camera, w, h, 1, target );
-						overlay.Draw( viewProj, null!, ReadOnlySpan<Effigy.Xform>.Empty, Array.Empty<ViewportMesh.BodyPickEntry>() );
+						overlay.Draw( viewProj, null!, ReadOnlySpan<Effigy.Xform>.Empty, Array.Empty<CpuMesh.BodyPickEntry>() );
 						if ( samples > 0 )
 						{
 							gl.BindFramebuffer( FramebufferTarget.ReadFramebuffer, fbo );
@@ -110,7 +110,7 @@ internal static class OverlayDepthTests
 		return new ViewportMesh
 		{
 			Vertices = data, BaseVertices = (float[])data.Clone(), Indices = new uint[] { 0, 1, 2, 0, 2, 3 },
-			Batches = new[] { new ViewportMesh.DrawBatch( "wall", material, 0, 6 ) }, Centre = new Vector3( 0, 0, 25 ), Radius = 40, TriangleCount = 2,
+			Batches = new[] { new CpuMesh.DrawBatch( "wall", material, 0, 6 ) }, Centre = new Vector3( 0, 0, 25 ), Radius = 40, TriangleCount = 2,
 		};
 	}
 

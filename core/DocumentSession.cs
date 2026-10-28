@@ -60,7 +60,7 @@ public sealed class RenderSnapshot : IDisposable
 {
 	public string DocumentId { get; }
 	public long Revision { get; }
-	public ViewportMesh Mesh { get; }
+	public CpuMesh Mesh { get; }
 	public MarionettePlayer? Player { get; }
 	public double LoadSeconds { get; }
 	public double ExtractSeconds { get; }
@@ -78,7 +78,7 @@ public sealed class RenderSnapshot : IDisposable
 	/// alone cannot see them. See <see cref="DocumentSession.PaintFingerprint"/>.</summary>
 	public string? PaintFingerprint { get; }
 
-	public RenderSnapshot( string documentId, long revision, ViewportMesh mesh, MarionettePlayer? player = null,
+	public RenderSnapshot( string documentId, long revision, CpuMesh mesh, MarionettePlayer? player = null,
 		double loadSeconds = 0, double extractSeconds = 0, double totalSeconds = 0, string? cacheNote = null,
 		IReadOnlyList<PropScene>? props = null, IReadOnlyList<MaterialDiagnostic>? materialDiagnostics = null,
 		string? paintFingerprint = null )
@@ -285,16 +285,16 @@ public sealed class DocumentSession
 		string capturedDocId = DocumentId;
 		var sw = Stopwatch.StartNew();
 
-		ViewportMesh mesh;
+		CpuMesh mesh;
 		if ( SourceKind == DocumentSourceKind.Fbx )
 		{
 			if ( FbxSource is null ) throw new InvalidOperationException( "FBX session has no import data." );
-			mesh = ViewportMesh.FromFbx( FbxSource.Result, loadSeconds, SourcePath );
+			mesh = CpuMesh.FromFbx( FbxSource.Result, loadSeconds, SourcePath );
 		}
 		else
 		{
 			if ( Studio is null ) throw new InvalidOperationException( "Effigy session has no PartStudio." );
-			mesh = ViewportMesh.FromStudio( Studio, loadSeconds, SourcePath );
+			mesh = CpuMesh.FromStudio( Studio, loadSeconds, SourcePath );
 		}
 		// Snapshot construction runs on the loader worker: resolve and decode before GL upload.
 		// Explicit project overrides can call mesh.ApplyMaterials with their own resolver instead.
@@ -458,7 +458,7 @@ public sealed class DocumentSession
 		return sb.ToString();
 	}
 
-	void ApplyPaintTextures( ViewportMesh mesh, MaterialDescriptor?[] batchDescriptors )
+	void ApplyPaintTextures( CpuMesh mesh, MaterialDescriptor?[] batchDescriptors )
 	{
 		if ( Studio is null ) return;
 		var paintBySlot = new Dictionary<int, PaintCanvas>();
@@ -507,7 +507,7 @@ public sealed class DocumentSession
 					with { MetallicFactor = 1f };
 			}
 
-			mesh.Batches[i] = new ViewportMesh.DrawBatch( batch, descriptor, color, normal ?? batch.NormalImage,
+			mesh.Batches[i] = new CpuMesh.DrawBatch( batch, descriptor, color, normal ?? batch.NormalImage,
 				rough ?? batch.RoughnessImage, metal ?? batch.MetallicImage, batch.EmissionImage, batch.OcclusionImage );
 		}
 	}

@@ -19,7 +19,7 @@ public sealed class AiLivePreview : IDisposable
     readonly object gate = new();
     readonly CancellationTokenSource stop = new();
     readonly string root;
-    readonly ViewportMesh.PieceCache pieces = new();   // used only by the loader thread
+    readonly CpuMesh.PieceCache pieces = new();   // used only by the loader thread
     Update? pending;
     JsonObject? state;
     long seek, seekLoaded;      // replay: 0 follows the latest revision, N pins revision N
@@ -36,7 +36,7 @@ public sealed class AiLivePreview : IDisposable
         Completion = Task.Run(LoadLoop);
     }
     public static ViewportMesh EmptyMesh() => new() { Vertices = Array.Empty<float>(), Indices = Array.Empty<uint>(),
-        Batches = Array.Empty<ViewportMesh.DrawBatch>(), Radius = 1, BoundsMin = -Vector3.One, BoundsMax = Vector3.One };
+        Batches = Array.Empty<CpuMesh.DrawBatch>(), Radius = 1, BoundsMin = -Vector3.One, BoundsMax = Vector3.One };
     public Update? Take()
     {
         lock (gate) { var result = pending; pending = null; return result; }

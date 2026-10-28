@@ -34,7 +34,7 @@ internal static class PoseAgreementTests
 
 			var verts = new List<float>();
 			var idx = new List<uint>();
-			var batches = new List<ViewportMesh.DrawBatch>();
+			var batches = new List<CpuMesh.DrawBatch>();
 			var caster = new MaterialPalette.Entry( "caster", .82f, .10f, .10f, .85f );
 			var receiver = new MaterialPalette.Entry( "receiver", .55f, .55f, .55f, .9f );
 
@@ -60,10 +60,10 @@ internal static class PoseAgreementTests
 
 			int casterOffset = AddQuad( new Vector3( 0, 0, CasterZ ), new Vector3( Stride, 0, 0 ),
 				new Vector3( 0, Stride, 0 ), Vector3.UnitZ, 0 );
-			batches.Add( new ViewportMesh.DrawBatch( "caster", caster, casterOffset * sizeof( uint ), 6 ) );
+			batches.Add( new CpuMesh.DrawBatch( "caster", caster, casterOffset * sizeof( uint ), 6 ) );
 			int receiverOffset = AddQuad( new Vector3( 0, 0, ReceiverZ ), new Vector3( ReceiverHalf, 0, 0 ),
 				new Vector3( 0, ReceiverHalf, 0 ), Vector3.UnitZ, 1 );
-			batches.Add( new ViewportMesh.DrawBatch( "receiver", receiver, receiverOffset * sizeof( uint ), 6 ) );
+			batches.Add( new CpuMesh.DrawBatch( "receiver", receiver, receiverOffset * sizeof( uint ), 6 ) );
 
 			// CPU side: the same two quads as independently triangulated picker parts carrying the
 			// same per-vertex bone, so MeshPicker poses them with player.GpuBones exactly as the

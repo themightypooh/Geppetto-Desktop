@@ -27,7 +27,7 @@ public sealed class PropScene : IDisposable
 	public string Name { get; }
 	/// <summary>The ModelDoc the prop names, project-relative.</summary>
 	public string ModelPath { get; }
-	public ViewportMesh Mesh { get; }
+	public CpuMesh Mesh { get; }
 	/// <summary>Scale applied to the prop's mesh, from the ModelDoc import chain.</summary>
 	public float MeshScale { get; }
 	/// <summary>Whether the clip shows this prop.</summary>
@@ -35,7 +35,7 @@ public sealed class PropScene : IDisposable
 	/// <summary>What the prop's own material resolution had to say.</summary>
 	public IReadOnlyList<MaterialDiagnostic> Diagnostics { get; }
 
-	public PropScene( string name, string modelPath, ViewportMesh mesh, float meshScale, bool visible,
+	public PropScene( string name, string modelPath, CpuMesh mesh, float meshScale, bool visible,
 		IReadOnlyList<MaterialDiagnostic>? diagnostics = null )
 	{
 		Name = name;
@@ -139,7 +139,7 @@ public static class PropSceneBuilder
 				var meshAsset = paths.ResolveRead( meshReference, requireExists: true );
 				byte[] bytes = File.ReadAllBytes( meshAsset.CanonicalPath );
 				var imported = FbxImport.Read( bytes );
-				var mesh = ViewportMesh.FromFbx( imported, 0, meshAsset.CanonicalPath );
+				var mesh = CpuMesh.FromFbx( imported, 0, meshAsset.CanonicalPath );
 				// The prop's own ModelDoc says which .vmat each of its materials means.
 				var map = VmdlMaterialMap.ForModel( paths, model, documentId );
 				var resolver = map?.Resolver ?? new MaterialResolver( paths, documentId );

@@ -35,7 +35,7 @@ public sealed record SizeMeasurement(
 }
 
 /// <summary>Only run-owned native documents. No shell, reference import, or player-asset writes.</summary>
-public sealed class AiSuiteTools
+public sealed class AiSuiteTools : IRunPathOwner
 {
     public string Root { get; }
     public PartStudio Studio { get; internal set; } = new();

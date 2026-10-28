@@ -78,7 +78,7 @@ public static class ServeMode
 				return 1;
 			}
 		}
-		var mesh = options.WatchRun is not null || options.Empty ? AiLivePreview.EmptyMesh() : loader.Mesh;
+		ViewportMesh mesh = options.WatchRun is not null || options.Empty ? AiLivePreview.EmptyMesh() : (ViewportMesh)loader.Mesh;
 		var player = options.WatchRun is null && !options.Empty ? loader.Player : null;
 		// Lane E: the clip currently playing in this pane, if any — including one
 		// set with `clip` after load, so a live revision can re-apply it instead of
@@ -1253,7 +1253,7 @@ public static class ServeMode
 		if ( mesh.Rig is not null )
 			foreach ( var b in mesh.Rig.Bones ) bones.Add( new JsonObject { ["name"] = b.Name, ["parent"] = b.Parent } );
 		var bodies = new JsonArray();
-		foreach ( var b in mesh.BodyPicks ?? Array.Empty<ViewportMesh.BodyPickEntry>() )
+		foreach ( var b in mesh.BodyPicks ?? Array.Empty<CpuMesh.BodyPickEntry>() )
 			bodies.Add( new JsonObject { ["name"] = b.Name, ["bone"] = b.BoneName ?? "" } );
 		var materials = new JsonArray();
 		foreach ( var b in mesh.Batches ) materials.Add( b.MaterialName );

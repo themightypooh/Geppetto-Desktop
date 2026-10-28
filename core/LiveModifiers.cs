@@ -191,7 +191,7 @@ public sealed class MorphModifier : MeshModifier
 
 /// <summary>R9 item 2: an ordered modifier stack evaluated on the CPU before upload. The source mesh
 /// is never mutated; disabled modifiers are skipped; the result keeps the source's resolved
-/// materials (<see cref="ViewportMesh.Remesh"/>).</summary>
+/// materials (<see cref="CpuMesh.Remesh"/>).</summary>
 public sealed class ModifierStack
 {
 	public List<MeshModifier> Modifiers { get; } = new();
@@ -219,7 +219,7 @@ public sealed class ModifierStack
 	}
 
 	/// <summary>Evaluate on <paramref name="mesh"/>.SourceMesh and re-extract; returns <paramref name="mesh"/> when empty.</summary>
-	public ViewportMesh Apply( ViewportMesh mesh )
+	public CpuMesh Apply( CpuMesh mesh )
 	{
 		if ( IsEmpty ) return mesh;
 		if ( mesh.SourceMesh is null ) throw new InvalidOperationException( "Mesh has no retained source to modify." );
@@ -236,7 +236,7 @@ public sealed class ModifierStack
 	/// mesh as loaded, so `retopo,datatransfer` restores the original's data onto the LOD).</summary>
 	public static readonly string[] Kinds = { "subsurf", "decimate", "retopo", "smooth", "displace", "shrinkwrap", "morph", "datatransfer" };
 
-	public static ModifierStack FromSpec( string spec, ViewportMesh mesh )
+	public static ModifierStack FromSpec( string spec, CpuMesh mesh )
 	{
 		var stack = new ModifierStack();
 		float r = MathF.Max( 1e-3f, mesh.Radius );

@@ -495,7 +495,7 @@ internal static class DependencyWatcherTests
 	{
 		Vertices = Array.Empty<float>(),
 		Indices = Array.Empty<uint>(),
-		Batches = Array.Empty<ViewportMesh.DrawBatch>()
+		Batches = Array.Empty<CpuMesh.DrawBatch>()
 	};
 
 	static void Assert( bool condition, string message )

@@ -80,7 +80,7 @@ void main() {
 		Matrix4x4 viewProj,
 		Skeleton rig,
 		ReadOnlySpan<Xform> worldPose,
-		ViewportMesh.BodyPickEntry[] bodies,
+		CpuMesh.BodyPickEntry[] bodies,
 		(Vector3 Min, Vector3 Max)? selectedBounds = null,
 		IReadOnlyList<HandleGeometry>? handles = null )
 	{
@@ -300,7 +300,7 @@ void main() {
 	public static int PickBody(
 		Vector3 rayOrigin,
 		Vector3 rayDir,
-		ViewportMesh.BodyPickEntry[] bodies )
+		CpuMesh.BodyPickEntry[] bodies )
 	{
 		if ( bodies is null || bodies.Length == 0 ) return -1;
 		int best = -1;

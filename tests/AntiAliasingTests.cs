@@ -145,7 +145,7 @@ internal static class AntiAliasingTests
         var material = new MaterialPalette.Entry("edge",0,0,0,1,0,100,100,100);
         var data = vertices.ToArray();
         return new ViewportMesh { Vertices=data, BaseVertices=(float[])data.Clone(), Indices=new uint[]{0,1,2},
-            Batches=new[]{new ViewportMesh.DrawBatch("edge",material,0,3)}, Centre=Vector3.Zero,Radius=2,TriangleCount=1 };
+            Batches=new[]{new CpuMesh.DrawBatch("edge",material,0,3)}, Centre=Vector3.Zero,Radius=2,TriangleCount=1 };
     }
     static Vector2 Project(OrbitCamera c, Vector3 p,int w,int h)
     {

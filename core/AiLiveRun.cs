@@ -14,7 +14,7 @@ namespace Marionette.Desktop;
 public sealed class AiLiveRun
 {
     readonly object gate = new();
-    readonly AiSuiteTools owner;
+    readonly IRunPathOwner owner;
     readonly Action<string>? emit;
     long sequence, revision;
     JsonObject? current;
@@ -25,7 +25,7 @@ public sealed class AiLiveRun
     public string DocumentId { get; } = Guid.NewGuid().ToString("N");
     public long Revision => revision;
     public string? CurrentPath => current is null ? null : owner.Owned(current["path"]!.GetValue<string>());
-    public AiLiveRun(AiSuiteTools owner, Action<string>? emit = null)
+    public AiLiveRun(IRunPathOwner owner, Action<string>? emit = null)
     {
         this.owner = owner; this.emit = emit;
         Directory.CreateDirectory(owner.Owned(".live/revisions"));
