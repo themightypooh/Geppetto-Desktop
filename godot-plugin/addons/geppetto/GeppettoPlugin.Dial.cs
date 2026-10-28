@@ -179,9 +179,6 @@ public partial class GeppettoPlugin
 				GD.Print( "[Geppetto] Rest pose applied" );
 				return true;
 
-			case ("CAD", "Face Material"):
-				GD.Print( $"[Geppetto] Face Material: pick a material on the ring to apply {GeppettoDialState.Current?.Name}" );
-				return true;
 		}
 		// Everything else lives in the per-workspace tool files (Tools/*.cs).
 		return GeppettoTools.TryRun( new GeppettoToolContext( this, c, ws, tool ) );
@@ -290,16 +287,8 @@ public partial class GeppettoPlugin
 	{
 		// Only Face Material applies a material; elsewhere the pick just becomes the current material.
 		if ( GeppettoDialState.Workspace.Name != "CAD" || GeppettoDialData.Clean( GeppettoDialState.CurrentTool ) != "Face Material" ) return;
-		var mesh = _character?.Root.FindChildren( "*", nameof( MeshInstance3D ), true, false ).OfType<MeshInstance3D>().FirstOrDefault();
-		if ( mesh == null ) { Need(); return; }
-		var mat = EffigyMaterialBridge.ToGodotMaterial( m.Name, m.Look );
-		var ur = GetUndoRedo();
-		ur.CreateAction( $"Geppetto: material {m.Name}", UndoRedo.MergeMode.Disable, mesh );
-		ur.AddDoProperty( mesh, GeometryInstance3D.PropertyName.MaterialOverride, mat );
-		ur.AddUndoProperty( mesh, GeometryInstance3D.PropertyName.MaterialOverride, mesh.MaterialOverride );
-		ur.CommitAction();
-		// TODO: per-face assignment through the kernel's face-material feature; this sets the whole body.
-		GD.Print( $"[Geppetto] Face Material: {m.Name} on {mesh.Name} (whole body; per-face is TODO)" );
+		// Colours only the faces picked with the Face Material tool (Tools/CadPick.cs).
+		GeppettoTools.FaceMaterialPicked( m );
 	}
 
 	public override void _Process( double delta )
