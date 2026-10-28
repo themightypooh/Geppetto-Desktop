@@ -21,7 +21,9 @@ public sealed class GeppettoCharacter
 	public Node Root { get; }
 	public string EffigyPath { get; }                      // res://…
 	public Skeleton3D? Skeleton { get; }
-	public Skeleton? Rig { get; }
+	public Skeleton? Rig => Doc?.Studio.Rig;
+	/// <summary>The live, editable document behind this character (shared by every tool and the save hook).</summary>
+	public GeppettoDocument? Doc { get; }
 	public DocumentSession? ClipSession { get; private set; }
 	public EffigyAutoKey? AutoKey { get; private set; }
 	public RigAnimFile? Clip => ClipSession?.Clip;
@@ -30,7 +32,6 @@ public sealed class GeppettoCharacter
 	public int Fps => Clip is { FrameRate: > 0 } c ? c.FrameRate : 30;
 	public int FrameCount => Clip == null ? 60 : Math.Max( 60, Math.Max( Clip.FrameCount, Clip.LastFrame + 1 ) );
 
-	static readonly Dictionary<string, (DateTime Stamp, PartStudio Studio)> Studios = new();
 	static readonly Dictionary<string, (EffigySaveBridge Bridge, DocumentSession Clip, string Name, bool New)> Clips = new();
 
 	GeppettoCharacter( Node root, string path )
@@ -39,7 +40,7 @@ public sealed class GeppettoCharacter
 		EffigyPath = path;
 		Skeleton = root.FindChild( "Skeleton3D", true, false ) as Skeleton3D
 			?? root.FindChildren( "*", nameof( Skeleton3D ), true, false ).OfType<Skeleton3D>().FirstOrDefault();
-		try { Rig = LoadStudio( path )?.Rig; }
+		try { Doc = GeppettoDocument.Get( path ); }
 		catch ( Exception e ) { GD.PushWarning( $"[Geppetto] Could not rebuild {path}: {e.Message}" ); }
 	}
 
@@ -67,17 +68,6 @@ public sealed class GeppettoCharacter
 	static GeppettoCharacter Reuse( GeppettoCharacter? current, Node node, string path ) =>
 		current != null && current.Root == node && GodotObject.IsInstanceValid( node ) ? current : new GeppettoCharacter( node, path );
 
-	static PartStudio? LoadStudio( string resPath )
-	{
-		string disk = ProjectSettings.GlobalizePath( resPath );
-		var stamp = File.GetLastWriteTimeUtc( disk );
-		if ( Studios.TryGetValue( disk, out var hit ) && hit.Stamp == stamp ) return hit.Studio;
-		var studio = StudioDocument.ReadFile( disk );
-		studio.Rebuild();
-		Studios[disk] = ( stamp, studio );
-		return studio;
-	}
-
 	/// <summary>Opens (once per .effigy) the clip the Timeline and the key tools work on.</summary>
 	public bool EnsureClip()
 	{
@@ -86,8 +76,8 @@ public sealed class GeppettoCharacter
 		string disk = ProjectSettings.GlobalizePath( EffigyPath );
 		if ( !Clips.TryGetValue( disk, out var entry ) )
 		{
-			var studio = LoadStudio( EffigyPath ) ?? new PartStudio();
-			var bridge = new EffigySaveBridge( DocumentSession.CreateEffigy( disk, studio ) );
+			var studio = Doc!.Studio;
+			var bridge = Doc.Bridge;
 			string dir = Path.GetDirectoryName( disk ) ?? ".", baseName = Path.GetFileNameWithoutExtension( disk );
 			var existing = Directory.Exists( dir ) ? Directory.GetFiles( dir, baseName + "_*.riganim" ).OrderBy( f => f ).FirstOrDefault() : null;
 			if ( existing != null )

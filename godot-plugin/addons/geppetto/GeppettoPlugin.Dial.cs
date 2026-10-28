@@ -183,7 +183,8 @@ public partial class GeppettoPlugin
 				GD.Print( $"[Geppetto] Face Material: pick a material on the ring to apply {GeppettoDialState.Current?.Name}" );
 				return true;
 		}
-		return false;
+		// Everything else lives in the per-workspace tool files (Tools/*.cs).
+		return GeppettoTools.TryRun( new GeppettoToolContext( this, c, ws, tool ) );
 	}
 
 	bool Need()

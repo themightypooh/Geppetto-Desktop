@@ -55,6 +55,8 @@ public partial class GeppettoPlugin : EditorPlugin, ISerializationListener
 		GD.Print( $"[G1] exit marker={Marker}" );
 		_nudge?.QueueFree();
 		TeardownDial();
+		TeardownViewportTools();
+		GeppettoDocument.CloseAll();
 		if ( _sceneImporter != null )
 		{
 			RemoveSceneFormatImporterPlugin( _sceneImporter );
@@ -67,6 +69,7 @@ public partial class GeppettoPlugin : EditorPlugin, ISerializationListener
 		_sceneImporter = new EffigySceneImporter();
 		AddSceneFormatImporterPlugin( _sceneImporter );
 		SetupDial();
+		SetupViewportTools();
 
 		var kernels = AppDomain.CurrentDomain.GetAssemblies().Count( a => a.GetName().Name == "Effigy.Kernel" );
 		GD.Print( $"[G1] enter marker={Marker} kernelAssembliesLoaded={kernels} ALCs={AssemblyLoadContext.All.Count()} ws={Process.GetCurrentProcess().WorkingSet64 / 1048576}MB" );
