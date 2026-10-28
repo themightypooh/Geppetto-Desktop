@@ -182,7 +182,10 @@ public sealed class GeppettoDocument
 	static bool SameBones( Skeleton3D skel, Skeleton rig )
 	{
 		if ( skel.GetBoneCount() != rig.Count ) return false;
-		for ( int i = 0; i < rig.Count; i++ ) if ( skel.GetBoneName( i ) != rig.Bones[i].Name ) return false;
+		for ( int i = 0; i < rig.Count; i++ )
+			if ( skel.GetBoneName( i ) != rig.Bones[i].Name || skel.GetBoneParent( i ) != rig.Bones[i].Parent
+				|| !skel.GetBoneRest( i ).IsEqualApprox( EffigySkeletonBridge.TransformXform( rig.Bones[i].Local ) ) )
+				return false;   // a reparent or a moved joint needs the rebuild as much as an add
 		return true;
 	}
 

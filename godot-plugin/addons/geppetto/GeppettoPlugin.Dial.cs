@@ -172,13 +172,6 @@ public partial class GeppettoPlugin
 				GD.Print( $"[Geppetto] Export Animation → {glb}: {err}" );
 				return true;
 
-			case ("Rig", "Rest"):
-				if ( c?.Skeleton == null || c.Rig == null ) return Need();
-				EffigyPoseBridge.ApplyRestPose( c.Rig, c.Skeleton );
-				_autoKeyBaseline = ReadPose();
-				GD.Print( "[Geppetto] Rest pose applied" );
-				return true;
-
 			case ("CAD", "Face Material"):
 				GD.Print( $"[Geppetto] Face Material: pick a material on the ring to apply {GeppettoDialState.Current?.Name}" );
 				return true;
