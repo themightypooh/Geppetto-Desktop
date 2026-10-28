@@ -366,6 +366,29 @@ public static class EffigyMaterialBridge
 		return tex;
 	}
 
+	/// <summary>The folder a document's .vmat slots resolve against. s&amp;box writes them rooted at the
+	/// project's Assets folder (`material 0 materials/players/apron_blue.vmat`), so walk up from the
+	/// .effigy's folder to the first one holding a listed .vmat; the .effigy's folder when none does.</summary>
+	public static string MaterialRoot( string effigyDiskPath )
+	{
+		string dir = System.IO.Path.GetDirectoryName( System.IO.Path.GetFullPath( effigyDiskPath ) ) ?? "";
+		var vmats = new List<string>();
+		try
+		{
+			foreach ( var line in System.IO.File.ReadLines( effigyDiskPath ) )
+			{
+				if ( !line.StartsWith( "material ", StringComparison.Ordinal ) ) continue;
+				var parts = line.Split( ' ', 3 );
+				if ( parts.Length == 3 && parts[2].EndsWith( ".vmat", StringComparison.OrdinalIgnoreCase ) ) vmats.Add( parts[2].Trim() );
+			}
+		}
+		catch ( System.IO.IOException ) { return dir; }
+		for ( var d = new System.IO.DirectoryInfo( dir ); d != null; d = d.Parent )
+			foreach ( var v in vmats )
+				if ( System.IO.File.Exists( System.IO.Path.Combine( d.FullName, v ) ) ) return d.FullName;
+		return dir;
+	}
+
 	private static void BindTextureChannel( MaterialResolver resolver, MaterialDescriptor descriptor, MaterialChannel channel, Action<ImageTexture> apply )
 	{
 		var binding = descriptor.GetChannel( channel );

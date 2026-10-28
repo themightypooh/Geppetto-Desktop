@@ -371,6 +371,22 @@ public static class VmatParser
 				continue;
 			}
 
+			// s&box's built-in neutral maps (white colour, flat normal, white AO) live in the engine, not the
+			// project, and change nothing; skip them instead of warning that they can't be found.
+			if ( key.StartsWith( "Texture", StringComparison.OrdinalIgnoreCase ) &&
+				 val.Replace( '\\', '/' ).StartsWith( "materials/default/default_", StringComparison.OrdinalIgnoreCase ) )
+				continue;
+
+			// The flat colour s&box player/prop materials carry (`g_vColorTint "[r g b a]"`, sRGB as typed).
+			if ( key.Equals( "g_vColorTint", StringComparison.OrdinalIgnoreCase ) )
+			{
+				if ( TryVec3( val, out var tint ) )
+					descriptor = descriptor with { BaseColorFactor = new Vec4( tint.x, tint.y, tint.z, descriptor.BaseColorFactor.w ) };
+				continue;
+			}
+			if ( key.Equals( "g_flModelTintAmount", StringComparison.OrdinalIgnoreCase ) )
+				continue;
+
 			if ( key.Equals( "TextureColor", StringComparison.OrdinalIgnoreCase ) ||
 				 key.Equals( "g_tColor", StringComparison.OrdinalIgnoreCase ) ||
 				 key.Equals( "TextureBaseColor", StringComparison.OrdinalIgnoreCase ) ||

@@ -54,7 +54,7 @@ public sealed class EffigyLiveDocumentService : IDisposable
 		MaterialResolver? resolver = null;
 		if ( !string.IsNullOrEmpty( dir ) && Directory.Exists( dir ) )
 		{
-			resolver = new MaterialResolver( dir, Path.GetFileNameWithoutExtension( diskPath ) );
+			resolver = new MaterialResolver( EffigyMaterialBridge.MaterialRoot( diskPath ), Path.GetFileNameWithoutExtension( diskPath ) );
 		}
 
 		return new EffigyLiveDocumentService( session, resolver );

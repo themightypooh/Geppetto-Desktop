@@ -48,7 +48,7 @@ public partial class EffigySceneImporter : EditorSceneFormatImporter
 			if ( !string.IsNullOrEmpty( dir ) && Directory.Exists( dir ) )
 			{
 				string fullDir = Path.GetFullPath( dir );
-				resolver = new MaterialResolver( fullDir, Path.GetFileNameWithoutExtension( diskPath ) );
+				resolver = new MaterialResolver( EffigyMaterialBridge.MaterialRoot( diskPath ), Path.GetFileNameWithoutExtension( diskPath ) );
 			}
 
 			// Slot looks (`materiallook SLOT color=... rough=...`) win over resolver and palette, as in the desktop viewer.

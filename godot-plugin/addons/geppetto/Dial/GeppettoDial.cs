@@ -102,7 +102,11 @@ public partial class GeppettoDial : Control
 	{
 		_s = GeppettoDialState.Scale * EditorInterface.Singleton.GetEditorScale();
 		float margin = 14 * EditorInterface.Singleton.GetEditorScale(), rr = RPlate * _s;
-		var home = new Vector2( margin + rr, Size.Y - margin - rr );
+		// The part of this overlay actually inside the window: when the editor's docks need more height
+		// than the window has, the viewport runs past the bottom edge and a corner dial would be hidden.
+		var visible = GetGlobalTransformWithCanvas().AffineInverse() * (Vector2)GetWindow().Size;
+		var view = new Vector2( Mathf.Min( Size.X, visible.X ), Mathf.Min( Size.Y, visible.Y ) );
+		var home = new Vector2( margin + rr, view.Y - margin - rr );
 		var c = home + GeppettoDialState.Offset;
 		// Keep the whole plate on screen whatever the viewport size, and the material ring too while it
 		// is open (it reaches MatR1 up and right, and MatR1·cos(MatA0) left), so no tab or label is cut.
@@ -112,9 +116,17 @@ public partial class GeppettoDial : Control
 			left = Mathf.Max( rr, -MatR1 * Mathf.Cos( Mathf.DegToRad( MatA0 ) ) * _s );
 			top = right = MatR1 * _s;
 		}
-		c.X = Mathf.Clamp( c.X, left, Mathf.Max( left, Size.X - right ) );
-		c.Y = Mathf.Clamp( c.Y, top, Mathf.Max( top, Size.Y - rr ) );
+		c.X = Mathf.Clamp( c.X, left, Mathf.Max( left, view.X - right ) );
+		c.Y = Mathf.Clamp( c.Y, top, Mathf.Max( top, view.Y - rr ) );
 		_ctr = c;
+	}
+
+	/// <summary>The plate's bounds in global canvas coordinates (for the window-run on-screen check).</summary>
+	public Rect2 RingRectGlobal()
+	{
+		Layout();
+		float rr = RPlate * _s;
+		return new Rect2( GetGlobalTransformWithCanvas() * ( _ctr - new Vector2( rr, rr ) ), new Vector2( rr * 2, rr * 2 ) );
 	}
 
 	Vector2 P( float r, float deg ) => _ctr + _s * r * Dir( deg );

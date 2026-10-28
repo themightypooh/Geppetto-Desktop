@@ -102,6 +102,20 @@ public partial class GeppettoPlugin
 		if ( bad == 0 ) Note( $"{step}: no clipped text" );
 	}
 
+	/// <summary>Fails when the shown dial's ring is not inside the editor window, where Poo can see it.</summary>
+	void CheckDialOnScreen( string step )
+	{
+		var win = EditorInterface.Singleton.GetBaseControl().GetWindow();
+		var screen = new Rect2( Vector2.Zero, win.Size );
+		foreach ( var d in _dials.Where( d => IsInstanceValid( d ) && d.IsVisibleInTree() ) )
+		{
+			var ring = d.RingRectGlobal();
+			Note( $"{step}: dial ring {ring} in window {screen} (dial rect {d.GetGlobalRect()}, base {EditorInterface.Singleton.GetBaseControl().Size})", fail: !screen.Encloses( ring ) );
+			return;
+		}
+		Note( $"{step}: no dial shown", fail: true );
+	}
+
 	static IEnumerable<Control> Walk( Node n )
 	{
 		if ( n is Control c ) yield return c;
@@ -149,6 +163,7 @@ public partial class GeppettoPlugin
 			Note( $"open: {_character.EffigyPath}, {features0} features, dial visible={_dials.Any( d => d.Visible )}" );
 			Shot( "open" );
 			CheckClipping( "open" );
+			CheckDialOnScreen( "open" );
 
 			for ( int w = 0; w < GeppettoDialData.Workspaces.Length; w++ )
 			{
