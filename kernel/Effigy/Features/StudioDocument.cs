@@ -650,7 +650,13 @@ public static class StudioDocument
 
 	// --- reading ------------------------------------------------------------------------------
 
-	public static PartStudio ReadFile( string path ) => Read( File.ReadAllText( path ) );
+	public static PartStudio ReadFile( string path )
+	{
+		var studio = Read( File.ReadAllText( path ) );
+		// Mesh edits keep their meshes in the <name>.meshedit/ folder beside the file.
+		MeshEditSidecar.Load( studio, path );
+		return studio;
+	}
 
 	/// <summary>
 	/// Parse a document back into a studio. Throws with the line number on anything malformed.

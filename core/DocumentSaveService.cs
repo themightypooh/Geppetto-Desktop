@@ -295,6 +295,17 @@ public sealed class DocumentSaveService
 				return new SaveResult( SaveStatus.IoError, targetPath, capturedRevision, $"Atomic replace failed: {ex.Message}" );
 			}
 
+			// Mesh edits keep their meshes beside the document (<name>.meshedit/<id>.bin), as s&box does;
+			// the text file alone would reload them empty.
+			if ( ext == ".effigy" && studio != null )
+			{
+				try { MeshEditSidecar.Save( studio, targetPath ); }
+				catch ( Exception ex )
+				{
+					return new SaveResult( SaveStatus.IoError, targetPath, capturedRevision, $"Saving mesh edits failed: {ex.Message}" );
+				}
+			}
+
 			// 3. Post-save session updates
 			if ( isSaveAs )
 			{
