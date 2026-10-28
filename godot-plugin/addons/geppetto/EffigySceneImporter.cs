@@ -27,6 +27,7 @@ public partial class EffigySceneImporter : EditorSceneFormatImporter
 			// Godot hands us res:// paths; the kernel and System.IO need real absolute file paths.
 			string diskPath = Path.GetFullPath( ProjectSettings.GlobalizePath( path ) );
 			var studio = StudioDocument.ReadFile( diskPath );
+			ImportSidecar.Load( studio, diskPath ); // imported / Wearer meshes live beside the document
 			studio.Rebuild();
 
 			var cpuMesh = CpuMesh.FromStudio( studio, 0, diskPath );

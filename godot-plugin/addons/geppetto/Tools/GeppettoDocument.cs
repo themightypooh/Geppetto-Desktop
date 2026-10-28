@@ -60,7 +60,9 @@ public sealed class GeppettoDocument
 		string disk = Path.GetFullPath( path.StartsWith( "res://" ) || path.StartsWith( "user://" ) ? ProjectSettings.GlobalizePath( path ) : path );
 		if ( Open.TryGetValue( disk, out var doc ) ) return doc;
 		string res = path.StartsWith( "res://" ) ? path : ProjectSettings.LocalizePath( disk );
-		doc = new GeppettoDocument( res, disk, StudioDocument.ReadFile( disk ) );
+		var studio = StudioDocument.ReadFile( disk );
+		ImportSidecar.Load( studio, disk ); // imported / Wearer meshes live beside the document
+		doc = new GeppettoDocument( res, disk, studio );
 		Open[disk] = doc;
 		return doc;
 	}
