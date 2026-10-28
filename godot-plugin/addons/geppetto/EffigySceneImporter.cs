@@ -46,7 +46,8 @@ public partial class EffigySceneImporter : EditorSceneFormatImporter
 				resolver = new MaterialResolver( fullDir, Path.GetFileNameWithoutExtension( diskPath ) );
 			}
 
-			var arrayMesh = EffigyMeshBridge.ToGodotArrayMesh( cpuMesh, resolver );
+			// Slot looks (`materiallook SLOT color=... rough=...`) win over resolver and palette, as in the desktop viewer.
+			var arrayMesh = EffigyMeshBridge.ToGodotArrayMesh( cpuMesh, resolver, studio.MaterialLooks, dir );
 			var meshInstance = new MeshInstance3D
 			{
 				Name = "Body",

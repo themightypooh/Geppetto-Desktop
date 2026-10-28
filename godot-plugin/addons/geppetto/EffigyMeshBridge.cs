@@ -43,7 +43,10 @@ public static class EffigyMeshBridge
 	/// Converts a <see cref="CpuMesh"/> to a Godot <see cref="ArrayMesh"/>.
 	/// Each material batch creates one surface on the ArrayMesh.
 	/// </summary>
-	public static ArrayMesh ToGodotArrayMesh( CpuMesh mesh, MaterialResolver resolver = null )
+	/// <param name="looks">The document's slot looks (<c>studio.MaterialLooks</c>); a slot with a look uses it over the resolver/palette.</param>
+	/// <param name="baseDir">Directory that relative look map paths resolve against (the document's folder).</param>
+	public static ArrayMesh ToGodotArrayMesh( CpuMesh mesh, MaterialResolver resolver = null,
+		IReadOnlyDictionary<int, Effigy.SlotLook> looks = null, string baseDir = null )
 	{
 		ArgumentNullException.ThrowIfNull( mesh );
 		var arrayMesh = new ArrayMesh();
@@ -225,7 +228,7 @@ public static class EffigyMeshBridge
 			// Surface name and material
 			int surface = arrayMesh.GetSurfaceCount() - 1;
 			arrayMesh.SurfaceSetName( surface, batch.MaterialName ?? $"surface_{batchIndex}" );
-			arrayMesh.SurfaceSetMaterial( surface, EffigyMaterialBridge.ToGodotMaterial( batch, resolver ) );
+			arrayMesh.SurfaceSetMaterial( surface, EffigyMaterialBridge.ToGodotMaterial( batch, resolver, looks, baseDir ) );
 		}
 
 		return arrayMesh;
@@ -234,6 +237,7 @@ public static class EffigyMeshBridge
 	/// <summary>
 	/// Flat PBR factors from the batch (colour, roughness, metal, emission, alpha, sidedness).
 	/// </summary>
-	public static StandardMaterial3D ToGodotMaterial( in CpuMesh.DrawBatch batch, MaterialResolver resolver = null ) =>
-		EffigyMaterialBridge.ToGodotMaterial( batch, resolver );
+	public static StandardMaterial3D ToGodotMaterial( in CpuMesh.DrawBatch batch, MaterialResolver resolver = null,
+		IReadOnlyDictionary<int, Effigy.SlotLook> looks = null, string baseDir = null ) =>
+		EffigyMaterialBridge.ToGodotMaterial( batch, resolver, looks, baseDir );
 }
