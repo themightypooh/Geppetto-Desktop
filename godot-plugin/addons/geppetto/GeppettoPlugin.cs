@@ -19,6 +19,7 @@ public partial class GeppettoPlugin : EditorPlugin, ISerializationListener
 	static PartStudio _held;                       // a kernel object parked in a static, like a cache would be
 	static CancellationTokenSource _cts;
 	private EffigySceneImporter _sceneImporter;
+	GeppettoFeatureTree _featureTree;
 
 	public void OnBeforeSerialize()
 	{
@@ -56,6 +57,7 @@ public partial class GeppettoPlugin : EditorPlugin, ISerializationListener
 		_nudge?.QueueFree();
 		TeardownDial();
 		TeardownViewportTools();
+		if ( _featureTree != null ) { RemoveDock( _featureTree ); _featureTree.QueueFree(); _featureTree = null; }
 		GeppettoDocument.CloseAll();
 		if ( _sceneImporter != null )
 		{
@@ -70,6 +72,7 @@ public partial class GeppettoPlugin : EditorPlugin, ISerializationListener
 		AddSceneFormatImporterPlugin( _sceneImporter );
 		SetupDial();
 		SetupViewportTools();
+		AddDock( _featureTree = GeppettoFeatureTree.Create() );
 
 		var kernels = AppDomain.CurrentDomain.GetAssemblies().Count( a => a.GetName().Name == "Effigy.Kernel" );
 		GD.Print( $"[G1] enter marker={Marker} kernelAssembliesLoaded={kernels} ALCs={AssemblyLoadContext.All.Count()} ws={Process.GetCurrentProcess().WorkingSet64 / 1048576}MB" );
