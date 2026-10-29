@@ -44,7 +44,7 @@ public static partial class GeppettoTools
 			if ( ctx.Doc is not { } doc || ctx.Character is not { } c ) return ctx.Need();
 			RigPanel.Open( ctx.Plugin, c );
 			int sel = GeppettoRig.SelectedIndex( doc );
-			if ( sel < 0 ) return GeppettoRig.Refuse( "Delete: no bone is picked. Pick the bone in the Rig panel's tree first." );
+			if ( sel < 0 ) return PickBone( c, "Delete", "Click the bone to delete. Esc to cancel.", b => GeppettoRig.DeleteBone( doc, b ) );
 			GeppettoRig.DeleteBone( doc, sel );
 			return true;
 		} );
@@ -55,19 +55,9 @@ public static partial class GeppettoTools
 			if ( ctx.Doc is not { } doc || ctx.Character is not { } c ) return ctx.Need();
 			RigPanel.Open( ctx.Plugin, c );
 			if ( Active is RigBodyPickTool { Name: "Assign Body" } ) { Activate( null ); return true; }
-			int sel = GeppettoRig.SelectedIndex( doc );
-			if ( sel < 0 ) return GeppettoRig.Refuse( "Can't assign bodies: no bone is picked. Pick the bone in the Rig panel's tree first." );
-			Activate( new RigBodyPickTool( c, "Assign Body",
-				() => GeppettoRig.SelectedIndex( doc ) is var b && b >= 0
-					? $"Click bodies to assign to '{doc.Studio.Rig.Bones[b].Name}' — click again to unassign one. Esc when done."
-					: "No bone is picked any more. Pick one in the Rig panel's tree, or press Esc.",
-				body =>
-				{
-					int bone = GeppettoRig.SelectedIndex( doc );
-					if ( bone < 0 ) return GeppettoRig.Refuse( "Can't assign: no bone is picked. Pick the bone in the Rig panel's tree first." );
-					GeppettoRig.ToggleBody( doc, body.Id, bone );
-					return true;
-				} ) );
+			if ( GeppettoRig.SelectedIndex( doc ) < 0 )
+				return PickBone( c, "Assign Body", "Click the bone to assign bodies to. Esc to cancel.", _ => StartAssign( c, doc ) );
+			StartAssign( c, doc );
 			return true;
 		} );
 
@@ -76,7 +66,7 @@ public static partial class GeppettoTools
 			if ( ctx.Doc is not { } doc || ctx.Character is not { } c ) return ctx.Need();
 			RigPanel.Open( ctx.Plugin, c );
 			int sel = GeppettoRig.SelectedIndex( doc );
-			if ( sel < 0 ) return GeppettoRig.Refuse( "Mirror bones: no bone is picked. Pick the bone to mirror in the Rig panel's tree first." );
+			if ( sel < 0 ) return PickBone( c, "Mirror bones", "Click the bone to mirror (it and everything under it). Esc to cancel.", b => GeppettoRig.Mirror( doc, b ) );
 			GeppettoRig.Mirror( doc, sel );
 			return true;
 		} );
@@ -87,7 +77,7 @@ public static partial class GeppettoTools
 			if ( ctx.Doc is not { } doc || ctx.Character is not { } c ) return ctx.Need();
 			RigPanel.Open( ctx.Plugin, c );
 			int sel = GeppettoRig.SelectedIndex( doc );
-			if ( sel < 0 ) return GeppettoRig.Refuse( "Make Soft: no bone is picked. Pick the bone in the Rig panel's tree first." );
+			if ( sel < 0 ) return PickBone( c, "Make Soft", "Click the bone to make soft (or rigid again). Esc to cancel.", b => GeppettoRig.SetSoft( doc, b, doc.Studio.Rig.Bones[b].Soft == null ) );
 			GeppettoRig.SetSoft( doc, sel, doc.Studio.Rig.Bones[sel].Soft == null );
 			return true;
 		} );
@@ -95,10 +85,10 @@ public static partial class GeppettoTools
 		Register( "Rig", "Preview", ctx =>
 		{
 			if ( ctx.Doc is not { } doc || ctx.Character is not { } c ) return ctx.Need();
-			if ( Active is RigSoftPreview ) { Activate( null ); GeppettoToolContext.Say( "Soft preview off." ); return true; }
+			if ( Active is RigSoftPreview ) { Activate( null ); GeppettoToast.Info( "Soft preview off." ); return true; }
 			if ( doc.Studio.Rig.Count == 0 ) return GeppettoRig.Refuse( "Preview: there are no bones to swing yet. Place a bone first." );
 			Activate( new RigSoftPreview( c ) );
-			GeppettoToolContext.Say( SoftBoneCount( doc ) == 0
+			GeppettoToast.Info( SoftBoneCount( doc ) == 0
 				? "Soft preview on, but no bone is soft yet: pick a bone and press Make Soft to see it swing."
 				: "Soft preview on: the soft bones hang under gravity and lag behind the pose. Pose a bone (Animate → Rotate) or move the character to push them; Rest settles them." );
 			return true;
@@ -109,10 +99,28 @@ public static partial class GeppettoTools
 		Register( "Rig", "Rest", ctx =>
 		{
 			if ( ctx.Doc == null ) return ctx.Need();
-			if ( Active is not RigSoftPreview preview )
-				return GeppettoRig.Refuse( "Nothing to rest: the soft preview isn't running. Turn on Soft Preview first." );
-			preview.Rest();
-			GeppettoToolContext.Say( "Soft bones back on their pose." );
+			if ( Active is RigSoftPreview preview )
+			{
+				preview.Rest();
+				GeppettoToast.Info( "Soft bones back on their pose." );
+				return true;
+			}
+			// No preview running: put the skeleton itself back on its rest pose (what Rest means to an
+			// animator), so a posed character can be bound and checked from rest.
+			if ( ctx.Character?.Skeleton is not { } skel || !GodotObject.IsInstanceValid( skel ) ) return ctx.Need();
+			var before = new List<(Vector3 P, Quaternion R, Vector3 S)>();
+			for ( int i = 0; i < skel.GetBoneCount(); i++ ) before.Add( ( skel.GetBonePosePosition( i ), skel.GetBonePoseRotation( i ), skel.GetBonePoseScale( i ) ) );
+			var ur = EditorInterface.Singleton.GetEditorUndoRedo();
+			ur.CreateAction( "Geppetto: rest pose", UndoRedo.MergeMode.Disable, skel );
+			ur.AddDoMethod( skel, Skeleton3D.MethodName.ResetBonePoses );
+			for ( int i = 0; i < before.Count; i++ )
+			{
+				ur.AddUndoMethod( skel, Skeleton3D.MethodName.SetBonePosePosition, i, before[i].P );
+				ur.AddUndoMethod( skel, Skeleton3D.MethodName.SetBonePoseRotation, i, before[i].R );
+				ur.AddUndoMethod( skel, Skeleton3D.MethodName.SetBonePoseScale, i, before[i].S );
+			}
+			ur.CommitAction();
+			GeppettoToast.Info( "Rest: every bone is back on its rest pose (the soft preview isn't running, so that is what Rest did)." );
 			return true;
 		} );
 
@@ -159,6 +167,30 @@ public static partial class GeppettoTools
 		Register( "Rig", "Wrinkle Maps", ctx =>
 			GeppettoRig.Refuse( "Wrinkle Maps is an s&box .vmdl compile switch (crease textures baked by Compile .vmdl). "
 				+ "Poohdot has no .vmdl compile, so there is nothing for it to switch here." ) );
+	}
+
+	/// <summary>No bone picked in the tree: ask for a click on one in the viewport, then run the action on it.</summary>
+	static bool PickBone( GeppettoCharacter c, string tool, string prompt, Action<int> action )
+	{
+		if ( c.Doc!.Studio.Rig.Count == 0 ) return GeppettoRig.Refuse( $"{tool}: there are no bones yet. Add Bone or Bone from Part first." );
+		if ( Active is RigBonePickTool { } p && p.Name == tool ) { Activate( null ); return true; }
+		Activate( new RigBonePickTool( c, tool, prompt, action ) );
+		return true;
+	}
+
+	static void StartAssign( GeppettoCharacter c, GeppettoDocument doc )
+	{
+		Activate( new RigBodyPickTool( c, "Assign Body",
+			() => GeppettoRig.SelectedIndex( doc ) is var b && b >= 0
+				? $"Click bodies to assign to '{doc.Studio.Rig.Bones[b].Name}' - click again to unassign one. Esc when done."
+				: "No bone is picked any more. Pick one in the Rig panel's tree, or press Esc.",
+			body =>
+			{
+				int bone = GeppettoRig.SelectedIndex( doc );
+				if ( bone < 0 ) return GeppettoRig.Refuse( "Can't assign: no bone is picked. Pick the bone in the Rig panel's tree first." );
+				GeppettoRig.ToggleBody( doc, body.Id, bone );
+				return true;
+			} ) );
 	}
 
 	static int SoftBoneCount( GeppettoDocument doc ) => SoftSolver.SoftBones( doc.Studio.Rig ).Count();
@@ -531,7 +563,7 @@ public static class GeppettoRig
 
 		if ( findings.Count == 0 )
 		{
-			GeppettoToolContext.Say( "Check model: nothing to report. This is ready to be a playermodel." );
+			GeppettoToast.Info( "Check model: nothing to report. This is ready to be a playermodel." );
 			return findings;
 		}
 
@@ -543,7 +575,7 @@ public static class GeppettoRig
 
 		int problems = findings.Count( f => f.Severity == Playermodel.Severity.Problem );
 		int warnings = findings.Count( f => f.Severity == Playermodel.Severity.Warning );
-		GeppettoToolContext.Say( problems > 0
+		GeppettoToast.Info( problems > 0
 			? $"Check model: {problems} problem(s) would stop this working as a playermodel — see the Output panel. Worst: {findings[0].Problem}."
 			: warnings > 0
 				? $"Check model: it will work, but {warnings} thing(s) will look wrong — see the Output panel. First: {findings[0].Problem}."
