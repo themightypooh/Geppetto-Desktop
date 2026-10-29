@@ -144,7 +144,7 @@ public partial class GeppettoPlugin
 				GeppettoDialState.ReloadMaterials();
 				GeppettoToolContext.Say( $"Deleted {m.Name} (moved to {to})." );
 			}
-			catch ( Exception e ) { GD.PushWarning( $"[Geppetto] Couldn't delete {m.Name}: {e.Message}" ); }
+			catch ( Exception e ) { GeppettoToolContext.Warn( $"Couldn't delete {m.Name}: {e.Message}" ); }
 			d.QueueFree();
 		};
 		d.Canceled += d.QueueFree;

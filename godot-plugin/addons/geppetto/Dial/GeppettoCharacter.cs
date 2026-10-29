@@ -53,7 +53,7 @@ public sealed class GeppettoCharacter
 		Skeleton = root.FindChild( "Skeleton3D", true, false ) as Skeleton3D
 			?? root.FindChildren( "*", nameof( Skeleton3D ), true, false ).OfType<Skeleton3D>().FirstOrDefault();
 		try { Doc = GeppettoDocument.Get( path ); }
-		catch ( Exception e ) { GD.PushWarning( $"[Geppetto] Could not rebuild {path}: {e.Message}" ); }
+		catch ( Exception e ) { GeppettoToolContext.Warn( $"Could not rebuild {path}: {e.Message}" ); }
 	}
 
 	/// <summary>A character for an imported scene root and its .effigy without an editor selection
@@ -171,7 +171,7 @@ public sealed class GeppettoCharacter
 	{
 		if ( Clip == null || RigAssetPath() is not { } rig ) return;
 		try { Clip.UseRig( File.ReadAllText( rig ) ); }
-		catch ( Exception e ) { GD.PushWarning( $"[Geppetto] Could not read {rig}: {e.Message}" ); }
+		catch ( Exception e ) { GeppettoToolContext.Warn( $"Could not read {rig}: {e.Message}" ); }
 	}
 
 	/// <summary>Runs one edit on the take as one undo step: recorded in the take's history (so Ctrl+S saves
@@ -205,7 +205,7 @@ public sealed class GeppettoCharacter
 	{
 		if ( Doc == null ) return Array.Empty<string>();
 		try { return Doc.Studio.ToMeshWithBodies().Mesh.ValidMorphs.Select( m => m.Name ).Distinct().ToList(); }
-		catch ( Exception e ) { GD.PushWarning( $"[Geppetto] Could not read shape keys: {e.Message}" ); return Array.Empty<string>(); }
+		catch ( Exception e ) { GeppettoToolContext.Warn( $"Could not read shape keys: {e.Message}" ); return Array.Empty<string>(); }
 	}
 
 	/// <summary>The Body mesh under the character (where shape keys show).</summary>

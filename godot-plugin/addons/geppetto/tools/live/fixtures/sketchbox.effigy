@@ -1,0 +1,42 @@
+effigy 1
+rollback 2147483647
+feature PrimitiveFeature
+	id 32321f00
+	name Box 1
+	suppressed 0
+	visible 1
+	param Divisions 4
+	param InnerRadius 0.3
+	param Material 0
+	param Position 0 0 0
+	param Radius 0.5
+	param RotationAngle 0
+	param RotationAxis 0 0 1
+	param Scale 1 1 1
+	param Segments 16
+	param Shape 0
+	param SizeX 4
+	param SizeY 4
+	param SizeZ 4
+	param TubeRadius 0.5
+	param UniformScale 0
+end
+feature ProfileFeature
+	id c9b95989
+	name Profile body
+	suppressed 0
+	visible 1
+	param Along 0
+	param AlongDirection 0 0 1
+	param Caps 0
+	param Fit 0
+	param Front 0,4;8,6;20,6;30,5;34,3
+	param Material 0
+	param Midline 0
+	param Mirror 0
+	param Position 0 0 0
+	param Roll 0
+	param Sides 16
+	param Squareness 0.15
+	param Subdivide 0
+end

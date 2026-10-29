@@ -43,7 +43,7 @@ public static class AnimateExport
 			string name = Path.GetFileNameWithoutExtension( f );
 			if ( name.StartsWith( baseName + "_", StringComparison.OrdinalIgnoreCase ) ) name = name[( baseName.Length + 1 )..];
 			try { result[name] = open.TryGetValue( f, out var live ) ? live : RigAnimFile.ReadFile( f ); }
-			catch ( Exception e ) { GD.PushWarning( $"[Geppetto] Skipping take {f}: {e.Message}" ); }
+			catch ( Exception e ) { GeppettoToolContext.Warn( $"Skipping take {f}: {e.Message}" ); }
 		}
 		return result;
 	}

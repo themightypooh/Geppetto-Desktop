@@ -397,7 +397,7 @@ public partial class RigPanel : EditorDock
 
 	void ToggleAddBone()
 	{
-		if ( _character == null || Doc == null ) { GD.PushWarning( "[Geppetto] Select a Geppetto character (an imported .effigy scene) first." ); SyncAddBone(); return; }
+		if ( _character == null || Doc == null ) { GeppettoToolContext.Warn( "Select a Geppetto character (an imported .effigy scene) first." ); SyncAddBone(); return; }
 		if ( GeppettoTools.Active is RigBoneTool ) GeppettoTools.Activate( null );
 		else GeppettoTools.Activate( new RigBoneTool( _character ) );
 		SyncAddBone();

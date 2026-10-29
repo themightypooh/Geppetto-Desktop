@@ -50,7 +50,7 @@ public static class AnimateTools
 	/// <paramref name="revert"/> change the in-memory clip to match.</summary>
 	public static bool EditTake( GeppettoCharacter c, string label, Action<JsonObject> edit, Action<RigAnimFile>? apply = null, Action<RigAnimFile>? revert = null )
 	{
-		if ( !c.EnsureClip() || c.ClipSession?.Clip is not { } clip ) { GD.PushWarning( "[Geppetto] This character has no take to edit (it needs a rig)." ); return false; }
+		if ( !c.EnsureClip() || c.ClipSession?.Clip is not { } clip ) { GeppettoToolContext.Warn( "This character has no take to edit (it needs a rig)." ); return false; }
 		var s = c.ClipSession;
 		string oldJson = s.ClipSourceJson ?? RigAnimWriter.Write( clip );
 		var root = JsonNode.Parse( oldJson.TrimStart( '﻿' ) )?.AsObject() ?? new JsonObject();
@@ -73,8 +73,8 @@ public static class AnimateTools
 	/// <summary>Adds a Morph event (s&amp;box MorphEvent: MorphName, Value, FadeIn, FadeOut over a frame range).</summary>
 	public static bool AddMorphEvent( GeppettoCharacter c, RigMorphEvent e, string? name = null )
 	{
-		if ( string.IsNullOrWhiteSpace( e.Morph ) ) { GD.PushWarning( "[Geppetto] Morph event: pick a shape key." ); return false; }
-		if ( e.End < e.Start ) { GD.PushWarning( "[Geppetto] Morph event: the end frame is before the start frame." ); return false; }
+		if ( string.IsNullOrWhiteSpace( e.Morph ) ) { GeppettoToolContext.Warn( "Morph event: pick a shape key." ); return false; }
+		if ( e.End < e.Start ) { GeppettoToolContext.Warn( "Morph event: the end frame is before the start frame." ); return false; }
 		return EditTake( c, $"Geppetto: morph event {e.Morph}", root => List( root, "MorphEvents" ).Add( new JsonObject
 		{
 			["Name"] = name ?? e.Morph,
@@ -90,9 +90,9 @@ public static class AnimateTools
 	/// <summary>Adds a Spawn model event (s&amp;box RigEvent with PropModel, AttachBone, FollowBone, offsets).</summary>
 	public static bool AddSpawnEvent( GeppettoCharacter c, AnimateSpawnEvent e )
 	{
-		if ( string.IsNullOrWhiteSpace( e.Model ) ) { GD.PushWarning( "[Geppetto] Spawn model: choose the model to spawn." ); return false; }
-		if ( e.End < e.Start ) { GD.PushWarning( "[Geppetto] Spawn model: the end frame is before the start frame." ); return false; }
-		if ( !string.IsNullOrEmpty( e.Bone ) && !c.BoneNames.Contains( e.Bone ) ) { GD.PushWarning( $"[Geppetto] Spawn model: no bone {e.Bone}." ); return false; }
+		if ( string.IsNullOrWhiteSpace( e.Model ) ) { GeppettoToolContext.Warn( "Spawn model: choose the model to spawn." ); return false; }
+		if ( e.End < e.Start ) { GeppettoToolContext.Warn( "Spawn model: the end frame is before the start frame." ); return false; }
+		if ( !string.IsNullOrEmpty( e.Bone ) && !c.BoneNames.Contains( e.Bone ) ) { GeppettoToolContext.Warn( $"Spawn model: no bone {e.Bone}." ); return false; }
 		return EditTake( c, $"Geppetto: spawn {Path.GetFileName( e.Model )}", root => List( root, "Events" ).Add( new JsonObject
 		{
 			["Name"] = string.IsNullOrWhiteSpace( e.Name ) ? "Spawn" : e.Name,
@@ -141,9 +141,9 @@ public static class AnimateTools
 	/// names none. Scrubbing, IK and export then clamp that bone. One undo step.</summary>
 	public static bool SetJointLimit( GeppettoCharacter c, string bone, Vector3 min, Vector3 max )
 	{
-		if ( !c.EnsureClip() || c.Clip is not { } clip || c.Doc == null ) { GD.PushWarning( "[Geppetto] Joint limit: this character has no take (it needs a rig)." ); return false; }
-		if ( !c.BoneNames.Contains( bone ) ) { GD.PushWarning( $"[Geppetto] Joint limit: no bone {bone}." ); return false; }
-		if ( min.X > max.X || min.Y > max.Y || min.Z > max.Z ) { GD.PushWarning( "[Geppetto] Joint limit: a minimum is above its maximum." ); return false; }
+		if ( !c.EnsureClip() || c.Clip is not { } clip || c.Doc == null ) { GeppettoToolContext.Warn( "Joint limit: this character has no take (it needs a rig)." ); return false; }
+		if ( !c.BoneNames.Contains( bone ) ) { GeppettoToolContext.Warn( $"Joint limit: no bone {bone}." ); return false; }
+		if ( min.X > max.X || min.Y > max.Y || min.Z > max.Z ) { GeppettoToolContext.Warn( "Joint limit: a minimum is above its maximum." ); return false; }
 
 		string oldAsset = clip.RigAsset ?? "";
 		string? path = c.RigAssetPath();
@@ -190,7 +190,7 @@ public static class AnimateTools
 	{
 		var c = ctx.Character;
 		if ( c?.Skeleton == null ) return ctx.Need();
-		if ( !c.EnsureClip() ) { GD.PushWarning( "[Geppetto] Joint limit: this character has no take (it needs a rig)." ); return true; }
+		if ( !c.EnsureClip() ) { GeppettoToolContext.Warn( "Joint limit: this character has no take (it needs a rig)." ); return true; }
 		var selected = EditorInterface.Singleton.GetSelection().GetSelectedNodes().OfType<BoneAttachment3D>().FirstOrDefault()?.BoneName ?? c.IkEndBone();
 
 		var box = AnimateUi.Box( "Joint limit", "Set limit" );
@@ -245,7 +245,7 @@ public static class AnimateTools
 		}
 
 		var head = c.HeadBone();
-		if ( head == null ) { GD.PushWarning( "[Geppetto] First Person View: this character has no bones." ); return true; }
+		if ( head == null ) { GeppettoToolContext.Warn( "First Person View: this character has no bones." ); return true; }
 		var (attach, cam) = MakeFirstPerson( c.Skeleton, head );
 		ur.CreateAction( "Geppetto: First Person View", UndoRedo.MergeMode.Disable, root );
 		ur.AddDoMethod( c.Skeleton, Node.MethodName.AddChild, attach, true );
@@ -303,7 +303,7 @@ public static class AnimateTools
 	{
 		var c = ctx.Character;
 		if ( c?.Skeleton == null ) return ctx.Need();
-		if ( !c.EnsureClip() ) { GD.PushWarning( "[Geppetto] Spawn model: this character has no take (it needs a rig)." ); return true; }
+		if ( !c.EnsureClip() ) { GeppettoToolContext.Warn( "Spawn model: this character has no take (it needs a rig)." ); return true; }
 		int frame = GeppettoTimeline.CurrentFrame;
 
 		var box = AnimateUi.Box( "Spawn model", "Add event" );
@@ -357,8 +357,8 @@ public static class AnimateTools
 		var c = ctx.Character;
 		if ( c?.Skeleton == null ) return ctx.Need();
 		var morphs = c.MorphNames();
-		if ( morphs.Count == 0 ) { GD.PushWarning( "[Geppetto] Morph event: this model has no shape keys. Add one in the Model workspace (Shape Key) first." ); return true; }
-		if ( !c.EnsureClip() ) { GD.PushWarning( "[Geppetto] Morph event: this character has no take (it needs a rig)." ); return true; }
+		if ( morphs.Count == 0 ) { GeppettoToolContext.Warn( "Morph event: this model has no shape keys. Add one in the Model workspace (Shape Key) first." ); return true; }
+		if ( !c.EnsureClip() ) { GeppettoToolContext.Warn( "Morph event: this character has no take (it needs a rig)." ); return true; }
 		int frame = GeppettoTimeline.CurrentFrame;
 
 		var box = AnimateUi.Box( "Morph event", "Add event" );

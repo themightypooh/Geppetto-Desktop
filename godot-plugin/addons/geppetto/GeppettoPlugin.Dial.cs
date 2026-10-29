@@ -174,7 +174,7 @@ public partial class GeppettoPlugin
 
 	bool Need()
 	{
-		GD.PushWarning( "[Geppetto] Select a Geppetto character (an imported .effigy scene) first." );
+		GeppettoToolContext.Warn( "Select a Geppetto character (an imported .effigy scene) first." );
 		return true;
 	}
 
@@ -191,7 +191,7 @@ public partial class GeppettoPlugin
 		if ( !_toolbarButtons.TryGetValue( shortcut, out var b ) || !IsInstanceValid( b ) )
 		{
 			b = FindButton( EditorInterface.Singleton.GetBaseControl(), shortcut )!;
-			if ( b == null ) { GD.PushWarning( $"[Geppetto] No 3D toolbar button for {shortcut}" ); return true; }
+			if ( b == null ) { GeppettoToolContext.Warn( $"No 3D toolbar button for {shortcut}" ); return true; }
 			_toolbarButtons[shortcut] = b;
 		}
 		b.EmitSignal( BaseButton.SignalName.Pressed );
@@ -240,7 +240,7 @@ public partial class GeppettoPlugin
 		var c = _character;
 		if ( c?.Skeleton == null || c.Rig == null ) return Need();
 		_ikEnd = c.IkEndBone();
-		if ( _ikEnd == null ) { GD.PushWarning( "[Geppetto] Two-bone IK needs a bone with a parent and a grandparent." ); return true; }
+		if ( _ikEnd == null ) { GeppettoToolContext.Warn( "Two-bone IK needs a bone with a parent and a grandparent." ); return true; }
 		ClearIk();
 		var skel = c.Skeleton;
 		var at = skel.GlobalTransform * skel.GetBoneGlobalPose( skel.FindBone( _ikEnd ) ).Origin;

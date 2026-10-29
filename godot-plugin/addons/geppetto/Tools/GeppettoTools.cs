@@ -33,11 +33,20 @@ public sealed class GeppettoToolContext
 	/// <summary>Warns that the tool needs a character and returns true (the tool did run, it just had nothing to act on).</summary>
 	public bool Need()
 	{
-		GD.PushWarning( "[Geppetto] Select a Geppetto character (an imported .effigy scene) first." );
+		Warn( "Select a Geppetto character (an imported .effigy scene) first." );
 		return true;
 	}
 
 	public static void Say( string message ) => GD.Print( $"[Geppetto] {message}" );
+
+	/// <summary>Why a tool refused or what went wrong: a warning in Output and a toast in the editor, so a
+	/// click that does nothing says why where the user is looking instead of only in the console.</summary>
+	public static void Warn( string message )
+	{
+		GD.PushWarning( $"[Geppetto] {message}" );
+		if ( !Engine.IsEditorHint() || EditorInterface.Singleton == null ) return;
+		Callable.From( () => EditorInterface.Singleton.GetEditorToaster()?.PushToast( message, EditorToaster.Severity.Warning ) ).CallDeferred();
+	}
 }
 
 /// <summary>

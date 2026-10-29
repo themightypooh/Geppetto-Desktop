@@ -452,7 +452,7 @@ public sealed class GeppettoModelEdit
 	{
 		LastMessage = message;
 		LastRefused = true;
-		GD.PushWarning( $"[Geppetto] {message}" );
+		GeppettoToolContext.Warn( $"{message}" );
 	}
 
 	/// <summary>A kernel refusal as a sentence: ArgumentException's "(Parameter 'x')" means nothing to the reader.</summary>

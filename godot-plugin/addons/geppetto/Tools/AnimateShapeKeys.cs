@@ -39,7 +39,7 @@ public partial class AnimateShapeKeys : VBoxContainer
 	/// (a Morph track key; its weight is the key's Scale.x). One undo step.</summary>
 	public static bool KeyWeight( GeppettoCharacter c, string morph, int frame, float weight )
 	{
-		if ( !c.EnsureClip() || c.ClipSession == null ) { GD.PushWarning( "[Geppetto] Shape key: this character has no take (it needs a rig)." ); return false; }
+		if ( !c.EnsureClip() || c.ClipSession == null ) { GeppettoToolContext.Warn( "Shape key: this character has no take (it needs a rig)." ); return false; }
 		weight = Math.Clamp( weight, 0f, 1f );
 		var pose = new RigPose( Vec3.Zero, Quat.Identity, new Vec3( weight, weight, weight ) );
 		var cmd = ClipEditService.BuildInsertOrReplaceKey( c.ClipSession, RigTrackKind.Morph, morph, frame, pose );

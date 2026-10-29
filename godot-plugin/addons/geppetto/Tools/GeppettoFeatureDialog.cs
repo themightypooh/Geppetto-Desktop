@@ -58,12 +58,21 @@ public partial class GeppettoFeatureDialog : ConfirmationDialog
 
 	public Feature Feature => _feature;
 
+	ScrollContainer? _scroll;
+	string _shown = "";
+
+	/// <summary>The parameters showing, so a choice that swaps them (a Primitive's Shape) rebuilds the rows.</summary>
+	string ParamKey() => string.Join( "|", _feature.Parameters.Concat( _feature.AdvancedParameters ).Select( p => p.Label ) );
+
 	void Build()
 	{
+		_scroll?.QueueFree();
+		_shown = ParamKey();
 		var scroll = new ScrollContainer { CustomMinimumSize = new Vector2( 400, 0 ), HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled };
 		var box = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
 		scroll.AddChild( box );
 		AddChild( scroll );
+		_scroll = scroll;
 
 		var nameEdit = new LineEdit { Text = _feature.Name ?? _feature.TypeName, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
 		nameEdit.TextChanged += t => _feature.Name = t;
@@ -71,7 +80,23 @@ public partial class GeppettoFeatureDialog : ConfirmationDialog
 
 		var advanced = _feature.AdvancedParameters.ToHashSet();
 		foreach ( var p in _feature.Parameters.Where( p => !advanced.Contains( p ) ) )
+		{
+			// A plane built from a picked face ignores its From choice, so showing "Top (XY)" there
+			// said the face had been dropped. Say what it is on instead.
+			if ( _feature is PlaneFeature { Face: not null } onFace && p == onFace.Base )
+			{
+				box.AddChild( Row( p.Label, new Label { Text = "The picked face", VerticalAlignment = VerticalAlignment.Center } ) );
+				continue;
+			}
+			// The kernel's Sketch choice is a placeholder with one empty option; the real reference is
+			// SketchFeatureId. Show the sketches instead (s&amp;box's EffigySketchSelector).
+			if ( _feature is SketchConsumingFeature consumer && p == consumer.Sketch )
+			{
+				box.AddChild( Row( p.Label, SketchPicker( consumer ) ) );
+				continue;
+			}
 			if ( Editor( p ) is { } c ) box.AddChild( Row( p, c ) );
+		}
 
 		if ( advanced.Count > 0 )
 		{
@@ -86,6 +111,26 @@ public partial class GeppettoFeatureDialog : ConfirmationDialog
 
 		int rows = box.GetChildCount();
 		scroll.CustomMinimumSize = new Vector2( 400, Math.Min( 560, 36 * rows + 8 ) );
+	}
+
+	Control SketchPicker( SketchConsumingFeature consumer )
+	{
+		var sketches = _doc.Studio.Features.OfType<SketchFeature>().Where( f => !f.Suppressed ).ToList();
+		if ( sketches.Count == 0 )
+			return new Label { Text = "None yet: draw a Sketch first", VerticalAlignment = VerticalAlignment.Center };
+		var o = new OptionButton { FitToLongestItem = true };
+		foreach ( var f in sketches ) o.AddItem( string.IsNullOrEmpty( f.Name ) ? f.TypeName : f.Name );
+		o.Selected = sketches.FindIndex( f => f.Id == _doc.Studio.ResolveSketchFeatureId( consumer ) );
+		o.ItemSelected += idx =>
+		{
+			if ( consumer.SketchFeatureId == sketches[(int)idx].Id ) return;
+			consumer.SketchFeatureId = sketches[(int)idx].Id;
+			// Picked regions are points in the old sketch's plane: meaningless in another one.
+			consumer.RegionSeeds.Clear();
+			if ( consumer is ExtrudeFeature ef ) ef.Faces.Clear();
+			Preview();
+		};
+		return o;
 	}
 
 	static Control Row( IParam p, Control editor ) =>
@@ -114,6 +159,23 @@ public partial class GeppettoFeatureDialog : ConfirmationDialog
 				if ( f.Max < float.MaxValue / 2 ) s.MaxValue = f.Max;
 				s.Value = f.Value;
 				s.ValueChanged += v => { f.Value = (float)v; f.Expr = null!; Preview(); };
+				// Typed input: the internal LineEdit is created lazily, so hook TextSubmitted when it appears.
+				Action hook = null!;
+				hook = () =>
+				{
+					foreach ( var le in EnumerateLineEdits( s ) )
+					{
+						if ( le.HasMeta( "g_hooked" ) ) continue;
+						le.SetMeta( "g_hooked", true );
+						le.TextSubmitted += t =>
+						{
+							if ( float.TryParse( t, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v ) )
+							{ f.Value = v; f.Expr = null!; s.Value = v; Preview(); }
+						};
+					}
+				};
+				hook();
+				s.ValueFocusEntered += () => hook();
 				return s;
 			}
 			case IntParam i:
@@ -170,10 +232,24 @@ public partial class GeppettoFeatureDialog : ConfirmationDialog
 		return null;
 	}
 
+	static IEnumerable<LineEdit> EnumerateLineEdits( Node root )
+	{
+		foreach ( Node c in root.GetChildren() )
+		{
+			if ( c is LineEdit le ) yield return le;
+			foreach ( var x in EnumerateLineEdits( c ) ) yield return x;
+		}
+	}
+
 	static float Get( Vec3 v, int a ) => a == 0 ? v.x : a == 1 ? v.y : v.z;
 	static Vec3 Set( Vec3 v, int a, float x ) => a == 0 ? new Vec3( x, v.y, v.z ) : a == 1 ? new Vec3( v.x, x, v.z ) : new Vec3( v.x, v.y, x );
 
-	void Preview() => _doc.Refresh();
+	void Preview()
+	{
+		_doc.Studio.MarkDirty( _feature );
+		_doc.Refresh();
+		if ( ParamKey() != _shown ) Callable.From( () => { if ( IsInstanceValid( this ) && !_done ) { Build(); ResetSize(); } } ).CallDeferred();
+	}
 
 	void Commit()
 	{
@@ -192,8 +268,8 @@ public partial class GeppettoFeatureDialog : ConfirmationDialog
 			var before = _before;
 			var f = _feature;
 			_doc.Execute( new DelegateEditCommand( $"Edit {f.TypeName} '{f.Name}'",
-				execute: () => after.Restore( f ),
-				undo: () => before.Restore( f ),
+				execute: () => { after.Restore( f ); studio.MarkDirty( f ); },
+				undo: () => { before.Restore( f ); studio.MarkDirty( f ); },
 				isNoOp: () => after.SameAs( before ) ) );
 		}
 		_closed?.Invoke( true );
@@ -205,7 +281,7 @@ public partial class GeppettoFeatureDialog : ConfirmationDialog
 		if ( _done ) return;
 		_done = true;
 		if ( _isNew ) _doc.Studio.Remove( _feature );
-		else _before.Restore( _feature );
+		else { _before.Restore( _feature ); _doc.Studio.MarkDirty( _feature ); }
 		_doc.Refresh();
 		_closed?.Invoke( false );
 		QueueFree();
@@ -217,10 +293,16 @@ public sealed class ParamSnapshot
 {
 	readonly List<(IParam P, object V)> _values = new();
 	string? _name;
+	// What a sketch-consuming feature builds from: not parameters, but Cancel has to put them back too.
+	string? _sketchId;
+	List<Vec2>? _seeds;
+	List<FaceRef>? _faces;
 
 	public static ParamSnapshot Take( Feature f )
 	{
 		var s = new ParamSnapshot { _name = f.Name };
+		if ( f is SketchConsumingFeature c ) { s._sketchId = c.SketchFeatureId; s._seeds = c.RegionSeeds.ToList(); }
+		if ( f is ExtrudeFeature ef ) s._faces = ef.Faces.ToList();
 		foreach ( var p in f.Parameters.Concat( f.AdvancedParameters ).Distinct() )
 			s._values.Add( ( p, p switch
 			{
@@ -239,6 +321,17 @@ public sealed class ParamSnapshot
 	public void Restore( Feature f )
 	{
 		f.Name = _name;
+		if ( f is SketchConsumingFeature c && _seeds != null )
+		{
+			c.SketchFeatureId = _sketchId ?? "";
+			c.RegionSeeds.Clear();
+			c.RegionSeeds.AddRange( _seeds );
+		}
+		if ( f is ExtrudeFeature ef && _faces != null )
+		{
+			ef.Faces.Clear();
+			ef.Faces.AddRange( _faces );
+		}
 		foreach ( var (p, v) in _values )
 			switch ( p )
 			{
@@ -253,7 +346,7 @@ public sealed class ParamSnapshot
 	}
 
 	public bool SameAs( ParamSnapshot o ) =>
-		_name == o._name && _values.Count == o._values.Count &&
+		_name == o._name && _sketchId == o._sketchId && ( _seeds ?? new() ).SequenceEqual( o._seeds ?? new() ) && _values.Count == o._values.Count &&
 		_values.Zip( o._values ).All( z => z.First.V is List<string> a && z.Second.V is List<string> b ? a.SequenceEqual( b ) : Equals( z.First.V, z.Second.V ) );
 }
 #endif

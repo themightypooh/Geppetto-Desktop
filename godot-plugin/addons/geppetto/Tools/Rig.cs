@@ -197,7 +197,7 @@ public static class GeppettoRig
 	/// refused. Same wording s&amp;box's Refuse put in its prompt.</summary>
 	public static bool Refuse( string message )
 	{
-		GD.PushWarning( $"[Geppetto] {message}" );
+		GeppettoToolContext.Warn( $"{message}" );
 		return true;
 	}
 

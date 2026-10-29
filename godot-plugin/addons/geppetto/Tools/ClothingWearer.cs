@@ -38,7 +38,7 @@ public static class ClothingWearer
 		dialog.FileSelected += path =>
 		{
 			var message = LoadFromResource( doc, path );
-			if ( message.StartsWith( "!" ) ) GD.PushWarning( $"[Geppetto] {message[1..]}" );
+			if ( message.StartsWith( "!" ) ) GeppettoToolContext.Warn( $"{message[1..]}" );
 			else GeppettoToolContext.Say( message );
 			dialog.QueueFree();
 		};

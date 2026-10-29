@@ -316,7 +316,7 @@ public sealed class PaintWeightsTool : IGeppettoViewportTool
 
 	static bool Refuse( string message )
 	{
-		GD.PushWarning( $"[Geppetto] {message}" );
+		GeppettoToolContext.Warn( $"{message}" );
 		return false;
 	}
 }

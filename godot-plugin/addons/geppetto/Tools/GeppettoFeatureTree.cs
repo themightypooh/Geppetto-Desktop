@@ -76,7 +76,7 @@ public partial class GeppettoFeatureTree : EditorDock
 	GeppettoDocument? Doc => _character?.Doc;
 	bool _filling;
 
-	enum Item { Edit, Rename, Suppress, Hide, MoveUp, MoveDown, Delete }
+	enum Item { Edit, EditSketch, Rename, Suppress, Hide, MoveUp, MoveDown, Delete }
 
 	public GeppettoFeatureTree()
 	{
@@ -251,7 +251,15 @@ public partial class GeppettoFeatureTree : EditorDock
 	void EditFeature( Feature f )
 	{
 		if ( Doc is not { } doc ) return;
+		// A drawn sketch opens in the viewport, where its curves are; a script sketch (Curves text) and
+		// its plane / offset still edit in the settings box (Edit... in the menu).
+		if ( f is SketchFeature sk && CadSketch.CanEdit( sk ) && _character != null ) { EditSketch( sk ); return; }
 		GeppettoFeatureDialog.ShowEdit( doc, f );
+	}
+
+	void EditSketch( SketchFeature f )
+	{
+		if ( Doc is { } doc && _character != null ) new CadSketch( doc ).StartEdit( _character, f );
 	}
 
 	void ShowMenu( Vector2 pos )
@@ -260,6 +268,7 @@ public partial class GeppettoFeatureTree : EditorDock
 		int at = doc.Studio.Features.IndexOf( f );
 		_menu.Clear();
 		_menu.AddItem( "Edit...", (int)Item.Edit );
+		if ( f is SketchFeature sk && CadSketch.CanEdit( sk ) ) _menu.AddItem( "Edit sketch", (int)Item.EditSketch );
 		_menu.AddItem( "Rename", (int)Item.Rename );
 		_menu.AddItem( f.Suppressed ? "Unsuppress" : "Suppress", (int)Item.Suppress );
 		_menu.AddItem( f.Visible ? "Hide" : "Show", (int)Item.Hide );
@@ -280,7 +289,8 @@ public partial class GeppettoFeatureTree : EditorDock
 		if ( Selected() is not { } f || Doc is not { } doc ) return;
 		switch ( item )
 		{
-			case Item.Edit: EditFeature( f ); break;
+			case Item.Edit: GeppettoFeatureDialog.ShowEdit( doc, f ); break;
+			case Item.EditSketch: if ( f is SketchFeature sk ) EditSketch( sk ); break;
 			case Item.Rename:
 				var row = _features.GetSelected();
 				row.SetText( 0, f.Name ?? f.TypeName );

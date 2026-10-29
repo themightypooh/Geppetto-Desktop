@@ -1,0 +1,10 @@
+[gd_scene format=3 uid="uid://02u017ys3cwj"]
+
+[ext_resource type="PackedScene" uid="uid://dxicwtc2f8i05" path="res://characters/sketchbox.effigy" id="1"]
+
+[node name="SketchTest" type="Node3D" unique_id=419778410]
+
+[node name="Sun" type="DirectionalLight3D" parent="." unique_id=1131826287]
+transform = Transform3D(1, 0, 0, 0, 0.5, 0.866, 0, -0.866, 0.5, 0, 4, 0)
+
+[node name="Character" parent="." unique_id=121828159 instance=ExtResource("1")]

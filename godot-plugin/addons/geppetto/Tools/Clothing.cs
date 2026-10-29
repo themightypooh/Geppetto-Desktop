@@ -84,19 +84,19 @@ public static class ClothingTools
 		switch ( f )
 		{
 			case GarmentFeature when studio.Rig == null || studio.Rig.Count == 0:
-				GD.PushWarning( "[Geppetto] Garment: a garment needs a rig to find the torso and arms - load a Wearer first (Clothing > Wearer). It will show an error until then." );
+				GeppettoToolContext.Warn( "Garment: a garment needs a rig to find the torso and arms - load a Wearer first (Clothing > Wearer). It will show an error until then." );
 				break;
 			case GarmentFeature when WearerBodyIds( studio ).Count == 0:
-				GD.PushWarning( "[Geppetto] Garment: no Wearer loaded, so it is cut from every body in the document. Load a Wearer first to dress a body." );
+				GeppettoToolContext.Warn( "Garment: no Wearer loaded, so it is cut from every body in the document. Load a Wearer first to dress a body." );
 				break;
 			case FurFeature when !hasGarment:
-				GD.PushWarning( "[Geppetto] Fur grows on garments - add a Garment first, or it has nothing to grow on." );
+				GeppettoToolContext.Warn( "Fur grows on garments - add a Garment first, or it has nothing to grow on." );
 				break;
 			case FurFeature:
 				GeppettoToolContext.Say( "Fur: no faces picked, so it covers every garment. Set Coverage to 'Trim the openings' for collar/cuff fur." );
 				break;
 			case TrimFeature or FabricFeature or GarmentDetailFeature when !hasGarment:
-				GD.PushWarning( $"[Geppetto] {f.TypeName} goes on a garment - add a Garment first." );
+				GeppettoToolContext.Warn( $"{f.TypeName} goes on a garment - add a Garment first." );
 				break;
 		}
 
@@ -132,7 +132,7 @@ public static class ClothingTools
 		var garments = ShapeableGarments( doc.Studio );
 		if ( garments.Count == 0 )
 		{
-			GD.PushWarning( "[Geppetto] Nothing to shape yet - add a Garment first." );
+			GeppettoToolContext.Warn( "Nothing to shape yet - add a Garment first." );
 			return true;
 		}
 

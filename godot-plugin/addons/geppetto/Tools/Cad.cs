@@ -126,7 +126,7 @@ public static class GeppettoCad
 	{
 		if ( NewFeature( tool, choice ) is not { } feature )
 		{
-			GD.PushWarning( $"[Geppetto] {tool} has no feature to make." );
+			GeppettoToolContext.Warn( $"{tool} has no feature to make." );
 			return;
 		}
 
@@ -149,7 +149,7 @@ public static class GeppettoCad
 
 		if ( Prepare( doc, feature ) is { } refusal )
 		{
-			GD.PushWarning( $"[Geppetto] {refusal}" );
+			GeppettoToolContext.Warn( $"{refusal}" );
 			return;
 		}
 		Open( doc, feature, character );
@@ -185,6 +185,9 @@ public static class GeppettoCad
 					return "Bend Along Curve needs a curve: draw a Spline first.";
 				if ( SelectedFeatureId is { } sid && splines.Any( s => s.Id == sid ) ) bend.SplineId = sid;
 				break;
+			case PrimitiveFeature primitive:
+				FitToModel( studio, primitive );
+				break;
 			case BooleanFeature boolean:
 				if ( studio.Bodies.Count < 2 )
 					return "Boolean needs two solids - add a Primitive or another part first.";
@@ -209,6 +212,33 @@ public static class GeppettoCad
 		return null;
 	}
 
+	/// <summary>
+	/// Sizes a new primitive to the model and stands it beside it. The feature's own defaults are 1u
+	/// (one inch), which on a character dozens of units tall is a speck buried inside the body, so
+	/// adding one looked like nothing happened. Empty documents get a 12u (one foot) shape at the origin.
+	/// </summary>
+	public static void FitToModel( PartStudio studio, PrimitiveFeature primitive )
+	{
+		var min = new Vec3( float.MaxValue, float.MaxValue, float.MaxValue );
+		var max = new Vec3( float.MinValue, float.MinValue, float.MinValue );
+		foreach ( var body in studio.Bodies )
+		{
+			if ( !body.Visible || body.Mesh is null ) continue;
+			foreach ( var p in body.Mesh.Positions )
+			{
+				min = new Vec3( MathF.Min( min.x, p.x ), MathF.Min( min.y, p.y ), MathF.Min( min.z, p.z ) );
+				max = new Vec3( MathF.Max( max.x, p.x ), MathF.Max( max.y, p.y ), MathF.Max( max.z, p.z ) );
+			}
+		}
+		bool empty = min.x > max.x;
+		float extent = empty ? 0 : MathF.Max( max.x - min.x, MathF.Max( max.y - min.y, max.z - min.z ) );
+		float size = empty ? 12f : MathF.Max( 1f, MathF.Round( extent / 4f ) );
+		foreach ( var f in new[] { primitive.SizeX, primitive.SizeY, primitive.SizeZ, primitive.Radius, primitive.InnerRadius, primitive.TubeRadius } )
+			f.Value *= size;
+		if ( !empty )
+			primitive.Position.Value = new Vec3( max.x + size, ( min.y + max.y ) / 2f, min.z + size / 2f );
+	}
+
 	static string? SelectedSketch( GeppettoDocument doc ) =>
 		SelectedFeatureId is { } id && doc.Studio.Features.OfType<SketchFeature>().Any( s => s.Id == id ) ? id : null;
 
@@ -217,7 +247,7 @@ public static class GeppettoCad
 	static void ChooseSketch( GeppettoDocument doc, string tool, Action<string> chosen )
 	{
 		var sketches = doc.Studio.Features.OfType<SketchFeature>().ToList();
-		if ( sketches.Count == 0 ) { GD.PushWarning( $"[Geppetto] {tool} needs a profile: draw a Sketch first." ); return; }
+		if ( sketches.Count == 0 ) { GeppettoToolContext.Warn( $"{tool} needs a profile: draw a Sketch first." ); return; }
 		if ( SelectedSketch( doc ) is { } id ) { chosen( id ); return; }
 		if ( sketches.Count == 1 ) { chosen( sketches[0].Id ); return; }
 		Menu( $"{tool} which sketch?", sketches.Select( s => s.Name ?? s.TypeName ).ToArray(), i => chosen( sketches[i].Id ) );

@@ -13,14 +13,18 @@ public partial class GeppettoPlugin
 	{
 		GeppettoDocument.UndoManager = GetUndoRedo();
 		GeppettoTools.ActiveChanged += Repaint;
+		GeppettoDocument.AnyChanged += RepaintDoc;
 		SetForceDrawOverForwardingEnabled();
 	}
 
 	void Repaint() => UpdateOverlays();
 
+	void RepaintDoc( GeppettoDocument _ ) => UpdateOverlays();
+
 	void TeardownViewportTools()
 	{
 		GeppettoTools.ActiveChanged -= Repaint;
+		GeppettoDocument.AnyChanged -= RepaintDoc;
 		GeppettoTools.Activate( null );
 		GeppettoDocument.UndoManager = null;
 	}
@@ -45,8 +49,17 @@ public partial class GeppettoPlugin
 		return used ? (int)AfterGuiInput.Stop : (int)AfterGuiInput.Pass;
 	}
 
-	public override void _Forward3DDrawOverViewport( Control viewportControl ) => GeppettoTools.Active?.Draw( viewportControl );
+	public override void _Forward3DDrawOverViewport( Control viewportControl ) => DrawOver( viewportControl );
 
-	public override void _Forward3DForceDrawOverViewport( Control viewportControl ) => GeppettoTools.Active?.Draw( viewportControl );
+	public override void _Forward3DForceDrawOverViewport( Control viewportControl ) => DrawOver( viewportControl );
+
+	// Datum planes are always shown (they make no geometry, so this is the only sign one exists),
+	// then the running tool's overlay on top.
+	void DrawOver( Control viewportControl )
+	{
+		if ( _character is { } ch && EditorInterface.Singleton.GetEditorViewport3D( 0 )?.GetCamera3D() is { } cam )
+			GeppettoDatumPlanes.Draw( viewportControl, cam, ch );
+		GeppettoTools.Active?.Draw( viewportControl );
+	}
 }
 #endif
