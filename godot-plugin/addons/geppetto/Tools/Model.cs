@@ -37,6 +37,7 @@ public static partial class GeppettoTools
 			Register( "Model", tool, ctx =>
 			{
 				if ( ctx.Doc == null || ctx.Character == null ) return ctx.Need();
+				if ( !HasEditableBody( ctx.Doc ) ) return StartFromPrimitive( ctx, element );
 				var edit = GeppettoModelEdit.For( ctx.Doc );
 				edit.SetMode( element );
 				Activate( new GeppettoModelSelectTool( ctx.Character, edit ) );
@@ -59,6 +60,7 @@ public static partial class GeppettoTools
 			Register( "Model", o.Tool, ctx =>
 			{
 				if ( ctx.Doc == null || ctx.Character == null ) return ctx.Need();
+				if ( !HasEditableBody( ctx.Doc ) ) return StartFromPrimitive( ctx, null );
 				var edit = GeppettoModelEdit.For( ctx.Doc );
 				if ( !edit.EnsureSession() ) return true;
 				if ( o.TakesNumber ) GeppettoModelOpPopup.Open( edit, o );
@@ -69,6 +71,47 @@ public static partial class GeppettoTools
 				return true;
 			} );
 		}
+	}
+
+	static bool HasEditableBody( GeppettoDocument doc ) =>
+		doc.Studio.Bodies.Any( b => b.Visible && !b.IsReference && b.Mesh is { FaceCount: > 0 } );
+
+	static Action? _afterPrimitive;
+
+	/// <summary>
+	/// A Model tool on a model with nothing in it yet (a new model made in an empty scene): there is no
+	/// vertex, edge or face to work on, so offer the Add &gt; Primitive shape menu instead of a dead end.
+	/// Once the shape is in, the picking tool the user asked for (Vertex, Edge or Face) starts on it.
+	/// </summary>
+	static bool StartFromPrimitive( GeppettoToolContext ctx, EditElement? mode )
+	{
+		var doc = ctx.Doc!;
+		var character = ctx.Character!;
+		if ( _afterPrimitive != null ) { GeppettoDocument.AnyChanged -= OnAnyChangedAfterPrimitive; _afterPrimitive = null; }
+		if ( mode is { } m )
+		{
+			_afterPrimitive = () =>
+			{
+				if ( !HasEditableBody( doc ) || Active is GeppettoModelSelectTool ) return;
+				var edit = GeppettoModelEdit.For( doc );
+				edit.SetMode( m );
+				Activate( new GeppettoModelSelectTool( character, edit ) );
+			};
+			GeppettoDocument.AnyChanged += OnAnyChangedAfterPrimitive;
+		}
+		GeppettoToolContext.Say( "This model is empty: pick a shape to start from, then edit its vertices, edges and faces." );
+		return GeppettoCad.Run( doc, "Primitive", character );
+	}
+
+	static void OnAnyChangedAfterPrimitive( GeppettoDocument doc )
+	{
+		if ( _afterPrimitive == null || !HasEditableBody( doc ) ) return;
+		// Wait for the shape's settings box to close (OK keeps it, Cancel takes it out again).
+		if ( GeppettoFeatureDialog.AnyOpen ) return;
+		var run = _afterPrimitive;
+		_afterPrimitive = null;
+		GeppettoDocument.AnyChanged -= OnAnyChangedAfterPrimitive;
+		run();
 	}
 }
 
@@ -103,6 +146,8 @@ public sealed class GeppettoModelEdit
 	public string? LastMessage { get; private set; }
 	/// <summary>True when <see cref="LastMessage"/> is a refusal.</summary>
 	public bool LastRefused { get; private set; }
+	/// <summary>True when <see cref="LastMessage"/> is a remark on a change that did happen.</summary>
+	public bool LastRemark { get; private set; }
 
 	/// <summary>Raised whenever the selection, mode or mesh changes (the overlay repaints).</summary>
 	public event Action? Changed;
@@ -236,7 +281,7 @@ public sealed class GeppettoModelEdit
 		}
 
 		Commit( label, beforeState );
-		Say( s.Notice != null ? $"{label}: {s.Notice}" : s.Outcome ?? $"{label}: done" );
+		Say( s.Notice != null ? $"{label}: {s.Notice}" : s.Outcome ?? $"{label}: done", remark: s.Notice != null );
 		return true;
 	}
 
@@ -276,7 +321,10 @@ public sealed class GeppettoModelEdit
 			f.Commit( s.Mesh, s.Base, s.Separated, s.Creases, s.Seams );
 			_knownRevision = f.Revision;
 			Doc.Refresh();
-			if ( s.Notice != null ) Refuse( $"{n.Label}: {s.Notice}" ); else Say( s.Outcome ?? $"{n.Label}: {value:0.###}", quiet: true );
+			// A notice on a step that stayed is a remark ("chamfered instead"), not a refusal: the change is real.
+			if ( s.Notice != null && s.LastChangedNothing ) Refuse( $"{n.Label}: {s.Notice}" );
+			else if ( s.Notice != null ) Say( $"{n.Label}: {s.Notice}", quiet: true, remark: true );
+			else Say( s.Outcome ?? $"{n.Label}: {value:0.###}", quiet: true );
 			Changed?.Invoke();
 			return true;
 		}
@@ -303,6 +351,8 @@ public sealed class GeppettoModelEdit
 			return true;
 		}
 		RestoreBefore( n.Before );
+		// Done on a value that changed nothing: say so rather than leave the last preview's number up.
+		if ( !LastRefused ) Refuse( $"{n.Label}: {s.Notice ?? "nothing changed."}" );
 		return false;
 	}
 
@@ -450,10 +500,11 @@ public sealed class GeppettoModelEdit
 		return count == 0 ? $"Nothing selected - click {what} to pick them" : $"{count} {what} selected";
 	}
 
-	void Say( string message, bool quiet = false )
+	void Say( string message, bool quiet = false, bool remark = false )
 	{
 		LastMessage = message;
 		LastRefused = false;
+		LastRemark = remark;
 		if ( !quiet ) GeppettoToolContext.Say( message );
 	}
 
@@ -461,6 +512,7 @@ public sealed class GeppettoModelEdit
 	{
 		LastMessage = message;
 		LastRefused = true;
+		LastRemark = false;
 		GeppettoToolContext.Warn( $"{message}" );
 	}
 
@@ -527,6 +579,8 @@ public sealed class GeppettoModelEdit
 		// Add
 		Typed( "Extrude", "Extrude", s => Size( s ) * 0.1f, "Distance (inches)", ( s, v ) => s.Extrude( NonZero( "An extrude", v ) ) ),
 		Typed( "Inset", "Inset", s => Size( s ) * 0.03f, "Distance (inches)", ( s, v ) => s.Inset( v ) ),
+		// s&box StartBevel: four segments round the edge off; one makes a flat chamfer.
+		new GeppettoModelOp( "Bevel", "Bevel", ( s, v, _ ) => s.Bevel( Positive( "The bevel width", v ), 4 ), s => Size( s ) * 0.02f, "Width (inches)" ),
 		Plain( "Duplicate", "Duplicate", s => s.Duplicate() ),
 		Plain( "Bridge", "Bridge", s => s.BridgeSelectedLoops() ),
 		Typed( "Spin", "Spin", _ => 360f, "Angle (degrees)", ( s, v ) => s.Spin( v, Math.Max( 4, (int)MathF.Round( MathF.Abs( v ) / 15f ) ) ) ),

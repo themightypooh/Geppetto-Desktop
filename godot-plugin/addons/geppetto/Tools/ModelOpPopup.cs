@@ -65,7 +65,8 @@ public partial class GeppettoModelOpPopup : ConfirmationDialog
 		amount.ValueChanged += v => { _value = (float)v; Preview(); };
 		box.AddChild( Row( _op.ValueLabel, amount ) );
 
-		_notice = new Label { AutowrapMode = TextServer.AutowrapMode.WordSmart, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+		// A wrapped label needs a width to wrap at, or the box grows to one word per line.
+		_notice = new Label { AutowrapMode = TextServer.AutowrapMode.WordSmart, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, CustomMinimumSize = new Vector2( 340, 0 ) };
 		box.AddChild( _notice );
 	}
 
@@ -85,7 +86,7 @@ public partial class GeppettoModelOpPopup : ConfirmationDialog
 	{
 		if ( _closed ) return;
 		_edit.PreviewNumeric( _value, _axis );
-		_notice.Text = _edit.LastRefused ? _edit.LastMessage ?? "" : "";
+		_notice.Text = _edit.LastRefused || _edit.LastRemark ? _edit.LastMessage ?? "" : "";
 		_notice.TooltipText = _notice.Text;
 		_notice.Visible = _notice.Text.Length > 0;
 		ResetSize();

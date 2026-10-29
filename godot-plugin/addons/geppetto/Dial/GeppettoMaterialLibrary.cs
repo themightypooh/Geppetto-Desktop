@@ -225,6 +225,8 @@ public static class GeppettoMaterialLibrary
 		Directory.CreateDirectory( trash );
 		string to = Path.Combine( trash, $"{Path.GetFileName( m.Dir )}-{DateTime.Now:yyyyMMdd-HHmmss}" );
 		MoveFolder( m.Dir, to );
+		// Characters using it keep their look: their slot maps follow the files into .trash.
+		RepointMaps( m.Dir, to, keepNames: true );
 		if ( m.Source == "project" ) EditorInterface.Singleton.GetResourceFilesystem().Scan();
 		return to;
 	}
@@ -268,12 +270,13 @@ public static class GeppettoMaterialLibrary
 
 	/// <summary>Slot looks in open documents that point at files in <paramref name="oldDir"/> now point at
 	/// the same-suffix file in <paramref name="newDir"/>.</summary>
-	static void RepointMaps( string oldDir, string newDir )
+	static void RepointMaps( string oldDir, string newDir, bool keepNames = false )
 	{
 		string newStem = Path.GetFileName( newDir );
 		string? Fix( string? p )
 		{
 			if ( string.IsNullOrEmpty( p ) || !p.StartsWith( oldDir + Path.DirectorySeparatorChar ) ) return p;
+			if ( keepNames ) return Path.Combine( newDir, Path.GetFileName( p ) );
 			string bare = Path.GetFileNameWithoutExtension( p );
 			int us = bare.LastIndexOf( '_' );
 			string suffix = us > 0 ? bare[us..] : "";

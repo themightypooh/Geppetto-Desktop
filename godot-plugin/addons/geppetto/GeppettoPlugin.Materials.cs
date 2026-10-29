@@ -95,7 +95,7 @@ public partial class GeppettoPlugin
 		switch ( (int)id )
 		{
 			case MenuFaces: ApplyToPickedFaces( m ); break;
-			case MenuEdit: GeppettoMaterialDialog.Open( m, null, Saved ); break;
+			case MenuEdit: GeppettoMaterialDialog.Open( m, null, n => { Saved( n ); RelookSlots( m.Name, n ); } ); break;
 			case MenuCopy: GeppettoMaterialDialog.Open( null, m, Saved ); break;
 			case MenuRename: AskRename( m ); break;
 			case MenuDelete: AskDelete( m ); break;
@@ -121,6 +121,7 @@ public partial class GeppettoPlugin
 			{
 				var n = GeppettoMaterialLibrary.Rename( m, name.Text );
 				Saved( n );
+				RelookSlots( m.Name, n );
 				GeppettoToolContext.Say( $"Renamed {m.Name} to {n.Name}." );
 				d.QueueFree();
 			}
@@ -219,6 +220,31 @@ public partial class GeppettoPlugin
 		{
 			GeppettoDialState.PickMaterial( m, remember: true );
 			GeppettoToolContext.Say( $"Slot {slot} now shows {m.Name}." );
+		}
+	}
+
+	/// <summary>An edited or renamed material: every slot of every open model that shows it (by name)
+	/// takes its new look and name, so the faces using it change too. One undo step per model.</summary>
+	static void RelookSlots( string oldName, GeppettoDialMaterial m )
+	{
+		foreach ( var doc in GeppettoDocument.All.ToList() )
+		{
+			var studio = doc.Studio;
+			var slots = studio.MaterialNames.Where( kv => kv.Value == oldName ).Select( kv => kv.Key ).ToList();
+			if ( slots.Count == 0 ) continue;
+			var before = slots.ToDictionary( s => s, s => studio.MaterialLooks.TryGetValue( s, out var l ) ? l : null );
+			var look = m.Look;
+			doc.Execute( new DelegateEditCommand( $"Material {m.Name} changed",
+				execute: () => { foreach ( int s in slots ) { studio.MaterialLooks[s] = look.Clone(); studio.MaterialNames[s] = m.Name; } studio.MarkAllDirty(); },
+				undo: () =>
+				{
+					foreach ( int s in slots )
+					{
+						if ( before[s] is { } b ) studio.MaterialLooks[s] = b; else studio.MaterialLooks.Remove( s );
+						studio.MaterialNames[s] = oldName;
+					}
+					studio.MarkAllDirty();
+				} ), $"Geppetto: material {m.Name} changed" );
 		}
 	}
 
