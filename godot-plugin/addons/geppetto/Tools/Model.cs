@@ -37,6 +37,7 @@ public static partial class GeppettoTools
 			Register( "Model", tool, ctx =>
 			{
 				if ( ctx.Doc == null || ctx.Character == null ) return ctx.Need();
+				if ( !HasEditableBody( ctx.Doc ) ) return StartFromPrimitive( ctx, element );
 				var edit = GeppettoModelEdit.For( ctx.Doc );
 				edit.SetMode( element );
 				Activate( new GeppettoModelSelectTool( ctx.Character, edit ) );
@@ -59,6 +60,7 @@ public static partial class GeppettoTools
 			Register( "Model", o.Tool, ctx =>
 			{
 				if ( ctx.Doc == null || ctx.Character == null ) return ctx.Need();
+				if ( !HasEditableBody( ctx.Doc ) ) return StartFromPrimitive( ctx, null );
 				var edit = GeppettoModelEdit.For( ctx.Doc );
 				if ( !edit.EnsureSession() ) return true;
 				if ( o.TakesNumber ) GeppettoModelOpPopup.Open( edit, o );
@@ -69,6 +71,47 @@ public static partial class GeppettoTools
 				return true;
 			} );
 		}
+	}
+
+	static bool HasEditableBody( GeppettoDocument doc ) =>
+		doc.Studio.Bodies.Any( b => b.Visible && !b.IsReference && b.Mesh is { FaceCount: > 0 } );
+
+	static Action? _afterPrimitive;
+
+	/// <summary>
+	/// A Model tool on a model with nothing in it yet (a new model made in an empty scene): there is no
+	/// vertex, edge or face to work on, so offer the Add &gt; Primitive shape menu instead of a dead end.
+	/// Once the shape is in, the picking tool the user asked for (Vertex, Edge or Face) starts on it.
+	/// </summary>
+	static bool StartFromPrimitive( GeppettoToolContext ctx, EditElement? mode )
+	{
+		var doc = ctx.Doc!;
+		var character = ctx.Character!;
+		if ( _afterPrimitive != null ) { GeppettoDocument.AnyChanged -= OnAnyChangedAfterPrimitive; _afterPrimitive = null; }
+		if ( mode is { } m )
+		{
+			_afterPrimitive = () =>
+			{
+				if ( !HasEditableBody( doc ) || Active is GeppettoModelSelectTool ) return;
+				var edit = GeppettoModelEdit.For( doc );
+				edit.SetMode( m );
+				Activate( new GeppettoModelSelectTool( character, edit ) );
+			};
+			GeppettoDocument.AnyChanged += OnAnyChangedAfterPrimitive;
+		}
+		GeppettoToolContext.Say( "This model is empty: pick a shape to start from, then edit its vertices, edges and faces." );
+		return GeppettoCad.Run( doc, "Primitive", character );
+	}
+
+	static void OnAnyChangedAfterPrimitive( GeppettoDocument doc )
+	{
+		if ( _afterPrimitive == null || !HasEditableBody( doc ) ) return;
+		// Wait for the shape's settings box to close (OK keeps it, Cancel takes it out again).
+		if ( GeppettoFeatureDialog.AnyOpen ) return;
+		var run = _afterPrimitive;
+		_afterPrimitive = null;
+		GeppettoDocument.AnyChanged -= OnAnyChangedAfterPrimitive;
+		run();
 	}
 }
 

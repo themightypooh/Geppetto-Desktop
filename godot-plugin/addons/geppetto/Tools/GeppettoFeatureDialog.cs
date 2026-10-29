@@ -42,6 +42,7 @@ public partial class GeppettoFeatureDialog : ConfirmationDialog
 	static GeppettoFeatureDialog Open( GeppettoDocument doc, Feature feature, bool isNew, int? index, Action<bool>? closed )
 	{
 		var d = new GeppettoFeatureDialog { _doc = doc, _feature = feature, _isNew = isNew, _index = index, _closed = closed };
+		_live++;
 		d._before = ParamSnapshot.Take( feature );
 		d.Title = ( isNew ? "New " : "Edit " ) + feature.TypeName;
 		d.OkButtonText = isNew ? "Add" : "Apply";
@@ -57,6 +58,11 @@ public partial class GeppettoFeatureDialog : ConfirmationDialog
 	}
 
 	public Feature Feature => _feature;
+
+	static int _live;
+
+	/// <summary>True while a feature box is open and not yet answered (OK or Cancel).</summary>
+	public static bool AnyOpen => _live > 0;
 
 	ScrollContainer? _scroll;
 	string _shown = "";
@@ -255,6 +261,7 @@ public partial class GeppettoFeatureDialog : ConfirmationDialog
 	{
 		if ( _done ) return;
 		_done = true;
+		_live = Math.Max( 0, _live - 1 );
 		var studio = _doc.Studio;
 		if ( _isNew )
 		{
@@ -280,6 +287,7 @@ public partial class GeppettoFeatureDialog : ConfirmationDialog
 	{
 		if ( _done ) return;
 		_done = true;
+		_live = Math.Max( 0, _live - 1 );
 		if ( _isNew ) _doc.Studio.Remove( _feature );
 		else { _before.Restore( _feature ); _doc.Studio.MarkDirty( _feature ); }
 		_doc.Refresh();
