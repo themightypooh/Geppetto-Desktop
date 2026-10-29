@@ -295,6 +295,44 @@ public partial class sketchedit_test : RefCounted
 
 		tDoc.Finish();
 
+		// --- dial: every CAD > Sketch group tile runs something, and every tool has a hotkey ---
+		var named = GeppettoTools.SketchTiles.Select( t => t.Tile ).Concat( new[] { "Construction", "Project", "Finish sketch" } ).ToHashSet();
+		var cadWs = GeppettoDialData.Workspace( "CAD" );
+		var groupTools = new[] { "Draw", "Shapes", "Modify" }.SelectMany( g => GeppettoDialData.Group( "CAD", g ) ?? Array.Empty<string>() ).ToList();
+		Add( "dial: Draw/Shapes/Modify hold 24 sketch tiles, all wired", groupTools.Count == 24 && groupTools.All( named.Contains ) && groupTools.All( t => GeppettoDialData.HasTool( cadWs, t ) ), groupTools.Count );
+		var keyed = new[] { Key.S, Key.L, Key.M, Key.R, Key.C, Key.A, Key.P, Key.G, Key.W, Key.E, Key.N, Key.T, Key.X, Key.F, Key.O, Key.U, Key.Z }
+			.SelectMany( k => new[] { CadSketch.ToolForKey( k, false ), CadSketch.ToolForKey( k, true ) } ).Where( t => t != null ).Distinct().Count();
+		Add( "hotkeys reach 22 distinct sketch tools", keyed == 22, keyed );
+
+		// --- constraints and dimensions on the selection (hotkey path, no panel) ---
+		var sq = new CadSketch( _doc );
+		sq.ChoosePlane( o, d );
+		foreach ( var q in new[] { new Vec2( -1, -1 ), new Vec2( 2, -1 ), new Vec2( 2, 1 ), new Vec2( -1, 1 ) } )
+			sq.Points.Add( c + q );
+		sq.Commit();
+		var ce = new CadSketch( _doc ) { Tool = CadSketch.EditTool.Select };
+		ce.BeginEdit( Sk );
+		var lines = Sk.Sketch.Curves.OfType<SketchLine>().ToList();
+		float Len( SketchLine l ) => ( Sk.Sketch.Points[l.Start] - Sk.Sketch.Points[l.End] ).Length;
+		bool Has( SketchConstraintKind k ) => Sk.Sketch.Constraints.Any( x => x.Kind == k );
+		ce.Toggle( lines[0].Id, add: false );
+		Add( "H puts Horizontal on a line", ce.Constrain( "Horizontal", SketchConstraintKind.Horizontal ) && Has( SketchConstraintKind.Horizontal ) );
+		ce.Toggle( lines[0].Id, add: false ); ce.Toggle( lines[2].Id, add: true );
+		Add( "B puts Parallel on two lines", ce.Constrain( "Parallel", SketchConstraintKind.Parallel ) && Has( SketchConstraintKind.Parallel ) );
+		ce.Toggle( lines[1].Id, add: false ); ce.Toggle( lines[3].Id, add: true );
+		Add( "Shift+E puts Equal on two lines", ce.Constrain( "Equal", SketchConstraintKind.EqualLength ) && Has( SketchConstraintKind.EqualLength ) );
+		ce.Toggle( lines[0].Id, add: false );
+		var dimKinds = CadSketch.ConstraintKeys.First( k => k.Key == Key.D ).Kinds;
+		Add( "D dimensions a line at its length", ce.Constrain( "Dimension", dimKinds ) && Has( SketchConstraintKind.Distance ) );
+		Add( "typed 2.5 sets the line to 2.5", ce.SetDimension( 2.5f ) && MathF.Abs( Len( lines[0] ) - 2.5f ) < 1e-3f, Len( lines[0] ) );
+		Add( "a value of 0 or less is refused, length kept", !ce.SetDimension( -1f ) && MathF.Abs( Len( lines[0] ) - 2.5f ) < 1e-3f );
+		int before = Sk.Sketch.Constraints.Count;
+		var par = Sk.Sketch.Constraints.First( x => x.Kind == SketchConstraintKind.Parallel );
+		Add( "removing a constraint takes only that one", ce.RemoveConstraint( par ) && Sk.Sketch.Constraints.Count == before - 1 && !Has( SketchConstraintKind.Parallel ) );
+		ce.Toggle( lines[0].Id, add: false );
+		Add( "Shift+Delete clears the selection's constraints", ce.RemoveConstraintsOnSelection() > 0 && !Has( SketchConstraintKind.Distance ) );
+		ce.Finish();
+
 		// --- a script sketch is not opened (its Curves text rebuilds it) ---
 		var script = new SketchFeature();
 		script.Curves.Value = "rect 0 0 1 1";
