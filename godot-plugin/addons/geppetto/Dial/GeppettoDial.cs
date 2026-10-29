@@ -151,15 +151,41 @@ public partial class GeppettoDial : Control
 				for ( int i = 0; i < st.Stages.Length; i++ )
 					list.Add( ( st.Stages[i].Stage, GeppettoDialData.IconPath( st.Stages[i].Stage, null ), i == GeppettoDialState.LastStage[GeppettoDialState.Ws], false ) );
 				break;
-			default:
+			case 2:
+			{
 				var stage = st.Stages[GeppettoDialState.OpenStage];
 				list.Add( ( "Back", GeppettoDialData.IconPath( "__back", null ), false, true ) );
 				bool inStage = GeppettoDialState.LastStage[GeppettoDialState.Ws] == GeppettoDialState.OpenStage;
 				foreach ( var t in stage.Tools )
-					list.Add( ( t, GeppettoDialData.IconPath( t, stage.Stage ), inStage && GeppettoDialState.CurrentTool == t, false ) );
+				{
+					var g = GeppettoDialData.Group( st.Name, t );
+					bool on = inStage && ( GeppettoDialState.CurrentTool == t || g != null && g.Contains( GeppettoDialState.CurrentTool ) );
+					list.Add( ( t, GeppettoDialData.IconPath( t, stage.Stage ), on, false ) );
+				}
 				break;
+			}
+			default:
+			{
+				var tools = GeppettoDialData.Group( st.Name, GeppettoDialState.OpenGroup ?? "" ) ?? Array.Empty<string>();
+				list.Add( ( "Back", GeppettoDialData.IconPath( "__back", null ), false, true ) );
+				bool inStage = GeppettoDialState.LastStage[GeppettoDialState.Ws] == GeppettoDialState.OpenStage;
+				foreach ( var t in tools )
+					list.Add( ( t, GeppettoDialData.IconPath( "sk:" + t, GeppettoDialState.OpenGroup ), inStage && GeppettoDialState.CurrentTool == t, false ) );
+				break;
+			}
 		}
 		return list;
+	}
+
+	/// <summary>The middle of the named tile on the current ring, in the dial's own coordinates, or null
+	/// (window runs click it like a mouse would).</summary>
+	public Vector2? TileCenter( string name )
+	{
+		Layout();
+		var tiles = Tiles();
+		int i = tiles.FindIndex( t => t.Name == name || t.Back && name == "Back" );
+		if ( i < 0 ) return null;
+		return P( ( RCore + RRing ) / 2, -90 + i * 360f / tiles.Count );
 	}
 
 	List<GeppettoDialMaterial> PageMaterials() =>
@@ -360,6 +386,8 @@ public partial class GeppettoDial : Control
 		{
 			case 0: GeppettoDialState.OpenWorkspace( i ); break;
 			case 1: GeppettoDialState.OpenStageTools( i - 1 ); break;
+			case 2 when GeppettoDialData.Group( GeppettoDialState.Workspace.Name, tiles[i].Name ) != null:
+				GeppettoDialState.OpenGroupTools( tiles[i].Name ); break;
 			default: GeppettoDialState.PickTool( tiles[i].Name ); break;
 		}
 	}
@@ -476,7 +504,7 @@ public partial class GeppettoDial : Control
 			var ic = _ctr + _s * ir * Dir( mid );
 			var labelCol = active ? LabelActive : LabelCol; labelCol.A *= alpha;
 			var iconCol = active ? LabelActive : back ? LabelCol : IconCol; iconCol.A *= alpha;
-			var desk = back ? null : GeppettoDialData.DeskIcon( GeppettoDialState.Level == 0 ? "ws" : GeppettoDialState.Workspace.Name,
+			var desk = back || GeppettoDialState.Level == 3 ? null : GeppettoDialData.DeskIcon( GeppettoDialState.Level == 0 ? "ws" : GeppettoDialState.Workspace.Name,
 				GeppettoDialState.Level == 0 ? "ws:" + name : name, 2 * Mathf.RoundToInt( 15 * _s ) );
 			if ( desk != null )
 			{
