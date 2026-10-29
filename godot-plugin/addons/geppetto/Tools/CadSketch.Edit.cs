@@ -82,6 +82,9 @@ public sealed partial class CadSketch
 	int _dragPoint = -1;
 	CurveHandle? _dragHandle;
 	Vec2 _dragFrom;
+	// A plain press on something already selected keeps the selection (so a group can be dragged);
+	// let go without dragging and the selection narrows to that one thing, as any editor does.
+	object? _narrowTo;
 	Vector2? _boxFrom;
 
 	Sketch S => Editing!.Sketch;
@@ -289,17 +292,20 @@ public sealed partial class CadSketch
 		return best == float.MaxValue ? 0f : best * sign;
 	}
 
+	/// <summary>The curve nearest the click, within the edge-snap reach. Distance only: OnCurve is a
+	/// parameter test that assumes the point already lies on the curve (any line whose span covers the
+	/// click passes it, however far away), so it cannot be used to pick.</summary>
 	SketchCurve? CurveUnder( Vec2 p )
 	{
-		float bestD = 0.5f;
+		float bestD = MathF.Max( 0.5f, _snapper.CurveRadius );
 		SketchCurve? best = null;
+		var at = new Vector2( p.x, p.y );
 		foreach ( var c in S.Curves )
 		{
-			if ( SketchIntersect.OnCurve( S, c, p, out _ ) ) return c;
 			var pts = c.Tessellate( S, S.Tolerance );
 			for ( int i = 0; i + 1 < pts.Count; i++ )
 			{
-				float d = Geometry2D.GetClosestPointToSegment( new Vector2( p.x, p.y ), new Vector2( pts[i].x, pts[i].y ), new Vector2( pts[i + 1].x, pts[i + 1].y ) ).DistanceTo( new Vector2( p.x, p.y ) );
+				float d = Geometry2D.GetClosestPointToSegment( at, new Vector2( pts[i].x, pts[i].y ), new Vector2( pts[i + 1].x, pts[i + 1].y ) ).DistanceTo( at );
 				if ( d < bestD ) { bestD = d; best = c; }
 			}
 		}
@@ -308,7 +314,7 @@ public sealed partial class CadSketch
 
 	int NearestPoint( Vec2 p, float maxDist = 0.6f )
 	{
-		int best = -1; float bestD = maxDist;
+		int best = -1; float bestD = MathF.Max( maxDist, _snapper.PointRadius );
 		for ( int i = 0; i < S.Points.Count; i++ )
 		{
 			float d = ( S.Points[i] - p ).Length;
@@ -977,7 +983,9 @@ public sealed partial class CadSketch
 	/// </summary>
 	SnapResult SnapFor( Vec2 raw )
 	{
-		if ( Tool == EditTool.Cut ) { LastSnap = new SnapResult( raw, -1, 0 ); return LastSnap; }
+		// Cut does not snap, and nor does a fillet's radius click: snapping it back onto the corner it
+		// measures from would make every small fillet radius zero.
+		if ( Tool == EditTool.Cut || ( Tool == EditTool.Fillet && _pending.Count == 1 ) ) { LastSnap = new SnapResult( raw, -1, 0 ); return LastSnap; }
 		_snapper.IgnorePoint = _dragPoint;
 		IReadOnlyList<Vec2> pending = Tool switch
 		{
@@ -992,17 +1000,60 @@ public sealed partial class CadSketch
 		return snap;
 	}
 
-	/// <summary>Where a constraint's glyph is drawn on screen (DrawEdit uses the same spot).</summary>
-	static Vector2 GlyphAt( Vector2 anchor, ConstraintMarker m ) =>
-		anchor + ( m.Away.Length < 1e-6f ? new Vector2( 0.7071f, -0.7071f ) : new Vector2( m.Away.x, -m.Away.y ) ) * 14f;
+	/// <summary>A glyph's first spot: 14px off its anchor along the marker's Away direction, which is a
+	/// plane direction and so is projected (the plane's axes are not the screen's).</summary>
+	Vector2 GlyphAt( Camera3D cam, Vector2 anchor, ConstraintMarker m )
+	{
+		var dir = new Vector2( 0.7071f, -0.7071f );
+		if ( m.Away.Length > 1e-6f && Screen( cam, m.Anchor + m.Away * MathF.Max( 1e-3f, _snapper.CurveRadius ) ) is { } b && ( b - anchor ).Length() > 1e-6f )
+			dir = ( b - anchor ).Normalized();
+		return anchor + dir * 14f;
+	}
 
-	/// <summary>The constraint glyph under the cursor, or null.</summary>
+	/// <summary>The text a glyph shows: its label, or what is being typed into the armed dimension.</summary>
+	string GlyphLabel( ConstraintMarker m ) => m.Constraint == _dimension && _typed.Length > 0 ? _typed + "_" : m.Label;
+
+	/// <summary>The box a glyph's label is drawn in, centred on its spot.</summary>
+	Rect2 GlyphBox( ConstraintMarker m, Vector2 at )
+	{
+		var font = ThemeDB.FallbackFont;
+		var size = font.GetStringSize( GlyphLabel( m ), HorizontalAlignment.Left, -1, GlyphFontSize ) + new Vector2( 4, 2 );
+		size.Y = MathF.Max( size.Y, font.GetHeight( GlyphFontSize ) + 2 );
+		return new Rect2( at - size / 2, size );
+	}
+
+	const int GlyphFontSize = 11;
+
+	/// <summary>Every glyph's spot on screen. Rules on the same curve share an anchor, so a glyph whose
+	/// box would overlap one already placed steps on along its own direction until it is clear: each
+	/// stays readable and clickable, however long a dimension's text gets. DrawEdit, picking and window
+	/// runs all use this one layout.</summary>
+	List<(ConstraintMarker Marker, Vector2 At)> GlyphLayout( Camera3D cam )
+	{
+		var placed = new List<(ConstraintMarker, Vector2)>();
+		var boxes = new List<Rect2>();
+		foreach ( var m in ConstraintTools.Markers( S ) )
+		{
+			if ( Screen( cam, m.Anchor ) is not { } a ) continue;
+			var at = GlyphAt( cam, a, m );
+			var step = ( at - a ).Normalized() * 3f;
+			for ( int i = 0; i < 60 && boxes.Any( b => b.Intersects( GlyphBox( m, at ) ) ); i++ ) at += step;
+			placed.Add( (m, at) );
+			boxes.Add( GlyphBox( m, at ).Grow( 1 ) );
+		}
+		return placed;
+	}
+
+	/// <summary>Where a constraint's glyph is drawn on screen (window runs click it).</summary>
+	public Vector2? GlyphScreen( Camera3D cam, ConstraintMarker m ) =>
+		GlyphLayout( cam ).FirstOrDefault( g => g.Marker.Constraint == m.Constraint ) is { Marker: not null } g ? g.At : null;
+
+	/// <summary>The constraint glyph under the cursor (inside its box, or within a few pixels of it).</summary>
 	ConstraintMarker? MarkerAt( Camera3D cam, Vector2 screen )
 	{
-		ConstraintMarker? best = null; float bestD = 9f;
-		foreach ( var m in ConstraintTools.Markers( S ) )
-			if ( Screen( cam, m.Anchor ) is { } a && GlyphAt( a, m ).DistanceTo( screen ) <= bestD ) { best = m; bestD = GlyphAt( a, m ).DistanceTo( screen ); }
-		return best;
+		foreach ( var (m, at) in GlyphLayout( cam ) )
+			if ( GlyphBox( m, at ).Grow( 2 ).HasPoint( screen ) ) return m;
+		return null;
 	}
 
 	// =========================================================================================
@@ -1067,7 +1118,10 @@ public sealed partial class CadSketch
 		var before = new List<Vec2>( S.Points );
 		dim.Value = value;
 		var solve = SketchSolver.Solve( S, SelectedPoints.Count > 0 ? SelectedPoints.First() : 0 );
-		if ( !solve.Converged )
+		// A solve that "holds" the value by shrinking a line to nothing (an angle between lines that are
+		// also parallel, say) has not held it: that is a refusal too.
+		bool collapsed = S.Curves.OfType<SketchLine>().Any( l => ( before[l.Start] - before[l.End] ).Length > 1e-3f && ( S.Points[l.Start] - S.Points[l.End] ).Length < 1e-4f );
+		if ( !solve.Converged || collapsed )
 		{
 			dim.Value = old;
 			for ( int i = 0; i < S.Points.Count && i < before.Count; i++ ) S.Points[i] = before[i];
@@ -1168,8 +1222,8 @@ public sealed partial class CadSketch
 				{
 					var snap = SnapFor( raw );
 					_hover = snap.Point;
-					if ( _dragPoint >= 0 ) { MovePoint( _dragPoint, snap.Point - _dragFrom ); _dragFrom = snap.Point; }
-					else if ( _dragHandle is { } dh ) DragHandle( dh, snap.Point );
+					if ( _dragPoint >= 0 ) { if ( ( snap.Point - _dragFrom ).Length > 1e-6f ) _narrowTo = null; MovePoint( _dragPoint, snap.Point - _dragFrom ); _dragFrom = snap.Point; }
+					else if ( _dragHandle is { } dh ) { if ( mm.ButtonMask.HasFlag( MouseButtonMask.Left ) ) _narrowTo = null; DragHandle( dh, snap.Point ); }
 				}
 				else
 				{
@@ -1186,13 +1240,15 @@ public sealed partial class CadSketch
 				if ( _typed.Length == 0 ) _dimension = null;
 				var snap = raw is { } r ? SnapFor( r ) : default;
 				var at = raw != null ? snap.Point : (Vec2?)null;
-				int point = snap.SnappedPointIndex >= 0 ? snap.SnappedPointIndex : PointAt( camera, mb.Position );
+				// Select picks what is under the cursor on screen; the snapper is for placing, not picking.
+				int point = Tool != EditTool.Select && snap.SnappedPointIndex >= 0 ? snap.SnappedPointIndex : PointAt( camera, mb.Position );
 
 				if ( Tool == EditTool.Select )
 				{
 					if ( point >= 0 )
 					{
 						if ( !SelectedPoints.Contains( point ) || mb.ShiftPressed ) Toggle( point, mb.ShiftPressed );
+						else _narrowTo = point;
 						_dragPoint = point; _dragFrom = at ?? S.Points[point];
 					}
 					else if ( MarkerAt( camera, mb.Position ) is { } mk )
@@ -1201,7 +1257,13 @@ public sealed partial class CadSketch
 						if ( mk.IsDimension && mb.ShiftPressed ) { _dimension = mk.Constraint; _typed = ""; GeppettoTools.Redraw(); }
 						else RemoveConstraint( mk.Constraint );
 					}
-					else if ( HandleAt( camera, mb.Position ) is { } h ) _dragHandle = h;
+					else if ( HandleAt( camera, mb.Position ) is { } h )
+					{
+						// A grip sits on its curve, so grabbing it selects the curve too (as a point does).
+						if ( !SelectedCurves.Contains( h.CurveId ) || mb.ShiftPressed ) Toggle( h.CurveId, mb.ShiftPressed );
+						else _narrowTo = h.CurveId;
+						_dragHandle = h;
+					}
 					else if ( CurveAt( camera, mb.Position ) is { } c ) Toggle( c, mb.ShiftPressed );
 					else _boxFrom = mb.Position;
 					return true;
@@ -1248,7 +1310,9 @@ public sealed partial class CadSketch
 					if ( rect.Size.LengthSquared() < 16f ) { if ( !mb.ShiftPressed ) ClearSelection(); }
 					else SelectWhere( p => Screen( camera, p ) is { } s && rect.HasPoint( s ), touching: mb.Position.X < from.X, mb.ShiftPressed );
 				}
-				_boxFrom = null; _dragPoint = -1; _dragHandle = null;
+				if ( _narrowTo is int np ) Toggle( np, false );
+				else if ( _narrowTo is string nc ) Toggle( nc, false );
+				_narrowTo = null; _boxFrom = null; _dragPoint = -1; _dragHandle = null;
 				return true;
 			}
 			case InputEventMouseButton { ButtonIndex: MouseButton.Right, Pressed: true }:
@@ -1500,20 +1564,15 @@ public sealed partial class CadSketch
 
 			DrawSnapMarker( overlay, cam );
 
-			foreach ( var m in ConstraintTools.Markers( S ) )
+			foreach ( var (m, glyphPos) in GlyphLayout( cam ) )
 			{
-				if ( Screen( cam, m.Anchor ) is { } pt )
-				{
-					var glyphPos = GlyphAt( pt, m );
-					bool armed = m.Constraint == _dimension;
-					var col = armed ? HoverBlue : m.IsDimension ? DimensionMark : ConstraintMark;
-					var label = armed && _typed.Length > 0 ? _typed + "_" : m.Label;
-					var font = ThemeDB.FallbackFont;
-					var size = font.GetStringSize( label, HorizontalAlignment.Left, -1, 11 );
-					var at = glyphPos - new Vector2( size.X / 2, -font.GetAscent( 11 ) / 2 );
-					overlay.DrawRect( new Rect2( at - new Vector2( 2, font.GetAscent( 11 ) + 1 ), size + new Vector2( 4, 2 ) ), new Color( 0.08f, 0.09f, 0.11f, 0.7f ) );
-					overlay.DrawString( font, at, label, HorizontalAlignment.Left, -1, 11, col );
-				}
+				bool armed = m.Constraint == _dimension;
+				var col = armed ? HoverBlue : m.IsDimension ? DimensionMark : ConstraintMark;
+				var font = ThemeDB.FallbackFont;
+				var box = GlyphBox( m, glyphPos );
+				overlay.DrawRect( box, new Color( 0.08f, 0.09f, 0.11f, 0.7f ) );
+				float baseline = box.Position.Y + ( box.Size.Y - font.GetHeight( GlyphFontSize ) ) / 2 + font.GetAscent( GlyphFontSize );
+				overlay.DrawString( font, new Vector2( box.Position.X + 2, baseline ), GlyphLabel( m ), HorizontalAlignment.Left, -1, GlyphFontSize, col );
 			}
 		}
 
