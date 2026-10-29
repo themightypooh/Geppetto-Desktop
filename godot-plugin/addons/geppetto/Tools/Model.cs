@@ -146,6 +146,8 @@ public sealed class GeppettoModelEdit
 	public string? LastMessage { get; private set; }
 	/// <summary>True when <see cref="LastMessage"/> is a refusal.</summary>
 	public bool LastRefused { get; private set; }
+	/// <summary>True when <see cref="LastMessage"/> is a remark on a change that did happen.</summary>
+	public bool LastRemark { get; private set; }
 
 	/// <summary>Raised whenever the selection, mode or mesh changes (the overlay repaints).</summary>
 	public event Action? Changed;
@@ -279,7 +281,7 @@ public sealed class GeppettoModelEdit
 		}
 
 		Commit( label, beforeState );
-		Say( s.Notice != null ? $"{label}: {s.Notice}" : s.Outcome ?? $"{label}: done" );
+		Say( s.Notice != null ? $"{label}: {s.Notice}" : s.Outcome ?? $"{label}: done", remark: s.Notice != null );
 		return true;
 	}
 
@@ -319,7 +321,10 @@ public sealed class GeppettoModelEdit
 			f.Commit( s.Mesh, s.Base, s.Separated, s.Creases, s.Seams );
 			_knownRevision = f.Revision;
 			Doc.Refresh();
-			if ( s.Notice != null ) Refuse( $"{n.Label}: {s.Notice}" ); else Say( s.Outcome ?? $"{n.Label}: {value:0.###}", quiet: true );
+			// A notice on a step that stayed is a remark ("chamfered instead"), not a refusal: the change is real.
+			if ( s.Notice != null && s.LastChangedNothing ) Refuse( $"{n.Label}: {s.Notice}" );
+			else if ( s.Notice != null ) Say( $"{n.Label}: {s.Notice}", quiet: true, remark: true );
+			else Say( s.Outcome ?? $"{n.Label}: {value:0.###}", quiet: true );
 			Changed?.Invoke();
 			return true;
 		}
@@ -346,6 +351,8 @@ public sealed class GeppettoModelEdit
 			return true;
 		}
 		RestoreBefore( n.Before );
+		// Done on a value that changed nothing: say so rather than leave the last preview's number up.
+		if ( !LastRefused ) Refuse( $"{n.Label}: {s.Notice ?? "nothing changed."}" );
 		return false;
 	}
 
@@ -493,10 +500,11 @@ public sealed class GeppettoModelEdit
 		return count == 0 ? $"Nothing selected - click {what} to pick them" : $"{count} {what} selected";
 	}
 
-	void Say( string message, bool quiet = false )
+	void Say( string message, bool quiet = false, bool remark = false )
 	{
 		LastMessage = message;
 		LastRefused = false;
+		LastRemark = remark;
 		if ( !quiet ) GeppettoToolContext.Say( message );
 	}
 
@@ -504,6 +512,7 @@ public sealed class GeppettoModelEdit
 	{
 		LastMessage = message;
 		LastRefused = true;
+		LastRemark = false;
 		GeppettoToolContext.Warn( $"{message}" );
 	}
 
