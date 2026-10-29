@@ -570,6 +570,8 @@ public sealed class GeppettoModelEdit
 		// Add
 		Typed( "Extrude", "Extrude", s => Size( s ) * 0.1f, "Distance (inches)", ( s, v ) => s.Extrude( NonZero( "An extrude", v ) ) ),
 		Typed( "Inset", "Inset", s => Size( s ) * 0.03f, "Distance (inches)", ( s, v ) => s.Inset( v ) ),
+		// s&box StartBevel: four segments round the edge off; one makes a flat chamfer.
+		new GeppettoModelOp( "Bevel", "Bevel", ( s, v, _ ) => s.Bevel( Positive( "The bevel width", v ), 4 ), s => Size( s ) * 0.02f, "Width (inches)" ),
 		Plain( "Duplicate", "Duplicate", s => s.Duplicate() ),
 		Plain( "Bridge", "Bridge", s => s.BridgeSelectedLoops() ),
 		Typed( "Spin", "Spin", _ => 360f, "Angle (degrees)", ( s, v ) => s.Spin( v, Math.Max( 4, (int)MathF.Round( MathF.Abs( v ) / 15f ) ) ) ),
