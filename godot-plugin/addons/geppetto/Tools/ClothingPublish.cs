@@ -79,7 +79,7 @@ public static class ClothingPublish
 		string category = recipe == null ? "" : ClothingDefinition.CategoryFor( recipe );
 		string slots = recipe == null ? "" : string.Join( ", ", ClothingDefinition.SlotsFor( recipe ) );
 		Rescan( glb );
-		return ( $"Wrote {modelRel} and {Folder}/{name}.clothing ({category}; slots {slots}). Poohdot has no Dresser yet, so nothing puts it on for you: instance the .glb and parent it to the wearer's skeleton.", glb, clothing );
+		return ( $"Wrote {modelRel} and {Folder}/{name}.clothing ({category}; slots {slots}). To wear it, parent the .glb to the wearer's skeleton.", glb, clothing );
 	}
 
 	/// <summary>Writes the live-cloth file. Returns (message, path or null on refusal).</summary>
@@ -98,7 +98,7 @@ public static class ClothingPublish
 		if ( ClothExport.ExportLiveClothToFile( studio, material, path ) == null )
 			return ( "No bones to hang the cloth on - the wearer's skeleton has no torso or arms Effigy recognises.", null );
 		Rescan( path );
-		return ( $"Wrote {rel}. Poohdot has no live-cloth component yet to play it; the file is the same one s&box's Garment Cloth reads.", path );
+		return ( $"Wrote {rel}, the file s&box's Garment Cloth reads (no live-cloth player in Poohdot yet).", path );
 	}
 
 	static void Rescan( string path )
@@ -113,7 +113,7 @@ public static class ClothingPublish
 		var doc = ctx.Doc;
 		if ( doc == null ) return ctx.Need();
 		var (message, glb, _) = MakeClothing( doc );
-		if ( glb == null ) GeppettoToolContext.Warn( $"{message}" ); else GeppettoToolContext.Say( message );
+		if ( glb == null ) GeppettoToolContext.Warn( $"{message}" ); else GeppettoToast.Info( message );
 		return true;
 	}
 
@@ -122,7 +122,7 @@ public static class ClothingPublish
 		var doc = ctx.Doc;
 		if ( doc == null ) return ctx.Need();
 		var (message, path) = MakeLiveCloth( doc );
-		if ( path == null ) GeppettoToolContext.Warn( $"{message}" ); else GeppettoToolContext.Say( message );
+		if ( path == null ) GeppettoToolContext.Warn( $"{message}" ); else GeppettoToast.Info( message );
 		return true;
 	}
 }

@@ -77,7 +77,7 @@ public static class ClothingCheck
 			Marks.Add( ( p, deepest > 0f ? d / deepest : 1f ) );
 
 		message = clipping > 0
-			? $"{clipping} vertices clip, deepest {deepest:0.##} in - marked yellow to red. Push out fixes it, or choose a looser Fit; the rest is in the console."
+			? $"{clipping} vertices clip (deepest {deepest:0.##} in), marked yellow to red. Push out, or pick a looser Fit."
 			: faults == 0
 				? $"Checked {garments.Count} garment(s): nothing wrong. Details in the console."
 				: $"{faults} of {garments.Count} garments have something to fix - see the console.";
@@ -189,15 +189,16 @@ public static class ClothingCheck
 
 	public static bool ClearMarksTool( GeppettoToolContext ctx )
 	{
+		if ( ctx.Doc == null && Marks.Count == 0 ) return ctx.Need();
 		if ( Marks.Count == 0 && GeppettoTools.Active is not MarksTool )
 		{
-			GeppettoToolContext.Say( "No clipping marks to clear." );
+			GeppettoToast.Info( "No clipping marks to clear." );
 			return true;
 		}
 		Marks.Clear();
 		if ( GeppettoTools.Active is MarksTool ) GeppettoTools.Activate( null );
 		GeppettoTools.Redraw();
-		GeppettoToolContext.Say( "Clipping marks cleared." );
+		GeppettoToast.Info( "Clipping marks cleared." );
 		return true;
 	}
 
@@ -208,12 +209,12 @@ public static class ClothingCheck
 			_markRoot = ctx.Character?.Root as Node3D;
 			GeppettoTools.Activate( new MarksTool() );
 			GeppettoTools.Redraw();
-			GD.PushWarning( $"[Geppetto] {message}" );
+			GeppettoToolContext.Warn( message );
 		}
 		else
 		{
 			if ( GeppettoTools.Active is MarksTool ) GeppettoTools.Activate( null );
-			GeppettoToolContext.Say( message );
+			GeppettoToast.Info( message );
 		}
 	}
 

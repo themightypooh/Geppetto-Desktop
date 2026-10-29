@@ -240,7 +240,7 @@ public static class AnimateTools
 			ur.AddUndoReference( existing );
 			ur.CommitAction();
 			SetPreview( false );
-			GeppettoToolContext.Say( "First Person View off" );
+			GeppettoToast.Info( "First Person View off" );
 			return true;
 		}
 
@@ -258,8 +258,11 @@ public static class AnimateTools
 		var sel = EditorInterface.Singleton.GetSelection();
 		sel.Clear();
 		sel.AddNode( cam );
-		SetPreview( true );
-		GeppettoToolContext.Say( $"First Person View from {head}" );
+		// The viewport only learns about the selected camera on its next selection update; ticking Preview
+		// before that hits "p_activate && !preview" and leaves the box unticked. Wait a moment.
+		if ( Engine.GetMainLoop() is SceneTree tree )
+			tree.CreateTimer( 0.15 ).Timeout += () => { if ( GodotObject.IsInstanceValid( cam ) && cam.IsInsideTree() ) SetPreview( true ); };
+		GeppettoToast.Info( $"First Person View from {head}: the viewport now looks through the head camera. Press First Person View again to stop." );
 		return true;
 	}
 
@@ -285,13 +288,14 @@ public static class AnimateTools
 		var vp = EditorInterface.Singleton.GetEditorViewport3D( 0 )?.GetParent()?.GetParent();
 		var check = vp == null ? null : FindCheck( vp, "Preview" );
 		if ( check == null ) { if ( on ) GeppettoToolContext.Say( "First Person View: tick the viewport's Preview box to look through it" ); return; }
+		if ( on && !check.IsVisibleInTree() ) { GeppettoToolContext.Say( "First Person View: tick the viewport's Preview box to look through it" ); return; }
 		check.ButtonPressed = on;
 	}
 
 	static CheckBox? FindCheck( Node n, string text )
 	{
 		if ( n is CheckBox cb && cb.Text == text ) return cb;
-		foreach ( var ch in n.GetChildren() ) if ( FindCheck( ch, text ) is { } hit ) return hit;
+		foreach ( var ch in n.GetChildren( true ) ) if ( FindCheck( ch, text ) is { } hit ) return hit;
 		return null;
 	}
 

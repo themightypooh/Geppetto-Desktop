@@ -15,6 +15,10 @@ public partial class GeppettoPlugin
 		GeppettoTools.ActiveChanged += Repaint;
 		GeppettoDocument.AnyChanged += RepaintDoc;
 		SetForceDrawOverForwardingEnabled();
+		// A dial tool finds the character itself with nothing selected; without this the editor only forwards
+		// viewport clicks while a Node3D is selected, so the tool's first click went to the editor's own
+		// click-select instead (it picked a mesh, and only the clicks after that reached the tool).
+		SetInputEventForwardingAlwaysEnabled();
 	}
 
 	void Repaint() => UpdateOverlays();

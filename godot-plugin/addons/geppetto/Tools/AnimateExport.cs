@@ -186,10 +186,10 @@ public static class AnimateExport
 			};
 			if ( err == null )
 			{
-				GeppettoToolContext.Say( $"Exported {path.Text}" );
+				GeppettoToast.Info( $"Exported {path.Text}" );
 				if ( path.Text.StartsWith( "res://" ) ) EditorInterface.Singleton.GetResourceFilesystem().Scan();
 			}
-			else GD.PushError( $"[Geppetto] Export {path.Text} failed: {err}" );
+			else GeppettoToolContext.Warn( $"Export {path.Text} failed: {err}" );
 		};
 		AnimateUi.Show( box );
 		return true;

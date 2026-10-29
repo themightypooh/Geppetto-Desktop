@@ -86,7 +86,8 @@ static class RigView
 		overlay.DrawCircle( b, 2.5f, col );
 	}
 
-	/// <summary>The tool's prompt, top-left over the viewport, wrapped to the viewport width (never clipped).</summary>
+	/// <summary>The tool's prompt, top-left over the viewport under the view menu's "Front Orthogonal" label
+	/// (it used to sit on top of it), wrapped to the viewport width (never clipped).</summary>
 	public static void DrawPrompt( Control overlay, string text )
 	{
 		if ( string.IsNullOrEmpty( text ) ) return;
@@ -94,8 +95,9 @@ static class RigView
 		int size = overlay.GetThemeDefaultFontSize();
 		float width = MathF.Max( 120f, overlay.Size.X - 32f );
 		var box = font.GetMultilineStringSize( text, HorizontalAlignment.Left, width, size );
-		overlay.DrawRect( new Rect2( 10, 10, box.X + 12, box.Y + 10 ), new Color( 0, 0, 0, 0.55f ) );
-		overlay.DrawMultilineString( font, new Vector2( 16, 15 + font.GetAscent( size ) ), text, HorizontalAlignment.Left, width, size, -1, Colors.White );
+		const float top = 52f;
+		overlay.DrawRect( new Rect2( 10, top, box.X + 12, box.Y + 10 ), new Color( 0.08f, 0.09f, 0.11f, 0.92f ) );
+		overlay.DrawMultilineString( font, new Vector2( 16, top + 5 + font.GetAscent( size ) ), text, HorizontalAlignment.Left, width, size, -1, Colors.White );
 	}
 
 	public static void DrawLabel( Control overlay, Vector2 at, string text, Color col )

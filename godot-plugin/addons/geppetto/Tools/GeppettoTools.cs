@@ -50,8 +50,7 @@ public sealed class GeppettoToolContext
 	{
 		GD.PushWarning( $"[Geppetto] {message}" );
 		Spoken?.Invoke( message, true );
-		if ( !Engine.IsEditorHint() || EditorInterface.Singleton == null ) return;
-		Callable.From( () => EditorInterface.Singleton.GetEditorToaster()?.PushToast( message, EditorToaster.Severity.Warning ) ).CallDeferred();
+		GeppettoToast.Push( message, EditorToaster.Severity.Warning );
 	}
 }
 

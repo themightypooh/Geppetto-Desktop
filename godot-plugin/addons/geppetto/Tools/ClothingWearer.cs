@@ -39,7 +39,7 @@ public static class ClothingWearer
 		{
 			var message = LoadFromResource( doc, path );
 			if ( message.StartsWith( "!" ) ) GeppettoToolContext.Warn( $"{message[1..]}" );
-			else GeppettoToolContext.Say( message );
+			else GeppettoToast.Info( message );
 			dialog.QueueFree();
 		};
 		dialog.Canceled += () => dialog.QueueFree();
