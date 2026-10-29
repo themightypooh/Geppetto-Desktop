@@ -26,7 +26,7 @@ public partial class GeppettoPlugin
 		_runOut = System.Environment.GetEnvironmentVariable( "GEPPETTO_WINDOW_RUN" ) ?? "";
 		if ( _runOut.Length == 0 ) return;
 		Directory.CreateDirectory( _runOut );
-		_ = System.Environment.GetEnvironmentVariable( "GEPPETTO_WINDOW_WS" ) switch { "SketchEdit" => SketchEditRun(), "Live" => LiveRun(), "Blank" => BlankRun(), _ => WindowRun() };
+		_ = System.Environment.GetEnvironmentVariable( "GEPPETTO_WINDOW_WS" ) switch { "SketchEdit" => SketchEditRun(), "Live" => LiveRun(), "Blank" => BlankRun(), "SketchTools" => SketchToolsRun(), _ => WindowRun() };
 	}
 
 	async Task Wait( double seconds ) => await ToSignal( GetTree().CreateTimer( seconds ), SceneTreeTimer.SignalName.Timeout );
@@ -222,12 +222,21 @@ public partial class GeppettoPlugin
 					RefreshDial();
 					await Wait( 0.8 );
 					Shot( $"{ws.Name}-ring-{ws.Stages[s].Stage}" );
+					foreach ( var tile in ws.Stages[s].Tools.Where( t => GeppettoDialData.Group( ws.Name, t ) != null ) )
+					{
+						GeppettoDialState.OpenGroupTools( tile );
+						RefreshDial();
+						await Wait( 0.8 );
+						Shot( $"{ws.Name}-ring-{ws.Stages[s].Stage}-{tile}" );
+						CheckClipping( $"{ws.Name} > {tile} ring" );
+						GeppettoDialState.Back();
+					}
 				}
 				GeppettoDialState.Level = 0;
 				GeppettoDialState.Touch();
 				RefreshDial();
 				foreach ( var (stage, tools) in ws.Stages )
-					foreach ( var raw in tools )
+					foreach ( var raw in tools.SelectMany( t => GeppettoDialData.Group( ws.Name, t ) ?? new[] { t } ) )
 					{
 						string tool = GeppettoDialData.Clean( raw );
 						if ( tool is "Delete" or "Remesh" or "Subdivide" ) continue; // would wreck the model for the later steps
