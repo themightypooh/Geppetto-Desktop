@@ -76,6 +76,11 @@ public partial class GeppettoFeatureTree : EditorDock
 	GeppettoDocument? Doc => _character?.Doc;
 	bool _filling;
 
+	// The window run drives the dock through these, the way clicks would.
+	internal Tree FeatureRows => _features;
+	internal Tree PartRows => _parts;
+	internal PopupMenu RowMenu => _menu;
+
 	enum Item { Edit, EditSketch, Rename, Suppress, Hide, MoveUp, MoveDown, Delete }
 
 	public GeppettoFeatureTree()
@@ -295,7 +300,8 @@ public partial class GeppettoFeatureTree : EditorDock
 				var row = _features.GetSelected();
 				row.SetText( 0, f.Name ?? f.TypeName );
 				row.SetEditable( 0, true );
-				_features.EditSelected( true );
+				// The row menu is still closing; editing now loses the field to the menu's focus hand-back.
+				Callable.From( () => _features.EditSelected( true ) ).CallDeferred();
 				break;
 			case Item.Suppress: GeppettoFeatureOps.ToggleSuppressed( doc, f ); break;
 			case Item.Hide: GeppettoFeatureOps.ToggleVisible( doc, f ); break;
