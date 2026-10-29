@@ -111,6 +111,15 @@ public partial class GeppettoFeatureDialog : ConfirmationDialog
 
 		int rows = box.GetChildCount();
 		scroll.CustomMinimumSize = new Vector2( 400, Math.Min( 560, 36 * rows + 8 ) );
+		// A label that wraps to two lines makes its row taller than the 36px guess, and the last row
+		// slid under the buttons (Fillet's "Angle threshold (deg)"). Size to the laid-out rows instead.
+		box.Resized += () =>
+		{
+			float want = Math.Min( 560, box.Size.Y + 8 );
+			if ( !IsInstanceValid( scroll ) || Math.Abs( scroll.CustomMinimumSize.Y - want ) < 1 ) return;
+			scroll.CustomMinimumSize = new Vector2( 400, want );
+			Callable.From( () => { if ( IsInstanceValid( this ) && !_done ) ResetSize(); } ).CallDeferred();
+		};
 	}
 
 	Control SketchPicker( SketchConsumingFeature consumer )
@@ -224,7 +233,10 @@ public partial class GeppettoFeatureDialog : ConfirmationDialog
 			}
 			case BodySelectionParam bs:
 			{
-				var l = new Label { Text = bs.BodyIds.Count == 0 ? "All bodies" : string.Join( ", ", bs.BodyIds ), AutowrapMode = TextServer.AutowrapMode.WordSmart,
+				// Body ids mean nothing to anyone: show the part names the Parts list shows.
+				string BodyName( string id ) => _doc.Studio.Bodies.FirstOrDefault( b => b.Id == id ) is { } b
+					? ( string.IsNullOrEmpty( b.Name ) ? "Unnamed part" : b.Name ) : "A removed part";
+				var l = new Label { Text = bs.BodyIds.Count == 0 ? "All bodies" : string.Join( ", ", bs.BodyIds.Select( BodyName ) ), AutowrapMode = TextServer.AutowrapMode.WordSmart,
 					TooltipText = "Pick bodies in the viewport before opening the tool to limit it" };
 				return l;
 			}
