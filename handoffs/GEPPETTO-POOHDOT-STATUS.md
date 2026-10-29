@@ -8,12 +8,13 @@ Poohdot is `/home/poo/src/poohdot/godot/bin/godot.linuxbsd.editor.x86_64.mono`. 
 
 ## CURRENT STATE (read this first, 2026-10-29)
 
-- **Code:** `godot-plugin-baseline` @ **7a98c8b** holds everything, and every tool branch is merged into it. The main tree still has uncommitted files that aren't mine (the godot-ui-mock cache and handoffs docs). Another agent shares that tree, so don't revert them.
-- **Installed:** 7a98c8b is published to `~/.local/share/poohdot/geppetto` with `install.sh publish`. Injected projects, from `injected.txt`: `~/games/godot/geppetto-test`, `~/games/godot/tamagatchi/godot` (never test there), and a scratch copy. Both real projects build. Poo just reloads the project in Poohdot.
+- **Code:** `godot-plugin-baseline` @ **8ef2022** (sketch-calm, fast-forwarded 2026-10-29) holds everything, and every tool branch is merged into it. The main tree still has uncommitted files that aren't mine (the godot-ui-mock cache and handoffs docs). Another agent shares that tree, so don't revert them.
+- **Installed:** 8ef2022 is published (2026-10-29) to `~/.local/share/poohdot/geppetto` with `install.sh publish`. Injected projects, from `injected.txt`: `~/games/godot/geppetto-test`, `~/games/godot/tamagatchi/godot` (never test there), and a scratch copy. Both real projects build (0 errors on 8ef2022). Poo just reloads the project in Poohdot.
 - **Verified on 7a98c8b:**
   - All 11 headless `tools/*_test.gd` suites pass (sketchedit 46/46).
   - All 10 hidden window runs end `fails=0`: Default, Blank, CadAudit, Deep, SketchTools, NoModelAudit, SketchEdit, RigAudit, ClothingAudit and AnimateAudit.
   - The published-addon copy of geppetto-test passes Blank and Default.
+  - On 8ef2022: the published-addon copy passes Blank (`RESULT fails=0`, with the new calm checks). The other runs weren't re-run for this small change.
 - **Window-run runner:** `winruns.sh` (scratchpad, so it may be gone). It is just a loop. For each `Mode:scene` it copies the project, then runs the gamescope command under Testing with `GEPPETTO_WINDOW_WS=<Mode> GEPPETTO_WINDOW_SCENE=res://<scene>`.
   - Scenes: Default/RigAudit/ClothingAudit/AnimateAudit use test.tscn. Blank/CadAudit/Deep/SketchTools/NoModelAudit use blank.tscn. SketchEdit uses sketch.tscn.
   - The test project for SketchEdit needs `sketchbox.effigy`. If it was damaged, restore it from `tools/live/fixtures/sketchbox.effigy`.
@@ -32,7 +33,7 @@ Poohdot is `/home/poo/src/poohdot/godot/bin/godot.linuxbsd.editor.x86_64.mono`. 
   1. Mock the 4 sketch panels in Poohdot for sign-off.
   2. Re-frame the camera on a new model.
   3. Fix the Garment sliver in the kernel.
-- **sketch-calm branch (2026-10-29, not merged or published, waiting on Poo):** a calmer "pick a plane" moment.
+- **sketch-calm (2026-10-29, Poo approved; merged and published as 8ef2022):** a calmer "pick a plane" moment.
   - The auto-made model isn't selected, so Godot's move/rotate rings don't show. Tools and the Features dock find it as the scene's first character.
   - The Top/Front/Right and datum planes only draw while a tool wants a plane (Sketch before one is picked, or the Plane tool): a faint wash and a thin outline, with no name boxes. The hovered plane gets a stronger wash, a solid outline, and its name beside the mouse.
   - The planes are twice as big: empty model 48in half-size, 2.0x model extent, datum 0.8x.
