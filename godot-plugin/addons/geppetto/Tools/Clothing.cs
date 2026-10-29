@@ -68,9 +68,21 @@ public static class ClothingTools
 	/// <summary>Fills in what s&box got from the selection: a garment goes on the wearer.</summary>
 	public static void Prepare( PartStudio studio, Feature f )
 	{
-		if ( f is GarmentFeature g && g.Bodies.BodyIds.Count == 0 )
-			g.Bodies.BodyIds.AddRange( WearerBodyIds( studio ) );
+		if ( f is not GarmentFeature g || g.Bodies.BodyIds.Count > 0 ) return;
+		var ids = WearerBodyIds( studio );
+		if ( ids.Count == 0 ) ids = TorsoBodyIds( studio );
+		g.Bodies.BodyIds.AddRange( ids );
 	}
+
+	static readonly System.Text.RegularExpressions.Regex Extremity =
+		new( "head|hand|foot|wrist|toe|finger", System.Text.RegularExpressions.RegexOptions.IgnoreCase );
+
+	/// <summary>With no Wearer loaded, the character's own bodies a garment can go on: every non-garment
+	/// body bound to a bone that is not a head, hand or foot. Cutting from every body made the fit fail
+	/// ("covers nothing") because the hat, gloves and boots sit inside the torso's shell.</summary>
+	public static List<string> TorsoBodyIds( PartStudio studio ) =>
+		studio.Bodies.Where( b => !b.IsGarment && studio.BodyBoneMap.TryGetValue( b.Id, out var bone ) && !Extremity.IsMatch( bone ) )
+			.Select( b => b.Id ).ToList();
 
 	public static bool NewFeatureTool( GeppettoToolContext ctx, string tool )
 	{
@@ -84,24 +96,28 @@ public static class ClothingTools
 		switch ( f )
 		{
 			case GarmentFeature when studio.Rig == null || studio.Rig.Count == 0:
-				GeppettoToolContext.Warn( "Garment: a garment needs a rig to find the torso and arms - load a Wearer first (Clothing > Wearer). It will show an error until then." );
-				break;
+				GeppettoToolContext.Warn( "Garment needs a rig to find the torso and arms. Load a Wearer first (Clothing > Wearer), or add bones in Rig." );
+				return true;
+			case GarmentFeature when WearerBodyIds( studio ).Count == 0 && TorsoBodyIds( studio ).Count == 0:
+				GeppettoToolContext.Warn( "Garment: no body is bound to a torso bone to dress. Load a Wearer first (Clothing > Wearer), or Assign Body in Rig." );
+				return true;
 			case GarmentFeature when WearerBodyIds( studio ).Count == 0:
-				GeppettoToolContext.Warn( "Garment: no Wearer loaded, so it is cut from every body in the document. Load a Wearer first to dress a body." );
+				GeppettoToast.Info( "Garment: no Wearer loaded, so it is cut from this character's torso, arms and legs." );
 				break;
-			case FurFeature when !hasGarment:
-				GeppettoToolContext.Warn( "Fur grows on garments - add a Garment first, or it has nothing to grow on." );
-				break;
+			case FurFeature or TrimFeature or FabricFeature or GarmentDetailFeature when !hasGarment:
+				GeppettoToolContext.Warn( $"{f.TypeName} goes on a garment - add a Garment first." );
+				return true;
 			case FurFeature:
 				GeppettoToolContext.Say( "Fur: no faces picked, so it covers every garment. Set Coverage to 'Trim the openings' for collar/cuff fur." );
-				break;
-			case TrimFeature or FabricFeature or GarmentDetailFeature when !hasGarment:
-				GeppettoToolContext.Warn( $"{f.TypeName} goes on a garment - add a Garment first." );
 				break;
 		}
 
 		Prepare( studio, f );
-		GeppettoFeatureDialog.ShowNew( doc, f );
+		GeppettoFeatureDialog.ShowNew( doc, f, closed: ok =>
+		{
+			if ( ok && f.Error != null ) GeppettoToolContext.Warn( $"{f.TypeName}: {f.Error}" );
+		} );
+		if ( f.Error != null ) GeppettoToolContext.Warn( $"{f.TypeName}: {f.Error} Change the settings or Cancel." );
 		return true;
 	}
 
