@@ -90,7 +90,7 @@ public static partial class GeppettoTools
 			Activate( new RigSoftPreview( c ) );
 			GeppettoToast.Info( SoftBoneCount( doc ) == 0
 				? "Soft preview on, but no bone is soft yet: pick a bone and press Make Soft to see it swing."
-				: "Soft preview on: the soft bones hang under gravity and lag behind the pose. Pose a bone (Animate → Rotate) or move the character to push them; Rest settles them." );
+				: "Soft preview on: soft bones hang and lag behind the pose. Pose a bone to push them; Rest settles them." );
 			return true;
 		} );
 
@@ -165,8 +165,7 @@ public static partial class GeppettoTools
 		} );
 
 		Register( "Rig", "Wrinkle Maps", ctx =>
-			GeppettoRig.Refuse( "Wrinkle Maps is an s&box .vmdl compile switch (crease textures baked by Compile .vmdl). "
-				+ "Poohdot has no .vmdl compile, so there is nothing for it to switch here." ) );
+			ctx.Doc == null ? ctx.Need() : GeppettoRig.Refuse( "Wrinkle Maps is an s&box .vmdl compile switch. Poohdot has no .vmdl compile, so nothing to switch." ) );
 	}
 
 	/// <summary>No bone picked in the tree: ask for a click on one in the viewport, then run the action on it.</summary>
