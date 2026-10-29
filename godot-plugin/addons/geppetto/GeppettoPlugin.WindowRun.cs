@@ -377,7 +377,7 @@ public partial class GeppettoPlugin
 	}
 
 	/// <summary>Add Primitive from both fans, the way a click does: the shape menu, then the settings box
-	/// (size and segments), OK. Each shape must add one feature and one body, at the origin, and undo and
+	/// (size and segments), OK. Each shape must add one feature and one body, beside the model (FitToModel), and undo and
 	/// redo as one step. Undone again afterwards so the later steps see the model unchanged.</summary>
 	async Task PrimitiveRun( GeppettoDocument doc )
 	{
@@ -397,6 +397,9 @@ public partial class GeppettoPlugin
 					string step = $"{ws} > Primitive > {shapes[i]}";
 					SelectCharacter();
 					int features = doc.Studio.Features.Count, bodies = doc.Studio.Bodies.Count;
+					// Where the tool should stand it: the origin on an empty model, else beside the model.
+					var expect = new PrimitiveFeature();
+					GeppettoCad.FitToModel( doc.Studio, expect );
 					if ( !RunTool( ws, "Primitive" ) ) { Note( $"{step}: not wired", fail: true ); continue; }
 					await Wait( 0.3 );
 					var menu = EditorInterface.Singleton.GetBaseControl().GetChildren().OfType<PopupMenu>().LastOrDefault( m => m.Visible );
@@ -413,9 +416,9 @@ public partial class GeppettoPlugin
 					await Wait( 0.4 );
 					int addF = doc.Studio.Features.Count - features, addB = doc.Studio.Bodies.Count - bodies;
 					var last = doc.Studio.Features.LastOrDefault() as PrimitiveFeature;
-					bool atOrigin = last != null && last.Position.Value.Length < 1e-4f;
-					Note( $"{step}: +{addF} feature, +{addB} body, shape={last?.Shape.Value}, size/segments editable={sized}, at origin={atOrigin}",
-						fail: addF != 1 || addB < 1 || last?.Shape.Value != shapes[i] || !sized || !atOrigin );
+					bool placed = last != null && ( last.Position.Value - expect.Position.Value ).Length < 1e-3f;
+					Note( $"{step}: +{addF} feature, +{addB} body, shape={last?.Shape.Value}, size/segments editable={sized}, placed beside the model={placed}",
+						fail: addF != 1 || addB < 1 || last?.Shape.Value != shapes[i] || !sized || !placed );
 					Shot( $"{ws}-primitive-{shapes[i]}" );
 					history.Undo();
 					await Wait( 0.2 );
