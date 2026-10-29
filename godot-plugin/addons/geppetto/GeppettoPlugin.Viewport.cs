@@ -19,17 +19,19 @@ public partial class GeppettoPlugin
 		// viewport clicks while a Node3D is selected, so the tool's first click went to the editor's own
 		// click-select instead (it picked a mesh, and only the clicks after that reached the tool).
 		SetInputEventForwardingAlwaysEnabled();
+		SetupModeBars();
 	}
 
-	void Repaint() => UpdateOverlays();
+	void Repaint() { UpdateOverlays(); SyncModeBars(); }
 
-	void RepaintDoc( GeppettoDocument _ ) => UpdateOverlays();
+	void RepaintDoc( GeppettoDocument _ ) { UpdateOverlays(); SyncModeBars(); }
 
 	void TeardownViewportTools()
 	{
 		GeppettoTools.ActiveChanged -= Repaint;
 		GeppettoDocument.AnyChanged -= RepaintDoc;
 		GeppettoTools.Activate( null );
+		TeardownModeBars();
 		GeppettoDocument.UndoManager = null;
 	}
 

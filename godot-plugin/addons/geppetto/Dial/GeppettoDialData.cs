@@ -115,6 +115,8 @@ public static class GeppettoDialData
 	// Stages first, then tools; anything missing falls back to its stage's icon.
 	static readonly Dictionary<string, string> Icons = new()
 	{
+		["Line"] = "M5 19 19 5 M3 21h4v-4H3z M17 7h4V3h-4z", ["Rectangle"] = "M4 6h16v12H4z", ["Circle"] = "M12 4a8 8 0 1 0 0 16 8 8 0 1 0 0-16 M12 12h.01",
+		["Arc"] = "M4 18A10 10 0 0 1 20 18 M3 20h2M19 20h2", ["Dimension"] = "M4 8v10M20 8v10 M4 13h16 M7 10l-3 3 3 3M17 10l3 3-3 3",
 		["Sketch"] = "M4 19 9 6l5 9 3-5 3 4", ["Solid"] = "M4 8l8-4 8 4v8l-8 4-8-4z M4 8l8 4 8-4M12 12v8", ["Detail"] = "M5 19V9a4 4 0 0 1 4-4h10 M5 19h14",
 		["Repeat"] = "M12 3v18 M3 7h6v10H3z M15 7h6v10h-6z", ["Finish"] = "M5 20 15 10 M14 5l5 5 M12 7l5 5-3 3-5-5z",
 		["Select"] = "M5 4l13 7-6 1.5L9 19z", ["Transform"] = "M12 3v18M3 12h18 M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3",

@@ -128,10 +128,16 @@ public partial class GeppettoPlugin
 		for ( int i = 0; i < 40 && GeppettoTools.Active is not CadSketch; i++ ) await Wait( 0.25 );
 		if ( _character?.Doc == null || GeppettoTools.Active is not CadSketch draw ) { Note( $"sketch: ran={ran}, no model or tool", fail: true ); return; }
 		await Click( mid );
-		foreach ( var c in new[] { new Vec3( 4, 4, 0 ), new Vec3( 8, 4, 0 ), new Vec3( 8, 8, 0 ), new Vec3( 4, 8, 0 ) } ) await Click( Scr( c ) );
+		// Phase 1 is laid out in units for a framed model; a new model isn't framed, so scale it all by k until
+		// 4 units is ~60px and no click lands in another's point snap (12px).
+		float k = 1;
+		while ( Scr( new Vec3( 4 * k, 0, 0 ) ).DistanceTo( Scr( new Vec3( 0, 0, 0 ) ) ) < 60 && k < 64 ) k *= 2;
+		Vec3 K( float x, float y, float z ) => new( x * k, y * k, z * k );
+		foreach ( var c in new[] { K( 4, 4, 0 ), K( 8, 4, 0 ), K( 8, 8, 0 ), K( 4, 8, 0 ) } ) await Click( Scr( c ) );
 		await Key( Godot.Key.Enter );
 		var sk1 = Doc().Studio.Features.OfType<SketchFeature>().LastOrDefault();
-		Note( $"sketch 1: {sk1?.Sketch.Curves.Count ?? 0} curves on {( draw.PlaneIndex >= 0 ? "plane " + draw.PlaneIndex : "?" )}", fail: sk1 == null || sk1.Sketch.Curves.Count != 4 );
+		Note( $"sketch 1: {sk1?.Sketch.Curves.Count ?? 0} curves on {( draw.PlaneIndex >= 0 ? "plane " + draw.PlaneIndex : "?" )}, points " +
+			string.Join( " ", sk1?.Sketch.Points.Select( p => $"({p.x:0.#},{p.y:0.#})" ) ?? Enumerable.Empty<string>() ), fail: sk1 == null || sk1.Sketch.Curves.Count != 4 );
 		if ( sk1 == null ) return;
 
 		// Revolve: Cancel first, then for real.
@@ -154,7 +160,7 @@ public partial class GeppettoPlugin
 		SplineFeature? spline = null;
 		if ( GeppettoTools.Active is GeppettoCadSplineDraw )
 		{
-			foreach ( var c in new[] { new Vec3( -30, -24, 0 ), new Vec3( -32, -8, 0 ), new Vec3( -32, 8, 0 ), new Vec3( -30, 24, 0 ) } ) await Click( Scr( c ) );
+			foreach ( var c in new[] { K( -30, -24, 0 ), K( -32, -8, 0 ), K( -32, 8, 0 ), K( -30, 24, 0 ) } ) await Click( Scr( c ) );
 			await Wait( 0.3 );
 			Shot( "spline-drawn" );
 			var sbox = Box();
@@ -162,7 +168,7 @@ public partial class GeppettoPlugin
 			Note( $"spline: {spline?.Points.Count ?? 0} points at {string.Join( " ", spline?.Points.Select( q => $"({q.x:F0},{q.y:F0},{q.z:F0})" ) ?? Array.Empty<string>() )}", fail: ( spline?.Points.Count ?? 0 ) < 4 );
 			await Key( Godot.Key.Backspace );
 			Note( $"spline backspace: {spline?.Points.Count ?? 0} points", fail: ( spline?.Points.Count ?? 0 ) != 3 );
-			await Click( Scr( new Vec3( -30, 24, 0 ) ) );
+			await Click( Scr( K( -30, 24, 0 ) ) );
 			await Key( Godot.Key.Enter );
 			bool inTree = spline != null && Doc().Studio.Features.Contains( spline );
 			Note( $"spline enter: added={inTree} error={spline?.Error ?? "none"} box open={Box() != null} tool={GeppettoTools.Active?.Name ?? "none"}",
@@ -182,8 +188,8 @@ public partial class GeppettoPlugin
 		RunTool( "CAD", "Plane" );
 		await Wait( 0.3 );
 		await Key( Godot.Key.Enter );
-		var plane = await Accept( "plane", box => TypeInto( box, "Offset", "10", "plane" ) );
-		Note( $"plane offset typed: {( plane as PlaneFeature )?.Offset.Value}", fail: plane is not PlaneFeature { Offset.Value: 10f } );
+		var plane = await Accept( "plane", box => TypeInto( box, "Offset", $"{10 * k}", "plane" ) );
+		Note( $"plane offset typed: {( plane as PlaneFeature )?.Offset.Value}", fail: ( plane as PlaneFeature )?.Offset.Value != 10 * k );
 
 		RunTool( "CAD", "Sketch" );
 		await Wait( 0.3 );
@@ -191,9 +197,9 @@ public partial class GeppettoPlugin
 		{
 			var ce = EffigyPoseBridge.ToEffigyPosition( GeppettoPicker.BodyTransformOf( _character!.Root ).AffineInverse() * cam.GlobalPosition );
 			float qx = ce.x >= 0 ? 6 : -6, qy = ce.y >= 0 ? 6 : -6;
-			await Click( Scr( new Vec3( qx, qy, 10 ) ) );
+			await Click( Scr( K( qx, qy, 10 ) ) );
 			Note( $"sketch 2: on {( draw2.PlaneFeatureId.Length > 0 ? "datum " + draw2.PlaneFeatureId : draw2.Face != null ? "a face" : "plane " + draw2.PlaneIndex )}", fail: plane == null || draw2.PlaneFeatureId != plane.Id );
-			foreach ( var c in new[] { new Vec3( qx - 3, qy - 3, 10 ), new Vec3( qx + 3, qy - 3, 10 ), new Vec3( qx + 3, qy + 3, 10 ), new Vec3( qx - 3, qy + 3, 10 ) } ) await Click( Scr( c ) );
+			foreach ( var c in new[] { K( qx - 3, qy - 3, 10 ), K( qx + 3, qy - 3, 10 ), K( qx + 3, qy + 3, 10 ), K( qx - 3, qy + 3, 10 ) } ) await Click( Scr( c ) );
 			await Key( Godot.Key.Enter );
 		}
 		var sk2 = Doc().Studio.Features.OfType<SketchFeature>().LastOrDefault();
@@ -309,7 +315,9 @@ public partial class GeppettoPlugin
 			else { Box()?.GetCancelButton().EmitSignal( BaseButton.SignalName.Pressed ); await Wait( 0.3 ); await Drop( tool, baseState ); }
 		}
 
-		string obj = ProjectSettings.GlobalizePath( "res://audit_cube.obj" );
+		// Outside the project: a new .obj under res:// gets auto-imported, and that import's progress
+		// dialog parents itself to the file dialog below, which is freed under it (an editor crash).
+		string obj = ProjectSettings.GlobalizePath( "user://audit_cube.obj" );
 		File.WriteAllText( obj, "o cube\nv 0 0 0\nv 4 0 0\nv 4 4 0\nv 0 4 0\nv 0 0 4\nv 4 0 4\nv 4 4 4\nv 0 4 4\n" +
 			"f 1 4 3 2\nf 5 6 7 8\nf 1 2 6 5\nf 2 3 7 6\nf 3 4 8 7\nf 4 1 5 8\n" );
 		RunTool( "CAD", "Import" );

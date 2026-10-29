@@ -70,6 +70,7 @@ public partial class GeppettoPlugin
 	{
 		var roots = new List<Control>();
 		roots.AddRange( _dials.Where( IsInstanceValid ) );
+		roots.AddRange( _modeBars.Where( IsInstanceValid ) );
 		if ( _featureTree != null ) roots.Add( _featureTree );
 		if ( _timeline != null && _timelineDocked ) roots.Add( _timeline );
 		foreach ( var w in OpenWindows() ) roots.AddRange( w.GetChildren().OfType<Control>() );

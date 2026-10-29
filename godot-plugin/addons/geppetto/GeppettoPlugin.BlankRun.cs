@@ -1,6 +1,7 @@
 #if TOOLS
 #nullable enable
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Effigy;
@@ -55,15 +56,47 @@ public partial class GeppettoPlugin
 			CheckClipping( "planes" );
 
 			float r = vp.GetVisibleRect().Size.Y * 0.1f;
+			var bar = _modeBars.FirstOrDefault( b => IsInstanceValid( b ) && b.GetParent() == ViewportSurface( 0 ) );
+			Note( $"mode bar before a plane: showing={bar?.Showing}", fail: bar == null || bar.Showing );
 			await Click( mid );
 			Note( $"plane: {( draw.Plane == null ? "none" : $"normal {draw.Plane.Normal}" )}, picked {( draw.PlaneIndex >= 0 ? "origin plane " + draw.PlaneIndex : draw.Face != null ? "face" : draw.PlaneFeatureId )}", fail: draw.Plane == null );
 			Note( $"planes hidden once one is picked: wanted={GeppettoDatumPlanes.Wanted( GeppettoTools.Active )}", fail: GeppettoDatumPlanes.Wanted( GeppettoTools.Active ) );
+
+			// Sketch mode: amber frame + SKETCH tag + the bar naming the plane, inside the viewport, model dimmed.
+			await Wait( 0.3 );
+			if ( !await CheckSketchBar( bar, draw, "sketch mode" ) ) { Finish(); return; }
+			Shot( "blank-1b-sketch-mode" );
+			CheckClipping( "sketch mode bar" );
+			// Rectangle on the bar starts a full sketch with that tool armed.
+			await RealClick( bar!.Buttons.GetValueOrDefault( "Rectangle" ), "Rectangle" );
+			Note( $"bar Rectangle: editing={draw.Editing != null}, tool={draw.Tool}", fail: draw.Editing == null || draw.Tool != CadSketch.EditTool.Rectangle );
+			int before = doc.Studio.Features.Count;
+			await Click( mid - new Vector2( r, r ) );
+			await Click( mid + new Vector2( r, r ) );
+			Note( $"bar rectangle drawn: {draw.Editing?.Sketch.Curves.Count ?? 0} curves", fail: ( draw.Editing?.Sketch.Curves.Count ?? 0 ) != 4 );
+			// Cancel throws it away: no feature, tool off, bar gone, dim off.
+			await RealClick( bar.Buttons.GetValueOrDefault( "Cancel" ), "Cancel" );
+			await Wait( 0.3 );
+			Note( $"bar Cancel: tool={GeppettoTools.Active?.Name ?? "none"}, features {before} -> {doc.Studio.Features.Count}, bar showing={bar.Showing}, dimmed={ModelDimmed}",
+				fail: GeppettoTools.Active != null || doc.Studio.Features.Count != before || bar.Showing || ModelDimmed );
+			Shot( "blank-1c-cancelled" );
+
+			// Again, and this time the quick outline is finished with the bar's Finish.
+			RunTool( "CAD", "Sketch" );
+			for ( int i = 0; i < 20 && GeppettoTools.Active is not CadSketch; i++ ) await Wait( 0.25 );
+			if ( GeppettoTools.Active is not CadSketch again ) { Note( "sketch again: no tool", fail: true ); Finish(); return; }
+			draw = again;
+			GeppettoTools.Active.Input( cam, Move( mid ) );
+			await Click( mid );
+			await Wait( 0.3 );
+			if ( !await CheckSketchBar( bar, draw, "sketch mode again" ) ) { Finish(); return; }
 			foreach ( var q in new[] { new Vector2( -1, -1 ), new Vector2( 1, -1 ), new Vector2( 1, 1 ), new Vector2( -1, 1 ) } )
 				await Click( mid + q * r );
 			await Wait( 0.2 );
 			Shot( "blank-2-square" );
-			GeppettoTools.Active?.Input( cam, KeyPress( Key.Enter ) );
+			await RealClick( bar.Buttons.GetValueOrDefault( "Finish" ), "Finish" );
 			await Wait( 0.5 );
+			Note( $"bar Finish: tool={GeppettoTools.Active?.Name ?? "none"}, bar showing={bar.Showing}, dimmed={ModelDimmed}", fail: GeppettoTools.Active != null || bar.Showing || ModelDimmed );
 			var sk = doc.Studio.Features.OfType<SketchFeature>().LastOrDefault();
 			Note( $"square: {sk?.Sketch.Curves.Count ?? 0} curves, error={sk?.Error}", fail: sk == null || sk.Sketch.Curves.Count != 4 || sk.Error != null );
 			Shot( "blank-3-sketch" );
@@ -94,6 +127,35 @@ public partial class GeppettoPlugin
 		}
 		catch ( Exception e ) { Note( "blank: threw " + e, fail: true ); }
 		Finish();
+	}
+
+	async Task<bool> CheckSketchBar( GeppettoModeBar? bar, CadSketch draw, string step )
+	{
+		if ( bar == null ) { Note( $"{step}: no mode bar on the viewport", fail: true ); return false; }
+		bar.Sync();
+		await Wait( 0.1 );
+		var pill = bar.Pill.GetGlobalRect();
+		var area = bar.GetGlobalRect();
+		var tagRect = new Rect2( bar.GetGlobalTransformWithCanvas() * bar.TagRect().Position, bar.TagRect().Size );
+		bool inside = area.Encloses( pill ) && !pill.Intersects( tagRect );
+		bool amber = bar.FrameColour.IsEqualApprox( GeppettoModeBar.Amber );
+		Note( $"{step}: bar showing={bar.Showing}, tag={bar.Tag}, amber={amber}, title=\"{bar.Title}\", pill {pill.Position.Round()}+{pill.Size.Round()} inside {area.Size.Round()}={inside}, buttons=[{string.Join( ",", bar.Buttons.Keys )}], dimmed={ModelDimmed}",
+			fail: !bar.Showing || bar.Tag != "SKETCH" || !amber || !bar.Title.StartsWith( "Sketching on " ) || bar.Title.EndsWith( " a plane" ) || !inside
+				|| !new[] { "Line", "Rectangle", "Circle", "Arc", "Trim", "Dimension", "Finish", "Cancel" }.All( bar.Buttons.ContainsKey ) || !ModelDimmed );
+		return bar.Showing;
+	}
+
+	/// <summary>A real mouse click on a control, through the editor window's input like a person's.</summary>
+	async Task RealClick( Control? c, string what )
+	{
+		if ( c == null || !c.IsVisibleInTree() ) { Note( $"click {what}: not on screen", fail: true ); return; }
+		var w = c.GetViewport();
+		var at = c.GetGlobalTransformWithCanvas() * ( c.Size / 2 );
+		w.PushInput( new InputEventMouseMotion { Position = at, GlobalPosition = at }, true );
+		await Wait( 0.05 );
+		foreach ( bool down in new[] { true, false } )
+			w.PushInput( new InputEventMouseButton { ButtonIndex = MouseButton.Left, Pressed = down, Position = at, GlobalPosition = at, ButtonMask = down ? MouseButtonMask.Left : 0 }, true );
+		await Wait( 0.25 );
 	}
 }
 #endif

@@ -106,6 +106,7 @@ public sealed partial class CadSketch : IGeppettoViewportTool
 		_ray.BodyTransform = GeppettoPicker.BodyTransformOf( character.Root );
 		DatumHalfSize = GeppettoDatumPlanes.HalfSize( character.Root );
 		OriginHalfSize = GeppettoDatumPlanes.OriginHalfSize( character.Root );
+		_camera = EditorInterface.Singleton.GetEditorViewport3D( 0 )?.GetCamera3D();
 		GeppettoTools.Activate( this );
 	}
 
@@ -130,7 +131,7 @@ public sealed partial class CadSketch : IGeppettoViewportTool
 		GeppettoDatumPlanes.Hovered = null;
 		if ( pick is { } p )
 		{
-			Face = null; Plane = p.Plane; PlaneIndex = Math.Max( 0, p.Index );
+			Face = null; Plane = p.Plane; PlaneIndex = Math.Max( 0, p.Index ); PlaneName = p.Name;
 			if ( p.Index < 0 ) PlaneFeatureId = p.Id;
 			UpdateReference();
 			GeppettoToolContext.Say( $"Sketch: on {p.Name}. Click points; click the first point or press Enter to close." );
@@ -142,7 +143,7 @@ public sealed partial class CadSketch : IGeppettoViewportTool
 			var face = FacePlane.Capture( body!, hit.FaceIndex, hit.Point );
 			if ( FacePlane.TryResolve( _doc.Studio.Bodies, face, out var plane ) )
 			{
-				Face = face; Plane = plane; PlaneIndex = 0;
+				Face = face; Plane = plane; PlaneIndex = 0; PlaneName = "a face";
 				UpdateReference();
 				GeppettoToolContext.Say( "Sketch: on the picked face. Click points; click the first point or press Enter to close." );
 				if ( Armed is { } t ) BeginNew( t );
@@ -266,6 +267,7 @@ public sealed partial class CadSketch : IGeppettoViewportTool
 		var cam = _camera;
 		if ( cam != null && GodotObject.IsInstanceValid( cam ) && Plane != null )
 		{
+			DrawGrid( overlay, cam );
 			Vector3 W( Vec2 p ) => _ray.ToWorld( Plane.ToWorld( p ) );
 			for ( int i = 0; i + 1 < Points.Count; i++ )
 				GeppettoPicker.DrawWorldLine( overlay, cam, W( Points[i] ), W( Points[i + 1] ), Amber, 2.5f );
@@ -285,11 +287,8 @@ public sealed partial class CadSketch : IGeppettoViewportTool
 		{
 			// Choosing a plane: one short line, so the planes are the thing to look at.
 			GeppettoPicker.DrawHint( overlay, "Sketch: click a plane  ·  Esc to cancel" );
-			return;
 		}
-		string where = Points.Count < 3 ? $"click points ({Points.Count} so far, 3 needed)"
-			: $"{Points.Count} points: click the first point or press Enter to close";
-		GeppettoPicker.DrawHint( overlay, $"Sketch: {where}\nBackspace removes the last point, Esc cancels.\nPress a tool key (L, R, C, A, ...) for the full sketch tools." );
+		// With a plane, the mode bar says what to do (ModeStep) and "?" has the keys.
 	}
 
 	public void DrawSnapMarker( Control overlay, Camera3D cam )

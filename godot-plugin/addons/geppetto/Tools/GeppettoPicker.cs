@@ -346,7 +346,7 @@ public sealed class GeppettoPicker : IGeppettoViewportTool
 		int size = overlay.GetThemeDefaultFontSize();
 		float maxW = Math.Max( 120f, Math.Min( 640f, overlay.Size.X - 32f ) );
 		var ts = font.GetMultilineStringSize( text, HorizontalAlignment.Left, maxW, size );
-		var pos = new Vector2( Math.Max( 16f, ( overlay.Size.X - ts.X ) * 0.5f ), 44f );
+		var pos = new Vector2( Math.Max( 16f, ( overlay.Size.X - ts.X ) * 0.5f ), GeppettoModeBar.HintTop );
 		overlay.DrawRect( new Rect2( pos - new Vector2( 8, 6 ), ts + new Vector2( 16, 12 ) ), new Color( 0.08f, 0.09f, 0.11f, 0.85f ) );
 		overlay.DrawMultilineString( font, pos + new Vector2( 0, font.GetAscent( size ) ), text, HorizontalAlignment.Left, maxW, size, -1, new Color( 0.9f, 0.91f, 0.93f ) );
 	}

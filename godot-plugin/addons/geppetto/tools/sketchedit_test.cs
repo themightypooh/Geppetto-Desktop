@@ -333,6 +333,33 @@ public partial class sketchedit_test : RefCounted
 		Add( "Shift+Delete clears the selection's constraints", ce.RemoveConstraintsOnSelection() > 0 && !Has( SketchConstraintKind.Distance ) );
 		ce.Finish();
 
+		// --- Cancel (the mode bar's): an edit goes back exactly, a new sketch is never added, no undo step ---
+		int curves = Sk.Sketch.Curves.Count, points = Sk.Sketch.Points.Count, cons = Sk.Sketch.Constraints.Count, feats = _doc.Studio.Features.Count, u1 = Undos;
+		var cx2 = new CadSketch( _doc ) { Tool = CadSketch.EditTool.Line };
+		cx2.BeginEdit( Sk );
+		Add( "in sketch mode while editing", cx2.InMode && cx2.ModeTitle.StartsWith( "Sketching on " ) );
+		cx2.LineClick( c + new Vec2( -4, 4 ) );
+		cx2.LineClick( c + new Vec2( -5, 5 ) );
+		cx2.EndChain();
+		bool grew = Sk.Sketch.Curves.Count > curves;
+		cx2.Cancel();
+		Add( "Cancel puts an edited sketch back as it was", grew && Sk.Sketch.Curves.Count == curves && Sk.Sketch.Points.Count == points && Sk.Sketch.Constraints.Count == cons && cx2.Editing == null && !cx2.InMode,
+			$"{Sk.Sketch.Curves.Count} vs {curves}" );
+		Add( "Cancel adds no undo step or feature", Undos == u1 && _doc.Studio.Features.Count == feats && NoErrors, Errors );
+		var fresh = new CadSketch( _doc );
+		fresh.ChoosePlane( o, d );
+		fresh.BeginNew( CadSketch.EditTool.Rectangle );
+		fresh.ClickTool( c + new Vec2( 6, 6 ) );
+		fresh.ClickTool( c + new Vec2( 8, 8 ) );
+		bool drew = fresh.Editing?.Sketch.Curves.Count == 4;
+		fresh.Cancel();
+		Add( "Cancel drops a new sketch", drew && _doc.Studio.Features.Count == feats && Undos == u1 && !fresh.InMode );
+		var quick = new CadSketch( _doc );
+		quick.ChoosePlane( o, d );
+		foreach ( var q in new[] { new Vec2( 6, 6 ), new Vec2( 8, 6 ), new Vec2( 8, 8 ) } ) quick.Points.Add( c + q );
+		quick.ModeDone();
+		Add( "Finish on a quick outline adds it", _doc.Studio.Features.Count == feats + 1 && Sk.Sketch.Curves.Count == 3 );
+
 		// --- a script sketch is not opened (its Curves text rebuilds it) ---
 		var script = new SketchFeature();
 		script.Curves.Value = "rect 0 0 1 1";

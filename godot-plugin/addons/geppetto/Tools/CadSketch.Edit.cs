@@ -1426,6 +1426,7 @@ public sealed partial class CadSketch
 		var cam = _camera;
 		if ( cam != null && GodotObject.IsInstanceValid( cam ) && Plane != null && Editing != null )
 		{
+			DrawGrid( overlay, cam );
 			// 1. Shaded regions (Profile Inspector)
 			var profiles = ProfileFinder.Find( S );
 			foreach ( var region in ProfileFinder.ShadedRegions( S, profiles ) )
@@ -1575,7 +1576,11 @@ public sealed partial class CadSketch
 				overlay.DrawString( font, new Vector2( box.Position.X + 2, baseline ), GlyphLabel( m ), HorizontalAlignment.Left, -1, GlyphFontSize, col );
 			}
 		}
+	}
 
+	/// <summary>The one line under the mode bar: what the next click does (and the dimension being typed).</summary>
+	string EditStep()
+	{
 		string what = Tool switch
 		{
 			EditTool.Select => "Select (S): click points/curves (Shift adds), drag point/grip, box-select. Delete removes.",
@@ -1602,14 +1607,17 @@ public sealed partial class CadSketch
 			EditTool.Cut => "Cut (Z): drag a stroke across curves to slice them.",
 			_ => "",
 		};
-		string title = IsNewSketch ? $"New sketch ({S.Curves.Count} curves)" : $"Edit sketch ({S.Curves.Count} curves)";
 		string dim = _dimension != null ? $"\nDimension {_dimension.Value:0.###}: type a new value{( _typed.Length > 0 ? $" ({_typed})" : "" )} and press Enter." : "";
 		string snapNote = LastSnap.InferenceAxis != 0 && ( Tool == EditTool.Line && ChainLast >= 0 || Tool == EditTool.LineMidpoint && _pending.Count == 1 )
 			? ( ( LastSnap.InferenceAxis & 1 ) != 0 ? " Vertical: the line will keep it." : " Horizontal: the line will keep it." ) : "";
-		GeppettoPicker.DrawHint( overlay, $"{title}. {what}{snapNote}{dim}\n"
-			+ $"Draw: S select, L line, M midpoint, R rect, C circle, A arc, P point, G polygon, W slot, E ellipse, N spline, Q construction ({( ConstructionMode ? "on" : "off" )}).\n"
-			+ "Edit: T trim, X extend, F fillet, O offset, Shift+M mirror, Z cut, U project.\n"
-			+ "Constrain selection: H horiz, V vert, I coincident, Shift+E equal, B parallel, Shift+B perpendicular, K tangent, Shift+K concentric, Y midpoint, Shift+Y symmetric, J fix, Shift+P on line, D dimension. Click a mark to remove it. Esc/Enter finishes." );
+		return $"{what}{snapNote}{dim}".Replace( "\n", " " ).Trim();
 	}
+
+	/// <summary>The hotkeys, for the mode bar's "?".</summary>
+	string EditHelp() =>
+		$"Draw: S select, L line, M midpoint, R rect, C circle, A arc, P point, G polygon, W slot, E ellipse, N spline, Q construction ({( ConstructionMode ? "on" : "off" )}).\n"
+		+ "Edit: T trim, X extend, F fillet, O offset, Shift+M mirror, Z cut, U project.\n"
+		+ "Constrain selection: H horiz, V vert, I coincident, Shift+E equal, B parallel, Shift+B perpendicular, K tangent, Shift+K concentric, Y midpoint, Shift+Y symmetric, J fix, Shift+P on line, D dimension.\n"
+		+ "Click a mark to remove it. Enter or Esc finishes; Cancel throws the edit away.";
 }
 #endif
