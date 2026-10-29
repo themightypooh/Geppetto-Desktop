@@ -67,6 +67,16 @@ public sealed partial class CadSketch
 	string? _editingId;
 	Sketch? _before;
 	bool _dirty;
+	/// <summary>The session is drawing a sketch that is not in the tree yet: Finish adds it.</summary>
+	bool _isNew;
+	public bool IsNewSketch => Editing != null && _isNew;
+	/// <summary>The tool a dial tile or hotkey asked for before a plane was picked; the session starts
+	/// with it once the plane is clicked.</summary>
+	public EditTool? Armed { get; set; }
+
+	/// <summary>The dimension last put on, which typed digits retype (Enter applies).</summary>
+	SketchConstraint? _dimension;
+	string _typed = "";
 
 	// Mouse gestures in Select.
 	int _dragPoint = -1;
@@ -108,6 +118,47 @@ public sealed partial class CadSketch
 		return true;
 	}
 
+	/// <summary>
+	/// Starts a full drawing session on the plane already picked, for a sketch that is not in the
+	/// tree yet. Any outline points clicked so far become lines. Finish adds the sketch as one undo
+	/// step (nothing when nothing was drawn).
+	/// </summary>
+	public bool BeginNew( EditTool tool )
+	{
+		if ( Plane == null || Editing != null ) return false;
+		var f = new SketchFeature();
+		if ( PlaneFeatureId.Length > 0 ) f.PlaneFeatureId = PlaneFeatureId;
+		else if ( Face is { } fr ) f.Face = fr;
+		else f.Plane.Index = Math.Clamp( PlaneIndex, 0, 2 );
+		f.Sketch.Plane = Plane.Clone();
+		var idx = Points.Select( p => f.Sketch.AddPoint( p ) ).ToList();
+		for ( int i = 0; i + 1 < idx.Count; i++ ) f.Sketch.Add( new SketchLine( idx[i], idx[i + 1] ) );
+		var face = Face;
+		if ( !BeginEdit( f ) ) return false;
+		Face = face;
+		UpdateReference();
+		_isNew = true;
+		_dirty = idx.Count >= 2;
+		Points.Clear();
+		Armed = null;
+		SetTool( tool );
+		return true;
+	}
+
+	/// <summary>Arms a tool the way its hotkey or dial tile does: drops half-placed clicks, and ends the
+	/// line chain when leaving Line.</summary>
+	public void SetTool( EditTool tool )
+	{
+		if ( Tool == EditTool.Spline && tool != EditTool.Spline ) FinishSpline();
+		Tool = tool;
+		_pending.Clear();
+		_filletCorner = -1; _offsetCurveId = null; _cutFrom = null;
+		if ( tool != EditTool.Line ) EndChain();
+		// Mirror and Select work on the selection; the drawing tools start clean.
+		if ( tool is not ( EditTool.Select or EditTool.Mirror or EditTool.Trim or EditTool.Extend or EditTool.Fillet or EditTool.Offset ) ) ClearSelection();
+		GeppettoTools.Redraw();
+	}
+
 	void Changed()
 	{
 		_dirty = true;
@@ -127,7 +178,17 @@ public sealed partial class CadSketch
 		var after = feature.Sketch.Clone();
 		var id = _editingId!;
 		Editing = null; _before = null;
+		_dimension = null; _typed = "";
 		if ( GeppettoTools.Active == this ) GeppettoTools.Activate( null );
+		if ( _isNew )
+		{
+			_isNew = false;
+			if ( after.Curves.Count == 0 ) { GeppettoToolContext.Say( "Sketch: nothing drawn, so no sketch was added." ); return false; }
+			feature.Sketch = after;
+			bool added = _doc.AddFeature( feature );
+			if ( added ) GeppettoToolContext.Say( $"Sketch: added ({after.Curves.Count} curves). Ctrl+Z takes it back." );
+			return added;
+		}
 		if ( !_dirty ) return false;
 
 		// Back to where it started, so the command's own Execute is what makes the change.
@@ -909,6 +970,192 @@ public sealed partial class CadSketch
 		return best;
 	}
 
+	/// <summary>
+	/// The snap for the armed tool, the way s&amp;box asks for it: the clicks already placed for the shape
+	/// in progress are passed as pending (so they can be snapped back to, and a line's first point
+	/// drives the horizontal/vertical guide), Cut does not snap, and a dragged point ignores itself.
+	/// </summary>
+	SnapResult SnapFor( Vec2 raw )
+	{
+		if ( Tool == EditTool.Cut ) { LastSnap = new SnapResult( raw, -1, 0 ); return LastSnap; }
+		_snapper.IgnorePoint = _dragPoint;
+		IReadOnlyList<Vec2> pending = Tool switch
+		{
+			EditTool.Line => ChainLast >= 0 ? new[] { S.Points[ChainLast] } : Array.Empty<Vec2>(),
+			EditTool.Spline => _splinePoints,
+			EditTool.Select => Array.Empty<Vec2>(),
+			_ => _pending,
+		};
+		bool isLine = ( Tool == EditTool.Line && ChainLast >= 0 ) || ( Tool == EditTool.LineMidpoint && _pending.Count == 1 );
+		var snap = Snap( raw, pending, isLine );
+		_snapper.IgnorePoint = -1;
+		return snap;
+	}
+
+	/// <summary>Where a constraint's glyph is drawn on screen (DrawEdit uses the same spot).</summary>
+	static Vector2 GlyphAt( Vector2 anchor, ConstraintMarker m ) =>
+		anchor + ( m.Away.Length < 1e-6f ? new Vector2( 0.7071f, -0.7071f ) : new Vector2( m.Away.x, -m.Away.y ) ) * 14f;
+
+	/// <summary>The constraint glyph under the cursor, or null.</summary>
+	ConstraintMarker? MarkerAt( Camera3D cam, Vector2 screen )
+	{
+		ConstraintMarker? best = null; float bestD = 9f;
+		foreach ( var m in ConstraintTools.Markers( S ) )
+			if ( Screen( cam, m.Anchor ) is { } a && GlyphAt( a, m ).DistanceTo( screen ) <= bestD ) { best = m; bestD = GlyphAt( a, m ).DistanceTo( screen ); }
+		return best;
+	}
+
+	// =========================================================================================
+	// Constraints and dimensions (hotkeys on the selection; no panel)
+	// =========================================================================================
+
+	/// <summary>The constraint hotkeys, the kernel kinds each one puts on (the first that fits the
+	/// selection wins), and what the hint calls it.</summary>
+	public static readonly (Key Key, bool Shift, SketchConstraintKind[] Kinds, string Name)[] ConstraintKeys =
+	{
+		( Key.H, false, new[] { SketchConstraintKind.Horizontal }, "Horizontal" ),
+		( Key.V, false, new[] { SketchConstraintKind.Vertical }, "Vertical" ),
+		( Key.I, false, new[] { SketchConstraintKind.Coincident }, "Coincident" ),
+		( Key.E, true, new[] { SketchConstraintKind.EqualLength }, "Equal" ),
+		( Key.B, false, new[] { SketchConstraintKind.Parallel }, "Parallel" ),
+		( Key.B, true, new[] { SketchConstraintKind.Perpendicular }, "Perpendicular" ),
+		( Key.K, false, new[] { SketchConstraintKind.Tangent, SketchConstraintKind.TangentArcs }, "Tangent" ),
+		( Key.K, true, new[] { SketchConstraintKind.Concentric }, "Concentric" ),
+		( Key.Y, false, new[] { SketchConstraintKind.Midpoint }, "Midpoint" ),
+		( Key.Y, true, new[] { SketchConstraintKind.Symmetric }, "Symmetric" ),
+		( Key.J, false, new[] { SketchConstraintKind.Fixed }, "Fix" ),
+		( Key.P, true, new[] { SketchConstraintKind.PointOnLine }, "Point on line" ),
+		( Key.D, false, new[] { SketchConstraintKind.Distance, SketchConstraintKind.Radius, SketchConstraintKind.Diameter, SketchConstraintKind.Angle }, "Dimension" ),
+	};
+
+	/// <summary>Puts the first offer of one of <paramref name="kinds"/> that fits the selection on the
+	/// sketch and solves, pinned on the first selected point the way s&amp;box pins it. A dimension
+	/// takes the current measurement; typing digits then retypes it.</summary>
+	public bool Constrain( string name, params SketchConstraintKind[] kinds )
+	{
+		if ( Editing == null ) return false;
+		var sel = new SketchSelection( SelectedPoints, SelectedCurves );
+		if ( sel.IsEmpty ) { GeppettoToolContext.Say( $"Sketch: {name}: select points or curves first (S, then click; Shift adds)." ); GeppettoTools.Redraw(); return false; }
+		var offers = ConstraintTools.Offers( S, sel );
+		var offer = offers.FirstOrDefault( o => kinds.Contains( o.Kind ) );
+		if ( offer == null )
+		{
+			var fits = offers.Count == 0 ? "nothing" : string.Join( ", ", offers.Select( o => o.Label ).Distinct() );
+			GeppettoToolContext.Say( $"Sketch: {name} doesn't fit this selection. What fits: {fits}." );
+			return false;
+		}
+		int pin = SelectedPoints.Count > 0 ? SelectedPoints.First() : 0;
+		if ( pin < 0 || pin >= S.Points.Count ) pin = 0;
+		var res = ConstraintTools.ApplyAndSolve( S, offer, pin );
+		if ( !res.Applied ) { GeppettoToolContext.Say( $"Sketch: {res.Message}" ); return false; }
+		_dimension = offer.NeedsValue ? offer.Constraint : null;
+		_typed = "";
+		int dof = res.Solve.DegreesOfFreedom;
+		GeppettoToolContext.Say( $"Sketch: {offer.Label} applied — " + ( dof == 0 ? "the sketch is fully defined." : $"{dof} degree{( dof == 1 ? "" : "s" )} of freedom left." ) );
+		Changed();
+		return true;
+	}
+
+	/// <summary>Sets the value of the dimension last put on (or the one given) and solves; a value the
+	/// sketch can't take is refused and the old one kept.</summary>
+	public bool SetDimension( float value, SketchConstraint? dim = null )
+	{
+		dim ??= _dimension;
+		if ( Editing == null || dim == null || !S.Constraints.Contains( dim ) ) return false;
+		if ( value <= 0f && dim.Kind != SketchConstraintKind.Angle ) { GeppettoToolContext.Say( "Sketch: a dimension has to be more than 0." ); return false; }
+		float old = dim.Value;
+		var before = new List<Vec2>( S.Points );
+		dim.Value = value;
+		var solve = SketchSolver.Solve( S, SelectedPoints.Count > 0 ? SelectedPoints.First() : 0 );
+		if ( !solve.Converged )
+		{
+			dim.Value = old;
+			for ( int i = 0; i < S.Points.Count && i < before.Count; i++ ) S.Points[i] = before[i];
+			GeppettoToolContext.Say( $"Sketch: {value:0.###} can't be held with the rest of the sketch; kept {old:0.###}." );
+			return false;
+		}
+		GeppettoToolContext.Say( $"Sketch: dimension set to {value:0.###}." );
+		Changed();
+		return true;
+	}
+
+	/// <summary>Removes one constraint and re-solves (geometry stays where it is).</summary>
+	public bool RemoveConstraint( SketchConstraint c )
+	{
+		if ( Editing == null || !S.Constraints.Remove( c ) ) return false;
+		if ( _dimension == c ) { _dimension = null; _typed = ""; }
+		SketchSolver.Solve( S );
+		GeppettoToolContext.Say( $"Sketch: removed the {c.Kind} constraint." );
+		Changed();
+		return true;
+	}
+
+	/// <summary>Removes every constraint touching the selection (Shift+Delete).</summary>
+	public int RemoveConstraintsOnSelection()
+	{
+		if ( Editing == null ) return 0;
+		var gone = new HashSet<SketchConstraint>();
+		foreach ( var p in SelectedPoints ) foreach ( var c in ConstraintTools.Touching( S, p ) ) gone.Add( c );
+		foreach ( var c in S.Curves.Where( c => SelectedCurves.Contains( c.Id ) ) ) foreach ( var k in ConstraintTools.Touching( S, c ) ) gone.Add( k );
+		foreach ( var c in gone ) S.Constraints.Remove( c );
+		if ( gone.Count > 0 ) { _dimension = null; _typed = ""; SketchSolver.Solve( S ); Changed(); }
+		GeppettoToolContext.Say( $"Sketch: removed {gone.Count} constraint(s) from the selection." );
+		return gone.Count;
+	}
+
+	/// <summary>The tool a hotkey arms (s&amp;box has no sketch hotkeys; these follow the old desktop
+	/// sketcher and Onshape where they can).</summary>
+	public static EditTool? ToolForKey( Key key, bool shift ) => ( key, shift ) switch
+	{
+		(Key.S, false) => EditTool.Select,
+		(Key.L, false) => EditTool.Line,
+		(Key.M, false) => EditTool.LineMidpoint,
+		(Key.M, true) => EditTool.Mirror,
+		(Key.R, _) => shift ? EditTool.RectangleCentre : EditTool.Rectangle,
+		(Key.C, _) => shift ? EditTool.CircleThreePoint : EditTool.Circle,
+		(Key.A, _) => shift ? EditTool.ArcThreePoint : EditTool.Arc,
+		(Key.P, false) => EditTool.Point,
+		(Key.G, _) => shift ? EditTool.PolygonCircumscribed : EditTool.Polygon,
+		(Key.W, false) => EditTool.Slot,
+		(Key.E, false) => EditTool.Ellipse,
+		(Key.N, false) => EditTool.Spline,
+		(Key.T, false) => EditTool.Trim,
+		(Key.X, false) => EditTool.Extend,
+		(Key.F, false) => EditTool.Fillet,
+		(Key.O, false) => EditTool.Offset,
+		(Key.U, false) => EditTool.Use,
+		(Key.Z, false) => EditTool.Cut,
+		_ => null,
+	};
+
+	/// <summary>Q: selected curves flip between construction and real; with nothing selected it flips the
+	/// mode new curves are drawn in.</summary>
+	public void ToggleConstruction()
+	{
+		var picked = Editing == null ? new List<SketchCurve>() : S.Curves.Where( c => SelectedCurves.Contains( c.Id ) ).ToList();
+		if ( picked.Count > 0 )
+		{
+			bool to = !picked.All( c => c.Construction );
+			foreach ( var c in picked ) c.Construction = to;
+			GeppettoToolContext.Say( $"Sketch: {picked.Count} curve(s) now {( to ? "construction" : "real" )}." );
+			Changed();
+			return;
+		}
+		ConstructionMode = !ConstructionMode;
+		GeppettoToolContext.Say( $"Sketch: construction mode {( ConstructionMode ? "ON" : "OFF" )}." );
+		GeppettoTools.Redraw();
+	}
+
+	char? TypedChar( InputEventKey k )
+	{
+		if ( k.ShiftPressed ) return null;
+		if ( k.Keycode >= Key.Key0 && k.Keycode <= Key.Key9 ) return (char)( '0' + ( k.Keycode - Key.Key0 ) );
+		if ( k.Keycode >= Key.Kp0 && k.Keycode <= Key.Kp9 ) return (char)( '0' + ( k.Keycode - Key.Kp0 ) );
+		if ( k.Keycode is Key.Period or Key.KpPeriod ) return '.';
+		if ( k.Keycode == Key.Backspace && _typed.Length > 0 ) return '\b';
+		return null;
+	}
+
 	bool EditInput( Camera3D camera, InputEvent e )
 	{
 		switch ( e )
@@ -919,7 +1166,7 @@ public sealed partial class CadSketch
 				var (o, d) = GeppettoPicker.Ray( camera, mm.Position );
 				if ( OnPlane( o, d ) is { } raw )
 				{
-					var snap = Snap( raw, isLine: ( Tool == EditTool.Line && ChainLast >= 0 ) || ( Tool == EditTool.LineMidpoint && _pending.Count == 1 ) );
+					var snap = SnapFor( raw );
 					_hover = snap.Point;
 					if ( _dragPoint >= 0 ) { MovePoint( _dragPoint, snap.Point - _dragFrom ); _dragFrom = snap.Point; }
 					else if ( _dragHandle is { } dh ) DragHandle( dh, snap.Point );
@@ -936,7 +1183,8 @@ public sealed partial class CadSketch
 			{
 				var (o, d) = GeppettoPicker.Ray( camera, mb.Position );
 				var raw = OnPlane( o, d );
-				var snap = raw is { } r ? Snap( r, isLine: ( Tool == EditTool.Line && ChainLast >= 0 ) || ( Tool == EditTool.LineMidpoint && _pending.Count == 1 ) ) : default;
+				if ( _typed.Length == 0 ) _dimension = null;
+				var snap = raw is { } r ? SnapFor( r ) : default;
 				var at = raw != null ? snap.Point : (Vec2?)null;
 				int point = snap.SnappedPointIndex >= 0 ? snap.SnappedPointIndex : PointAt( camera, mb.Position );
 
@@ -946,6 +1194,12 @@ public sealed partial class CadSketch
 					{
 						if ( !SelectedPoints.Contains( point ) || mb.ShiftPressed ) Toggle( point, mb.ShiftPressed );
 						_dragPoint = point; _dragFrom = at ?? S.Points[point];
+					}
+					else if ( MarkerAt( camera, mb.Position ) is { } mk )
+					{
+						// Shift+click a dimension to retype it; a plain click takes the rule off (as s&box).
+						if ( mk.IsDimension && mb.ShiftPressed ) { _dimension = mk.Constraint; _typed = ""; GeppettoTools.Redraw(); }
+						else RemoveConstraint( mk.Constraint );
 					}
 					else if ( HandleAt( camera, mb.Position ) is { } h ) _dragHandle = h;
 					else if ( CurveAt( camera, mb.Position ) is { } c ) Toggle( c, mb.ShiftPressed );
@@ -1001,29 +1255,46 @@ public sealed partial class CadSketch
 				if ( ChainLast >= 0 ) { EndChain(); return true; }
 				if ( _pending.Count > 0 ) { _pending.Clear(); GeppettoTools.Redraw(); return true; }
 				return false;
+			case InputEventKey { Pressed: true, Echo: false } k when k.CtrlPressed || k.MetaPressed || k.AltPressed:
+				return false;   // Ctrl+Z, Ctrl+S and the editor's own shortcuts pass through
 			case InputEventKey { Pressed: true, Echo: false } k:
+				// Typing a number retypes the dimension just put on; Enter applies it.
+				if ( _dimension != null && TypedChar( k ) is { } ch )
+				{
+					if ( ch == '\b' ) { if ( _typed.Length > 0 ) _typed = _typed[..^1]; }
+					else _typed += ch;
+					GeppettoTools.Redraw();
+					return true;
+				}
+				if ( _dimension != null && _typed.Length > 0 && k.Keycode is Key.Enter or Key.KpEnter )
+				{
+					if ( float.TryParse( _typed, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v ) ) SetDimension( v );
+					else GeppettoToolContext.Say( $"Sketch: \"{_typed}\" isn't a number." );
+					_typed = "";
+					GeppettoTools.Redraw();
+					return true;
+				}
+				if ( _dimension != null && k.Keycode == Key.Escape && _typed.Length > 0 ) { _typed = ""; GeppettoTools.Redraw(); return true; }
+				foreach ( var ck in ConstraintKeys )
+					if ( ck.Key == k.Keycode && ck.Shift == k.ShiftPressed ) { Constrain( ck.Name, ck.Kinds ); return true; }
+				if ( ToolForKey( k.Keycode, k.ShiftPressed ) is { } tk ) { SetTool( tk ); return true; }
 				switch ( k.Keycode )
 				{
-					case Key.S: Tool = EditTool.Select; _pending.Clear(); EndChain(); return true;
-					case Key.L: Tool = EditTool.Line; _pending.Clear(); ClearSelection(); return true;
-					case Key.M: Tool = EditTool.LineMidpoint; _pending.Clear(); ClearSelection(); return true;
-					case Key.R: Tool = k.ShiftPressed ? EditTool.RectangleCentre : EditTool.Rectangle; _pending.Clear(); ClearSelection(); return true;
-					case Key.C: Tool = k.ShiftPressed ? EditTool.CircleThreePoint : EditTool.Circle; _pending.Clear(); ClearSelection(); return true;
-					case Key.A: Tool = k.ShiftPressed ? EditTool.ArcThreePoint : EditTool.Arc; _pending.Clear(); ClearSelection(); return true;
-					case Key.P: Tool = EditTool.Point; _pending.Clear(); ClearSelection(); return true;
-					case Key.G: Tool = k.ShiftPressed ? EditTool.PolygonCircumscribed : EditTool.Polygon; _pending.Clear(); ClearSelection(); return true;
-					case Key.O: Tool = EditTool.Offset; _pending.Clear(); return true;
-					case Key.T: Tool = EditTool.Trim; _pending.Clear(); return true;
-					case Key.X: Tool = EditTool.Extend; _pending.Clear(); return true;
-					case Key.F: Tool = EditTool.Fillet; _pending.Clear(); return true;
-					case Key.U: Tool = EditTool.Use; _pending.Clear(); return true;
+					case Key.U when k.ShiftPressed:
+						GeppettoToolContext.Say( $"Sketch: projected {ProjectAll()} face edge(s)." );
+						return true;
 					case Key.Q:
-						ConstructionMode = !ConstructionMode;
-						GeppettoToolContext.Say( $"Sketch: construction mode {( ConstructionMode ? "ON" : "OFF" )}." );
+						ToggleConstruction();
+						return true;
+					case Key.Bracketleft or Key.Bracketright when Tool is EditTool.Polygon or EditTool.PolygonCircumscribed:
+						PolygonSides = Math.Clamp( PolygonSides + ( k.Keycode == Key.Bracketright ? 1 : -1 ), 3, 32 );
 						GeppettoTools.Redraw();
 						return true;
+					case Key.Delete when k.ShiftPressed:
+						RemoveConstraintsOnSelection();
+						return true;
 					case Key.Enter or Key.KpEnter:
-						if ( Tool == EditTool.Spline ) { FinishSpline(); return true; }
+						if ( Tool == EditTool.Spline && _splinePoints.Count > 0 ) { FinishSpline(); return true; }
 						if ( ChainLast >= 0 ) EndChain();
 						else if ( _pending.Count > 0 ) _pending.Clear();
 						else Finish();
@@ -1051,6 +1322,8 @@ public sealed partial class CadSketch
 	// =========================================================================================
 
 	static readonly Color Picked = new( 1f, .9f, .3f );
+	static readonly Color ConstraintMark = new( 0.45f, 0.85f, 0.6f );
+	static readonly Color DimensionMark = new( 1f, 0.82f, 0.35f );
 	static readonly Color Line = new( .85f, .85f, .9f );
 
 	void DrawLine2D( Control overlay, Camera3D cam, Vec2 a, Vec2 b, Color col, float width = 1.5f )
@@ -1231,8 +1504,15 @@ public sealed partial class CadSketch
 			{
 				if ( Screen( cam, m.Anchor ) is { } pt )
 				{
-					var glyphPos = pt + new Vector2( m.Away.x, -m.Away.y ) * 14f;
-					overlay.DrawString( ThemeDB.FallbackFont, glyphPos + new Vector2( -4, 4 ), m.Label, HorizontalAlignment.Center, -1, 10, Picked );
+					var glyphPos = GlyphAt( pt, m );
+					bool armed = m.Constraint == _dimension;
+					var col = armed ? HoverBlue : m.IsDimension ? DimensionMark : ConstraintMark;
+					var label = armed && _typed.Length > 0 ? _typed + "_" : m.Label;
+					var font = ThemeDB.FallbackFont;
+					var size = font.GetStringSize( label, HorizontalAlignment.Left, -1, 11 );
+					var at = glyphPos - new Vector2( size.X / 2, -font.GetAscent( 11 ) / 2 );
+					overlay.DrawRect( new Rect2( at - new Vector2( 2, font.GetAscent( 11 ) + 1 ), size + new Vector2( 4, 2 ) ), new Color( 0.08f, 0.09f, 0.11f, 0.7f ) );
+					overlay.DrawString( font, at, label, HorizontalAlignment.Left, -1, 11, col );
 				}
 			}
 		}
@@ -1249,21 +1529,28 @@ public sealed partial class CadSketch
 			EditTool.Arc => _pending.Count == 0 ? "Centre Arc (A): click centre." : _pending.Count == 1 ? "Centre Arc: click start point." : "Centre Arc: click end direction.",
 			EditTool.ArcThreePoint => _pending.Count == 0 ? "3-Point Arc (Shift+A): click start point." : _pending.Count == 1 ? "3-Point Arc: click end point." : "3-Point Arc: click through-point.",
 			EditTool.Point => "Point (P): click to place a reference point.",
-			EditTool.Polygon => _pending.Count == 0 ? $"Polygon (G): click centre ({PolygonSides} sides)." : "Polygon: click vertex.",
-			EditTool.PolygonCircumscribed => _pending.Count == 0 ? $"Circumscribed Polygon (Shift+G): click centre ({PolygonSides} sides)." : "Polygon: click edge midpoint.",
-			EditTool.Slot => _pending.Count == 0 ? "Slot: click start of centre line." : _pending.Count == 1 ? "Slot: click end of centre line." : "Slot: click width point.",
-			EditTool.Ellipse => _pending.Count == 0 ? "Ellipse: click centre." : _pending.Count == 1 ? "Ellipse: click major axis end." : "Ellipse: click minor radius point.",
-			EditTool.Spline => $"Spline: click points ({_splinePoints.Count} placed); Enter finishes.",
+			EditTool.Polygon => _pending.Count == 0 ? $"Polygon (G): click centre ({PolygonSides} sides, [ ] change)." : "Polygon: click vertex.",
+			EditTool.PolygonCircumscribed => _pending.Count == 0 ? $"Circumscribed Polygon (Shift+G): click centre ({PolygonSides} sides, [ ] change)." : "Polygon: click edge midpoint.",
+			EditTool.Slot => _pending.Count == 0 ? "Slot (W): click start of centre line." : _pending.Count == 1 ? "Slot: click end of centre line." : "Slot: click width point.",
+			EditTool.Ellipse => _pending.Count == 0 ? "Ellipse (E): click centre." : _pending.Count == 1 ? "Ellipse: click major axis end." : "Ellipse: click minor radius point.",
+			EditTool.Spline => $"Spline (N): click points ({_splinePoints.Count} placed); Enter finishes.",
 			EditTool.Trim => "Trim (T): click a curve between intersections to trim.",
 			EditTool.Extend => "Extend (X): click curve near endpoint to extend.",
 			EditTool.Fillet => _pending.Count == 0 ? "Fillet (F): click corner point to round." : "Fillet: click radius.",
 			EditTool.Offset => _pending.Count == 0 ? "Offset (O): click curve to offset." : "Offset: click offset distance.",
-			EditTool.Mirror => "Mirror: click line to reflect selection across.",
-			EditTool.Use => "Project (U): click highlighted face edge to copy into sketch.",
-			EditTool.Cut => "Cut: drag a stroke across curves to slice them.",
+			EditTool.Mirror => "Mirror (Shift+M): select first, then click the line to reflect across.",
+			EditTool.Use => "Project (U): click a green face edge to copy it in; Shift+U takes them all.",
+			EditTool.Cut => "Cut (Z): drag a stroke across curves to slice them.",
 			_ => "",
 		};
-		GeppettoPicker.DrawHint( overlay, $"Edit sketch ({S.Curves.Count} curves). {what}\nS select, L line, M midpoint, R rect, C circle, A arc, P point, Q construction ({( ConstructionMode ? "ON" : "OFF" )}). Esc/Enter finishes." );
+		string title = IsNewSketch ? $"New sketch ({S.Curves.Count} curves)" : $"Edit sketch ({S.Curves.Count} curves)";
+		string dim = _dimension != null ? $"\nDimension {_dimension.Value:0.###}: type a new value{( _typed.Length > 0 ? $" ({_typed})" : "" )} and press Enter." : "";
+		string snapNote = LastSnap.InferenceAxis != 0 && ( Tool == EditTool.Line && ChainLast >= 0 || Tool == EditTool.LineMidpoint && _pending.Count == 1 )
+			? ( ( LastSnap.InferenceAxis & 1 ) != 0 ? " Vertical: the line will keep it." : " Horizontal: the line will keep it." ) : "";
+		GeppettoPicker.DrawHint( overlay, $"{title}. {what}{snapNote}{dim}\n"
+			+ $"Draw: S select, L line, M midpoint, R rect, C circle, A arc, P point, G polygon, W slot, E ellipse, N spline, Q construction ({( ConstructionMode ? "on" : "off" )}).\n"
+			+ "Edit: T trim, X extend, F fillet, O offset, Shift+M mirror, Z cut, U project.\n"
+			+ "Constrain selection: H horiz, V vert, I coincident, Shift+E equal, B parallel, Shift+B perpendicular, K tangent, Shift+K concentric, Y midpoint, Shift+Y symmetric, J fix, Shift+P on line, D dimension. Click a mark to remove it. Esc/Enter finishes." );
 	}
 }
 #endif

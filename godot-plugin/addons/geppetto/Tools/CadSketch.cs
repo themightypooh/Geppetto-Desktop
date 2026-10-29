@@ -134,6 +134,7 @@ public sealed partial class CadSketch : IGeppettoViewportTool
 			if ( p.Index < 0 ) PlaneFeatureId = p.Id;
 			UpdateReference();
 			GeppettoToolContext.Say( $"Sketch: on {p.Name}. Click points; click the first point or press Enter to close." );
+			if ( Armed is { } t ) BeginNew( t );
 			return;
 		}
 		if ( onFace )
@@ -144,6 +145,7 @@ public sealed partial class CadSketch : IGeppettoViewportTool
 				Face = face; Plane = plane; PlaneIndex = 0;
 				UpdateReference();
 				GeppettoToolContext.Say( "Sketch: on the picked face. Click points; click the first point or press Enter to close." );
+				if ( Armed is { } t ) BeginNew( t );
 				return;
 			}
 		}
@@ -230,6 +232,11 @@ public sealed partial class CadSketch : IGeppettoViewportTool
 			}
 			case InputEventMouseButton { ButtonIndex: MouseButton.Left, Pressed: false }:
 				return true;
+			case InputEventKey { Pressed: true, Echo: false } k when Plane != null && !k.CtrlPressed && !k.MetaPressed && !k.AltPressed
+				&& ToolForKey( k.Keycode, k.ShiftPressed ) is { } tool:
+				// A tool key turns the quick outline into a full sketch session (the clicked points become lines).
+				BeginNew( tool );
+				return true;
 			case InputEventKey { Pressed: true, Keycode: Key.Enter or Key.KpEnter }:
 				Commit();
 				return true;
@@ -273,10 +280,10 @@ public sealed partial class CadSketch : IGeppettoViewportTool
 			}
 			DrawSnapMarker( overlay, cam );
 		}
-		string where = Plane == null ? "click the Top, Front or Right plane, a Plane, or a face"
+		string where = Plane == null ? ( Armed is { } armed ? $"click the Top, Front or Right plane, a Plane, or a face to start drawing ({armed})" : "click the Top, Front or Right plane, a Plane, or a face" )
 			: Points.Count < 3 ? $"click points ({Points.Count} so far, 3 needed)"
 			: $"{Points.Count} points: click the first point or press Enter to close";
-		GeppettoPicker.DrawHint( overlay, $"Sketch: {where}\nBackspace removes the last point, Esc cancels." );
+		GeppettoPicker.DrawHint( overlay, $"Sketch: {where}\nBackspace removes the last point, Esc cancels." + ( Plane != null ? "\nPress a tool key (L, R, C, A, ...) for the full sketch tools." : "" ) );
 	}
 
 	public void DrawSnapMarker( Control overlay, Camera3D cam )
@@ -309,7 +316,7 @@ public sealed partial class CadSketch : IGeppettoViewportTool
 		// 2. Alignment inference guides
 		if ( snap.InferenceAxis != 0 )
 		{
-			Vec2? start = Editing != null && ChainLast >= 0 ? S.Points[ChainLast] : Points.Count > 0 ? Points[^1] : null;
+			Vec2? start = Editing != null ? ( ChainLast >= 0 ? S.Points[ChainLast] : _pending.Count > 0 ? _pending[0] : null ) : Points.Count > 0 ? Points[^1] : null;
 			if ( start is { } st )
 			{
 				float size = 100f;
