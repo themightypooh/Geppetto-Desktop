@@ -64,7 +64,7 @@ public static partial class GeppettoTools
 	{
 		if ( p.IsEmpty && !allowEmpty )
 		{
-			GeppettoToolContext.Say( $"{tool}: pick {( p.Kinds.HasFlag( PickKinds.Edges ) ? "an edge or a face" : p.Kinds.HasFlag( PickKinds.Regions ) ? "a sketch region or a face" : "a face" )} first, then press Enter." );
+			GeppettoToolContext.Warn( $"{tool}: pick {( p.Kinds.HasFlag( PickKinds.Edges ) ? "an edge or a face" : p.Kinds.HasFlag( PickKinds.Regions ) ? "a sketch region or a face" : "a face" )} first, then press Enter." );
 			return false;
 		}
 		var feature = BuildCadFeature( tool, p.Doc.Studio, p.Faces.ToList(), p.Edges.ToList(), p.RegionSketchId, p.RegionSeeds.ToList() );
@@ -115,7 +115,7 @@ public static partial class GeppettoTools
 			"click faces, then pick a material on the ring (Enter uses the current one)" );
 		picker.Confirmed = p =>
 		{
-			if ( GeppettoDialState.Current is not { } m ) { GeppettoToolContext.Say( "Face Material: pick a material on the ring first." ); return false; }
+			if ( GeppettoDialState.Current is not { } m ) { GeppettoToolContext.Warn( "Face Material: pick a material on the ring first." ); return false; }
 			ApplyFaceMaterialPick( p, m );
 			return false; // keep painting; Esc stops
 		};
@@ -137,7 +137,7 @@ public static partial class GeppettoTools
 
 	static void ApplyFaceMaterialPick( GeppettoPicker p, GeppettoDialMaterial m )
 	{
-		if ( p.Faces.Count == 0 ) { GeppettoToolContext.Say( "Face Material: click the faces to paint first." ); return; }
+		if ( p.Faces.Count == 0 ) { GeppettoToolContext.Warn( "Face Material: click the faces to paint first." ); return; }
 		int slot = ApplyFaceMaterial( p.Doc, p.Faces.ToList(), m.Name, m.Look );
 		if ( slot < 0 ) return;
 		GeppettoToolContext.Say( $"Face Material: {m.Name} on {p.Faces.Count} face{( p.Faces.Count == 1 ? "" : "s" )} (slot {slot})" );
@@ -158,10 +158,10 @@ public static partial class GeppettoTools
 		foreach ( var f in faces )
 			if ( FacePlane.TryResolveFace( studio.Bodies, f, out var body, out int index ) )
 				resolved.Add( ( body.Id, index, f ) );
-		if ( resolved.Count == 0 ) { GeppettoToolContext.Say( "Face Material: the picked faces are gone (the part changed); pick them again." ); return -1; }
+		if ( resolved.Count == 0 ) { GeppettoToolContext.Warn( "Face Material: the picked faces are gone (the part changed); pick them again." ); return -1; }
 
 		int slot = SlotForLook( studio, name, look );
-		if ( slot < 0 ) { GeppettoToolContext.Say( "Face Material: all 63 material slots are in use." ); return -1; }
+		if ( slot < 0 ) { GeppettoToolContext.Warn( "Face Material: all 63 material slots are in use." ); return -1; }
 
 		var before = StudioMaterialState.Take( studio, slot );
 		StudioMaterialState? after = null;
