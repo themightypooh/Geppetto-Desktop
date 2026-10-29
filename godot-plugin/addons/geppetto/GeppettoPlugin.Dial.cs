@@ -204,9 +204,20 @@ public partial class GeppettoPlugin
 		return true;
 	}
 
+	/// <summary>The editor names a shortcut resource by its display name ("Move Mode"), not by its
+	/// settings path ("spatial_editor/tool_move"), so a lookup by path alone found nothing.</summary>
+	static readonly Dictionary<string, string> ShortcutNames = new()
+	{
+		["spatial_editor/tool_select"] = "Select Mode",
+		["spatial_editor/tool_move"] = "Move Mode",
+		["spatial_editor/tool_rotate"] = "Rotate Mode",
+		["spatial_editor/tool_scale"] = "Scale Mode",
+	};
+
 	static BaseButton? FindButton( Node n, string shortcut )
 	{
-		if ( n is BaseButton bb && bb.Shortcut?.ResourceName == shortcut ) return bb;
+		if ( n is BaseButton bb && bb.Shortcut?.ResourceName is { } name
+			&& ( name == shortcut || ( ShortcutNames.TryGetValue( shortcut, out var shown ) && name == shown ) ) ) return bb;
 		// The 3D toolbar buttons are internal children of their HBox, so GetChildren() alone never sees them.
 		foreach ( var ch in n.GetChildren( true ) )
 			if ( FindButton( ch, shortcut ) is { } hit ) return hit;
