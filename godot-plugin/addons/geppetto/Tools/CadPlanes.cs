@@ -143,15 +143,16 @@ public static class GeppettoDatumPlanes
 		}
 
 		float originHalf = OriginHalfSize( character.Root );
+		var labels = new List<Rect2>();
 		foreach ( var (name, plane, colour) in Origin )
-			DrawSquare( overlay, cam, xf, plane, originHalf, colour, name, "#" + name );
+			DrawSquare( overlay, cam, xf, plane, originHalf, colour, name, "#" + name, labels );
 		foreach ( var (f, plane) in Published( doc.Studio ) )
-			DrawSquare( overlay, cam, xf, plane, half, Lilac, string.IsNullOrEmpty( f.Name ) ? f.TypeName : f.Name, f.Id );
+			DrawSquare( overlay, cam, xf, plane, half, Lilac, string.IsNullOrEmpty( f.Name ) ? f.TypeName : f.Name, f.Id, labels );
 	}
 
 	/// <summary>One plane's square outline, washed in its colour when hovered, with its name on a dark
 	/// box sized to the text and kept inside the viewport (so two parallel planes can be told apart).</summary>
-	static void DrawSquare( Control overlay, Camera3D cam, Transform3D xf, SketchPlane plane, float half, Color colour, string name, string id )
+	static void DrawSquare( Control overlay, Camera3D cam, Transform3D xf, SketchPlane plane, float half, Color colour, string name, string id, List<Rect2> labels )
 	{
 		Vector3 W( float x, float y ) { var e = plane.ToWorld( new Vec2( x, y ) ); return xf * EffigyMeshBridge.TransformPosition( e.x, e.y, e.z ); }
 		var c = new[] { W( half, half ), W( -half, half ), W( -half, -half ), W( half, -half ) };
@@ -166,7 +167,17 @@ public static class GeppettoDatumPlanes
 		var ts = font.GetStringSize( name, HorizontalAlignment.Left, -1, fontSize );
 		var at = cam.UnprojectPosition( c[1] ) + new Vector2( 6, 6 );
 		at = new Vector2( Math.Clamp( at.X, 4, Math.Max( 4, overlay.Size.X - ts.X - 12 ) ), Math.Clamp( at.Y, 4, Math.Max( 4, overlay.Size.Y - ts.Y - 8 ) ) );
-		overlay.DrawRect( new Rect2( at, ts + new Vector2( 8, 4 ) ), new Color( 0.08f, 0.09f, 0.11f, 0.75f ) );
+		// A small model puts the three origin corners on top of each other: step a label down
+		// (or up at the bottom edge) until it covers no other plane's name.
+		var box = new Rect2( at, ts + new Vector2( 8, 4 ) );
+		for ( int tries = 0; tries < 12 && labels.Any( r => r.Grow( 1 ).Intersects( box ) ); tries++ )
+		{
+			float step = box.Size.Y + 2;
+			box.Position += new Vector2( 0, box.End.Y + step <= overlay.Size.Y ? step : -step );
+		}
+		at = box.Position;
+		labels.Add( box );
+		overlay.DrawRect( box, new Color( 0.08f, 0.09f, 0.11f, 0.75f ) );
 		overlay.DrawString( font, at + new Vector2( 4, 2 + font.GetAscent( fontSize ) ), name, HorizontalAlignment.Left, -1, fontSize, colour with { A = 1 } );
 	}
 }
