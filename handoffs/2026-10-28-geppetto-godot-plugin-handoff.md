@@ -1,5 +1,7 @@
 # Geppetto as a Godot plugin: handoff (2026-10-28)
 
+> **2026-10-29: superseded for current state by `handoffs/GEPPETTO-POOHDOT-STATUS.md` (section "CURRENT STATE").** Everything is merged at 7a98c8b on godot-plugin-baseline and published.
+
 Work is paused because pooh's usage is too high. This is everything a later session needs.
 
 ## Decisions
@@ -42,3 +44,42 @@ All of it is inside `~/Desktop/geppetto-desktop/godot-ui-mock/`, a new folder. N
 2. Design each panel's controls one at a time with pooh, in real Godot (they found HTML mocks unhelpful), and get sign-off on each.
 3. In parallel, backend tickets G0–G2 from the backend doc. G0 needs pooh's OK to commit a baseline. Task 1.1 is local Copilot only.
 4. Open questions for pooh: first test character, bone naming, where `.effigy` files live, and whether ps1_lit maps can be ignored.
+
+---
+
+## Pick-up session, 2026-10-28 evening
+
+### godot-ui-mock: open questions closed
+Checked by opening the mock in Godot 4.7.2 (`/usr/bin/godot`), once `--headless --editor`, once as a real editor window inside `gamescope --backend headless` (nothing on pooh's screen), on a throwaway copy.
+- **Loads clean.** The editor log has no errors or warnings. Both plugins (`geppetto_mock`, `sbox_chrome`) start.
+- **`addons/sbox_chrome` symlink: works.** Its dock renames are live: Scene → Hierarchy, FileSystem → Assets, Output → Console, and the Hotload button shows. Nothing broken. (sbox_chrome belongs to the s&box thread; left alone.)
+- **Shortcuts: applied** in `~/.config/godot/editor_settings-4.7.tres`: backtick = toggle Output/Console, G = 3D snap. Backup from before: `editor_settings-4.7.tres.bak-before-G-backtick-20261028`. Opening the mock makes sbox_chrome re-write its Alt-orbit / no-Shift-pan keys into the same file; that is expected and it doesn't touch G or backtick. Ctrl+Alt+K (clear output) dropped out of the list, but that's Godot's default anyway, so nothing changed.
+- **`test_room.tscn` opens:** TestRoom, WorldEnvironment, Sun, Floor, Character (Body, Skeleton3D, AnimationPlayer), Camera. A capsule stands on a floor under a sky. The Sun node shows Godot's yellow warning triangle (a node config warning, harmless; not looked into).
+- **Dock placement in the saved layout:** all 6 Geppetto tabs sit in the bottom panel next to Assets, Console and Debugger, not in their `default_slot`s. pooh still has to drag them where they want them (Next steps 1 is unchanged).
+- Screenshots were sent to pooh (3D view with the Start tab; the Rig tab). No text clipping seen.
+- Nothing was fixed or reverted, since nothing was broken. The real mock's `editor_layout.cfg` was restored after the headless run (it had moved the window position only).
+
+### Backend tickets: status per ticket
+All of G0–G15 were already committed on `godot-plugin-baseline` by earlier sessions (this handoff's "Next steps 3" was stale). This session re-ran every check, nothing re-implemented. Poohdot = `~/src/poohdot/godot/bin/godot.linuxbsd.editor.x86_64.mono`, all runs headless.
+- G0 (572ec62) baseline snapshot: done.
+- G1 (cb0db20) kernel inside the Godot .NET plugin: verified, `godot-plugin` builds (`dotnet build -c Debug`, 0 warnings, 0 errors).
+- G2 (28a76d1) engine-free `core/Geppetto.Core.csproj`: verified, builds alone, 0 errors.
+- G3/G4/G5/G7/G8 (e9ef82d) mesh, skeleton, blend shapes, clips, `.effigy` importer: verified by `tools/harness.gd` on the two fixtures: 0 failed; g1-spike gives 4 bones and clips spin + wheel-rest (12 tracks each).
+- G6 (0d81c9f, 9485c68) materials: verified through the harness (materials load) and GLB export (1 material).
+- G9 (0d81c9f) live document service + undo adapter: verified through SaveRoundTrip (opens, edits, undoes through it).
+- G10 (0a48103) pose/IK + auto-key: verified, `tools/pose_ik_test.gd` 32/32 pass.
+- G11 (5e2ebbd) control registry + search: verified, `tools/control-registry-tests` 10 passed, 0 failed.
+- G12 (12f08cd) save back to `.effigy` / `.riganim`: verified, `tools/SaveRoundTrip.cs` on 2 .effigy + 1 .riganim, all ok, 0 failed.
+- G13 (fee0ff0) GLB export: verified, `tools/export_glb.gd` wrote a 1.1 MB .glb (1 mesh, 1 material, 1 skin, 2 animations).
+- G14/G15 (d8d8e12) harness + packaging/install guide: verified (harness above; install guide `addons/geppetto/README.md`).
+- CPU suite (`tests/Desktop.Tests.csproj`): 778 passed, 16 failed, 5 skipped (the known viewer failures, none new)
+
+### What's left
+- **Backend: nothing on G0–G15.** Known gaps carried forward: `EffigyUndoRedoAdapter` with Godot's UndoRedo can drift from Geppetto's EditHistory; `DocumentSaveService.Save()` deadlocks on Godot's main thread (callers use Task.Run). Stock Godot 4.7.2 from Arch (`/usr/bin/godot`) has no .NET, so the C# plugin is only tested in Poohdot.
+- **UI: pooh's call.** Placement of the 6 docks, then each panel designed with pooh and signed off. Not built here.
+- **Branch `geppetto-tools`** (worktree `.claude/worktrees/geppetto-tools`) is 26 commits ahead of baseline with the dial, tools and material manager, not merged. It contains real UI (dial, material dialog) that pooh asked for in other threads; whether it merges is pooh's call. Its open bug (Model view goes grey during a Model edit) is in `handoffs/GEPPETTO-POOHDOT-STATUS.md`.
+- `handoffs/WHAT-IS-LEFT-ROADMAP.md` is stale: it still lists G10–G15 as TODO. They're done.
+- Open questions for pooh unchanged: first test character, bone naming, where `.effigy` files live, whether ps1_lit maps can be ignored.
+
+### Undo for this session
+This session changed only this file (the section you're reading). Delete the section to undo. Test output stayed in the session scratchpad; the mock was screenshotted on a copy.
