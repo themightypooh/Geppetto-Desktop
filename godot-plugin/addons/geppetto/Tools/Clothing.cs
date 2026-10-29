@@ -172,7 +172,7 @@ public static class ClothingTools
 	static void Shape( GeppettoDocument doc, Body target )
 	{
 		var edit = ShapeGarment( doc, target );
-		GeppettoToolContext.Say( $"Shape garment: a Mesh edit '{edit.Name}' is on the garment. Use the Model workspace's mesh tools on it; the edits are kept if the garment's settings change." );
+		GeppettoToast.Info( $"Shape garment: a Mesh edit '{edit.Name}' is on the garment. Use the Model workspace's mesh tools on it; the edits are kept if the garment's settings change." );
 	}
 }
 #endif

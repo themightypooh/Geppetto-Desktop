@@ -256,7 +256,7 @@ public partial class GeppettoPlugin
 		_ikEnd = keep;
 		var at = skel.GlobalTransform * skel.GetBoneGlobalPose( end ).Origin;
 		var target = new Marker3D { Name = $"IK {_ikEnd}" };
-		AddSceneNode( target );
+		AddSceneNode( target, announce: false );
 		target.GlobalPosition = at;
 		_ikTarget = target;
 		_ikLast = at;
@@ -268,7 +268,7 @@ public partial class GeppettoPlugin
 	void ClearIk() { _ikTarget = null; _ikEnd = null; }
 
 	/// <summary>Adds a node under the edited scene's root as one undo step.</summary>
-	bool AddSceneNode( Node node )
+	bool AddSceneNode( Node node, bool announce = true )
 	{
 		var root = EditorInterface.Singleton.GetEditedSceneRoot();
 		if ( root == null ) { node.Free(); return Need(); }
@@ -279,6 +279,9 @@ public partial class GeppettoPlugin
 		ur.AddDoReference( node );
 		ur.AddUndoMethod( root, Node.MethodName.RemoveChild, node );
 		ur.CommitAction();
+		if ( !announce ) return true;
+		Select( node );   // so the move gizmo is on it straight away
+		GeppettoToast.Info( $"Added {node.Name} to the scene: move it with the gizmo." );
 		return true;
 	}
 

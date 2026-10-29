@@ -113,7 +113,7 @@ public static class ClothingPublish
 		var doc = ctx.Doc;
 		if ( doc == null ) return ctx.Need();
 		var (message, glb, _) = MakeClothing( doc );
-		if ( glb == null ) GeppettoToolContext.Warn( $"{message}" ); else GeppettoToolContext.Say( message );
+		if ( glb == null ) GeppettoToolContext.Warn( $"{message}" ); else GeppettoToast.Info( message );
 		return true;
 	}
 
@@ -122,7 +122,7 @@ public static class ClothingPublish
 		var doc = ctx.Doc;
 		if ( doc == null ) return ctx.Need();
 		var (message, path) = MakeLiveCloth( doc );
-		if ( path == null ) GeppettoToolContext.Warn( $"{message}" ); else GeppettoToolContext.Say( message );
+		if ( path == null ) GeppettoToolContext.Warn( $"{message}" ); else GeppettoToast.Info( message );
 		return true;
 	}
 }
