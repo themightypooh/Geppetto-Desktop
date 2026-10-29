@@ -47,7 +47,7 @@ public static class GeppettoDialData
 		new( "Model", "Edit vertices, edges and faces, or sculpt", 2, new[] {
 			( "Select", new[] { "Vertex", "Edge", "Face", "Grow", "Shrink", "Linked", "Invert" } ),
 			( "Transform", new[] { "Move", "Rotate", "Scale", "Edge slide", "Shrink/Fatten", "Bend" } ),
-			( "Add", new[] { "Extrude", "Inset", "Duplicate", "Bridge", "Spin", "Fill", "Pipe" } ),
+			( "Add", new[] { "Primitive", "Extrude", "Inset", "Duplicate", "Bridge", "Spin", "Fill", "Pipe" } ),
 			( "Clean up", new[] { "Merge", "Dissolve", "Delete", "Smooth", "Relax", "Flip", "Triangulate" } ),
 			( "Modifiers", new[] { "Crease", "Clear crease" } ),
 			( "UV", new[] { "Mark seam", "Project UVs", "Cylinder projection", "Sphere projection" } ) } ),
@@ -85,13 +85,13 @@ public static class GeppettoDialData
 	public static List<GeppettoDialMaterial> PresetMaterials() =>
 		SlotLook.Presets.Select( kv => GeppettoDialMaterial.FromPreset( kv.Key, kv.Value ) ).ToList();
 
-	/// <summary>The whole MATERIALS ring: saved materials (this project's, then the shared library), the
-	/// kernel presets, and the "+" ball that makes a new one.</summary>
+	/// <summary>The whole MATERIALS ring: the "+" ball that makes a new one (first, so it is always on
+	/// page 1), saved materials (this project's, then the shared library), then the kernel presets.</summary>
 	public static List<GeppettoDialMaterial> RingMaterials()
 	{
-		var list = GeppettoMaterialLibrary.Scan();
+		var list = new List<GeppettoDialMaterial> { GeppettoDialMaterial.New };
+		list.AddRange( GeppettoMaterialLibrary.Scan() );
 		list.AddRange( PresetMaterials() );
-		list.Add( GeppettoDialMaterial.New );
 		return list;
 	}
 
@@ -168,6 +168,112 @@ public static class GeppettoDialData
 		img.LoadSvgFromString( svg, px / 24f );
 		tex = ImageTexture.CreateFromImage( img );
 		IconCache[key] = tex;
+		return tex;
+	}
+
+	/// <summary>Geppetto Desktop's pixel tool icons (Dial/icons, copied from cabinet/art/tools), by dial name.
+	/// Keys are "Workspace/Name" first, then "Name"; workspaces are "ws:Name". Anything missing keeps its vector icon.</summary>
+	static readonly Dictionary<string, string> Desk = new()
+	{
+		["ws:CAD"] = "primitive",
+		["ws:Model"] = "meshedit",
+		["ws:Paint"] = "paint",
+		["ws:Rig"] = "bind",
+		["ws:Clothing"] = "garment",
+		["CAD/Sketch"] = "sketch",
+		["Plane"] = "plane",
+		["Primitive"] = "primitive",
+		["Import"] = "import",
+		["Profile"] = "profile",
+		["Solid"] = "extrude",
+		["Part"] = "part",
+		["CAD/Extrude"] = "extrude",
+		["Revolve"] = "revolve",
+		["Sweep"] = "sweep",
+		["Loft"] = "loft",
+		["Spline"] = "spline",
+		["Boolean"] = "boolean",
+		["Detail"] = "fillet",
+		["Fillet"] = "fillet",
+		["Chamfer"] = "chamfer",
+		["Shell"] = "shell",
+		["Move Face"] = "moveface",
+		["Delete Face"] = "deleteface",
+		["Draft"] = "draft",
+		["Hole"] = "hole",
+		["Repeat"] = "linearpattern",
+		["CAD/Mirror"] = "mirror",
+		["Linear Pattern"] = "linearpattern",
+		["Circular Pattern"] = "circularpattern",
+		["CAD/Transform"] = "transform",
+		["Bend Along Curve"] = "curvedeform",
+		["Simple Deform"] = "simpledeform",
+		["Lattice"] = "lattice",
+		["Finish"] = "facematerial",
+		["Face Material"] = "facematerial",
+		["Model/Transform"] = "transform",
+		["Model/Add"] = "edit_extrude",
+		["Model/Extrude"] = "edit_extrude",
+		["Inset"] = "edit_inset",
+		["Bridge"] = "edit_bridge",
+		["Clean up"] = "edit_dissolve",
+		["Dissolve"] = "edit_dissolve",
+		["Model/Delete"] = "edit_delete",
+		["UV"] = "uvproject",
+		["Project UVs"] = "uvproject",
+		["Cylinder projection"] = "uvproject",
+		["Sphere projection"] = "uvproject",
+		["Paint/Brush"] = "paint",
+		["Channel"] = "paintmaps",
+		["Rig/Bind"] = "bind",
+		["Assign Body"] = "bind",
+		["Rig/Delete"] = "remove",
+		["Soft"] = "flex",
+		["Make Soft"] = "flex",
+		["Weights"] = "skin",
+		["Paint Weights"] = "skin",
+		["Rig/Mesh"] = "remesh",
+		["Subdivide"] = "subdivide",
+		["Remesh"] = "remesh",
+		["Rig/Export"] = "topology",
+		["Check model"] = "topology",
+		["Wrinkle Maps"] = "correctiveshapekey",
+		["Clothing/Wearer"] = "wearer",
+		["Clothing/Garment"] = "garment",
+		["Garment"] = "garment",
+		["Clothing/Trim"] = "trim",
+		["Fur"] = "fur",
+		["Clothing/Material"] = "fabric",
+		["Fabric"] = "fabric",
+		["Details"] = "pocket",
+		["Pocket"] = "pocket",
+		["Hardware"] = "hardware",
+		["Wear"] = "wear",
+		["Glow"] = "glow",
+		["Clothing/Check"] = "clearance",
+		["Push out"] = "clearance",
+		["Publish"] = "export",
+		["Make clothing"] = "bake",
+		["Animate/Export"] = "export",
+		["Export Animation…"] = "export",
+	};
+
+	static readonly Dictionary<string, ImageTexture> DeskCache = new();
+
+	/// <summary>The Desktop pixel icon for a dial tile at px, or null. Scaled nearest-neighbour so the pixels stay crisp.</summary>
+	public static ImageTexture DeskIcon( string ws, string name, int px )
+	{
+		name = Clean( name );
+		if ( !Desk.TryGetValue( ws + "/" + name, out var file ) && !Desk.TryGetValue( name, out file ) ) return null;
+		px = Math.Clamp( px, 6, 256 );
+		var key = $"{file}|{px}";
+		if ( DeskCache.TryGetValue( key, out var tex ) && IsInstanceValid( tex ) ) return tex;
+		var img = Image.LoadFromFile( ProjectSettings.GlobalizePath( $"res://addons/geppetto/Dial/icons/{file}.png" ) );
+		if ( img == null || img.IsEmpty() ) return null;
+		// the art is drawn in 2px blocks, so half size and up stay crisp with nearest
+		img.Resize( px, px, px * 2 >= img.GetWidth() && px % 30 == 0 || px >= img.GetWidth() ? Image.Interpolation.Nearest : Image.Interpolation.Cubic );
+		tex = ImageTexture.CreateFromImage( img );
+		DeskCache[key] = tex;
 		return tex;
 	}
 
