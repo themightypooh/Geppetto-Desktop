@@ -113,12 +113,75 @@ public static class ClothingTools
 		}
 
 		Prepare( studio, f );
+		if ( f is GarmentDetailFeature detail && ReachableSpot( studio, detail ) is { } moved )
+			GeppettoToast.Info( moved );
 		GeppettoFeatureDialog.ShowNew( doc, f, closed: ok =>
 		{
 			if ( ok && f.Error != null ) GeppettoToolContext.Warn( $"{f.TypeName}: {f.Error}" );
 		} );
 		if ( f.Error != null ) GeppettoToolContext.Warn( $"{f.TypeName}: {f.Error} Change the settings or Cancel." );
 		return true;
+	}
+
+	/// <summary>A new Pocket / Hardware / Wear / Glow starts on its default place (the chest). A garment cut
+	/// from a character made of separate parts (Stringbean) is bands with gaps between them, and the chest
+	/// can fall in a gap, so the box opened on an error. Moves the new detail to the first place the garment
+	/// does cover (and a new Wear's patch up to the garment's face size). Returns what was changed, for a
+	/// toast; null when the default already builds, or nothing does and the box says why.</summary>
+	public static string? ReachableSpot( PartStudio studio, GarmentDetailFeature f )
+	{
+		if ( studio.Rig is not { Count: > 0 } rig || f.Facing.Index != 0 ) return null;
+		var surfaces = studio.Bodies.Where( b => b.IsGarment && !b.IsGarmentDetail && !b.IsReference && b.Mesh.FaceCount > 0 )
+			.Select( b => new DetailSurface( DetailEdges.Sheet( b.Mesh ) ) ).ToList();
+		if ( surfaces.Count == 0 ) return null;
+		var map = new BodyRegions.Map( rig );
+		var sides = DetailSpots.Sides( f.Side.Index );
+		bool Reaches( int i ) => surfaces.Any( s => sides.Any( side => DetailSpots.Find( s, map, DetailSpots.Names[i], side ) != null ) );
+		int start = f.Spot.Index;
+		// Reaching the spot is not always enough: Wear marks whole faces whose middle falls inside its
+		// patch, and a coarse garment has none inside 3 x 2 in. So the candidates are tried with a real
+		// build, the default first, and Wear's patch grows (x1..x4) before giving a place up.
+		var candidates = Enumerable.Range( 0, DetailSpots.Names.Length )
+			.OrderBy( i => i == start ? -1 : i ).Where( Reaches ).Take( 6 ).ToList();
+		if ( candidates.Count == 0 ) return null;
+		var wear = f as WearFeature;
+		float w = wear?.Width.Value ?? 0f, h = wear?.Height.Value ?? 0f;
+		var scales = wear != null ? new[] { 1f, 2f, 3f, 4f } : new[] { 1f };
+		studio.Features.Add( f );
+		try
+		{
+			foreach ( var i in candidates )
+				foreach ( var k in scales )
+				{
+					f.Spot.Index = i;
+					if ( wear != null ) { wear.Width.Value = MathF.Min( w * k, 12f ); wear.Height.Value = MathF.Min( h * k, 12f ); }
+					studio.MarkDirty( f ); studio.Rebuild();
+					if ( f.Error != null ) continue;
+					if ( i == start && k == 1f ) return null;
+					string from = DetailSpots.Names[start].ToLowerInvariant(), to = DetailSpots.Names[i].ToLowerInvariant();
+					string size = wear != null ? $"{wear.Width.Value:0.#} x {wear.Height.Value:0.#} in" : "";
+					string why = k == 1f ? $"the garment does not cover the {from}, so it starts on the {to}"
+						: i == start ? $"the garment's faces are bigger than {w:0.#} x {h:0.#} in, so it starts at {size}"
+						: $"the {from} is not covered and the faces are bigger than {w:0.#} x {h:0.#} in, so it starts on the {to} at {size}";
+					return $"{f.TypeName}: {why}. Change it in the box.";
+				}
+			// Last, a Wear that finds no face at any place goes along the openings (hem, collar,
+			// cuffs), which every garment has, whatever its faces are like.
+			if ( wear != null && wear.Area.Index == 0 )
+			{
+				f.Spot.Index = start;
+				wear.Width.Value = w; wear.Height.Value = h;
+				wear.Area.Index = 1;
+				studio.MarkDirty( f ); studio.Rebuild();
+				if ( f.Error == null )
+					return $"{f.TypeName}: no face of the garment fits a {w:0.#} x {h:0.#} in patch on the body, so it starts along the openings. Change Area in the box.";
+				wear.Area.Index = 0;
+			}
+		}
+		finally { studio.Features.Remove( f ); studio.MarkDirty( studio.Features.Count ); }
+		f.Spot.Index = start;
+		if ( wear != null ) { wear.Width.Value = w; wear.Height.Value = h; }
+		return null;
 	}
 
 	// ---- Shape garment ---------------------------------------------------------------------------
@@ -172,7 +235,7 @@ public static class ClothingTools
 	static void Shape( GeppettoDocument doc, Body target )
 	{
 		var edit = ShapeGarment( doc, target );
-		GeppettoToast.Info( $"Shape garment: a Mesh edit '{edit.Name}' is on the garment. Use the Model workspace's mesh tools on it; the edits are kept if the garment's settings change." );
+		GeppettoToast.Info( $"Shape garment: Mesh edit '{edit.Name}' added. Shape it with the Model mesh tools; edits survive garment changes." );
 	}
 }
 #endif
