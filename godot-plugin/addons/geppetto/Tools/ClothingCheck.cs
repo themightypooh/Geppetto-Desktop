@@ -77,7 +77,7 @@ public static class ClothingCheck
 			Marks.Add( ( p, deepest > 0f ? d / deepest : 1f ) );
 
 		message = clipping > 0
-			? $"{clipping} vertices clip, deepest {deepest:0.##} in - marked yellow to red. Push out fixes it, or choose a looser Fit; the rest is in the console."
+			? $"{clipping} vertices clip (deepest {deepest:0.##} in), marked yellow to red. Push out, or pick a looser Fit."
 			: faults == 0
 				? $"Checked {garments.Count} garment(s): nothing wrong. Details in the console."
 				: $"{faults} of {garments.Count} garments have something to fix - see the console.";
