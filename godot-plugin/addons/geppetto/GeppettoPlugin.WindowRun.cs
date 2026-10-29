@@ -26,7 +26,7 @@ public partial class GeppettoPlugin
 		_runOut = System.Environment.GetEnvironmentVariable( "GEPPETTO_WINDOW_RUN" ) ?? "";
 		if ( _runOut.Length == 0 ) return;
 		Directory.CreateDirectory( _runOut );
-		_ = System.Environment.GetEnvironmentVariable( "GEPPETTO_WINDOW_WS" ) switch { "SketchEdit" => SketchEditRun(), "Live" => LiveRun(), "Blank" => BlankRun(), _ => WindowRun() };
+		_ = System.Environment.GetEnvironmentVariable( "GEPPETTO_WINDOW_WS" ) switch { "SketchEdit" => SketchEditRun(), "Live" => LiveRun(), "Blank" => BlankRun(), "CadAudit" => CadAuditRun(), _ => WindowRun() };
 	}
 
 	async Task Wait( double seconds ) => await ToSignal( GetTree().CreateTimer( seconds ), SceneTreeTimer.SignalName.Timeout );

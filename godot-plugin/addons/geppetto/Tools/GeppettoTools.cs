@@ -39,13 +39,17 @@ public sealed class GeppettoToolContext
 
 	public const string NoModel = "No Geppetto model in this scene yet. Pick any CAD or Model tool to start one, or drag a .effigy in.";
 
-	public static void Say( string message ) => GD.Print( $"[Geppetto] {message}" );
+	public static void Say( string message ) { GD.Print( $"[Geppetto] {message}" ); Spoken?.Invoke( message, false ); }
+
+	/// <summary>Every Say / Warn, for the window runs that check what a tool told the user.</summary>
+	public static event Action<string, bool>? Spoken;
 
 	/// <summary>Why a tool refused or what went wrong: a warning in Output and a toast in the editor, so a
 	/// click that does nothing says why where the user is looking instead of only in the console.</summary>
 	public static void Warn( string message )
 	{
 		GD.PushWarning( $"[Geppetto] {message}" );
+		Spoken?.Invoke( message, true );
 		if ( !Engine.IsEditorHint() || EditorInterface.Singleton == null ) return;
 		Callable.From( () => EditorInterface.Singleton.GetEditorToaster()?.PushToast( message, EditorToaster.Severity.Warning ) ).CallDeferred();
 	}
