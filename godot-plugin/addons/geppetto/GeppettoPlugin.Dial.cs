@@ -144,7 +144,8 @@ public partial class GeppettoPlugin
 	/// <summary>Runs a wired tool. False when the tool has no backend yet.</summary>
 	bool RunTool( string ws, string tool )
 	{
-		var c = _character;
+		var c = FindCharacter();
+		if ( c == null && StartWithNewModel( ws, tool ) ) return true;
 		switch ( ws, tool )
 		{
 			case ("Animate", "Move" or "Rotate" or "Scale"):
@@ -174,7 +175,7 @@ public partial class GeppettoPlugin
 
 	bool Need()
 	{
-		GeppettoToolContext.Warn( "Select a Geppetto character (an imported .effigy scene) first." );
+		GeppettoToolContext.Warn( GeppettoToolContext.NoModel );
 		return true;
 	}
 

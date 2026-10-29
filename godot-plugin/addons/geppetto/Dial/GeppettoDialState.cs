@@ -70,7 +70,7 @@ public static class GeppettoDialState
 		Offset = Get( "offset", Vector2.Zero ).AsVector2();
 		Scale = Mathf.Clamp( (float)Get( "scale", 1f ).AsDouble(), 0.6f, 1.5f );
 		Ws = Math.Clamp( Get( "workspace", 0 ).AsInt32(), 0, GeppettoDialData.Workspaces.Length - 1 );
-		ForceShow = Get( "force_show", false ).AsBool();
+		ForceShow = Get( "force_show", true ).AsBool();
 		var stages = Get( "last_stage", new Godot.Collections.Dictionary() ).AsGodotDictionary();
 		var tools = Get( "last_tool", new Godot.Collections.Dictionary() ).AsGodotDictionary();
 		for ( int i = 0; i < GeppettoDialData.Workspaces.Length; i++ )

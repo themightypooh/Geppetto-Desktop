@@ -30,7 +30,8 @@ public partial class EffigySceneImporter : EditorSceneFormatImporter
 			ImportSidecar.Load( studio, diskPath ); // imported / Wearer meshes live beside the document
 			studio.Rebuild();
 
-			var cpuMesh = CpuMesh.FromStudio( studio, 0, diskPath );
+			// A new model (CAD's first sketch) has no body yet: it imports as an empty Body to build on.
+			var cpuMesh = EffigyMeshBridge.HasMesh( studio ) ? CpuMesh.FromStudio( studio, 0, diskPath ) : null;
 			var root = new Node3D();
 			root.Name = Path.GetFileNameWithoutExtension( diskPath );
 			root.SetMeta( EffigyMeta, path );
@@ -52,9 +53,9 @@ public partial class EffigySceneImporter : EditorSceneFormatImporter
 			}
 
 			// Slot looks (`materiallook SLOT color=... rough=...`) win over resolver and palette, as in the desktop viewer.
-			var arrayMesh = EffigyMeshBridge.ToGodotArrayMesh( cpuMesh, resolver, studio.MaterialLooks, dir );
+			var arrayMesh = cpuMesh == null ? new ArrayMesh() : EffigyMeshBridge.ToGodotArrayMesh( cpuMesh, resolver, studio.MaterialLooks, dir );
 			// Texture paint (Paint layers) bound on the slot materials as embedded ImageTextures, saved with the scene.
-			PaintShow.Apply( arrayMesh, cpuMesh, studio );
+			if ( cpuMesh != null ) PaintShow.Apply( arrayMesh, cpuMesh, studio );
 			var meshInstance = new MeshInstance3D
 			{
 				Name = "Body",
@@ -108,7 +109,7 @@ public partial class EffigySceneImporter : EditorSceneFormatImporter
 				}
 			}
 
-			GD.Print( $"[EffigyImporter] Successfully imported scene: {path} (verts={(cpuMesh.Vertices?.Length ?? 0) / CpuMesh.FloatsPerVertex}, tris={cpuMesh.TriangleCount}, surfaces={arrayMesh.GetSurfaceCount()})" );
+			GD.Print( $"[EffigyImporter] Successfully imported scene: {path} (verts={(cpuMesh?.Vertices?.Length ?? 0) / CpuMesh.FloatsPerVertex}, tris={cpuMesh?.TriangleCount ?? 0}, surfaces={arrayMesh.GetSurfaceCount()})" );
 			return root;
 		}
 		catch ( Exception ex )

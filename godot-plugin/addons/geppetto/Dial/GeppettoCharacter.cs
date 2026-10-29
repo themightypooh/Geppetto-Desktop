@@ -78,7 +78,20 @@ public sealed class GeppettoCharacter
 		foreach ( var n in EditorInterface.Singleton.GetSelection().GetSelectedNodes() )
 			for ( Node? p = n; p != null; p = p == root ? null : p.GetParent() )
 				if ( EffigyPathOf( p, root ) is { } path ) return Reuse( current, p, path );
-		return EffigyPathOf( root, root ) is { } rp ? Reuse( current, root, rp ) : null;
+		if ( EffigyPathOf( root, root ) is { } rp ) return Reuse( current, root, rp );
+		// Nothing picked: the scene's only (else first) character, so the tools don't refuse just because
+		// the click in the viewport landed on something else.
+		return FirstIn( root, root ) is { } first && EffigyPathOf( first, root ) is { } fp ? Reuse( current, first, fp ) : null;
+	}
+
+	static Node? FirstIn( Node node, Node root )
+	{
+		foreach ( var child in node.GetChildren() )
+		{
+			if ( EffigyPathOf( child, root ) != null ) return child;
+			if ( child.Owner == root && FirstIn( child, root ) is { } deeper ) return deeper;
+		}
+		return null;
 	}
 
 	static GeppettoCharacter Reuse( GeppettoCharacter? current, Node node, string path ) =>

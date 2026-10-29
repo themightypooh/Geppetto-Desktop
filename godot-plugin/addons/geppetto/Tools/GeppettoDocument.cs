@@ -160,9 +160,14 @@ public sealed class GeppettoDocument
 	/// root with the current build. Mirrors <see cref="EffigySceneImporter"/>.</summary>
 	public void ApplyTo( Node characterRoot )
 	{
-		var cpu = CpuMesh.FromStudio( Studio, 0, DiskPath );
-		var mesh = EffigyMeshBridge.ToGodotArrayMesh( cpu, Resolver, Studio.MaterialLooks, Path.GetDirectoryName( DiskPath ) );
-		PaintShow.Apply( mesh, cpu, Studio );   // painted textures stay on after the brush is put down
+		ArrayMesh mesh;
+		if ( !EffigyMeshBridge.HasMesh( Studio ) ) mesh = new ArrayMesh();   // everything deleted / not built yet
+		else
+		{
+			var cpu = CpuMesh.FromStudio( Studio, 0, DiskPath );
+			mesh = EffigyMeshBridge.ToGodotArrayMesh( cpu, Resolver, Studio.MaterialLooks, Path.GetDirectoryName( DiskPath ) );
+			PaintShow.Apply( mesh, cpu, Studio );   // painted textures stay on after the brush is put down
+		}
 		var body = characterRoot.FindChild( "Body", true, false ) as MeshInstance3D;
 		if ( body == null ) return;
 		body.Mesh = mesh;

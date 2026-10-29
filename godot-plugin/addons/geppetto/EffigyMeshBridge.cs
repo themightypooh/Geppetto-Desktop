@@ -15,6 +15,15 @@ public static class EffigyMeshBridge
 {
 	public const float ScaleToMetres = 0.0254f;
 
+	/// <summary>True when the document has a visible body with faces (CpuMesh.FromStudio refuses otherwise:
+	/// a brand-new model, or one whose last part was deleted).</summary>
+	public static bool HasMesh( Effigy.PartStudio studio )
+	{
+		foreach ( var b in studio.Bodies )
+			if ( b.Visible && b.Mesh is { FaceCount: > 0, VertexCount: > 0 } ) return true;
+		return false;
+	}
+
 	/// <summary>
 	/// Transforms position from Effigy inches to Godot metres:
 	/// X_G = 0.0254 * y_E

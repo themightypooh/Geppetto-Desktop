@@ -62,7 +62,7 @@ public static class GeppettoDatumPlanes
 	/// origin, so the part sits on them rather than beside a small square.</summary>
 	public static float OriginHalfSize( Node? root )
 	{
-		if ( root?.FindChild( "Body", true, false ) is MeshInstance3D body && body.Mesh != null )
+		if ( root?.FindChild( "Body", true, false ) is MeshInstance3D body && body.Mesh is { } mesh && mesh.GetSurfaceCount() > 0 )
 		{
 			var a = body.GetAabb();
 			float m = 0;
@@ -70,7 +70,7 @@ public static class GeppettoDatumPlanes
 				m = Math.Max( m, Math.Max( Math.Abs( v.X ), Math.Max( Math.Abs( v.Y ), Math.Abs( v.Z ) ) ) );
 			return Math.Max( 6f, m / EffigyMeshBridge.ScaleToMetres * 1.2f );
 		}
-		return 12f;
+		return 24f;   // a new, empty model: about a metre across, so the planes read at the editor's starting zoom
 	}
 
 	/// <summary>Where a ray (Effigy space) crosses a plane inside its square of half-side half, or null.</summary>

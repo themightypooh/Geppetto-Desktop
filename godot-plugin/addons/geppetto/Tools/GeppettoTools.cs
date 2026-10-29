@@ -33,9 +33,11 @@ public sealed class GeppettoToolContext
 	/// <summary>Warns that the tool needs a character and returns true (the tool did run, it just had nothing to act on).</summary>
 	public bool Need()
 	{
-		Warn( "Select a Geppetto character (an imported .effigy scene) first." );
+		Warn( Character == null ? NoModel : "This needs a model with a body to work on." );
 		return true;
 	}
+
+	public const string NoModel = "No Geppetto model in this scene yet. Pick any CAD or Model tool to start one, or drag a .effigy in.";
 
 	public static void Say( string message ) => GD.Print( $"[Geppetto] {message}" );
 
