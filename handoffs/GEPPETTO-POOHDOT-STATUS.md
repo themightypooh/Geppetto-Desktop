@@ -8,13 +8,17 @@ Poohdot is `/home/poo/src/poohdot/godot/bin/godot.linuxbsd.editor.x86_64.mono`. 
 
 ## CURRENT STATE (read this first, 2026-10-29)
 
-- **Code:** `godot-plugin-baseline` @ **8ef2022** (sketch-calm, fast-forwarded 2026-10-29) holds everything, and every tool branch is merged into it. The main tree still has uncommitted files that aren't mine (the godot-ui-mock cache and handoffs docs). Another agent shares that tree, so don't revert them.
-- **Installed:** 8ef2022 is published (2026-10-29) to `~/.local/share/poohdot/geppetto` with `install.sh publish`. Injected projects, from `injected.txt`: `~/games/godot/geppetto-test`, `~/games/godot/tamagatchi/godot` (never test there), and a scratch copy. Both real projects build (0 errors on 8ef2022). Poo just reloads the project in Poohdot.
+- **Code:** `godot-plugin-baseline` @ **2ac1768** (sketch-mode-look, fast-forwarded 2026-10-29; before it 8ef2022 sketch-calm) holds everything, and every tool branch is merged into it. The main tree still has uncommitted files that aren't mine (the godot-ui-mock cache and handoffs docs). Another agent shares that tree, so don't revert them.
+- **Installed:** 2ac1768 is published (2026-10-29) to `~/.local/share/poohdot/geppetto` with `install.sh publish`. Injected projects, from `injected.txt`: `~/games/godot/geppetto-test`, `~/games/godot/tamagatchi/godot` (never test there), and a scratch copy. Both real projects build (0 errors on 2ac1768). Poo just reloads the project in Poohdot.
 - **Verified on 7a98c8b:**
   - All 11 headless `tools/*_test.gd` suites pass (sketchedit 46/46).
   - All 10 hidden window runs end `fails=0`: Default, Blank, CadAudit, Deep, SketchTools, NoModelAudit, SketchEdit, RigAudit, ClothingAudit and AnimateAudit.
   - The published-addon copy of geppetto-test passes Blank and Default.
   - On 8ef2022: the published-addon copy passes Blank (`RESULT fails=0`, with the new calm checks). The other runs weren't re-run for this small change.
+  - On 2ac1768 (sketch-mode-look): all 11 headless suites pass (sketchedit 51/51), and Blank, CadAudit, SketchTools, SketchEdit and Default end `fails=0`.
+    - sketch-calm had broken CadAudit (5 fails): the new model is no longer selected, so the camera isn't brought in and its 4-unit clicks snapped together. Phase 1 now scales its coordinates until 4 units is ~60px.
+    - CadAudit's import step could crash the editor: its .obj was written under res://, got auto-imported, and the import progress dialog was parented to the file dialog being freed. It now writes to user://.
+- **Sketch mode look (2ac1768):** amber 4px frame + SKETCH tag, a pill bar at top centre ("Sketching on <plane>", Line/Rectangle/Circle/Arc/Trim/Dimension, Finish, Cancel, ?), plane-coloured grid (major line every 4th), model dimmed via a RenderingServer overlay. Other tools can use the same frame/bar through `IGeppettoModeTool`. Cancel discards; Esc still finishes. No camera ease: Poohdot has no editor camera API.
 - **Window-run runner:** `winruns.sh` (scratchpad, so it may be gone). It is just a loop. For each `Mode:scene` it copies the project, then runs the gamescope command under Testing with `GEPPETTO_WINDOW_WS=<Mode> GEPPETTO_WINDOW_SCENE=res://<scene>`.
   - Scenes: Default/RigAudit/ClothingAudit/AnimateAudit use test.tscn. Blank/CadAudit/Deep/SketchTools/NoModelAudit use blank.tscn. SketchEdit uses sketch.tscn.
   - The test project for SketchEdit needs `sketchbox.effigy`. If it was damaged, restore it from `tools/live/fixtures/sketchbox.effigy`.
