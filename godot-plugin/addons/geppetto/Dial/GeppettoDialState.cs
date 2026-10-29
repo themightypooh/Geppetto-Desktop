@@ -17,8 +17,10 @@ public static class GeppettoDialState
 	const string Section = "geppetto_dial";
 	public const int MaxRecent = 8;
 
-	// Ring levels: 0 = workspaces, 1 = the open workspace's stages, 2 = the open stage's tools.
+	// Ring levels: 0 = workspaces, 1 = the open workspace's stages, 2 = the open stage's tools,
+	// 3 = the tools of a group tile on level 2 (CAD > Sketch > Draw / Shapes / Modify).
 	public static int Level;
+	public static string OpenGroup;                    // group shown at level 3
 	public static int Ws;
 	public static int OpenStage;                       // stage shown at level 2
 	public static readonly int[] LastStage = new int[GeppettoDialData.Workspaces.Length];
@@ -77,7 +79,7 @@ public static class GeppettoDialState
 		{
 			var w = GeppettoDialData.Workspaces[i];
 			if ( stages.TryGetValue( w.Name, out var s ) ) LastStage[i] = Math.Clamp( s.AsInt32(), 0, w.Stages.Length - 1 );
-			if ( tools.TryGetValue( w.Name, out var t ) && w.Stages.Any( st => st.Tools.Contains( t.AsString() ) ) ) LastTool[i] = t.AsString();
+			if ( tools.TryGetValue( w.Name, out var t ) && GeppettoDialData.HasTool( w, t.AsString() ) ) LastTool[i] = t.AsString();
 		}
 		var cur = Get( "material", "" ).AsString();
 		Current = FindMaterial( cur ) ?? Current;
@@ -134,6 +136,12 @@ public static class GeppettoDialState
 	public static void OpenStageTools( int stage )
 	{
 		OpenStage = stage; LastStage[Ws] = stage; Level = 2; Fan(); Save(); Touch();
+	}
+
+	/// <summary>Level 3: open a group tile of the open stage. The ring fans into the group's tools.</summary>
+	public static void OpenGroupTools( string group )
+	{
+		OpenGroup = group; LastStage[Ws] = OpenStage; Level = 3; Fan(); Save(); Touch();
 	}
 
 	public static void Back()

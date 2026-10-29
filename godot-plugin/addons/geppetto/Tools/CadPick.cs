@@ -58,6 +58,68 @@ public static partial class GeppettoTools
 			new CadSketch( doc ).Start( character );
 			return true;
 		} );
+
+		// CAD > Sketch > Draw / Shapes / Modify tiles: the sketch tools (the same as their hotkeys).
+		foreach ( var (tile, tool) in SketchTiles )
+		{
+			var t = tool;
+			Register( "CAD", tile, ctx => RunSketchTool( ctx, t ) );
+		}
+		Register( "CAD", "Construction", ctx =>
+		{
+			if ( Active is CadSketch { Editing: not null } s ) { s.ToggleConstruction(); return true; }
+			return RunSketchTool( ctx, CadSketch.EditTool.Line, construction: true );
+		} );
+		Register( "CAD", "Project", ctx =>
+		{
+			if ( Active is CadSketch { Editing: not null } s )
+			{
+				s.SetTool( CadSketch.EditTool.Use );
+				GeppettoToolContext.Say( "Project: click a green face edge to copy it in; Shift+U takes them all." );
+				return true;
+			}
+			return RunSketchTool( ctx, CadSketch.EditTool.Use );
+		} );
+		Register( "CAD", "Finish sketch", ctx =>
+		{
+			if ( Active is CadSketch { Editing: not null } s ) { s.Finish(); return true; }
+			if ( Active is CadSketch q && q.Points.Count >= 3 ) return q.Commit();
+			GeppettoToolContext.Say( "Finish sketch: no sketch is open." );
+			return true;
+		} );
+	}
+
+	/// <summary>Dial tile → sketch tool.</summary>
+	public static readonly (string Tile, CadSketch.EditTool Tool)[] SketchTiles =
+	{
+		( "Select", CadSketch.EditTool.Select ), ( "Line", CadSketch.EditTool.Line ), ( "Midpoint line", CadSketch.EditTool.LineMidpoint ),
+		( "Point", CadSketch.EditTool.Point ), ( "Sketch spline", CadSketch.EditTool.Spline ), ( "Arc", CadSketch.EditTool.Arc ),
+		( "3 point arc", CadSketch.EditTool.ArcThreePoint ), ( "Rectangle", CadSketch.EditTool.Rectangle ),
+		( "Centre rectangle", CadSketch.EditTool.RectangleCentre ), ( "Circle", CadSketch.EditTool.Circle ),
+		( "3 point circle", CadSketch.EditTool.CircleThreePoint ), ( "Polygon", CadSketch.EditTool.Polygon ),
+		( "Outer polygon", CadSketch.EditTool.PolygonCircumscribed ), ( "Slot", CadSketch.EditTool.Slot ), ( "Ellipse", CadSketch.EditTool.Ellipse ),
+		( "Trim", CadSketch.EditTool.Trim ), ( "Extend", CadSketch.EditTool.Extend ), ( "Sketch fillet", CadSketch.EditTool.Fillet ),
+		( "Offset", CadSketch.EditTool.Offset ), ( "Sketch mirror", CadSketch.EditTool.Mirror ), ( "Cut", CadSketch.EditTool.Cut ),
+	};
+
+	/// <summary>A sketch tool picked on the dial: switch the open sketch to it, or start a sketch with it armed
+	/// (the plane pick then opens the full sketch session with that tool).</summary>
+	static bool RunSketchTool( GeppettoToolContext ctx, CadSketch.EditTool tool, bool construction = false )
+	{
+		if ( Active is CadSketch s )
+		{
+			if ( s.Editing != null ) s.SetTool( tool );
+			else if ( s.Plane != null ) s.BeginNew( tool );
+			else { s.Armed = tool; GeppettoToolContext.Say( $"Sketch ({tool}): click the Top, Front or Right plane, a Plane, or a face." ); }
+			if ( construction ) s.ConstructionMode = true;
+			Redraw();
+			return true;
+		}
+		if ( ctx.Doc is not { } doc || ctx.Character is not { } character ) return ctx.Need();
+		var sketch = new CadSketch( doc ) { Armed = tool, ConstructionMode = construction };
+		sketch.Start( character );
+		GeppettoToolContext.Say( $"Sketch ({tool}): click the Top, Front or Right plane, a Plane, or a face." );
+		return true;
 	}
 
 	static bool ConfirmCadPick( GeppettoPicker p, string tool, bool allowEmpty )

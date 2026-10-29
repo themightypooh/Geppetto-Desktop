@@ -39,7 +39,7 @@ public static class GeppettoDialData
 	public static readonly GeppettoWorkspace[] Workspaces =
 	{
 		new( "CAD", "Sketches, solids and the feature tree", 1, new[] {
-			( "Sketch", new[] { "Sketch", "Plane", "Primitive", "Import", "Profile" } ),
+			( "Sketch", new[] { "Sketch", "Draw", "Shapes", "Modify", "Plane", "Primitive", "Import", "Profile" } ),
 			( "Solid", new[] { "Part", "Extrude", "Revolve", "Sweep", "Loft", "Spline", "Boolean" } ),
 			( "Detail", new[] { "Fillet", "Chamfer", "Shell", "Move Face", "Delete Face", "Draft", "Hole" } ),
 			( "Repeat", new[] { "Mirror", "Linear Pattern", "Circular Pattern", "Transform", "Bend Along Curve", "Simple Deform", "Lattice" } ),
@@ -77,6 +77,22 @@ public static class GeppettoDialData
 			( "Events", new[] { "Spawn model", "Morph event" } ),
 			( "Export", new[] { "Export Animation…" } ) } ),
 	};
+
+	/// <summary>Tiles that open a further ring (level 3) instead of running a tool: "Workspace/Tile" → its tools.
+	/// The sketch tools are s&amp;box's BuildSketchStages (Draw, Shapes, Modify), squeezed to 8 a ring.
+	/// "Sketch spline/fillet/mirror" keep them apart from CAD's Solid Spline, Detail Fillet and Repeat Mirror.</summary>
+	public static readonly Dictionary<string, string[]> Groups = new()
+	{
+		["CAD/Draw"] = new[] { "Select", "Line", "Midpoint line", "Point", "Sketch spline", "Arc", "3 point arc", "Construction" },
+		["CAD/Shapes"] = new[] { "Rectangle", "Centre rectangle", "Circle", "3 point circle", "Polygon", "Outer polygon", "Slot", "Ellipse" },
+		["CAD/Modify"] = new[] { "Trim", "Extend", "Sketch fillet", "Offset", "Sketch mirror", "Cut", "Project", "Finish sketch" },
+	};
+
+	public static string[] Group( string ws, string tile ) => Groups.TryGetValue( ws + "/" + tile, out var g ) ? g : null;
+
+	/// <summary>Every tool name a workspace can run: its stage tools and the tools inside its groups.</summary>
+	public static bool HasTool( GeppettoWorkspace w, string tool ) =>
+		w.Stages.Any( st => st.Tools.Contains( tool ) ) || Groups.Any( kv => kv.Key.StartsWith( w.Name + "/" ) && kv.Value.Contains( tool ) );
 
 	public static GeppettoWorkspace Workspace( string name ) =>
 		Workspaces.FirstOrDefault( w => w.Name == name ) ?? Workspaces[0];
@@ -133,6 +149,21 @@ public static class GeppettoDialData
 		["ws:Rig"] = "M12 2.5a2.4 2.4 0 1 0 0 .1 M12 6v7.5 M12 13.5l-4.5 6.5M12 13.5l4.5 6.5 M6 9.5h12",
 		["ws:Clothing"] = "M8 3 3 6l2 4 2-1v12h10V9l2 1 2-4-5-3c-.5 1.5-2 2.5-4 2.5S8.5 4.5 8 3z",
 		["ws:Animate"] = "M12 2.5a2.4 2.4 0 1 0 0 .1 M12 6v7 M6 8.5l6 2 6-4 M12 13l-4 7.5M12 13l4 7.5",
+		// CAD > Sketch groups and their tools ("sk:" names win over a same-named tool elsewhere).
+		["Draw"] = "M4 20l3-1L19 7l-2-2L5 17z M15 7l2 2", ["Shapes"] = "M3 4h8v8H3z M17 13a4 4 0 1 0 0 8 4 4 0 1 0 0-8 M15 3l5 8h-10z",
+		["Modify"] = "M6 4a2 2 0 1 0 0 4 2 2 0 1 0 0-4 M6 16a2 2 0 1 0 0 4 2 2 0 1 0 0-4 M8 7l12 9M8 17l12-9",
+		["sk:Select"] = "M5 4l13 7-6 1.5L9 19z", ["sk:Line"] = "M5 19 19 5 M5 19a1.5 1.5 0 1 0 0 .1M19 5a1.5 1.5 0 1 0 0 .1",
+		["sk:Midpoint line"] = "M4 20 20 4 M12 9a3 3 0 1 0 0 6 3 3 0 1 0 0-6", ["sk:Point"] = "M12 9a3 3 0 1 0 0 6 3 3 0 1 0 0-6 M12 3v3M12 18v3M3 12h3M18 12h3",
+		["sk:Sketch spline"] = "M3 17C7 3 13 21 21 7 M3 17a1.5 1.5 0 1 0 0 .1 M21 7a1.5 1.5 0 1 0 0 .1", ["sk:Arc"] = "M4 18a8 8 0 0 1 16 0 M12 18h.1",
+		["sk:3 point arc"] = "M4 18a8 8 0 0 1 16 0 M4 18h.1M12 10h.1M20 18h.1", ["sk:Construction"] = "M4 20l2-2M8 16l2-2M12 12l2-2M16 8l2-2M20 4h.1",
+		["sk:Rectangle"] = "M4 6h16v12H4z", ["sk:Centre rectangle"] = "M4 6h16v12H4z M12 11v2M11 12h2",
+		["sk:Circle"] = "M12 4a8 8 0 1 0 0 16 8 8 0 1 0 0-16 M12 12h.1", ["sk:3 point circle"] = "M12 4a8 8 0 1 0 0 16 8 8 0 1 0 0-16 M12 4h.1M5 16h.1M19 16h.1",
+		["sk:Polygon"] = "M12 3l8 5v8l-8 5-8-5V8z", ["sk:Outer polygon"] = "M12 4l7 4v8l-7 4-7-4V8z M12 6a6 6 0 1 0 0 12 6 6 0 1 0 0-12",
+		["sk:Slot"] = "M8 7h8a5 5 0 0 1 0 10H8A5 5 0 0 1 8 7z", ["sk:Ellipse"] = "M12 6c5 0 9 2.7 9 6s-4 6-9 6-9-2.7-9-6 4-6 9-6z",
+		["sk:Trim"] = "M4 12h6M14 12h6 M12 4v16 M9 9l6 6M15 9l-6 6", ["sk:Extend"] = "M4 12h10 M14 12h6 M18 9l3 3-3 3 M20 4v16",
+		["sk:Sketch fillet"] = "M5 19V11a6 6 0 0 1 6-6h8", ["sk:Offset"] = "M4 18 14 8 M8 20l10-10 M14 8h4v4",
+		["sk:Sketch mirror"] = "M12 3v18 M8 7 4 12l4 5z M16 7l4 5-4 5z", ["sk:Cut"] = "M6 6a2 2 0 1 0 0 .1M6 18a2 2 0 1 0 0 .1 M8 7l12 10M8 17l12-10",
+		["sk:Project"] = "M3 15 9 7h12l-6 8z M12 3v8M9 8l3 3 3-3", ["sk:Finish sketch"] = "M4 12l5 5L20 6",
 		["__back"] = "M10 6 4 12l6 6M4 12h16",
 		["__move"] = "M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3",
 		["__size"] = "M5 19 19 5 M13 5h6v6 M5 13v6h6",
