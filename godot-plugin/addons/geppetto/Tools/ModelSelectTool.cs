@@ -219,12 +219,42 @@ public sealed class GeppettoModelSelectTool : IGeppettoViewportTool
 			case Kind.Vertex: s.SelectVertex( el.Index, how ); break;
 			case Kind.Edge:
 				if ( alt && ctrl ) s.SelectEdgeRing( el.Edge, shift ? MeshEditSession.Combine.Add : MeshEditSession.Combine.Replace );
+				else if ( alt && HoleRim( s.Mesh, el.Edge ) is { } rim )
+				{
+					// Alt on the rim of a hole takes the whole rim (Blender's boundary loop): ready for Fill or Bridge.
+					if ( !shift ) s.ClearSelection();
+					foreach ( var r in rim ) s.SelectEdge( r, MeshEditSession.Combine.Add );
+				}
 				else if ( alt ) s.SelectEdgeLoop( el.Edge, shift ? MeshEditSession.Combine.Add : MeshEditSession.Combine.Replace );
 				else s.SelectEdge( el.Edge, how );
 				break;
 			default: s.SelectFace( el.Index, how ); break;
 		}
 		_edit.SelectionChanged();
+	}
+
+	/// <summary>The open edges round the hole <paramref name="seed"/> borders, walked vertex to vertex
+	/// along edges with only one face; null when <paramref name="seed"/> is not on a hole.</summary>
+	static List<EdgeKey>? HoleRim( PolyMesh mesh, EdgeKey seed )
+	{
+		var open = new HashSet<EdgeKey>();
+		foreach ( var (key, faces) in mesh.BuildEdgeFaces() )
+			if ( faces.Count == 1 ) open.Add( key );
+		if ( !open.Contains( seed ) ) return null;
+		var byVertex = new Dictionary<int, List<EdgeKey>>();
+		foreach ( var e in open )
+		{
+			if ( !byVertex.TryGetValue( e.A, out var a ) ) byVertex[e.A] = a = new();
+			if ( !byVertex.TryGetValue( e.B, out var b ) ) byVertex[e.B] = b = new();
+			a.Add( e ); b.Add( e );
+		}
+		var rim = new List<EdgeKey> { seed };
+		var seen = new HashSet<EdgeKey> { seed };
+		var todo = new Stack<int>( new[] { seed.A, seed.B } );
+		while ( todo.Count > 0 )
+			foreach ( var e in byVertex[todo.Pop()] )
+				if ( seen.Add( e ) ) { rim.Add( e ); todo.Push( e.A ); todo.Push( e.B ); }
+		return rim;
 	}
 
 	/// <summary>Box select: everything of the current mode whose screen position is inside the box and
