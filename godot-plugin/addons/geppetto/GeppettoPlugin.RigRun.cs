@@ -751,15 +751,16 @@ public partial class GeppettoPlugin
 			Note( $"Export: box open = {ex != null}", fail: ex == null );
 			if ( ex != null )
 			{
-				var file = WalkAll( ex ).OfType<LineEdit>().First();
-				string glb = ProjectSettings.GlobalizePath( file.Text );
+				// Read the path now: OK frees the box and its LineEdit.
+				string fileText = WalkAll( ex ).OfType<LineEdit>().Select( l => l.Text ).FirstOrDefault( t => t.EndsWith( ".glb" ) ) ?? "";
+				string glb = ProjectSettings.GlobalizePath( fileText );
 				if ( File.Exists( glb ) ) File.Delete( glb );
 				Shot( "anim-9-export" );
 				CheckClipping( "Export box" );
 				ex.GetOkButton().EmitSignal( BaseButton.SignalName.Pressed );
 				await Wait( 1.5 );
 				long bytes = File.Exists( glb ) ? new FileInfo( glb ).Length : 0;
-				Note( $"Export: {file.Text} {bytes} bytes ({Heard})", fail: bytes == 0 || !HeardSay( "Exported" ) );
+				Note( $"Export: {fileText} {bytes} bytes ({Heard})", fail: bytes == 0 || !HeardSay( "Exported" ) );
 			}
 
 			// Ctrl+S saves the take: the .riganim on disk has the keys.
