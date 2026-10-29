@@ -144,12 +144,15 @@ public partial class GeppettoPlugin
 	/// <summary>Runs a wired tool. False when the tool has no backend yet.</summary>
 	bool RunTool( string ws, string tool )
 	{
+		var was = _character;
 		var c = FindCharacter();
+		if ( c != was ) { _autoKeyBaseline = null; ClearIk(); }
 		if ( c == null && StartWithNewModel( ws, tool ) ) return true;
 		switch ( ws, tool )
 		{
 			case ("Animate", "Move" or "Rotate" or "Scale"):
-				if ( c?.Skeleton != null ) Select( c.Skeleton );
+				if ( c?.Skeleton == null ) return Need();
+				Select( c.Skeleton );
 				return PressToolbar( "spatial_editor/tool_" + tool.ToLowerInvariant() );
 
 			case ("Animate", "Key"):
@@ -158,12 +161,14 @@ public partial class GeppettoPlugin
 			case ("Animate", "Auto-Key"):
 				_autoKey = !_autoKey;
 				_autoKeyBaseline = ReadPose();
-				GD.Print( $"[Geppetto] Auto-Key {( _autoKey ? "on" : "off" )}" );
+				if ( c?.Skeleton == null ) { _autoKey = false; return Need(); }
+				GeppettoToast.Info( _autoKey ? "Auto-Key on: every bone you move is keyed at the playhead." : "Auto-Key off." );
 				return true;
 
 			case ("Animate", "Two-bone IK"):
 				return AddIkTarget();
 
+			case ("Animate", "Prop" or "Light" or "Camera") when c == null: return Need();
 			case ("Animate", "Prop"): return AddSceneNode( new Node3D { Name = "Prop" } );
 			case ("Animate", "Light"): return AddSceneNode( new OmniLight3D { Name = "Light", Position = new Vector3( 1, 2, 1 ) } );
 			case ("Animate", "Camera"): return AddSceneNode( new Camera3D { Name = "Camera", Position = new Vector3( 0, 1.5f, 3 ) } );
@@ -202,7 +207,8 @@ public partial class GeppettoPlugin
 	static BaseButton? FindButton( Node n, string shortcut )
 	{
 		if ( n is BaseButton bb && bb.Shortcut?.ResourceName == shortcut ) return bb;
-		foreach ( var ch in n.GetChildren() )
+		// The 3D toolbar buttons are internal children of their HBox, so GetChildren() alone never sees them.
+		foreach ( var ch in n.GetChildren( true ) )
 			if ( FindButton( ch, shortcut ) is { } hit ) return hit;
 		return null;
 	}
@@ -230,7 +236,7 @@ public partial class GeppettoPlugin
 			var clipPose = EffigyPoseBridge.SampleClip( c.Clip, c.Rig, frame / (double)c.Fps );
 			keyed = c.AutoKey.KeyChangedBones( c.Skeleton, clipPose, frame ).Count;
 		}
-		GD.Print( $"[Geppetto] Keyed {keyed} bone(s) at frame {frame}" );
+		GeppettoToast.Info( keyed == 0 ? $"Key: nothing changed since the last key at frame {frame}." : $"Keyed {keyed} bone(s) at frame {frame}." );
 		_autoKeyBaseline = ReadPose();
 		_timeline?.Refresh();
 		return true;
@@ -242,16 +248,20 @@ public partial class GeppettoPlugin
 		if ( c?.Skeleton == null || c.Rig == null ) return Need();
 		_ikEnd = c.IkEndBone();
 		if ( _ikEnd == null ) { GeppettoToolContext.Warn( "Two-bone IK needs a bone with a parent and a grandparent." ); return true; }
-		ClearIk();
 		var skel = c.Skeleton;
-		var at = skel.GlobalTransform * skel.GetBoneGlobalPose( skel.FindBone( _ikEnd ) ).Origin;
+		int end = skel.FindBone( _ikEnd );
+		if ( end < 0 ) { GeppettoToolContext.Warn( $"Two-bone IK: the skeleton has no bone '{_ikEnd}' - reopen the scene so it matches the rig." ); _ikEnd = null; return true; }
+		var keep = _ikEnd;
+		ClearIk();
+		_ikEnd = keep;
+		var at = skel.GlobalTransform * skel.GetBoneGlobalPose( end ).Origin;
 		var target = new Marker3D { Name = $"IK {_ikEnd}" };
 		AddSceneNode( target );
 		target.GlobalPosition = at;
 		_ikTarget = target;
 		_ikLast = at;
 		Select( target );
-		GD.Print( $"[Geppetto] Two-bone IK on {_ikEnd}: move the '{target.Name}' marker" );
+		GeppettoToast.Info( $"Two-bone IK on {_ikEnd}: move the '{target.Name}' marker and the arm or leg follows." );
 		return true;
 	}
 
