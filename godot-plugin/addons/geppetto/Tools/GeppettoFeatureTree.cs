@@ -154,6 +154,9 @@ public partial class GeppettoFeatureTree : EditorDock
 		if ( doc == Doc ) Fill();
 	}
 
+	/// <summary>Picks the character up again when one appears without a selection change (a new model).</summary>
+	public static void Refresh() => _instance?.Reselect();
+
 	void Reselect()
 	{
 		var found = GeppettoCharacter.Find( _character );

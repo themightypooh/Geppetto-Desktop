@@ -51,7 +51,9 @@ public partial class GeppettoPlugin
 	}
 
 	/// <summary>Writes an empty .effigy, imports it and instances it at the origin of the edited scene (a new
-	/// 3D scene is made first when none is open), then selects it so the dial and the Features dock follow.</summary>
+	/// 3D scene is made first when none is open). It is not selected: a selection puts Godot's move/rotate
+	/// gizmo on it, which buries the planes Sketch asks you to click. The tools and the Features dock find it
+	/// as the scene's first character instead (GeppettoCharacter.Find).</summary>
 	async Task<GeppettoCharacter?> NewModel()
 	{
 		var root = EditorInterface.Singleton.GetEditedSceneRoot();
@@ -102,7 +104,7 @@ public partial class GeppettoPlugin
 		ur.AddUndoMethod( root, Node.MethodName.RemoveChild, inst );
 		ur.CommitAction();
 
-		Select( inst );
+		GeppettoFeatureTree.Refresh();
 		GeppettoToolContext.Say( $"New model {res} added to the scene" );
 		EditorInterface.Singleton.GetEditorToaster()?.PushToast( $"Geppetto: new model {Path.GetFileName( disk )} added. Ctrl+S saves it." );
 		return GeppettoCharacter.Find( null );

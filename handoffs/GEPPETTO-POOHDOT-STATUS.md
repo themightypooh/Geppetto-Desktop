@@ -32,6 +32,12 @@ Poohdot is `/home/poo/src/poohdot/godot/bin/godot.linuxbsd.editor.x86_64.mono`. 
   1. Mock the 4 sketch panels in Poohdot for sign-off.
   2. Re-frame the camera on a new model.
   3. Fix the Garment sliver in the kernel.
+- **sketch-calm branch (2026-10-29, not merged or published, waiting on Poo):** a calmer "pick a plane" moment.
+  - The auto-made model isn't selected, so Godot's move/rotate rings don't show. Tools and the Features dock find it as the scene's first character.
+  - The Top/Front/Right and datum planes only draw while a tool wants a plane (Sketch before one is picked, or the Plane tool): a faint wash and a thin outline, with no name boxes. The hovered plane gets a stronger wash, a solid outline, and its name beside the mouse.
+  - The planes are twice as big: empty model 48in half-size, 2.0x model extent, datum 0.8x.
+  - Choosing a plane shows one hint line: "Sketch: click a plane · Esc to cancel".
+  - Blank run has new checks: nothing selected, planes wanted, a plane hovered, planes gone once one is picked. Shot: `shots/sketch-calm.png`.
 - **Docs:** `AUDIT-AND-SKETCH-NEXT.md` (Steps 1–4 done) and `CAD-SKETCH-PARITY.md` (the s&box vs Poohdot sketch table).
 
 ## Branches and where the code is

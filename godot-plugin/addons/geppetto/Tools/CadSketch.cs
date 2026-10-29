@@ -203,6 +203,7 @@ public sealed partial class CadSketch : IGeppettoViewportTool
 				if ( Plane == null )
 				{
 					GeppettoDatumPlanes.Hovered = PlaneUnder( o, d, out _, out _, out _ )?.Id;
+					GeppettoDatumPlanes.HoverAt = mm.Position;
 					_hover = null;
 					LastSnap = default;
 				}
@@ -280,10 +281,15 @@ public sealed partial class CadSketch : IGeppettoViewportTool
 			}
 			DrawSnapMarker( overlay, cam );
 		}
-		string where = Plane == null ? ( Armed is { } armed ? $"click the Top, Front or Right plane, a Plane, or a face to start drawing ({armed})" : "click the Top, Front or Right plane, a Plane, or a face" )
-			: Points.Count < 3 ? $"click points ({Points.Count} so far, 3 needed)"
+		if ( Plane == null )
+		{
+			// Choosing a plane: one short line, so the planes are the thing to look at.
+			GeppettoPicker.DrawHint( overlay, "Sketch: click a plane  ·  Esc to cancel" );
+			return;
+		}
+		string where = Points.Count < 3 ? $"click points ({Points.Count} so far, 3 needed)"
 			: $"{Points.Count} points: click the first point or press Enter to close";
-		GeppettoPicker.DrawHint( overlay, $"Sketch: {where}\nBackspace removes the last point, Esc cancels." + ( Plane != null ? "\nPress a tool key (L, R, C, A, ...) for the full sketch tools." : "" ) );
+		GeppettoPicker.DrawHint( overlay, $"Sketch: {where}\nBackspace removes the last point, Esc cancels.\nPress a tool key (L, R, C, A, ...) for the full sketch tools." );
 	}
 
 	public void DrawSnapMarker( Control overlay, Camera3D cam )

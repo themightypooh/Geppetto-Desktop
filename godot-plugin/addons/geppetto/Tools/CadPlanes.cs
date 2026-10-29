@@ -10,11 +10,11 @@ namespace Geppetto;
 
 /// <summary>
 /// The Top/Front/Right origin planes and the datum planes (PlaneFeature) in the viewport.
-/// The origin planes are always drawn as outlines in Onshape's colours (Top orange, Front blue,
-/// Right green, as s&amp;box's EffigyViewport.DrawReferencePlanes) so Sketch has something to click.
+/// The origin planes are drawn in Onshape's colours (Top orange, Front blue, Right green, as
+/// s&amp;box's EffigyViewport.DrawReferencePlanes), but only while a tool is waiting for a plane (<see cref="Wanted"/>).
 /// Datum planes: A Plane feature makes no geometry, so without this a
 /// new plane showed nothing at all and nothing could be drawn on it. Each one the last rebuild
-/// published is drawn as a lilac square with its name, under whatever tool is running, and Sketch
+/// published is drawn as a lilac square (its name on hover) while a plane is wanted, and Sketch
 /// takes a click on one as the plane to draw on (s&amp;box's EffigyViewport.Planes).
 /// </summary>
 public static class GeppettoDatumPlanes
@@ -39,6 +39,9 @@ public static class GeppettoDatumPlanes
 	/// <summary>The plane under the cursor while Sketch is choosing one, washed in its colour; null for none.</summary>
 	public static string? Hovered { get; set; }
 
+	/// <summary>Where the mouse was over the viewport when <see cref="Hovered"/> was set: the name goes there.</summary>
+	public static Vector2 HoverAt { get; set; }
+
 	/// <summary>The planes to show: every unsuppressed PlaneFeature the last rebuild published.</summary>
 	public static IEnumerable<(PlaneFeature Feature, SketchPlane Plane)> Published( PartStudio studio ) =>
 		studio.Features.OfType<PlaneFeature>()
@@ -53,9 +56,9 @@ public static class GeppettoDatumPlanes
 		{
 			var size = body.GetAabb().Size;
 			float metres = Math.Max( size.X, Math.Max( size.Y, size.Z ) );
-			return Math.Max( 6f, metres / EffigyMeshBridge.ScaleToMetres * 0.4f );
+			return Math.Max( 12f, metres / EffigyMeshBridge.ScaleToMetres * 0.8f );
 		}
-		return 12f;
+		return 24f;
 	}
 
 	/// <summary>Half the origin planes' side in inches: reaches past the model on every side of the
@@ -68,9 +71,9 @@ public static class GeppettoDatumPlanes
 			float m = 0;
 			foreach ( var v in new[] { a.Position, a.End } )
 				m = Math.Max( m, Math.Max( Math.Abs( v.X ), Math.Max( Math.Abs( v.Y ), Math.Abs( v.Z ) ) ) );
-			return Math.Max( 6f, m / EffigyMeshBridge.ScaleToMetres * 1.2f );
+			return Math.Max( 12f, m / EffigyMeshBridge.ScaleToMetres * 2.0f );
 		}
-		return 24f;   // a new, empty model: about a metre across, so the planes read at the editor's starting zoom
+		return 48f;   // a new, empty model: about two metres across, so the planes read at the editor's starting zoom
 	}
 
 	/// <summary>Where a ray (Effigy space) crosses a plane inside its square of half-side half, or null.</summary>
@@ -117,7 +120,7 @@ public static class GeppettoDatumPlanes
 		return best;
 	}
 
-	public static void Draw( Control overlay, Camera3D cam, GeppettoCharacter character )
+	public static void Draw( Control overlay, Camera3D cam, GeppettoCharacter character, bool planes )
 	{
 		if ( character.Doc is not { } doc || !GodotObject.IsInstanceValid( character.Root ) ) return;
 		var xf = GeppettoPicker.BodyTransformOf( character.Root );
@@ -142,43 +145,40 @@ public static class GeppettoDatumPlanes
 			}
 		}
 
+		if ( !planes ) return;
 		float originHalf = OriginHalfSize( character.Root );
-		var labels = new List<Rect2>();
 		foreach ( var (name, plane, colour) in Origin )
-			DrawSquare( overlay, cam, xf, plane, originHalf, colour, name, "#" + name, labels );
+			DrawSquare( overlay, cam, xf, plane, originHalf, colour, name, "#" + name );
 		foreach ( var (f, plane) in Published( doc.Studio ) )
-			DrawSquare( overlay, cam, xf, plane, half, Lilac, string.IsNullOrEmpty( f.Name ) ? f.TypeName : f.Name, f.Id, labels );
+			DrawSquare( overlay, cam, xf, plane, half, Lilac, string.IsNullOrEmpty( f.Name ) ? f.TypeName : f.Name, f.Id );
 	}
 
-	/// <summary>One plane's square outline, washed in its colour when hovered, with its name on a dark
-	/// box sized to the text and kept inside the viewport (so two parallel planes can be told apart).</summary>
-	static void DrawSquare( Control overlay, Camera3D cam, Transform3D xf, SketchPlane plane, float half, Color colour, string name, string id, List<Rect2> labels )
+	/// <summary>True while a tool is waiting for a plane: Sketch before one is chosen, or the Plane tool
+	/// picking its face. The planes are only drawn then, so the view is calm the rest of the time.</summary>
+	public static bool Wanted( IGeppettoViewportTool? tool ) =>
+		tool is CadSketch { Editing: null, Plane: null } or GeppettoPicker { Name: "Plane" };
+
+	/// <summary>One plane: a faint wash in its colour and a thin outline. The hovered one is washed
+	/// stronger with a solid outline, and its name is written in its colour beside the mouse (no box).</summary>
+	static void DrawSquare( Control overlay, Camera3D cam, Transform3D xf, SketchPlane plane, float half, Color colour, string name, string id )
 	{
 		Vector3 W( float x, float y ) { var e = plane.ToWorld( new Vec2( x, y ) ); return xf * EffigyMeshBridge.TransformPosition( e.x, e.y, e.z ); }
 		var c = new[] { W( half, half ), W( -half, half ), W( -half, -half ), W( half, -half ) };
 		bool hot = Hovered == id;
-		if ( hot && c.All( p => !cam.IsPositionBehind( p ) ) )
-			overlay.DrawColoredPolygon( c.Select( p => cam.UnprojectPosition( p ) ).ToArray(), colour with { A = 0.22f } );
+		if ( c.All( p => !cam.IsPositionBehind( p ) ) )
+			overlay.DrawColoredPolygon( c.Select( p => cam.UnprojectPosition( p ) ).ToArray(), colour with { A = hot ? 0.22f : 0.08f } );
 		for ( int i = 0; i < 4; i++ )
-			GeppettoPicker.DrawWorldLine( overlay, cam, c[i], c[( i + 1 ) % 4], hot ? colour with { A = 1 } : colour, hot ? 3f : 1.5f );
-		if ( cam.IsPositionBehind( c[1] ) ) return;
+			GeppettoPicker.DrawWorldLine( overlay, cam, c[i], c[( i + 1 ) % 4], colour with { A = hot ? 1f : 0.35f }, hot ? 2f : 1f );
+		if ( !hot ) return;
 		var font = overlay.GetThemeDefaultFont();
 		int fontSize = overlay.GetThemeDefaultFontSize();
 		var ts = font.GetStringSize( name, HorizontalAlignment.Left, -1, fontSize );
-		var at = cam.UnprojectPosition( c[1] ) + new Vector2( 6, 6 );
-		at = new Vector2( Math.Clamp( at.X, 4, Math.Max( 4, overlay.Size.X - ts.X - 12 ) ), Math.Clamp( at.Y, 4, Math.Max( 4, overlay.Size.Y - ts.Y - 8 ) ) );
-		// A small model puts the three origin corners on top of each other: step a label down
-		// (or up at the bottom edge) until it covers no other plane's name.
-		var box = new Rect2( at, ts + new Vector2( 8, 4 ) );
-		for ( int tries = 0; tries < 12 && labels.Any( r => r.Grow( 1 ).Intersects( box ) ); tries++ )
-		{
-			float step = box.Size.Y + 2;
-			box.Position += new Vector2( 0, box.End.Y + step <= overlay.Size.Y ? step : -step );
-		}
-		at = box.Position;
-		labels.Add( box );
-		overlay.DrawRect( box, new Color( 0.08f, 0.09f, 0.11f, 0.75f ) );
-		overlay.DrawString( font, at + new Vector2( 4, 2 + font.GetAscent( fontSize ) ), name, HorizontalAlignment.Left, -1, fontSize, colour with { A = 1 } );
+		var at = HoverAt + new Vector2( 16, 20 );
+		at = new Vector2( Math.Clamp( at.X, 4, Math.Max( 4, overlay.Size.X - ts.X - 4 ) ), Math.Clamp( at.Y, 4, Math.Max( 4, overlay.Size.Y - ts.Y - 4 ) ) );
+		var pos = at + new Vector2( 0, font.GetAscent( fontSize ) );
+		// A dark 1px outline keeps the coloured name readable over a light model without a box.
+		overlay.DrawStringOutline( font, pos, name, HorizontalAlignment.Left, -1, fontSize, 3, new Color( 0.05f, 0.05f, 0.06f, 0.8f ) );
+		overlay.DrawString( font, pos, name, HorizontalAlignment.Left, -1, fontSize, ( colour with { A = 1 } ).Lightened( 0.4f ) );
 	}
 }
 #endif

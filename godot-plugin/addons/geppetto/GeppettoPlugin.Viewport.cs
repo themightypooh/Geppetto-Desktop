@@ -57,12 +57,12 @@ public partial class GeppettoPlugin
 
 	public override void _Forward3DForceDrawOverViewport( Control viewportControl ) => DrawOver( viewportControl );
 
-	// Datum planes are always shown (they make no geometry, so this is the only sign one exists),
-	// then the running tool's overlay on top.
+	// Unused sketches are always shown; the origin and datum planes only while a tool wants a plane
+	// (GeppettoDatumPlanes.Wanted). Then the running tool's overlay on top.
 	void DrawOver( Control viewportControl )
 	{
 		if ( _character is { } ch && EditorInterface.Singleton.GetEditorViewport3D( 0 )?.GetCamera3D() is { } cam )
-			GeppettoDatumPlanes.Draw( viewportControl, cam, ch );
+			GeppettoDatumPlanes.Draw( viewportControl, cam, ch, GeppettoDatumPlanes.Wanted( GeppettoTools.Active ) );
 		GeppettoTools.Active?.Draw( viewportControl );
 	}
 }

@@ -43,14 +43,21 @@ public partial class GeppettoPlugin
 			Note( $"sketch: ran={ran}, model={( _character?.EffigyPath ?? "none" )}, tool={GeppettoTools.Active?.Name}",
 				fail: !ran || doc == null || GeppettoTools.Active is not CadSketch );
 			if ( doc == null || GeppettoTools.Active is not CadSketch draw ) { Finish(); return; }
+			// A calm start: the new model isn't selected (no move/rotate gizmo), the planes show because
+			// Sketch is waiting for one, and the hovered one is named.
+			int picked = EditorInterface.Singleton.GetSelection().GetSelectedNodes().Count;
+			Note( $"calm: {picked} node(s) selected after the new model, planes wanted={GeppettoDatumPlanes.Wanted( GeppettoTools.Active )}",
+				fail: picked != 0 || !GeppettoDatumPlanes.Wanted( GeppettoTools.Active ) );
 			GeppettoTools.Active.Input( cam, Move( mid ) );
 			await Wait( 0.3 );
+			Note( $"hover: {GeppettoDatumPlanes.Hovered ?? "none"} under the middle", fail: GeppettoDatumPlanes.Hovered == null );
 			Shot( "blank-1-planes" );
 			CheckClipping( "planes" );
 
 			float r = vp.GetVisibleRect().Size.Y * 0.1f;
 			await Click( mid );
 			Note( $"plane: {( draw.Plane == null ? "none" : $"normal {draw.Plane.Normal}" )}, picked {( draw.PlaneIndex >= 0 ? "origin plane " + draw.PlaneIndex : draw.Face != null ? "face" : draw.PlaneFeatureId )}", fail: draw.Plane == null );
+			Note( $"planes hidden once one is picked: wanted={GeppettoDatumPlanes.Wanted( GeppettoTools.Active )}", fail: GeppettoDatumPlanes.Wanted( GeppettoTools.Active ) );
 			foreach ( var q in new[] { new Vector2( -1, -1 ), new Vector2( 1, -1 ), new Vector2( 1, 1 ), new Vector2( -1, 1 ) } )
 				await Click( mid + q * r );
 			await Wait( 0.2 );
