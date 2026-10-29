@@ -50,7 +50,8 @@ public sealed class GeppettoDocument
 		Bridge = new EffigySaveBridge( Session );
 		string? dir = Path.GetDirectoryName( diskPath );
 		if ( !string.IsNullOrEmpty( dir ) && Directory.Exists( dir ) )
-			Resolver = new MaterialResolver( dir, Path.GetFileNameWithoutExtension( diskPath ) );
+			// Same root as EffigySceneImporter, or a rebuild after any edit loses the .vmat slots and goes grey.
+			Resolver = new MaterialResolver( EffigyMaterialBridge.MaterialRoot( diskPath ), Path.GetFileNameWithoutExtension( diskPath ) );
 		LastReport = studio.Rebuild();
 	}
 

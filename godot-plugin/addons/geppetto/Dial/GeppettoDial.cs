@@ -476,13 +476,27 @@ public partial class GeppettoDial : Control
 			var ic = _ctr + _s * ir * Dir( mid );
 			var labelCol = active ? LabelActive : LabelCol; labelCol.A *= alpha;
 			var iconCol = active ? LabelActive : back ? LabelCol : IconCol; iconCol.A *= alpha;
-			int ipx = Mathf.Max( 8, Mathf.RoundToInt( 20 * _s * k ) );
-			var tex = GeppettoDialData.Icon( icon, iconCol, ipx );
-			DrawTextureRect( tex, new Rect2( ic + new Vector2( -ipx / 2f, -15 * _s * k ), new Vector2( ipx, ipx ) ), false );
+			var desk = back ? null : GeppettoDialData.DeskIcon( GeppettoDialState.Level == 0 ? "ws" : GeppettoDialState.Workspace.Name,
+				GeppettoDialState.Level == 0 ? "ws:" + name : name, 2 * Mathf.RoundToInt( 15 * _s ) );
+			if ( desk != null )
+			{
+				// Desktop pixel icon: baked at a fixed size, scaled only by the fan-in
+				float dpx = desk.GetWidth() * k;
+				var tint = new Color( 1, 1, 1, ( active || hover ? 1 : 0.85f ) * alpha );
+				DrawTextureRect( desk, new Rect2( ic + new Vector2( -dpx / 2, -21 * _s * k ), new Vector2( dpx, dpx ) ), false, tint );
+			}
+			else
+			{
+				int ipx = Mathf.Max( 8, Mathf.RoundToInt( 20 * _s * k ) );
+				var tex = GeppettoDialData.Icon( icon, iconCol, ipx );
+				DrawTextureRect( tex, new Rect2( ic + new Vector2( -ipx / 2f, -15 * _s * k ), new Vector2( ipx, ipx ) ), false );
+			}
 
 			// Width available at the label: the tile's chord there, less a margin.
 			float lr = ir + 10;
 			float chord = 2 * lr * _s * Mathf.Sin( Mathf.DegToRad( Mathf.Min( step - 2.2f, 170 ) / 2 ) ) - 8 * _s;
+			// side tiles are narrower across than the chord: keep the label inside the wedge on its own row
+			chord = Mathf.Min( chord, 2 * HalfSpan( ir * Dir( mid ) + new Vector2( 0, 15 * k ), r0 + 3, r1 - 4, a0 + 1, a1 - 1 ) * _s - 4 * _s );
 			float baseSize = ( n > 6 ? 7.5f : 8.5f ) * _s * k;
 			DrawFitted( _bold, GeppettoDialData.Clean( name ).ToUpperInvariant(), ic + new Vector2( 0, 15 * _s * k ), chord, baseSize, 6f * _s, labelCol );
 		}
@@ -752,6 +766,28 @@ public partial class GeppettoDial : Control
 	/// Draws text centred on <paramref name="centre"/> inside <paramref name="maxW"/>: shrink first, then
 	/// wrap onto two lines, then elide with "…". Nothing is ever drawn wider than the box.
 	/// </summary>
+	/// <summary>How far left and right (the smaller) a horizontal line through p (dial units, from the centre)
+	/// stays inside the ring sector r0..r1, a0..a1 degrees.</summary>
+	static float HalfSpan( Vector2 p, float r0, float r1, float a0, float a1 )
+	{
+		bool Inside( Vector2 q )
+		{
+			float r = q.Length();
+			if ( r < r0 || r > r1 ) return false;
+			float a = Mathf.RadToDeg( Mathf.Atan2( q.Y, q.X ) );
+			float mid = ( a0 + a1 ) / 2;
+			float d = Mathf.PosMod( a - mid + 180, 360 ) - 180;
+			return Mathf.Abs( d ) <= ( a1 - a0 ) / 2;
+		}
+		float Reach( float dir )
+		{
+			float x = 0;
+			while ( x < r1 * 2 && Inside( p + new Vector2( dir * ( x + 1 ), 0 ) ) ) x += 1;
+			return x;
+		}
+		return Mathf.Min( Reach( -1 ), Reach( 1 ) );
+	}
+
 	void DrawFitted( Font font, string text, Vector2 centre, float maxW, float size, float minSize, Color col, int maxLines = 2 )
 	{
 		var (lines, fs) = Fit( font, text, maxW, size, minSize, maxLines );

@@ -96,6 +96,8 @@ public static class GeppettoCad
 	{
 		var feature = new PrimitiveFeature();
 		if ( shape >= 0 ) feature.Shape.Index = shape;
+		// The kernel's tube radius equals its radius, which it refuses; a new torus should build as it comes.
+		if ( feature.Shape.Value == "Torus" ) feature.TubeRadius.Value = 0.15f;
 		return feature;
 	}
 

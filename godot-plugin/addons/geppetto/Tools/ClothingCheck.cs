@@ -23,6 +23,13 @@ public static class ClothingCheck
 	/// <summary>The clipping points of the last Check, in Effigy space, with 0..1 depth (1 = deepest).</summary>
 	public static readonly List<(Vec3 Point, float Depth)> Marks = new();
 
+	/// <summary>Marks drawn at most, deepest first. A badly fitted coat clips hundreds of thousands of
+	/// vertices, and a circle per vertex every frame locks the editor up.</summary>
+	const int MaxMarks = 4000;
+
+	/// <summary>Console lines per garment at most; the validator can list one problem per edge.</summary>
+	const int MaxLines = 12;
+
 	static Node3D? _markRoot;
 
 	public static IReadOnlyDictionary<string, float> ClipDepths => LastClipDepth;
@@ -57,11 +64,15 @@ public static class ClothingCheck
 			if ( !report.Clean ) faults++;
 			if ( report.Clipping > 0 && g.FeatureId != null )
 				LastClipDepth[g.FeatureId] = MathF.Max( LastClipDepth.GetValueOrDefault( g.FeatureId ), report.DeepestClip );
-			foreach ( var line in report.Lines() ) GD.Print( $"[Geppetto] {line}" );
+			var lines = report.Lines().ToList();
+			foreach ( var line in lines.Take( MaxLines ) ) GD.Print( $"[Geppetto] {line}" );
+			if ( lines.Count > MaxLines ) GD.Print( $"[Geppetto] ...and {lines.Count - MaxLines} more." );
 			for ( int i = 0; i < report.ClipPoints.Count; i++ )
 				points.Add( ( report.ClipPoints[i], i < report.ClipDepths.Count ? report.ClipDepths[i] : 0f ) );
 		}
 
+		if ( points.Count > MaxMarks )
+			points = points.OrderByDescending( m => m.Item2 ).Take( MaxMarks ).ToList();
 		foreach ( var (p, d) in points )
 			Marks.Add( ( p, deepest > 0f ? d / deepest : 1f ) );
 

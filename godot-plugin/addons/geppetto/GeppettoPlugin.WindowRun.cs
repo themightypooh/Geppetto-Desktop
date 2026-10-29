@@ -184,17 +184,48 @@ public partial class GeppettoPlugin
 
 			// GEPPETTO_WINDOW_WS=Animate runs just that workspace (Materials: just the material checks).
 			string only = System.Environment.GetEnvironmentVariable( "GEPPETTO_WINDOW_WS" ) ?? "";
-			if ( only.Length == 0 || only == "Materials" ) await MaterialRun( doc );
+			var picked = only.Split( ',', StringSplitOptions.RemoveEmptyEntries );   // or a list: Rig,Animate
+			bool Runs( string name ) => picked.Length == 0 || picked.Contains( name );
+			// GEPPETTO_WINDOW_SAVE_EACH=1 saves the scene between steps, to find the one that leaves it unsaveable.
+			bool saveEach = System.Environment.GetEnvironmentVariable( "GEPPETTO_WINDOW_SAVE_EACH" ) == "1";
+			async Task SaveProbe( string after )
+			{
+				if ( !saveEach ) return;
+				GD.Print( $"[WindowRun] save probe after {after}" );
+				_SaveExternalData();
+				EditorInterface.Singleton.SaveScene();
+				await Wait( 0.5 );
+				GD.Print( $"[WindowRun] save probe after {after}: ok" );
+			}
+			if ( Runs( "Materials" ) ) { await MaterialRun( doc ); await SaveProbe( "Materials" ); }
+			if ( Runs( "Primitives" ) ) { await PrimitiveRun( doc ); await SaveProbe( "Primitives" ); }
 			for ( int w = 0; w < GeppettoDialData.Workspaces.Length; w++ )
 			{
 				var ws = GeppettoDialData.Workspaces[w];
-				if ( only.Length > 0 && ws.Name != only ) continue;
+				if ( !Runs( ws.Name ) ) continue;
+				if ( w > 0 ) await SaveProbe( $"before {ws.Name}" );
 				Note( $"{ws.Name}: switching" );
 				GeppettoDialState.Ws = w;
+				GeppettoDialState.Touch();   // redraws the ring, as a click would
 				RefreshDial();
 				await Wait( 0.3 );
 				Shot( $"{ws.Name}-workspace" );
 				CheckClipping( ws.Name );
+				// the stage ring and each stage's tool ring, for icon/label shots
+				GeppettoDialState.OpenWorkspace( w );
+				RefreshDial();
+				await Wait( 0.8 );
+				Shot( $"{ws.Name}-ring-stages" );
+				for ( int s = 0; s < ws.Stages.Length; s++ )
+				{
+					GeppettoDialState.OpenStageTools( s );
+					RefreshDial();
+					await Wait( 0.8 );
+					Shot( $"{ws.Name}-ring-{ws.Stages[s].Stage}" );
+				}
+				GeppettoDialState.Level = 0;
+				GeppettoDialState.Touch();
+				RefreshDial();
 				foreach ( var (stage, tools) in ws.Stages )
 					foreach ( var raw in tools )
 					{
@@ -256,6 +287,7 @@ public partial class GeppettoPlugin
 		try
 		{
 			GeppettoDialState.Ws = Array.FindIndex( GeppettoDialData.Workspaces, w => w.Name == "Model" );
+			GeppettoDialState.Touch();   // redraws the ring, as a click would
 			GeppettoDialState.MatOpen = false;
 			RefreshDial();
 			// a 64px checker as the colour texture
@@ -268,8 +300,9 @@ public partial class GeppettoPlugin
 			Note( $"materials: saved {saved.Dir} (albedo={saved.Look.AlbedoMap != null}) and {gold.Name}", fail: saved.Look.AlbedoMap == null || !File.Exists( Path.Combine( saved.Dir!, "window_test_brick.tres" ) ) );
 			GeppettoDialState.ToggleMaterials();
 			await Wait( 0.6 );
-			bool onRing = GeppettoDialState.Materials.Any( m => m.Name == "Window Test Brick" ) && GeppettoDialState.Materials.Any( m => m.IsNew );
-			Note( $"materials: ring has {GeppettoDialState.Materials.Count} balls, custom + \"+\" on it={onRing}", fail: !onRing );
+			bool onRing = GeppettoDialState.Materials.Any( m => m.Name == "Window Test Brick" );
+			int plusAt = GeppettoDialState.Materials.FindIndex( m => m.IsNew );
+			Note( $"materials: ring has {GeppettoDialState.Materials.Count} balls, custom on it={onRing}, \"+\" at ball {plusAt} (must be 0, page 1)", fail: !onRing || plusAt != 0 );
 			Shot( "materials-ring" );
 			CheckClipping( "materials ring" );
 			CheckDialOnScreen( "materials ring" );
@@ -292,6 +325,7 @@ public partial class GeppettoPlugin
 			}
 
 			// Model: select two faces, pick the brick, the faces move to its slot.
+			int coloured0 = ColouredSurfaces();
 			var edit = GeppettoModelEdit.For( doc );
 			edit.SetMode( EditElement.Face );
 			// the test character has several bodies: open the biggest, as clicking it would
@@ -307,6 +341,8 @@ public partial class GeppettoPlugin
 				int slot0 = s2.Mesh.Faces[0].Material, slot1 = s2.Mesh.Faces[1].Material;
 				bool lookSet = doc.Studio.MaterialLooks.TryGetValue( slot0, out var lk ) && lk.AlbedoMap == saved.Look.AlbedoMap;
 				Note( $"materials: Model faces 0,1 on slot {slot0},{slot1}, look has the texture={lookSet}", fail: slot0 != slot1 || slot0 == 0 || !lookSet );
+				int coloured1 = ColouredSurfaces();
+				Note( $"materials: coloured Body surfaces {coloured0} before Model, {coloured1} after the face pick (grey view if it drops)", fail: coloured1 < coloured0 );
 				Shot( "materials-model-faces" );
 				// whole slot: the brick's slot turns gold, undoably
 				SetSlotLook( doc, slot0, gold );
@@ -329,6 +365,78 @@ public partial class GeppettoPlugin
 			GeppettoDialState.Touch();
 		}
 		catch ( Exception e ) { Note( "materials: threw " + e, fail: true ); }
+	}
+
+	/// <summary>Add Primitive from both fans, the way a click does: the shape menu, then the settings box
+	/// (size and segments), OK. Each shape must add one feature and one body, at the origin, and undo and
+	/// redo as one step. Undone again afterwards so the later steps see the model unchanged.</summary>
+	async Task PrimitiveRun( GeppettoDocument doc )
+	{
+		try
+		{
+			var shapes = GeppettoCad.Choices( "Primitive" )!;
+			var root = EditorInterface.Singleton.GetEditedSceneRoot();
+			var ur = GetUndoRedo();
+			var history = ur.GetHistoryUndoRedo( ur.GetObjectHistoryId( root ) );
+			foreach ( var ws in new[] { "CAD", "Model" } )
+			{
+				GeppettoDialState.Ws = Array.FindIndex( GeppettoDialData.Workspaces, w => w.Name == ws );
+				GeppettoDialState.Touch();   // redraws the ring, as a click would
+				RefreshDial();
+				for ( int i = 0; i < shapes.Length; i++ )
+				{
+					string step = $"{ws} > Primitive > {shapes[i]}";
+					SelectCharacter();
+					int features = doc.Studio.Features.Count, bodies = doc.Studio.Bodies.Count;
+					if ( !RunTool( ws, "Primitive" ) ) { Note( $"{step}: not wired", fail: true ); continue; }
+					await Wait( 0.3 );
+					var menu = EditorInterface.Singleton.GetBaseControl().GetChildren().OfType<PopupMenu>().LastOrDefault( m => m.Visible );
+					if ( menu == null ) { Note( $"{step}: no shape menu", fail: true ); continue; }
+					menu.EmitSignal( PopupMenu.SignalName.IdPressed, (long)i );
+					menu.Hide();
+					await Wait( 0.4 );
+					var box = OpenWindows().OfType<GeppettoFeatureDialog>().LastOrDefault();
+					if ( box?.Feature is not PrimitiveFeature prim ) { Note( $"{step}: no settings box", fail: true ); continue; }
+					bool sized = prim.Parameters.Any( p => p == prim.SizeX || p == prim.Radius ) && ( prim.Parameters.Contains( prim.Segments ) || prim.Parameters.Contains( prim.Divisions ) || shapes[i] is "Box" or "Wedge" );
+					Shot( $"{ws}-primitive-{shapes[i]}-box" );
+					CheckClipping( $"{step} box" );
+					box.GetOkButton().EmitSignal( BaseButton.SignalName.Pressed );
+					await Wait( 0.4 );
+					int addF = doc.Studio.Features.Count - features, addB = doc.Studio.Bodies.Count - bodies;
+					var last = doc.Studio.Features.LastOrDefault() as PrimitiveFeature;
+					bool atOrigin = last != null && last.Position.Value.Length < 1e-4f;
+					Note( $"{step}: +{addF} feature, +{addB} body, shape={last?.Shape.Value}, size/segments editable={sized}, at origin={atOrigin}",
+						fail: addF != 1 || addB < 1 || last?.Shape.Value != shapes[i] || !sized || !atOrigin );
+					Shot( $"{ws}-primitive-{shapes[i]}" );
+					history.Undo();
+					await Wait( 0.2 );
+					int undone = doc.Studio.Features.Count;
+					history.Redo();
+					await Wait( 0.2 );
+					int redone = doc.Studio.Features.Count;
+					history.Undo();
+					await Wait( 0.2 );
+					Note( $"{step}: undo {undone}, redo {redone}, undo again {doc.Studio.Features.Count} (from {features})",
+						fail: undone != features || redone != features + 1 || doc.Studio.Features.Count != features );
+				}
+			}
+		}
+		catch ( Exception e ) { Note( "primitives: threw " + e, fail: true ); }
+	}
+
+	/// <summary>Surfaces of the selected character's Body whose material is not plain grey: a texture or
+	/// a tinted albedo. Drops to 0 when a rebuild loses the slot looks and the view goes grey.</summary>
+	int ColouredSurfaces()
+	{
+		var root = EditorInterface.Singleton.GetEditedSceneRoot();
+		var node = EditorInterface.Singleton.GetSelection().GetSelectedNodes().FirstOrDefault() ?? root;
+		if ( node?.FindChild( "Body", true, false ) is not MeshInstance3D { Mesh: { } mesh } body ) return 0;
+		int n = 0;
+		for ( int i = 0; i < mesh.GetSurfaceCount(); i++ )
+			if ( ( body.GetSurfaceOverrideMaterial( i ) ?? mesh.SurfaceGetMaterial( i ) ) is BaseMaterial3D m
+				&& ( m.AlbedoTexture != null || Mathf.Abs( m.AlbedoColor.R - m.AlbedoColor.G ) > 0.02f || Mathf.Abs( m.AlbedoColor.G - m.AlbedoColor.B ) > 0.02f ) )
+				n++;
+		return n;
 	}
 
 	void Finish()

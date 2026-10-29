@@ -44,6 +44,15 @@ public static partial class GeppettoTools
 			} );
 		}
 
+		// The CAD Primitive (shape menu, then its settings box), so a part can be added without leaving Model.
+		Register( "Model", "Primitive", ctx =>
+		{
+			if ( ctx.Doc == null ) return ctx.Need();
+			var edit = GeppettoModelEdit.For( ctx.Doc );
+			if ( edit.IsPreviewing ) edit.AcceptNumeric();
+			return GeppettoCad.Run( ctx.Doc, "Primitive", ctx.Character );
+		} );
+
 		foreach ( var op in GeppettoModelEdit.Ops.Values )
 		{
 			var o = op;
