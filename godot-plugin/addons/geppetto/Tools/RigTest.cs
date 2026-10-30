@@ -235,6 +235,22 @@ public partial class RigTest : RefCounted
 			Check( "mirror: +Y weight lands on −Y with the flipped name", mhit && nmirrored == 1 && npairs == 1,
 				$"{nmirrored}/{npairs}" );
 
+			var flayer = new WeightPaintLayer( tmesh );
+			var six = new BoneWeight[6];
+			for ( int i = 0; i < 6; i++ ) six[i] = new BoneWeight( i % 2, 0.5f - i * 0.05f );
+			flayer.Capture( v1, six, trig );
+			var (fl, frep) = GeppettoRig.FixLayer( flayer, trig, tmesh );
+			bool fok = false;
+			foreach ( var (vertex, ws) in fl.Painted )
+				if ( vertex == v1 )
+				{
+					float s = 0f;
+					foreach ( var (_, w) in ws ) s += w;
+					fok = ws.Count == 4 && MathF.Abs( s - 1f ) < 1e-3f && ws[0].Weight >= ws[1].Weight;
+				}
+			Check( "fix: prunes to 4, renormalises, strongest first", fok && frep.Changed == 1,
+				$"changed={frep.Changed}" );
+
 		}
 
 		// ---- the scene: ApplyTo rebuilds the Skeleton3D ------------------------------------

@@ -105,7 +105,12 @@ public static partial class GeppettoTools
 			return GeppettoRig.MirrorWeights( doc );
 		} );
 
-
+		Register( "Rig", "Fix Weights", ctx =>
+		{
+			if ( ctx.Doc is not { } doc || ctx.Character is not { } c ) return ctx.Need();
+			RigPanel.Open( ctx.Plugin, c );
+			return GeppettoRig.FixWeights( doc );
+		} );
 
 
 
@@ -744,7 +749,7 @@ public static class GeppettoRig
 	}
 
 	// =========================================================================================
-	// Weight tools
+	// Weight tools: mirror, fix, copy/paste
 	// =========================================================================================
 
 	/// <summary>Mirrors painted weights across Y=0 (Effigy's left/right axis): every painted
@@ -842,6 +847,81 @@ public static class GeppettoRig
 			undo: () => studio.WeightPaint = before ), "Geppetto: mirror weights" );
 		if ( !ok ) return false;
 		GeppettoToolContext.Say( $"Mirrored {n} vertices across Y=0 (+Y to −Y) over {pairs} bone pairs." );
+		return true;
+	}
+
+	/// <summary>What Fix Weights changed, for the report.</summary>
+	public sealed class FixReport
+	{
+		public int Vertices;
+		public int Changed;
+		public float WorstDropped;
+		public int Unresolvable;
+	}
+
+	/// <summary>One click of hygiene on a weight layer: prune to 4 influences, drop weights
+	/// under 0.01, renormalise to a partition of unity, strongest first. Pure and UI-free.</summary>
+	public static (WeightPaintLayer Layer, FixReport Report) FixLayer(
+		WeightPaintLayer layer, Skeleton rig, PolyMesh mesh )
+	{
+		if ( layer is not { Count: > 0 } ) throw new ArgumentException( "no painted weights to fix" );
+		var result = new WeightPaintLayer( mesh );
+		var rep = new FixReport();
+		foreach ( var (vertex, weights) in layer.Painted )
+		{
+			rep.Vertices++;
+			var bw = new List<BoneWeight>();
+			foreach ( var (bone, w) in weights )
+			{
+				int bi = rig.IndexOf( bone );
+				if ( bi < 0 ) { rep.Unresolvable++; rep.WorstDropped = MathF.Max( rep.WorstDropped, w ); continue; }
+				if ( w > 0f ) bw.Add( new BoneWeight( bi, w ) );
+			}
+			if ( bw.Count == 0 ) continue;
+			var pruned = SkinWeights.Prune( bw.ToArray(), 4 );
+			float droppedPrune = bw.Count > 4 ? bw.OrderByDescending( w => w.Weight ).Skip( 4 ).Max( w => w.Weight ) : 0f;
+			rep.WorstDropped = MathF.Max( rep.WorstDropped, droppedPrune );
+			var kept = pruned.Where( w => w.Weight >= 0.01f ).ToArray();
+			if ( kept.Length == 0 ) kept = new[] { new BoneWeight( pruned[0].Bone, 1f ) };
+			float sum = 0f;
+			foreach ( var w in kept ) sum += w.Weight;
+			var tidy = kept.Select( w => new BoneWeight( w.Bone, w.Weight / sum ) ).ToArray();
+			rep.WorstDropped = MathF.Max( rep.WorstDropped,
+				pruned.Where( w => w.Weight < 0.01f ).Select( w => w.Weight ).DefaultIfEmpty( 0f ).Max() );
+			bool same = tidy.Length == weights.Count;
+			if ( same )
+				for ( int i = 0; i < tidy.Length && same; i++ )
+				{
+					int bi = rig.IndexOf( weights[i].Bone );
+					same = bi == tidy[i].Bone && MathF.Abs( weights[i].Weight - tidy[i].Weight ) < 1e-4f;
+				}
+			if ( !same ) rep.Changed++;
+			result.Capture( vertex, tidy, rig );
+		}
+		return (result, rep);
+	}
+
+	/// <summary>Prune to 4, drop the negligible, renormalise — the "make it actually work in the
+	/// game" button. One undo step, with a report of what changed.</summary>
+	public static bool FixWeights( GeppettoDocument doc )
+	{
+		var studio = doc.Studio;
+		if ( studio.WeightPaint is not { Count: > 0 } )
+			return !Refuse( "Fix Weights needs painted weights — run Auto Weights or paint first." );
+		var (mesh, _) = studio.ToMeshWithBodies();
+		WeightPaintLayer fixed_; FixReport rep;
+		try { (fixed_, rep) = FixLayer( studio.WeightPaint, studio.Rig, mesh ); }
+		catch ( Exception e ) when ( e is ArgumentException or InvalidOperationException )
+		{ return !Refuse( $"Fix Weights: {e.Message}" ); }
+		var before = studio.WeightPaint;
+		bool ok = doc.Execute( new DelegateEditCommand( "Fix weights",
+			execute: () => studio.WeightPaint = fixed_,
+			undo: () => studio.WeightPaint = before ), "Geppetto: fix weights" );
+		if ( !ok ) return false;
+		GeppettoToolContext.Say( $"Fix Weights: {rep.Changed} of {rep.Vertices} vertices tidied"
+			+ ( rep.WorstDropped > 0 ? $", worst dropped influence {rep.WorstDropped:0.###}" : ", nothing dropped" )
+			+ ( rep.Unresolvable > 0 ? $", {rep.Unresolvable} influences named bones that no longer exist" : "" )
+			+ "." );
 		return true;
 	}
 
