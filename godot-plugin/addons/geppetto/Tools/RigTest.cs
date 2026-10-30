@@ -338,6 +338,15 @@ public partial class RigTest : RefCounted
 				$"{w0:0.##},{w1:0.##},{w2:0.##}" );
 		}
 
+		// ---- export playermodel -------------------------------------------------------------
+		{
+			string glb = Path.Combine( Path.GetTempPath(), "geppetto-rig-test-pm.glb" );
+			bool ok = GeppettoRig.ExportPlayermodel( doc, glb );
+			bool exists = File.Exists( glb ) && new FileInfo( glb ).Length > 0;
+			Check( "export: refused-or-wrote honestly", ok == exists, $"ok={ok} exists={exists}" );
+			try { File.Delete( glb ); } catch { }
+		}
+
 		// ---- the scene: ApplyTo rebuilds the Skeleton3D ------------------------------------
 		var skel = scene.FindChild( "Skeleton3D", true, false ) as Skeleton3D;
 		doc.ApplyTo( scene );

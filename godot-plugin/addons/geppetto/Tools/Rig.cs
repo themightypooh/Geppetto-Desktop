@@ -136,6 +136,12 @@ public static partial class GeppettoTools
 			return true;
 		} );
 
+		Register( "Rig", "Export Playermodel", ctx =>
+		{
+			if ( ctx.Doc is not { } doc ) return ctx.Need();
+			return GeppettoRig.ExportPlayermodel( doc );
+		} );
+
 		// --- Soft ---
 		Register( "Rig", "Make Soft", ctx =>
 		{
@@ -1093,6 +1099,33 @@ public static class GeppettoRig
 			s => { s.Rig.HipsBone = name; return true; } );
 		if ( ok ) GeppettoToolContext.Say( name == "" ? "Hips bone cleared." : $"'{name}' is the hips bone now." );
 		return ok;
+	}
+
+	/// <summary>Ships the rigged character as .glb — Godot-native (Skeleton3D + Skin + takes),
+	/// with the real painted weights. Runs Check model first and refuses when a problem would
+	/// break the export, so a rig you can't ship never silently ships.</summary>
+	public static bool ExportPlayermodel( GeppettoDocument doc, string? path = null )
+	{
+		var studio = doc.Studio;
+		if ( studio.Rig.Count == 0 ) return !Refuse( "Export Playermodel: there is no rig yet." );
+		List<Playermodel.Finding> findings;
+		try { findings = Playermodel.Check( Playermodel.Build( studio ), DmxWriter.MaxInfluences ); }
+		catch ( Exception e ) { return !Refuse( $"Export Playermodel: the playermodel could not even be built — {e.Message}" ); }
+		var problems = findings.Where( f => f.Severity == Playermodel.Severity.Problem ).ToList();
+		if ( problems.Count > 0 )
+			return !Refuse( $"Export Playermodel refused: {problems.Count} problem(s) — worst: {problems[0].Problem}. {problems[0].Remedy}" );
+		path ??= ( doc.ResPath.EndsWith( ".effigy" ) ? doc.ResPath[..^".effigy".Length] : doc.ResPath ) + ".glb";
+		Error err;
+		try { err = AnimateExport.ExportGlb( doc, path ); }
+		catch ( Exception e ) { return !Refuse( $"Export Playermodel failed: {e.Message}" ); }
+		if ( err != Error.Ok ) return !Refuse( $"Export Playermodel failed: {err}" );
+		int warnings = findings.Count( f => f.Severity == Playermodel.Severity.Warning );
+		if ( path.StartsWith( "res://" ) ) EditorInterface.Singleton.GetResourceFilesystem().Scan();
+		GeppettoToolContext.Say( $"Exported playermodel to {path}"
+			+ ( warnings > 0 ? $" with {warnings} warning(s) — see the Output panel" : "" )
+			+ $". Root: '{( string.IsNullOrEmpty( studio.Rig.RootBone ) ? "(first root)" : studio.Rig.RootBone )}'"
+			+ ( string.IsNullOrEmpty( studio.Rig.HipsBone ) ? "" : $", hips: '{studio.Rig.HipsBone}'" ) + "." );
+		return true;
 	}
 
 	// =========================================================================================
