@@ -97,6 +97,20 @@ public static partial class GeppettoTools
 			return true;
 		} );
 
+		// --- Weights ---
+		Register( "Rig", "Mirror Weights", ctx =>
+		{
+			if ( ctx.Doc is not { } doc || ctx.Character is not { } c ) return ctx.Need();
+			RigPanel.Open( ctx.Plugin, c );
+			return GeppettoRig.MirrorWeights( doc );
+		} );
+
+
+
+
+
+
+
 		// --- Soft ---
 		Register( "Rig", "Make Soft", ctx =>
 		{
@@ -726,6 +740,108 @@ public static class GeppettoRig
 		Select( doc, 0 );
 		RigPanel.RefreshOpen();
 		GeppettoToolContext.Say( $"Template '{name}': {tpl.Count} bones. Reshape them to the character, then run Auto Weights." );
+		return true;
+	}
+
+	// =========================================================================================
+	// Weight tools
+	// =========================================================================================
+
+	/// <summary>Mirrors painted weights across Y=0 (Effigy's left/right axis): every painted
+	/// vertex on the +Y side donates its weights to the nearest vertex on the −Y side, with
+	/// _L/_R (and .L/.R, _l/_r) name flipping via the same convention the bone mirror uses.
+	/// Pure and UI-free so the headless test drives exactly what the tool runs.</summary>
+	public static (WeightPaintLayer Layer, int Mirrored, int Pairs) MirrorLayer(
+		WeightPaintLayer layer, PolyMesh mesh, Skeleton rig )
+	{
+		if ( layer is not { Count: > 0 } ) throw new ArgumentException( "no painted weights to mirror" );
+		if ( mesh.VertexCount == 0 ) throw new ArgumentException( "no mesh" );
+		rig.MirrorPartners( out int pairs );
+		if ( pairs == 0 ) throw new ArgumentException( "no _L/_R bone pairs — name bones with _L/_R suffixes first" );
+
+		// Uniform grid so the nearest-vertex search isn't O(n^2) on a real character.
+		var pos = mesh.Positions;
+		var lo = pos[0]; var hi = pos[0];
+		foreach ( var p in pos )
+		{
+			lo = new Vec3( MathF.Min( lo.x, p.x ), MathF.Min( lo.y, p.y ), MathF.Min( lo.z, p.z ) );
+			hi = new Vec3( MathF.Max( hi.x, p.x ), MathF.Max( hi.y, p.y ), MathF.Max( hi.z, p.z ) );
+		}
+		float cell = MathF.Max( ( hi - lo ).Length / 128f, 1e-6f );
+		var grid = new Dictionary<(int, int, int), List<int>>();
+		static (int, int, int) Key( Vec3 p, Vec3 lo, float cell ) =>
+			((int)MathF.Floor( ( p.x - lo.x ) / cell ), (int)MathF.Floor( ( p.y - lo.y ) / cell ), (int)MathF.Floor( ( p.z - lo.z ) / cell ));
+		for ( int v = 0; v < pos.Count; v++ )
+		{
+			var k = Key( pos[v], lo, cell );
+			if ( !grid.TryGetValue( k, out var list ) ) grid[k] = list = new List<int>();
+			list.Add( v );
+		}
+		int Nearest( Vec3 q )
+		{
+			var (ix, iy, iz) = Key( q, lo, cell );
+			for ( int r = 0; r < 1000; r++ )
+			{
+				int best = -1; float bestD = float.MaxValue;
+				for ( int ax = ix - r; ax <= ix + r; ax++ )
+					for ( int ay = iy - r; ay <= iy + r; ay++ )
+						for ( int az = iz - r; az <= iz + r; az++ )
+						{
+							if ( Math.Max( Math.Abs( ax - ix ), Math.Max( Math.Abs( ay - iy ), Math.Abs( az - iz ) ) ) != r ) continue;
+							if ( !grid.TryGetValue( (ax, ay, az), out var list ) ) continue;
+							foreach ( int v in list )
+							{
+								float d = ( pos[v] - q ).LengthSquared;
+								if ( d < bestD ) { bestD = d; best = v; }
+							}
+						}
+				if ( best >= 0 ) return best;
+			}
+			throw new InvalidOperationException( "mirror search failed" );
+		}
+
+		var result = layer.Clone();
+		int mirrored = 0;
+		foreach ( var (vertex, weights) in layer.Painted )
+		{
+			if ( vertex < 0 || vertex >= pos.Count ) continue;
+			var p = pos[vertex];
+			if ( p.y <= 1e-6f ) continue; // source side is +Y; the centre keeps its own paint
+			int u = Nearest( new Vec3( p.x, -p.y, p.z ) );
+			var bw = new List<BoneWeight>( weights.Count );
+			foreach ( var (bone, w) in weights )
+			{
+				string f = Skeleton.FlipSideSuffix( bone ) ?? bone;
+				int bi = rig.IndexOf( f );
+				if ( bi < 0 ) { f = bone; bi = rig.IndexOf( f ); }
+				if ( bi < 0 ) continue;
+				bw.Add( new BoneWeight( bi, w ) );
+			}
+			if ( bw.Count == 0 ) continue;
+			result.Capture( u, bw.ToArray(), rig );
+			mirrored++;
+		}
+		return (result, mirrored, pairs);
+	}
+
+	/// <summary>Copies the finished +Y side's weights onto the −Y side, one undo step.</summary>
+	public static bool MirrorWeights( GeppettoDocument doc )
+	{
+		var studio = doc.Studio;
+		if ( studio.Rig.Count == 0 ) return !Refuse( "Mirror Weights needs a skeleton." );
+		if ( studio.WeightPaint is not { Count: > 0 } )
+			return !Refuse( "Mirror Weights needs painted weights — run Auto Weights or paint first." );
+		var (mesh, _) = studio.ToMeshWithBodies();
+		WeightPaintLayer mirrored; int n, pairs;
+		try { (mirrored, n, pairs) = MirrorLayer( studio.WeightPaint, mesh, studio.Rig ); }
+		catch ( Exception e ) when ( e is ArgumentException or InvalidOperationException )
+		{ return !Refuse( $"Mirror Weights: {e.Message}" ); }
+		var before = studio.WeightPaint;
+		bool ok = doc.Execute( new DelegateEditCommand( "Mirror weights",
+			execute: () => studio.WeightPaint = mirrored,
+			undo: () => studio.WeightPaint = before ), "Geppetto: mirror weights" );
+		if ( !ok ) return false;
+		GeppettoToolContext.Say( $"Mirrored {n} vertices across Y=0 (+Y to −Y) over {pairs} bone pairs." );
 		return true;
 	}
 

@@ -2,6 +2,7 @@
 #nullable enable
 using System;
 using System.IO;
+using System.Collections.Generic;
 using System.Linq;
 using Effigy;
 using Godot;
@@ -209,6 +210,33 @@ public partial class RigTest : RefCounted
 			Check( "template: refused on a non-empty rig", !tpl && rig.Count == bn + 2 );
 		}
 
+		// ---- mirror / fix / copy-paste weights ------------------------------------------------
+		{
+			// Pure-core tests on a tiny symmetric mesh.
+			var tmesh = new PolyMesh();
+			int v0 = tmesh.AddVertex( new Vec3( 1, 1, 0 ) );
+			int v1 = tmesh.AddVertex( new Vec3( 1, 2, 0 ) );
+			int v2 = tmesh.AddVertex( new Vec3( 1, 1, 1 ) );
+			int v3 = tmesh.AddVertex( new Vec3( 1, -1, 0 ) );
+			int v4 = tmesh.AddVertex( new Vec3( 1, -2, 0 ) );
+			int v5 = tmesh.AddVertex( new Vec3( 1, -1, 1 ) );
+			tmesh.AddFace( new[] { v0, v1, v2 } );
+			tmesh.AddFace( new[] { v3, v4, v5 } );
+			var trig = new Skeleton();
+			trig.AddBone( "arm_L", -1, Xform.Identity, 1f );
+			trig.AddBone( "arm_R", -1, Xform.Identity, 1f );
+			var tlayer = new WeightPaintLayer( tmesh );
+			tlayer.Capture( v0, new[] { new BoneWeight( 0, 1f ) }, trig );
+			var (mlayer, nmirrored, npairs) = GeppettoRig.MirrorLayer( tlayer, tmesh, trig );
+			bool mhit = false;
+			foreach ( var (vertex, ws) in mlayer.Painted )
+				if ( vertex == v3 && ws.Count == 1 && ws[0].Bone == "arm_R" && MathF.Abs( ws[0].Weight - 1f ) < 1e-4f )
+					mhit = true;
+			Check( "mirror: +Y weight lands on −Y with the flipped name", mhit && nmirrored == 1 && npairs == 1,
+				$"{nmirrored}/{npairs}" );
+
+		}
+
 		// ---- the scene: ApplyTo rebuilds the Skeleton3D ------------------------------------
 		var skel = scene.FindChild( "Skeleton3D", true, false ) as Skeleton3D;
 		doc.ApplyTo( scene );
@@ -259,6 +287,7 @@ public partial class RigTest : RefCounted
 		again?.Free();
 		scene.QueueFree();
 	}
+
 
 	/// <summary>GeppettoCharacter's constructor is private (it is found from the editor selection); the
 	/// test builds one the same way Find would.</summary>
