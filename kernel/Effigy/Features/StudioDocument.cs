@@ -5,6 +5,8 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace Effigy;
 
@@ -354,6 +356,12 @@ public static class StudioDocument
 		// document that has never been rigged still writes no rig block at all.
 		foreach ( var c in studio.Correctives.Where( c => !string.IsNullOrWhiteSpace( c?.Bone ) ) )
 			sb.Append( "\tcorrective " ).Append( c ).Append( '\n' );
+
+		foreach ( var d in studio.Drivers.Where( d => !string.IsNullOrWhiteSpace( d?.Bone ) ) )
+			sb.Append( "\tdriverjson " ).Append( d.ToJson().ToJsonString() ).Append( '\n' );
+
+		foreach ( var k in studio.IkChains.Where( k => !string.IsNullOrWhiteSpace( k?.EndBone ) ) )
+			sb.Append( "\tikjson " ).Append( k.ToJson().ToJsonString() ).Append( '\n' );
 
 		if ( studio.WeightPaint is { Count: > 0 } layer )
 			WriteWeights( sb, layer );
@@ -1013,6 +1021,22 @@ public static class StudioDocument
 			{
 				if ( CorrectiveShape.Parse( line[11..] ) is { } c )
 					studio.Correctives.Add( c );
+
+				continue;
+			}
+
+			if ( line.StartsWith( "driverjson " ) )
+			{
+				foreach ( var d in MorphDriver.ReadRig( $"{{\"MorphDrivers\":[{line[11..].Trim()}]}}" ) )
+					studio.Drivers.Add( d );
+
+				continue;
+			}
+
+			if ( line.StartsWith( "ikjson " ) )
+			{
+				foreach ( var k in RigIk.ReadRig( $"{{\"IkConstraints\":[{line[7..].Trim()}]}}" ) )
+					studio.IkChains.Add( k );
 
 				continue;
 			}

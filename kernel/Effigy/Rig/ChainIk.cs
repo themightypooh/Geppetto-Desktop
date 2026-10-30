@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace Effigy;
 
@@ -52,6 +53,27 @@ public sealed class RigIk
 	/// IkConstraint.MaxStretch. 1 (the default, and what a rig without the field reads back as)
 	/// never stretches; 1.5 lets a cable reach half as far again. See <see cref="ChainIk.Stretch"/>.</summary>
 	public float MaxStretch = 1f;
+
+	/// <summary>A copy with its weight multiplied by <paramref name="by"/> - a clip's keyed IK weight
+	/// (<see cref="RigAnimFile.IkWeightAt"/>) on top of the constraint's own.</summary>
+	public RigIk Clone() => (RigIk)MemberwiseClone();
+
+	/// <summary>This chain as <see cref="ReadRig"/> reads it: the .ctrlrig IkConstraints entry shape,
+	/// so the rig block and the export speak the same format.</summary>
+	public System.Text.Json.Nodes.JsonObject ToJson() => new()
+	{
+		["Name"] = Name,
+		["TargetBone"] = EndBone,
+		["ChainLength"] = ChainLength,
+		["Weight"] = Weight,
+		["Iterations"] = Iterations,
+		["Enabled"] = Enabled,
+		["Live"] = Live,
+		["GoalRotation"] = GoalRotation,
+		["Solver"] = Fabrik ? "Fabrik" : Spline ? "Spline" : "CCD",
+		["PoleDirection"] = FormattableString.Invariant( $"{Pole.x},{Pole.y},{Pole.z}" ),
+		["MaxStretch"] = MaxStretch,
+	};
 
 	/// <summary>A copy with its weight multiplied by <paramref name="by"/> - a clip's keyed IK weight
 	/// (<see cref="RigAnimFile.IkWeightAt"/>) on top of the constraint's own.</summary>

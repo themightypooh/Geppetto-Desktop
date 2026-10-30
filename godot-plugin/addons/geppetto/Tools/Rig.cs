@@ -307,13 +307,15 @@ public static class GeppettoRig
 	// One undo step for any rig change
 	// =========================================================================================
 
-	/// <summary>Everything a rig edit can touch: the bones, which part is pinned to which bone, and the
-	/// bone names the corrective shapes are keyed on.</summary>
+	/// <summary>Everything a rig edit can touch: the bones, which part is pinned to which bone, the
+	/// bone names the corrective shapes are keyed on, the morph drivers, and the IK chains.</summary>
 	sealed class Snapshot
 	{
 		public readonly List<Bone> Bones;
 		public readonly Dictionary<string, string> BodyBoneMap;
-		public readonly List<(CorrectiveShape Shape, string Bone)> Correctives;
+		public readonly List<CorrectiveShape> Correctives;
+		public readonly List<MorphDriver> Drivers;
+		public readonly List<RigIk> IkChains;
 		public readonly string RootBone;
 		public readonly string HipsBone;
 
@@ -321,7 +323,9 @@ public static class GeppettoRig
 		{
 			Bones = s.Rig.Bones.Select( b => b.Clone() ).ToList();
 			BodyBoneMap = new Dictionary<string, string>( s.BodyBoneMap );
-			Correctives = s.Correctives.Select( c => (c, c.Bone) ).ToList();
+			Correctives = s.Correctives.Select( c => c.Clone() ).ToList();
+			Drivers = s.Drivers.Select( d => d.Clone() ).ToList();
+			IkChains = s.IkChains.Select( k => k.Clone() ).ToList();
 			RootBone = s.Rig.RootBone;
 			HipsBone = s.Rig.HipsBone;
 		}
@@ -332,7 +336,12 @@ public static class GeppettoRig
 			s.Rig.Bones.AddRange( Bones.Select( b => b.Clone() ) );
 			s.BodyBoneMap.Clear();
 			foreach ( var kv in BodyBoneMap ) s.BodyBoneMap[kv.Key] = kv.Value;
-			foreach ( var (shape, bone) in Correctives ) shape.Bone = bone;
+			s.Correctives.Clear();
+			s.Correctives.AddRange( Correctives.Select( c => c.Clone() ) );
+			s.Drivers.Clear();
+			s.Drivers.AddRange( Drivers.Select( d => d.Clone() ) );
+			s.IkChains.Clear();
+			s.IkChains.AddRange( IkChains.Select( k => k.Clone() ) );
 			s.Rig.RootBone = RootBone;
 			s.Rig.HipsBone = HipsBone;
 		}
@@ -351,7 +360,47 @@ public static class GeppettoRig
 			}
 			foreach ( var kv in BodyBoneMap )
 				if ( !o.BodyBoneMap.TryGetValue( kv.Key, out var v ) || v != kv.Value ) return false;
-			for ( int i = 0; i < Correctives.Count; i++ ) if ( Correctives[i].Bone != o.Correctives[i].Bone ) return false;
+			if ( !SameShapes( Correctives, o.Correctives ) ) return false;
+			if ( !SameDrivers( Drivers, o.Drivers ) ) return false;
+			if ( !SameIk( IkChains, o.IkChains ) ) return false;
+			return true;
+		}
+
+		static bool SameShapes( List<CorrectiveShape> a, List<CorrectiveShape> b )
+		{
+			if ( a.Count != b.Count ) return false;
+			for ( int i = 0; i < a.Count; i++ )
+				if ( a[i].Bone != b[i].Bone || a[i].Angle != b[i].Angle || !a[i].Axis.Equals( b[i].Axis ) )
+					return false;
+			return true;
+		}
+
+		static bool SameDrivers( List<MorphDriver> a, List<MorphDriver> b )
+		{
+			if ( a.Count != b.Count ) return false;
+			for ( int i = 0; i < a.Count; i++ )
+			{
+				var x = a[i]; var y = b[i];
+				if ( x.Morph != y.Morph || x.Bone != y.Bone || x.OtherBone != y.OtherBone
+					|| x.Channel != y.Channel || x.Axis != y.Axis
+					|| x.Rest != y.Rest || x.Target != y.Target || x.Ease != y.Ease || x.Clamp != y.Clamp )
+					return false;
+			}
+			return true;
+		}
+
+		static bool SameIk( List<RigIk> a, List<RigIk> b )
+		{
+			if ( a.Count != b.Count ) return false;
+			for ( int i = 0; i < a.Count; i++ )
+			{
+				var x = a[i]; var y = b[i];
+				if ( x.Name != y.Name || x.EndBone != y.EndBone || x.ChainLength != y.ChainLength
+					|| x.Weight != y.Weight || x.Iterations != y.Iterations || x.Enabled != y.Enabled
+					|| x.Fabrik != y.Fabrik || x.Spline != y.Spline || x.MaxStretch != y.MaxStretch
+					|| !x.Pole.Equals( y.Pole ) )
+					return false;
+			}
 			return true;
 		}
 	}

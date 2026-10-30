@@ -279,6 +279,18 @@ public sealed class PartStudio
 	public List<CorrectiveShape> Correctives = new();
 
 	/// <summary>
+	/// Morph drivers on the rig: bone pose -> morph weight (<see cref="MorphDriver"/>). Rig-side
+	/// (the shape-key features carry their own driver fields); saved in the rig block.
+	/// </summary>
+	public List<MorphDriver> Drivers = new();
+
+	/// <summary>
+	/// IK chains on the rig (<see cref="RigIk"/>): end bone, chain length, pole, solver, stretch.
+	/// Saved in the rig block.
+	/// </summary>
+	public List<RigIk> IkChains = new();
+
+	/// <summary>
 	/// Named values the whole document can refer to as <c>#name</c> in a numeric field.
 	///
 	/// DOCUMENT STATE, next to MaterialNames: a variable that belongs to a feature is just a
