@@ -363,6 +363,9 @@ public static class StudioDocument
 		foreach ( var k in studio.IkChains.Where( k => !string.IsNullOrWhiteSpace( k?.EndBone ) ) )
 			sb.Append( "\tikjson " ).Append( k.ToJson().ToJsonString() ).Append( '\n' );
 
+		foreach ( var s in studio.NlaStrips.Where( s => s?.Action != null ) )
+			sb.Append( "\tnlajson " ).Append( NlaStripJson( s ) ).Append( '\n' );
+
 		if ( studio.WeightPaint is { Count: > 0 } layer )
 			WriteWeights( sb, layer );
 
@@ -668,6 +671,8 @@ public static class StudioDocument
 		var studio = Read( File.ReadAllText( path ) );
 		// Mesh edits keep their meshes in the <name>.meshedit/ folder beside the file.
 		MeshEditSidecar.Load( studio, path );
+		// NLA strips reference take files; reload them from beside the .effigy.
+		LoadNlaTakes( studio, Path.GetDirectoryName( path ) );
 		return studio;
 	}
 
@@ -1041,6 +1046,14 @@ public static class StudioDocument
 				continue;
 			}
 
+			if ( line.StartsWith( "nlajson " ) )
+			{
+				if ( ParseNlaStrip( line[8..].Trim() ) is { } s )
+					studio.NlaStrips.Add( s );
+
+				continue;
+			}
+
 			if ( line.StartsWith( "bind " ) )
 			{
 				var parts = line[5..].Split( ' ', 2, StringSplitOptions.RemoveEmptyEntries );
@@ -1074,6 +1087,82 @@ public static class StudioDocument
 				ReadWeights( studio, lines, ref i );
 				continue;
 			}
+		}
+	}
+
+	static string NlaStripJson( NlaStrip s ) => new JsonObject
+	{
+		["Name"] = s.Name ?? "",
+		["Take"] = s.TakePath ?? "",
+		["Start"] = s.Start,
+		["End"] = s.End,
+		["Weight"] = s.Weight,
+		["FadeIn"] = s.FadeIn,
+		["FadeOut"] = s.FadeOut,
+		["Mode"] = s.Mode.ToString(),
+		["Loop"] = s.Loop,
+		["TimeScale"] = s.TimeScale,
+		["Muted"] = s.Muted,
+		["Mask"] = new JsonArray( s.Mask.Select( m => JsonValue.Create( m ) ).ToArray() ),
+	}.ToJsonString();
+
+	static NlaStrip? ParseNlaStrip( string json )
+	{
+		JsonDocument doc;
+		try { doc = JsonDocument.Parse( json ); }
+		catch ( JsonException ) { return null; }
+		using ( doc )
+		{
+			var e = doc.RootElement;
+			if ( e.ValueKind != JsonValueKind.Object ) return null;
+			var s = new NlaStrip();
+			if ( e.TryGetProperty( "Name", out var name ) && name.ValueKind == JsonValueKind.String )
+				s.Name = name.GetString() ?? "";
+			if ( e.TryGetProperty( "Take", out var take ) && take.ValueKind == JsonValueKind.String )
+				s.TakePath = take.GetString() ?? "";
+			if ( e.TryGetProperty( "Start", out var start ) && start.ValueKind == JsonValueKind.Number )
+				s.Start = start.GetSingle();
+			if ( e.TryGetProperty( "End", out var end ) && end.ValueKind == JsonValueKind.Number )
+				s.End = end.GetSingle();
+			if ( e.TryGetProperty( "Weight", out var weight ) && weight.ValueKind == JsonValueKind.Number )
+				s.Weight = weight.GetSingle();
+			if ( e.TryGetProperty( "FadeIn", out var fadeIn ) && fadeIn.ValueKind == JsonValueKind.Number )
+				s.FadeIn = fadeIn.GetSingle();
+			if ( e.TryGetProperty( "FadeOut", out var fadeOut ) && fadeOut.ValueKind == JsonValueKind.Number )
+				s.FadeOut = fadeOut.GetSingle();
+			if ( e.TryGetProperty( "Mode", out var mode ) && mode.ValueKind == JsonValueKind.String
+				&& Enum.TryParse<NlaBlendMode>( mode.GetString(), out var m ) )
+				s.Mode = m;
+			if ( e.TryGetProperty( "Loop", out var loop ) && loop.ValueKind is JsonValueKind.True or JsonValueKind.False )
+				s.Loop = loop.GetBoolean();
+			if ( e.TryGetProperty( "TimeScale", out var ts ) && ts.ValueKind == JsonValueKind.Number )
+				s.TimeScale = ts.GetSingle();
+			if ( e.TryGetProperty( "Muted", out var muted ) && muted.ValueKind is JsonValueKind.True or JsonValueKind.False )
+				s.Muted = muted.GetBoolean();
+			if ( e.TryGetProperty( "Mask", out var mask ) && mask.ValueKind == JsonValueKind.Array )
+				foreach ( var item in mask.EnumerateArray() )
+					if ( item.ValueKind == JsonValueKind.String && item.GetString() is { } g )
+						s.Mask.Add( g );
+			return string.IsNullOrWhiteSpace( s.TakePath ) ? null : s;
+		}
+	}
+
+	/// <summary>
+	/// NLA strips reference their takes by file; the take itself is reloaded here so a strip never
+	/// freezes a stale copy. A missing take leaves the strip's action null (the strip validates loud
+	/// rather than silently vanishing).
+	/// </summary>
+	static void LoadNlaTakes( PartStudio studio, string? dir )
+	{
+		foreach ( var s in studio.NlaStrips )
+		{
+			if ( s.Action != null || string.IsNullOrWhiteSpace( s.TakePath ) )
+				continue;
+			string take = s.TakePath!;
+			if ( !Path.IsPathRooted( take ) && !string.IsNullOrEmpty( dir ) )
+				take = Path.Combine( dir, take );
+			try { s.Action = RigAnimFile.ReadFile( take ); }
+			catch ( Exception ) { /* Validate() reports it */ }
 		}
 	}
 

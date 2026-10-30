@@ -34,8 +34,8 @@ public partial class RigPanel : EditorDock
 	PopupMenu _menu = null!, _parentMenu = null!;
 	VBoxContainer _inspector = null!, _bodies = null!, _softFields = null!, _problems = null!;
 	Label _name = null!, _bodiesHeader = null!, _problemsHeader = null!, _empty = null!;
-	OptionButton _corrPick = null!, _drvPick = null!, _ikPick = null!;
-	LineEdit _drvMorph = null!;
+	OptionButton _corrPick = null!, _drvPick = null!, _ikPick = null!, _nlaPick = null!;
+	LineEdit _drvMorph = null!, _nlaTake = null!;
 	Label _wave2Info = null!;
 	SpinBox[] _head = null!, _tail = null!, _soft = null!;
 	CheckBox _softToggle = null!;
@@ -249,6 +249,34 @@ public partial class RigPanel : EditorDock
 			_wave2Info.Text = err ?? $"Solved end at ({pos.x:0.##}, {pos.y:0.##}, {pos.z:0.##}).";
 		};
 		ikRow.AddChild( ikSolve );
+
+		var nlaHead = Wrapped( "NLA strips" );
+		nlaHead.Modulate = new Color( 1, 1, 1, 0.6f );
+		w2.AddChild( nlaHead );
+		_nlaTake = new LineEdit { PlaceholderText = "Take file, beside the .effigy", SizeFlagsHorizontal = SizeFlags.ExpandFill };
+		w2.AddChild( _nlaTake );
+		_nlaPick = new OptionButton { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+		w2.AddChild( _nlaPick );
+		var nlaRow = new HFlowContainer();
+		w2.AddChild( nlaRow );
+		var nlaAdd = Wrap( new Button { Text = "Add", TooltipText = "Place the named take on the timeline as a strip." } );
+		nlaAdd.Pressed += () =>
+		{
+			if ( Doc is { } d && GeppettoRigNla.AddStrip( d, _nlaTake.Text ) )
+				_wave2Info.Text = "Strip added.";
+		};
+		nlaRow.AddChild( nlaAdd );
+		var nlaDel = Wrap( new Button { Text = "Remove", TooltipText = "Remove the listed strip." } );
+		nlaDel.Pressed += () => { if ( Doc is { } d ) GeppettoRigNla.RemoveStrip( d, _nlaPick.Selected ); };
+		nlaRow.AddChild( nlaDel );
+		var nlaEval = Wrap( new Button { Text = "Evaluate", TooltipText = "Evaluate the timeline at frame 0 and say how many bones it poses." } );
+		nlaEval.Pressed += () =>
+		{
+			if ( Doc is not { } d ) return;
+			var (poses, err) = GeppettoRigNla.Evaluate( d, 0f );
+			_wave2Info.Text = err ?? $"Frame 0 poses {poses!.Count} bones.";
+		};
+		nlaRow.AddChild( nlaEval );
 
 		_wave2Info = Wrapped( "" );
 		_wave2Info.Modulate = new Color( 1, 1, 1, 0.6f );
@@ -520,6 +548,9 @@ public partial class RigPanel : EditorDock
 		_ikPick.Clear();
 		foreach ( var k in doc?.Studio.IkChains ?? Enumerable.Empty<RigIk>() )
 			_ikPick.AddItem( k.Name );
+		_nlaPick.Clear();
+		foreach ( var s in doc?.Studio.NlaStrips ?? Enumerable.Empty<NlaStrip>() )
+			_nlaPick.AddItem( string.IsNullOrWhiteSpace( s.Name ) ? s.TakePath : s.Name );
 	}
 
 	static float Axis( Vec3 v, int k ) => k == 0 ? v.x : k == 1 ? v.y : v.z;

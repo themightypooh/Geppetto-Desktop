@@ -45,6 +45,22 @@ public sealed class NlaStrip
 	/// <summary>Bone names to take from the action, MotionLint globs ("arm_*"); empty = all.</summary>
 	public List<string> Mask = new();
 
+	/// <summary>
+	/// Editor bookkeeping, not part of the solve: the take file this strip's action was loaded from,
+	/// relative to the .effigy when it sits beside it. The .effigy saves this; the action itself is
+	/// reloaded from the take on open, so strips never freeze a stale copy of an edited take.
+	/// </summary>
+	public string TakePath = "";
+
+	/// <summary>A copy sharing the action (actions are loaded documents; the editor never mutates
+	/// them, so undo only needs the strip's own fields).</summary>
+	public NlaStrip Clone()
+	{
+		var copy = (NlaStrip)MemberwiseClone();
+		copy.Mask = new List<string>( Mask );
+		return copy;
+	}
+
 	/// <summary>The action's span in its own frames: its last keyed frame (0 for an empty action).</summary>
 	public float ActionSpan => Action?.LastKeyFrame ?? 0;
 

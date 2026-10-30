@@ -316,6 +316,7 @@ public static class GeppettoRig
 		public readonly List<CorrectiveShape> Correctives;
 		public readonly List<MorphDriver> Drivers;
 		public readonly List<RigIk> IkChains;
+		public readonly List<NlaStrip> NlaStrips;
 		public readonly string RootBone;
 		public readonly string HipsBone;
 
@@ -326,6 +327,7 @@ public static class GeppettoRig
 			Correctives = s.Correctives.Select( c => c.Clone() ).ToList();
 			Drivers = s.Drivers.Select( d => d.Clone() ).ToList();
 			IkChains = s.IkChains.Select( k => k.Clone() ).ToList();
+			NlaStrips = s.NlaStrips.Select( t => t.Clone() ).ToList();
 			RootBone = s.Rig.RootBone;
 			HipsBone = s.Rig.HipsBone;
 		}
@@ -342,6 +344,8 @@ public static class GeppettoRig
 			s.Drivers.AddRange( Drivers.Select( d => d.Clone() ) );
 			s.IkChains.Clear();
 			s.IkChains.AddRange( IkChains.Select( k => k.Clone() ) );
+			s.NlaStrips.Clear();
+			s.NlaStrips.AddRange( NlaStrips.Select( t => t.Clone() ) );
 			s.Rig.RootBone = RootBone;
 			s.Rig.HipsBone = HipsBone;
 		}
@@ -363,6 +367,7 @@ public static class GeppettoRig
 			if ( !SameShapes( Correctives, o.Correctives ) ) return false;
 			if ( !SameDrivers( Drivers, o.Drivers ) ) return false;
 			if ( !SameIk( IkChains, o.IkChains ) ) return false;
+			if ( !SameStrips( NlaStrips, o.NlaStrips ) ) return false;
 			return true;
 		}
 
@@ -399,6 +404,21 @@ public static class GeppettoRig
 					|| x.Weight != y.Weight || x.Iterations != y.Iterations || x.Enabled != y.Enabled
 					|| x.Fabrik != y.Fabrik || x.Spline != y.Spline || x.MaxStretch != y.MaxStretch
 					|| !x.Pole.Equals( y.Pole ) )
+					return false;
+			}
+			return true;
+		}
+
+		static bool SameStrips( List<NlaStrip> a, List<NlaStrip> b )
+		{
+			if ( a.Count != b.Count ) return false;
+			for ( int i = 0; i < a.Count; i++ )
+			{
+				var x = a[i]; var y = b[i];
+				if ( x.Name != y.Name || x.TakePath != y.TakePath || x.Start != y.Start || x.End != y.End
+					|| x.Weight != y.Weight || x.FadeIn != y.FadeIn || x.FadeOut != y.FadeOut
+					|| x.Mode != y.Mode || x.Loop != y.Loop || x.TimeScale != y.TimeScale || x.Muted != y.Muted
+					|| !x.Mask.SequenceEqual( y.Mask ) )
 					return false;
 			}
 			return true;

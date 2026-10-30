@@ -291,6 +291,12 @@ public sealed class PartStudio
 	public List<RigIk> IkChains = new();
 
 	/// <summary>
+	/// NLA strips on the rig (<see cref="NlaStrip"/>): take files placed on a timeline. Saved in the
+	/// rig block as take references; the take itself is reloaded on open.
+	/// </summary>
+	public List<NlaStrip> NlaStrips = new();
+
+	/// <summary>
 	/// Named values the whole document can refer to as <c>#name</c> in a numeric field.
 	///
 	/// DOCUMENT STATE, next to MaterialNames: a variable that belongs to a feature is just a
