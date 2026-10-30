@@ -173,6 +173,42 @@ public partial class RigTest : RefCounted
 			Check( "auto weights: redo brings it back", studioW.WeightPaint is { Count: > 0 } );
 		}
 
+		// ---- skeleton import + template ------------------------------------------------------
+		{
+			var gskel = new Skeleton3D();
+			gskel.AddBone( "groot" );
+			gskel.AddBone( "gchild" );
+			gskel.SetBoneParent( 1, 0 );
+			gskel.SetBoneRest( 0, new Transform3D( Basis.Identity, new Vector3( 0, 1, 0 ) ) );
+			gskel.SetBoneRest( 1, new Transform3D( Basis.Identity, new Vector3( 0, 1, 0 ) ) );
+			var conv = GeppettoRig.SkeletonFromGodot( gskel );
+			Check( "import: names + parents", conv.Count == 2 && conv.Bones[0].Name == "groot" && conv.Bones[1].Parent == 0,
+				$"{conv.Count} bones" );
+			var ch = conv.HeadWorld( 1 );
+			Check( "import: child head in Effigy inches", MathF.Abs( ch.x ) < 0.01f && MathF.Abs( ch.y ) < 0.01f && MathF.Abs( ch.z - 78.74f ) < 0.05f, ch.ToString() );
+			Check( "import: parent length spans to the child", MathF.Abs( conv.Bones[0].Length - 39.37f ) < 0.05f, conv.Bones[0].Length.ToString( "0.##" ) );
+			gskel.Free();
+
+			int bn = rig.Count;
+			var g2 = new Skeleton3D();
+			g2.AddBone( "imp_root" );
+			g2.AddBone( "imp_tip" );
+			g2.SetBoneParent( 1, 0 );
+			g2.SetBoneRest( 0, new Transform3D( Basis.Identity, Vector3.Zero ) );
+			g2.SetBoneRest( 1, new Transform3D( Basis.Identity, new Vector3( 0, 0.5f, 0 ) ) );
+			bool imp = GeppettoRig.ImportSkeleton( doc, g2 );
+			Check( "import: appended as new roots", imp && rig.Count == bn + 2 && rig.Bones[bn].Name == "imp_root"
+				&& rig.Bones[bn + 1].Parent == bn, Names( rig ) );
+			doc.Session.History.Undo();
+			Check( "import: undo removes them", rig.Count == bn );
+			doc.Session.History.Redo();
+			Check( "import: redo brings them back", rig.Count == bn + 2 );
+			g2.Free();
+
+			bool tpl = GeppettoRig.ApplyTemplate( doc, "biped" );
+			Check( "template: refused on a non-empty rig", !tpl && rig.Count == bn + 2 );
+		}
+
 		// ---- the scene: ApplyTo rebuilds the Skeleton3D ------------------------------------
 		var skel = scene.FindChild( "Skeleton3D", true, false ) as Skeleton3D;
 		doc.ApplyTo( scene );
@@ -217,7 +253,7 @@ public partial class RigTest : RefCounted
 
 		var again = importer._ImportScene( path, 0, new Godot.Collections.Dictionary() ) as Node3D;
 		var skel2 = again?.FindChild( "Skeleton3D", true, false ) as Skeleton3D;
-		Check( "import: new bone count", skel2 != null && skel2.GetBoneCount() == n0 + 3 && skel2.GetBoneCount() == reread.Rig.Count,
+		Check( "import: new bone count", skel2 != null && skel2.GetBoneCount() == n0 + 5 && skel2.GetBoneCount() == reread.Rig.Count,
 			skel2 == null ? "no skeleton" : $"{skel2.GetBoneCount()} (was {n0})" );
 		Check( "import: mirrored bone present", skel2 != null && skel2.FindBone( "upperarm_R" ) >= 0 );
 		again?.Free();

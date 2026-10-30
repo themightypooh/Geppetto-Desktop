@@ -78,6 +78,25 @@ public static partial class GeppettoTools
 			return GeppettoRig.AutoWeights( doc );
 		} );
 
+		Register( "Rig", "Import Skeleton", ctx =>
+		{
+			if ( ctx.Doc is not { } doc || ctx.Character is not { } c ) return ctx.Need();
+			RigPanel.Open( ctx.Plugin, c );
+			foreach ( var n in EditorInterface.Singleton.GetSelection().GetSelectedNodes() )
+				if ( n is Skeleton3D skel )
+					return GeppettoRig.ImportSkeleton( doc, skel );
+			return GeppettoRig.Refuse( "Import Skeleton: select a Skeleton3D in the scene dock first — "
+				+ "import a character scene, select its Skeleton3D, then run this." );
+		} );
+
+		Register( "Rig", "Rig Template", ctx =>
+		{
+			if ( ctx.Doc is not { } doc || ctx.Character is not { } c ) return ctx.Need();
+			RigPanel.Open( ctx.Plugin, c );
+			GeppettoToolContext.Say( "Pick a template in the Rig panel's Template row, then press Template." );
+			return true;
+		} );
+
 		// --- Soft ---
 		Register( "Rig", "Make Soft", ctx =>
 		{
@@ -569,6 +588,144 @@ public static class GeppettoRig
 			+ ( report.RigidVertices > 0 ? $", {report.RigidVertices} rigid" : "" )
 			+ ( had ? ", replacing your earlier paint (undo brings it back)" : "" )
 			+ ". See the Output panel for the bind report." );
+		return true;
+	}
+
+	// =========================================================================================
+	// Skeleton import + templates
+	// =========================================================================================
+
+	/// <summary>Inverse of EffigySkeletonBridge.TransformXform: a Godot local bone rest back to
+	/// Effigy space (inches, Effigy axes). The bridge maps (x,y,z)->(y,z,x)*0.0254, so this maps
+	/// (X,Y,Z)->(Z,X,Y)/0.0254 on both the basis columns and the origin.</summary>
+	static Xform XformFromGodotRest( Transform3D rest )
+	{
+		const float m2in = 1f / 0.0254f;
+		var b = rest.Basis;
+		var o = rest.Origin;
+		return new Xform(
+			new Vec3( b.Z.Z, b.Z.X, b.Z.Y ),
+			new Vec3( b.X.Z, b.X.X, b.X.Y ),
+			new Vec3( b.Y.Z, b.Y.X, b.Y.Y ),
+			new Vec3( o.Z, o.X, o.Y ) * m2in );
+	}
+
+	/// <summary>A Godot Skeleton3D as an Effigy skeleton: names, parents and exact rest poses
+	/// survive; lengths are geometric (head to the average child head, 4 inches for a leaf),
+	/// because Godot stores no bone length.</summary>
+	public static Skeleton SkeletonFromGodot( Skeleton3D skel )
+	{
+		int n = skel.GetBoneCount();
+		if ( n == 0 ) throw new ArgumentException( "that Skeleton3D has no bones" );
+		var names = new string[n];
+		var parents = new int[n];
+		var locals = new Xform[n];
+		for ( int i = 0; i < n; i++ )
+		{
+			names[i] = skel.GetBoneName( i );
+			if ( string.IsNullOrWhiteSpace( names[i] ) ) throw new ArgumentException( $"bone {i} has no name" );
+			parents[i] = skel.GetBoneParent( i );
+			if ( parents[i] < -1 || parents[i] >= n ) throw new ArgumentException( $"bone '{names[i]}' has an impossible parent {parents[i]}" );
+			locals[i] = XformFromGodotRest( skel.GetBoneRest( i ) );
+		}
+		// World xforms, parents before children.
+		var worlds = new Xform[n];
+		var done = new bool[n];
+		for ( int pass = 0; pass <= n; pass++ )
+		{
+			bool progress = false;
+			for ( int i = 0; i < n; i++ )
+			{
+				if ( done[i] ) continue;
+				int p = parents[i];
+				if ( p >= 0 && !done[p] ) continue;
+				worlds[i] = p < 0 ? locals[i] : worlds[p] * locals[i];
+				done[i] = true;
+				progress = true;
+			}
+			if ( done.All( d => d ) ) break;
+			if ( !progress ) throw new InvalidOperationException( "a bone cycle in the Skeleton3D" );
+		}
+		var sk = new Skeleton();
+		var map = new int[n];
+		for ( int i = 0; i < n; i++ ) map[i] = -1;
+		int added = 0;
+		while ( added < n )
+		{
+			bool progress = false;
+			for ( int i = 0; i < n; i++ )
+			{
+				if ( map[i] >= 0 ) continue;
+				int p = parents[i];
+				if ( p >= 0 && map[p] < 0 ) continue;
+				map[i] = sk.AddBone( names[i], p < 0 ? -1 : map[p], locals[i], 1f );
+				added++;
+				progress = true;
+			}
+			if ( !progress ) throw new InvalidOperationException( "a bone cycle in the Skeleton3D" );
+		}
+		for ( int i = 0; i < n; i++ )
+		{
+			var kids = new List<int>();
+			for ( int k = 0; k < n; k++ ) if ( parents[k] == i ) kids.Add( k );
+			Vec3 head = worlds[i].Origin;
+			Vec3 tail = head + worlds[i].Y.Normal * 4f;
+			if ( kids.Count > 0 )
+			{
+				var avg = Vec3.Zero;
+				foreach ( int k in kids ) avg += worlds[k].Origin;
+				tail = avg * ( 1f / kids.Count );
+			}
+			float len = ( tail - head ).Length;
+			sk.Bones[map[i]].Length = len > 1e-4f ? len : 4f;
+		}
+		return sk;
+	}
+
+	/// <summary>Appends a Skeleton3D's bones to the rig as new roots (names made unique), one
+	/// undo step. Select in the scene dock, then run.</summary>
+	public static bool ImportSkeleton( GeppettoDocument doc, Skeleton3D skel )
+	{
+		Skeleton conv;
+		try { conv = SkeletonFromGodot( skel ); }
+		catch ( Exception e ) when ( e is ArgumentException or InvalidOperationException )
+		{ return !Refuse( $"Import Skeleton: {e.Message}" ); }
+		var rig = doc.Studio.Rig;
+		int first = rig.Count;
+		bool ok = RigEdit( doc, $"import skeleton ({conv.Count} bones)", s =>
+		{
+			foreach ( var b in conv.Bones )
+				s.Rig.AddBone( s.Rig.UniqueName( b.Name ), b.Parent < 0 ? -1 : first + b.Parent, b.Local, b.Length );
+			return true;
+		} );
+		if ( !ok ) return false;
+		Select( doc, first );
+		RigPanel.RefreshOpen();
+		GeppettoToolContext.Say( $"Imported {conv.Count} bones from '{skel.Name}'. Clashing names were made unique." );
+		return true;
+	}
+
+	/// <summary>Starts the rig from a template (human, biped, quadruped, fish, avian, arachnid,
+	/// serpentine, ...). Needs an empty rig — templates replace, they don't merge.</summary>
+	public static bool ApplyTemplate( GeppettoDocument doc, string name )
+	{
+		var rig = doc.Studio.Rig;
+		if ( rig.Count > 0 ) return !Refuse( "Rig Template needs an empty rig — delete the bones first, then apply the template." );
+		Skeleton tpl;
+		try { tpl = RigTemplates.BuildTemplate( name ); }
+		catch ( Exception e ) { return !Refuse( $"Rig Template: {e.Message}" ); }
+		if ( tpl.Count == 0 ) return !Refuse( $"Rig Template '{name}': the template built no bones." );
+		bool ok = RigEdit( doc, $"rig template {name}", s =>
+		{
+			s.Rig.Bones.Clear();
+			s.Rig.Bones.AddRange( tpl.Bones.Select( b => b.Clone() ) );
+			s.BodyBoneMap.Clear();
+			return true;
+		} );
+		if ( !ok ) return false;
+		Select( doc, 0 );
+		RigPanel.RefreshOpen();
+		GeppettoToolContext.Say( $"Template '{name}': {tpl.Count} bones. Reshape them to the character, then run Auto Weights." );
 		return true;
 	}
 

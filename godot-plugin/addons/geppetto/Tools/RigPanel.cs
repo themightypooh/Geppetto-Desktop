@@ -130,6 +130,19 @@ public partial class RigPanel : EditorDock
 		_empty = Wrapped( "No bones yet. Add Bone, then click the model to place the first joint." );
 		col.AddChild( _empty );
 
+		var trow = new HFlowContainer();
+		col.AddChild( trow );
+		var templatePick = new OptionButton
+		{
+			SizeFlagsHorizontal = SizeFlags.ExpandFill,
+			TooltipText = "Start from a template skeleton instead of placing every bone by hand. Needs an empty rig.",
+		};
+		foreach ( var tn in RigTemplates.Names ) templatePick.AddItem( tn );
+		trow.AddChild( templatePick );
+		var templateGo = Wrap( new Button { Text = "Template" } );
+		templateGo.Pressed += () => { if ( Doc is { } d ) GeppettoRig.ApplyTemplate( d, RigTemplates.Names[templatePick.Selected] ); };
+		trow.AddChild( templateGo );
+
 		_menu = new PopupMenu();
 		_menu.AddItem( "Rename", 0 );
 		_parentMenu = new PopupMenu { Name = "ParentTo" };
