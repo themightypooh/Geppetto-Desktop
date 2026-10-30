@@ -318,6 +318,26 @@ public partial class RigTest : RefCounted
 			Check( "root/hips: undo clears", doc.Studio.Rig.RootBone == "" && doc.Studio.Rig.HipsBone == "" );
 		}
 
+		// ---- gradient brush -----------------------------------------------------------------
+		{
+			var gmesh = new PolyMesh();
+			int g0 = gmesh.AddVertex( new Vec3( 0, 0, 0 ) );
+			int g1 = gmesh.AddVertex( new Vec3( 0, 5, 0 ) );
+			int g2 = gmesh.AddVertex( new Vec3( 0, 10, 0 ) );
+			gmesh.AddFace( new[] { g0, g1, g2 } );
+			var gw = new SkinWeights( 3 );
+			gw[0] = new[] { new BoneWeight( 0, 0.5f ), new BoneWeight( 1, 0.5f ) };
+			gw[1] = new[] { new BoneWeight( 0, 0.5f ), new BoneWeight( 1, 0.5f ) };
+			gw[2] = new[] { new BoneWeight( 0, 0.5f ), new BoneWeight( 1, 0.5f ) };
+			var gstroke = new WeightStroke { Kind = WeightBrushKind.Gradient, Bone = 0, Falloff = BrushFalloff.Linear };
+			gstroke.Samples.Add( new WeightSample( new Vec3( 0, 0, 0 ), 20f, 1f ) );
+			gstroke.Samples.Add( new WeightSample( new Vec3( 0, 10, 0 ), 20f, 1f ) );
+			WeightBrush.Apply( gmesh, gw, gstroke );
+			float w0 = BoneW( gw[0] ), w1 = BoneW( gw[1] ), w2 = BoneW( gw[2] );
+			Check( "gradient: ramps 1 to 0 along the stroke", w0 > 0.9f && MathF.Abs( w1 - 0.5f ) < 0.15f && w2 < 0.1f,
+				$"{w0:0.##},{w1:0.##},{w2:0.##}" );
+		}
+
 		// ---- the scene: ApplyTo rebuilds the Skeleton3D ------------------------------------
 		var skel = scene.FindChild( "Skeleton3D", true, false ) as Skeleton3D;
 		doc.ApplyTo( scene );
@@ -381,6 +401,13 @@ public partial class RigTest : RefCounted
 				if ( aws[i].Item1 != ws[i].Bone || MathF.Abs( aws[i].Item2 - ws[i].Weight ) > 1e-5f ) return false;
 		}
 		return true;
+	}
+
+	/// <summary>Bone 0's weight on one vertex (0 when the vertex has no influences).</summary>
+	static float BoneW( BoneWeight[] ws )
+	{
+		foreach ( var w in ws ) if ( w.Bone == 0 ) return w.Weight;
+		return 0f;
 	}
 
 	/// <summary>GeppettoCharacter's constructor is private (it is found from the editor selection); the

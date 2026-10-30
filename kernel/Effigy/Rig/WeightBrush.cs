@@ -18,6 +18,11 @@ public enum WeightBrushKind
 	/// <summary>Move every influence toward the average of the vertex's neighbours. Painted bone
 	/// independent — it smooths the whole set, which is what makes a seam disappear.</summary>
 	Smooth,
+
+	/// <summary>Paint a smooth ramp along the stroke: 1 at the stroke's start, 0 at its end,
+	/// projected onto the start-to-end axis. One stroke does the forearm-to-upper-arm roll-off
+	/// that takes fiddly Add+Smooth work otherwise.</summary>
+	Gradient,
 }
 
 /// <summary>One sample on a weight stroke. The editor makes these; the kernel never learns what a
@@ -180,7 +185,7 @@ public static class WeightBrush
 	/// </summary>
 	public static int CountLocked( PolyMesh mesh, SkinWeights weights, WeightStroke stroke, MeshBVH bvh = null )
 	{
-		if ( stroke.Kind is not (WeightBrushKind.Subtract or WeightBrushKind.Set) )
+		if ( stroke.Kind is not (WeightBrushKind.Subtract or WeightBrushKind.Set or WeightBrushKind.Gradient) )
 			return 0;
 
 		bvh ??= MeshBVH.Build( mesh );
@@ -221,9 +226,14 @@ public static class WeightBrush
 				continue;
 
 			var before = weights[vi];
+			float want = stroke.Kind == WeightBrushKind.Gradient
+				? WeightOf( before, stroke.Bone )
+					+ ( GradientTarget( stroke, mesh.Positions[vi] ) - WeightOf( before, stroke.Bone ) )
+					* Math.Clamp( amount, 0f, 1f )
+				: TargetFor( before, stroke, amount );
 			var after = stroke.Kind == WeightBrushKind.Smooth
 				? SmoothOne( weights, neighbours[vi], vi, Math.Clamp( amount, 0f, 1f ) )
-				: Retarget( before, stroke.Bone, TargetFor( before, stroke, amount ) );
+				: Retarget( before, stroke.Bone, want );
 
 			if ( after is null || Same( before, after ) )
 				continue;
@@ -231,6 +241,19 @@ public static class WeightBrush
 			undo.Record( vi, before );
 			weights[vi] = after;
 		}
+	}
+
+	/// <summary>1 at the stroke's first sample, 0 at its last, linear along the start-to-end
+	/// axis. A zero-length stroke is all 1 — a dot, not a ramp.</summary>
+	static float GradientTarget( WeightStroke stroke, Vec3 vertex )
+	{
+		var samples = stroke.Samples;
+		if ( samples.Count == 0 ) return 1f;
+		var a = samples[0].Position;
+		var b = samples[samples.Count - 1].Position;
+		var ab = b - a;
+		if ( ab.LengthSquared < 1e-12f ) return 1f;
+		return 1f - Math.Clamp( Vec3.Dot( vertex - a, ab ) / ab.LengthSquared, 0f, 1f );
 	}
 
 	/// <summary>Where this sample wants the painted bone to end up on this vertex.</summary>
