@@ -112,9 +112,19 @@ public static partial class GeppettoTools
 			return GeppettoRig.FixWeights( doc );
 		} );
 
+		Register( "Rig", "Copy Weights", ctx =>
+		{
+			if ( ctx.Doc is not { } doc || ctx.Character is not { } c ) return ctx.Need();
+			RigPanel.Open( ctx.Plugin, c );
+			return GeppettoRig.CopyWeights( doc );
+		} );
 
-
-
+		Register( "Rig", "Paste Weights", ctx =>
+		{
+			if ( ctx.Doc is not { } doc || ctx.Character is not { } c ) return ctx.Need();
+			RigPanel.Open( ctx.Plugin, c );
+			return GeppettoRig.PasteWeights( doc );
+		} );
 
 		// --- Soft ---
 		Register( "Rig", "Make Soft", ctx =>
@@ -922,6 +932,69 @@ public static class GeppettoRig
 			+ ( rep.WorstDropped > 0 ? $", worst dropped influence {rep.WorstDropped:0.###}" : ", nothing dropped" )
 			+ ( rep.Unresolvable > 0 ? $", {rep.Unresolvable} influences named bones that no longer exist" : "" )
 			+ "." );
+		return true;
+	}
+
+	static readonly Dictionary<string, string> CopiedWeightBone = new();
+
+	/// <summary>Remembers the picked bone's weights; Paste Weights stamps them onto another bone.</summary>
+	public static bool CopyWeights( GeppettoDocument doc )
+	{
+		int sel = SelectedIndex( doc );
+		if ( sel < 0 ) return !Refuse( "Copy Weights: pick a bone in the Rig panel first." );
+		string name = doc.Studio.Rig.Bones[sel].Name;
+		CopiedWeightBone[doc.DiskPath] = name;
+		GeppettoToolContext.Say( $"Copied the weights of '{name}'. Pick another bone and press Paste Weights." );
+		return true;
+	}
+
+	/// <summary>Stamps the copied bone's per-vertex weights onto the picked bone, renormalising.
+	/// Paint once (a finger, a collar segment), propagate. One undo step.</summary>
+	public static bool PasteWeights( GeppettoDocument doc )
+	{
+		var studio = doc.Studio;
+		var rig = studio.Rig;
+		int sel = SelectedIndex( doc );
+		if ( sel < 0 ) return !Refuse( "Paste Weights: pick the bone to paste onto first." );
+		if ( !CopiedWeightBone.TryGetValue( doc.DiskPath, out var from ) )
+			return !Refuse( "Paste Weights: copy a bone's weights first." );
+		string to = rig.Bones[sel].Name;
+		if ( from == to ) return !Refuse( "Paste Weights: that's the bone the weights came from." );
+		int fromI = rig.IndexOf( from ), toI = rig.IndexOf( to );
+		if ( fromI < 0 ) return !Refuse( $"Paste Weights: '{from}' is no longer in the rig. Copy again." );
+		var layer = studio.WeightPaint;
+		if ( layer is not { Count: > 0 } )
+			return !Refuse( "Paste Weights needs painted weights — run Auto Weights or paint first." );
+		var (mesh, _) = studio.ToMeshWithBodies();
+		var pasted = layer.Clone();
+		int touched = 0;
+		foreach ( var (vertex, weights) in layer.Painted )
+		{
+			float sw = 0f; bool has = false;
+			foreach ( var (bone, w) in weights )
+				if ( bone == from ) { sw = w; has = true; break; }
+			if ( !has || sw <= 0f ) continue;
+			var bw = new List<BoneWeight>();
+			foreach ( var (bone, w) in weights )
+			{
+				int bi = rig.IndexOf( bone );
+				if ( bi < 0 || bi == toI ) continue;
+				bw.Add( new BoneWeight( bi, w ) );
+			}
+			bw.Add( new BoneWeight( toI, sw ) );
+			float sum = 0f;
+			foreach ( var w in bw ) sum += w.Weight;
+			if ( sum <= 1e-9f ) continue;
+			pasted.Capture( vertex, bw.Select( w => new BoneWeight( w.Bone, w.Weight / sum ) ).ToArray(), rig );
+			touched++;
+		}
+		if ( touched == 0 ) return !Refuse( $"Paste Weights: '{from}' has no painted weight anywhere to copy." );
+		var before = layer;
+		bool ok = doc.Execute( new DelegateEditCommand( "Paste weights",
+			execute: () => studio.WeightPaint = pasted,
+			undo: () => studio.WeightPaint = before ), "Geppetto: paste weights" );
+		if ( !ok ) return false;
+		GeppettoToolContext.Say( $"Pasted '{from}' onto '{to}' on {touched} vertices." );
 		return true;
 	}
 

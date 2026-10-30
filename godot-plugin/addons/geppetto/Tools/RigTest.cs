@@ -251,6 +251,29 @@ public partial class RigTest : RefCounted
 			Check( "fix: prunes to 4, renormalises, strongest first", fok && frep.Changed == 1,
 				$"changed={frep.Changed}" );
 
+			// Copy/paste on the live document (auto-weights layer is up from the earlier test).
+			int sh2 = rig.IndexOf( "shoulder_L" );
+			int hand2 = rig.IndexOf( "hand_L" );
+			GeppettoRig.Select( doc, sh2 );
+			Check( "copy: remembers the picked bone", GeppettoRig.CopyWeights( doc ) );
+			GeppettoRig.Select( doc, hand2 );
+			var snapBefore = doc.Studio.WeightPaint!.Clone();
+			bool pasted = GeppettoRig.PasteWeights( doc );
+			Check( "paste: ran", pasted );
+			bool pok = false;
+			foreach ( var (vertex, ws) in doc.Studio.WeightPaint!.Painted )
+			{
+				float afterW = 0f, beforeW = 0f;
+				foreach ( var (bone, w) in ws ) if ( bone == "hand_L" ) afterW = w;
+				foreach ( var (bvertex, bws) in snapBefore.Painted )
+					if ( bvertex == vertex )
+						foreach ( var (bone, w) in bws ) if ( bone == "hand_L" ) beforeW = w;
+				if ( afterW > beforeW + 1e-6f ) { pok = true; break; }
+			}
+			Check( "paste: the target bone gained weight somewhere", pok );
+			doc.Session.History.Undo();
+			Check( "paste: undo restores the layer", LayersEqual( doc.Studio.WeightPaint!, snapBefore ) );
+			doc.Session.History.Redo();
 		}
 
 		// ---- the scene: ApplyTo rebuilds the Skeleton3D ------------------------------------
@@ -304,6 +327,19 @@ public partial class RigTest : RefCounted
 		scene.QueueFree();
 	}
 
+	static bool LayersEqual( WeightPaintLayer a, WeightPaintLayer b )
+	{
+		if ( a.Count != b.Count ) return false;
+		var da = new Dictionary<int, List<(string, float)>>();
+		foreach ( var (v, ws) in a.Painted ) da[v] = new List<(string, float)>( ws );
+		foreach ( var (v, ws) in b.Painted )
+		{
+			if ( !da.TryGetValue( v, out var aws ) || aws.Count != ws.Count ) return false;
+			for ( int i = 0; i < ws.Count; i++ )
+				if ( aws[i].Item1 != ws[i].Bone || MathF.Abs( aws[i].Item2 - ws[i].Weight ) > 1e-5f ) return false;
+		}
+		return true;
+	}
 
 	/// <summary>GeppettoCharacter's constructor is private (it is found from the editor selection); the
 	/// test builds one the same way Find would.</summary>
