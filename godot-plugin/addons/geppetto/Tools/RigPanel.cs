@@ -34,6 +34,9 @@ public partial class RigPanel : EditorDock
 	PopupMenu _menu = null!, _parentMenu = null!;
 	VBoxContainer _inspector = null!, _bodies = null!, _softFields = null!, _problems = null!;
 	Label _name = null!, _bodiesHeader = null!, _problemsHeader = null!, _empty = null!;
+	OptionButton _corrPick = null!, _drvPick = null!, _ikPick = null!;
+	LineEdit _drvMorph = null!;
+	Label _wave2Info = null!;
 	SpinBox[] _head = null!, _tail = null!, _soft = null!;
 	CheckBox _softToggle = null!;
 	bool _syncing;
@@ -150,6 +153,106 @@ public partial class RigPanel : EditorDock
 		var templateGo = Wrap( new Button { Text = "Template" } );
 		templateGo.Pressed += () => { if ( Doc is { } d ) GeppettoRig.ApplyTemplate( d, RigTemplates.Names[templatePick.Selected] ); };
 		trow.AddChild( templateGo );
+
+		// ---- Correctives / Drivers / IK (wave 2, placeholder UI) ----
+		var w2 = new VBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+		col.AddChild( w2 );
+
+		var corrHead = Wrapped( "Correctives" );
+		corrHead.Modulate = new Color( 1, 1, 1, 0.6f );
+		w2.AddChild( corrHead );
+		_corrPick = new OptionButton { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+		w2.AddChild( _corrPick );
+		var corrRow = new HFlowContainer();
+		w2.AddChild( corrRow );
+		var corrAdd = Wrap( new Button { Text = "Add", TooltipText = "Add a corrective for the selected bone (a 90° bend)." } );
+		corrAdd.Pressed += () =>
+		{
+			if ( Doc is { } d && GeppettoRigCorrectives.AddCorrective( d, GeppettoRig.SelectedIndex( d ) ) )
+				_wave2Info.Text = "Corrective added.";
+		};
+		corrRow.AddChild( corrAdd );
+		var corrDel = Wrap( new Button { Text = "Remove", TooltipText = "Remove the listed corrective." } );
+		corrDel.Pressed += () => { if ( Doc is { } d ) GeppettoRigCorrectives.RemoveCorrective( d, _corrPick.Selected ); };
+		corrRow.AddChild( corrDel );
+		var corrPrev = Wrap( new Button { Text = "Preview", TooltipText = "Build the morph on the first skinned body and say how many vertices move." } );
+		corrPrev.Pressed += () =>
+		{
+			if ( Doc is not { } d ) return;
+			var body = d.Studio.Bodies.FirstOrDefault( b => b.Mesh != null && b.Mesh.Skin != null );
+			if ( body == null ) { _wave2Info.Text = "No skinned body to preview on."; return; }
+			var (moved, max, err) = GeppettoRigCorrectives.PreviewCorrective( d, _corrPick.Selected, body.Id );
+			_wave2Info.Text = err ?? $"{moved} vertices move, max {max:0.###}.";
+		};
+		corrRow.AddChild( corrPrev );
+
+		var drvHead = Wrapped( "Drivers" );
+		drvHead.Modulate = new Color( 1, 1, 1, 0.6f );
+		w2.AddChild( drvHead );
+		_drvMorph = new LineEdit { PlaceholderText = "Morph name", SizeFlagsHorizontal = SizeFlags.ExpandFill };
+		w2.AddChild( _drvMorph );
+		_drvPick = new OptionButton { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+		w2.AddChild( _drvPick );
+		var drvRow = new HFlowContainer();
+		w2.AddChild( drvRow );
+		var drvAdd = Wrap( new Button { Text = "Add", TooltipText = "Drive the named morph from the selected bone (0° to 90° about Y)." } );
+		drvAdd.Pressed += () =>
+		{
+			if ( Doc is not { } d ) return;
+			int sel = GeppettoRig.SelectedIndex( d );
+			if ( sel < 0 || sel >= d.Studio.Rig.Count ) { _wave2Info.Text = "Select a bone first."; return; }
+			if ( GeppettoRigDrivers.AddDriver( d, _drvMorph.Text, d.Studio.Rig.Bones[sel].Name ) )
+				_wave2Info.Text = "Driver added.";
+		};
+		drvRow.AddChild( drvAdd );
+		var drvDel = Wrap( new Button { Text = "Remove", TooltipText = "Remove the listed driver." } );
+		drvDel.Pressed += () => { if ( Doc is { } d ) GeppettoRigDrivers.RemoveDriver( d, _drvPick.Selected ); };
+		drvRow.AddChild( drvDel );
+		var drvPrev = Wrap( new Button { Text = "Preview", TooltipText = "Pose the driver bone to its target angle and read the weight back." } );
+		drvPrev.Pressed += () =>
+		{
+			if ( Doc is not { } d ) return;
+			var list = GeppettoRigDrivers.List( d );
+			if ( _drvPick.Selected < 0 || _drvPick.Selected >= list.Count ) { _wave2Info.Text = "Nothing selected."; return; }
+			var (w, err) = GeppettoRigDrivers.PreviewDriver( d, _drvPick.Selected, list[_drvPick.Selected].Target );
+			_wave2Info.Text = err ?? $"Weight at target: {w:0.###}.";
+		};
+		drvRow.AddChild( drvPrev );
+
+		var ikHead = Wrapped( "IK chains" );
+		ikHead.Modulate = new Color( 1, 1, 1, 0.6f );
+		w2.AddChild( ikHead );
+		_ikPick = new OptionButton { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+		w2.AddChild( _ikPick );
+		var ikRow = new HFlowContainer();
+		w2.AddChild( ikRow );
+		var ikAdd = Wrap( new Button { Text = "Add", TooltipText = "Add a 2-bone IK chain ending at the selected bone." } );
+		ikAdd.Pressed += () =>
+		{
+			if ( Doc is { } d && GeppettoRigIk.AddIk( d, GeppettoRig.SelectedIndex( d ) ) )
+				_wave2Info.Text = "IK chain added.";
+		};
+		ikRow.AddChild( ikAdd );
+		var ikDel = Wrap( new Button { Text = "Remove", TooltipText = "Remove the listed IK chain." } );
+		ikDel.Pressed += () => { if ( Doc is { } d ) GeppettoRigIk.RemoveIk( d, _ikPick.Selected ); };
+		ikRow.AddChild( ikDel );
+		var ikSolve = Wrap( new Button { Text = "Solve", TooltipText = "Solve once from the bind pose toward the end bone's own position (a wiring check)." } );
+		ikSolve.Pressed += () =>
+		{
+			if ( Doc is not { } d ) return;
+			var list = GeppettoRigIk.List( d );
+			if ( _ikPick.Selected < 0 || _ikPick.Selected >= list.Count ) { _wave2Info.Text = "Nothing selected."; return; }
+			int end = d.Studio.Rig.IndexOf( list[_ikPick.Selected].EndBone );
+			if ( end < 0 ) { _wave2Info.Text = "End bone not on the rig."; return; }
+			var target = d.Studio.Rig.WorldBind( end ).Origin;
+			var (pos, err) = GeppettoRigIk.SolveOnce( d, _ikPick.Selected, target );
+			_wave2Info.Text = err ?? $"Solved end at ({pos.x:0.##}, {pos.y:0.##}, {pos.z:0.##}).";
+		};
+		ikRow.AddChild( ikSolve );
+
+		_wave2Info = Wrapped( "" );
+		_wave2Info.Modulate = new Color( 1, 1, 1, 0.6f );
+		w2.AddChild( _wave2Info );
 
 		_menu = new PopupMenu();
 		_menu.AddItem( "Rename", 0 );
@@ -403,6 +506,20 @@ public partial class RigPanel : EditorDock
 			}
 			_problems.AddChild( box );
 		}
+		SyncWave2( doc );
+	}
+
+	void SyncWave2( GeppettoDocument? doc )
+	{
+		_corrPick.Clear();
+		foreach ( var c in doc?.Studio.Correctives ?? Enumerable.Empty<CorrectiveShape>() )
+			_corrPick.AddItem( c.ToString() );
+		_drvPick.Clear();
+		foreach ( var d in doc?.Studio.Drivers ?? Enumerable.Empty<MorphDriver>() )
+			_drvPick.AddItem( $"{d.Morph} <- {d.Bone}" );
+		_ikPick.Clear();
+		foreach ( var k in doc?.Studio.IkChains ?? Enumerable.Empty<RigIk>() )
+			_ikPick.AddItem( k.Name );
 	}
 
 	static float Axis( Vec3 v, int k ) => k == 0 ? v.x : k == 1 ? v.y : v.z;
