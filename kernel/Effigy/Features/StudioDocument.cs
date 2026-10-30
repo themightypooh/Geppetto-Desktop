@@ -344,6 +344,11 @@ public static class StudioDocument
 				sb.Append( "\tbind " ).Append( body ).Append( ' ' ).Append( OneLine( bone ) ).Append( '\n' );
 		}
 
+		if ( !string.IsNullOrWhiteSpace( rig.RootBone ) )
+			sb.Append( "\troot " ).Append( OneLine( rig.RootBone ) ).Append( '\n' );
+		if ( !string.IsNullOrWhiteSpace( rig.HipsBone ) )
+			sb.Append( "\thips " ).Append( OneLine( rig.HipsBone ) ).Append( '\n' );
+
 		// INSIDE THE RIG BLOCK so an older reader skips it rather than refusing the file — ReadRig
 		// ignores keys it does not recognise. Weight paint without bones is not a thing, so a
 		// document that has never been rigged still writes no rig block at all.
@@ -1025,6 +1030,18 @@ public static class StudioDocument
 			if ( line.StartsWith( "bone " ) )
 			{
 				ReadBone( studio, lines, ref i );
+				continue;
+			}
+
+			if ( line.StartsWith( "root " ) )
+			{
+				studio.Rig.RootBone = line[5..].Trim();
+				continue;
+			}
+
+			if ( line.StartsWith( "hips " ) )
+			{
+				studio.Rig.HipsBone = line[5..].Trim();
 				continue;
 			}
 

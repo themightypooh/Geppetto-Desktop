@@ -59,6 +59,13 @@ public sealed class Skeleton
 {
 	public List<Bone> Bones = new();
 
+	/// <summary>Name of the bone the exporter and retargeter treat as the character root.
+	/// Empty means "the first root bone". Set from the Rig panel, saved in the .effigy.</summary>
+	public string RootBone = "";
+
+	/// <summary>Name of the hips bone. Empty means unset.</summary>
+	public string HipsBone = "";
+
 	public int Count => Bones.Count;
 
 	/// <summary>
@@ -439,7 +446,7 @@ public sealed class Skeleton
 
 			var local = mappedParent < 0 ? worlds[i] : worlds[mappedParent].Inverse * worlds[i];
 
-			newBones.Add( new Bone( bone.Name, mappedParent, local, bone.Length ) );
+			newBones.Add( new Bone( bone.Name, mappedParent, local, bone.Length ) { Soft = bone.Soft?.Clone() } );
 			oldToNew[i] = newBones.Count - 1;
 		}
 

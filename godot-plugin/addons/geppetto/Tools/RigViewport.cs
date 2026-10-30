@@ -120,10 +120,14 @@ sealed class RigBoneTool : IGeppettoViewportTool
 	public static bool PlaceMiddle = true;
 	/// <summary>Snap every joint onto y = 0, the plane Mirror reflects across.</summary>
 	public static bool SnapCentre;
+	/// <summary>Place each bone with its mirror across y = 0 (_L/_R), so a limb chain builds both
+	/// sides at once. Shared with the Rig panel's Mirror box.</summary>
+	public static bool MirrorPlace;
 
 	readonly GeppettoCharacter _c;
 	readonly GeppettoDocument _doc;
 	int _chainParent;
+	readonly Dictionary<int, int> _mirrorOf = new();
 	Vec3? _head;
 	Camera3D? _cam;
 	(Vec3 Point, float? Thickness)? _hover;
@@ -140,7 +144,7 @@ sealed class RigBoneTool : IGeppettoViewportTool
 		GeppettoToolContext.Say( Prompt );
 	}
 
-	string Where => ( PlaceMiddle ? "through the middle of the model" : "on the surface" ) + ( SnapCentre ? " and snapped to y=0" : "" );
+	string Where => ( PlaceMiddle ? "through the middle of the model" : "on the surface" ) + ( SnapCentre ? " and snapped to y=0" : "" ) + ( MirrorPlace ? ", mirrored" : "" );
 
 	string Prompt => _head == null
 		? $"Click to place a bone {Where}. Click again to extend the chain. Esc when done."
@@ -201,7 +205,15 @@ sealed class RigBoneTool : IGeppettoViewportTool
 			return true;
 		}
 
-		int index = GeppettoRig.AddBone( _doc, _chainParent, head, p.Point );
+		int index;
+		if ( MirrorPlace )
+		{
+			int mp = _chainParent >= 0 && _mirrorOf.TryGetValue( _chainParent, out var m ) ? m : _chainParent;
+			var (l, r) = GeppettoRig.AddBoneMirror( _doc, _chainParent, head, p.Point, mp );
+			index = l;
+			if ( l >= 0 && r >= 0 ) _mirrorOf[l] = r;
+		}
+		else index = GeppettoRig.AddBone( _doc, _chainParent, head, p.Point );
 		if ( index >= 0 )
 		{
 			_chainParent = index;

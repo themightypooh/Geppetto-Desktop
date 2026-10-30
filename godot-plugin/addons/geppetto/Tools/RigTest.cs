@@ -276,6 +276,48 @@ public partial class RigTest : RefCounted
 			doc.Session.History.Redo();
 		}
 
+		// ---- chains, root/hips ---------------------------------------------------------------
+		{
+			var (mpl, mpr) = GeppettoRig.AddBoneMirror( doc, -1, new Vec3( 0, 0, 0 ), new Vec3( 2, 4, 0 ), -1 );
+			string mln = mpl >= 0 ? rig.Bones[mpl].Name : "", mrn = mpr >= 0 ? rig.Bones[mpr].Name : "";
+			Check( "mirror place: pair added", mpl >= 0 && mpr >= 0 && mln.EndsWith( "_L" ) && mrn.EndsWith( "_R" )
+				&& rig.Bones[mpl].Parent == -1 && rig.Bones[mpr].Parent == -1, $"{mln},{mrn}" );
+			var hl = rig.HeadWorld( mpl ); var hr = rig.HeadWorld( mpr );
+			Check( "mirror place: reflected across y=0", MathF.Abs( hl.x - hr.x ) < 1e-3f && MathF.Abs( hl.y + hr.y ) < 1e-3f
+				&& MathF.Abs( hl.z - hr.z ) < 1e-3f, $"{hl} vs {hr}" );
+			doc.Session.History.Undo();
+			Check( "mirror place: one undo removes both", rig.IndexOf( mln ) < 0 && rig.IndexOf( mrn ) < 0 );
+			doc.Session.History.Redo();
+			Check( "mirror place: redo brings both back", rig.IndexOf( mln ) >= 0 && rig.IndexOf( mrn ) >= 0 );
+
+			int cr = GeppettoRig.AddBone( doc, -1, new Vec3( 0, 0, 0 ), new Vec3( 0, 5, 0 ), "chain_root" );
+			int cm = GeppettoRig.AddBone( doc, cr, new Vec3( 0, 5, 0 ), new Vec3( 0, 10, 0 ), "chain_mid" );
+			GeppettoRig.AddBone( doc, cm, new Vec3( 0, 10, 0 ), new Vec3( 0, 15, 0 ), "chain_tip" );
+			Check( "delete chain: removes the subtree", GeppettoRig.DeleteChain( doc, cr )
+				&& rig.IndexOf( "chain_root" ) < 0 && rig.IndexOf( "chain_mid" ) < 0 && rig.IndexOf( "chain_tip" ) < 0 );
+			doc.Session.History.Undo();
+			Check( "delete chain: undo restores", rig.IndexOf( "chain_tip" ) >= 0 );
+			doc.Session.History.Redo();
+			Check( "delete chain: redo removes again", rig.IndexOf( "chain_tip" ) < 0 );
+
+			int sh3 = rig.IndexOf( "shoulder_L" );
+			GeppettoRig.SetRootBone( doc, sh3 );
+			GeppettoRig.SetHipsBone( doc, rig.IndexOf( "hand_L" ) );
+			Check( "root/hips: set", doc.Studio.Rig.RootBone == "shoulder_L" && doc.Studio.Rig.HipsBone == "hand_L",
+				$"'{doc.Studio.Rig.RootBone}'/'{doc.Studio.Rig.HipsBone}'" );
+			GeppettoRig.RenameBone( doc, sh3, "shoulder_renamed" );
+			Check( "root: rename carries", doc.Studio.Rig.RootBone == "shoulder_renamed", doc.Studio.Rig.RootBone );
+			var saved2 = doc.Bridge.SaveAll();
+			var reread2 = StudioDocument.ReadFile( path );
+			Check( "root/hips: save+reload keeps them",
+				reread2.Rig.RootBone == "shoulder_renamed" && reread2.Rig.HipsBone == "hand_L",
+				$"'{reread2.Rig.RootBone}'/'{reread2.Rig.HipsBone}'" );
+			doc.Session.History.Undo(); // rename
+			doc.Session.History.Undo(); // hips
+			doc.Session.History.Undo(); // root
+			Check( "root/hips: undo clears", doc.Studio.Rig.RootBone == "" && doc.Studio.Rig.HipsBone == "" );
+		}
+
 		// ---- the scene: ApplyTo rebuilds the Skeleton3D ------------------------------------
 		var skel = scene.FindChild( "Skeleton3D", true, false ) as Skeleton3D;
 		doc.ApplyTo( scene );
@@ -320,7 +362,7 @@ public partial class RigTest : RefCounted
 
 		var again = importer._ImportScene( path, 0, new Godot.Collections.Dictionary() ) as Node3D;
 		var skel2 = again?.FindChild( "Skeleton3D", true, false ) as Skeleton3D;
-		Check( "import: new bone count", skel2 != null && skel2.GetBoneCount() == n0 + 5 && skel2.GetBoneCount() == reread.Rig.Count,
+		Check( "import: new bone count", skel2 != null && skel2.GetBoneCount() == n0 + 7 && skel2.GetBoneCount() == reread.Rig.Count,
 			skel2 == null ? "no skeleton" : $"{skel2.GetBoneCount()} (was {n0})" );
 		Check( "import: mirrored bone present", skel2 != null && skel2.FindBone( "upperarm_R" ) >= 0 );
 		again?.Free();

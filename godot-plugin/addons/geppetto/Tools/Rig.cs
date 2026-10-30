@@ -126,6 +126,16 @@ public static partial class GeppettoTools
 			return GeppettoRig.PasteWeights( doc );
 		} );
 
+		Register( "Rig", "Delete Chain", ctx =>
+		{
+			if ( ctx.Doc is not { } doc || ctx.Character is not { } c ) return ctx.Need();
+			RigPanel.Open( ctx.Plugin, c );
+			int sel = GeppettoRig.SelectedIndex( doc );
+			if ( sel < 0 ) return PickBone( c, "Delete Chain", "Click the bone whose chain to delete. Esc to cancel.", b => GeppettoRig.DeleteChain( doc, b ) );
+			GeppettoRig.DeleteChain( doc, sel );
+			return true;
+		} );
+
 		// --- Soft ---
 		Register( "Rig", "Make Soft", ctx =>
 		{
@@ -298,12 +308,16 @@ public static class GeppettoRig
 		public readonly List<Bone> Bones;
 		public readonly Dictionary<string, string> BodyBoneMap;
 		public readonly List<(CorrectiveShape Shape, string Bone)> Correctives;
+		public readonly string RootBone;
+		public readonly string HipsBone;
 
 		public Snapshot( PartStudio s )
 		{
 			Bones = s.Rig.Bones.Select( b => b.Clone() ).ToList();
 			BodyBoneMap = new Dictionary<string, string>( s.BodyBoneMap );
 			Correctives = s.Correctives.Select( c => (c, c.Bone) ).ToList();
+			RootBone = s.Rig.RootBone;
+			HipsBone = s.Rig.HipsBone;
 		}
 
 		public void Restore( PartStudio s )
@@ -313,11 +327,14 @@ public static class GeppettoRig
 			s.BodyBoneMap.Clear();
 			foreach ( var kv in BodyBoneMap ) s.BodyBoneMap[kv.Key] = kv.Value;
 			foreach ( var (shape, bone) in Correctives ) shape.Bone = bone;
+			s.Rig.RootBone = RootBone;
+			s.Rig.HipsBone = HipsBone;
 		}
 
 		public bool Same( Snapshot o )
 		{
 			if ( Bones.Count != o.Bones.Count || BodyBoneMap.Count != o.BodyBoneMap.Count ) return false;
+			if ( RootBone != o.RootBone || HipsBone != o.HipsBone ) return false;
 			for ( int i = 0; i < Bones.Count; i++ )
 			{
 				Bone a = Bones[i], b = o.Bones[i];
@@ -444,6 +461,8 @@ public static class GeppettoRig
 			s.Rig.RemoveBone( index );
 			foreach ( var body in s.BodyBoneMap.Where( kv => kv.Value == name ).Select( kv => kv.Key ).ToList() )
 				s.BodyBoneMap.Remove( body );
+			if ( s.Rig.RootBone == name ) s.Rig.RootBone = "";
+			if ( s.Rig.HipsBone == name ) s.Rig.HipsBone = "";
 			return true;
 		} );
 		if ( ok ) { Select( doc, -1 ); GeppettoToolContext.Say( $"Deleted bone {name}." ); }
@@ -471,6 +490,8 @@ public static class GeppettoRig
 			if ( i >= 0 ) rig.RenameBone( i, to );
 			foreach ( var body in studio.BodyBoneMap.Where( kv => kv.Value == from ).Select( kv => kv.Key ).ToList() ) studio.BodyBoneMap[body] = to;
 			foreach ( var c in studio.Correctives.Where( c => c.Bone == from ) ) c.Bone = to;
+			if ( rig.RootBone == from ) rig.RootBone = to;
+			if ( rig.HipsBone == from ) rig.HipsBone = to;
 			studio.WeightPaint?.RenameBone( from, to );
 			if ( Selected.TryGetValue( doc.DiskPath, out var sel ) && sel == from ) Selected[doc.DiskPath] = to;
 		}
@@ -996,6 +1017,82 @@ public static class GeppettoRig
 		if ( !ok ) return false;
 		GeppettoToolContext.Say( $"Pasted '{from}' onto '{to}' on {touched} vertices." );
 		return true;
+	}
+
+	// =========================================================================================
+	// Chains, root/hips, export
+	// =========================================================================================
+
+	/// <summary>Deletes a bone and its whole subtree. Children do not re-parent — the chain goes.
+	/// One undo step.</summary>
+	public static bool DeleteChain( GeppettoDocument doc, int index )
+	{
+		var rig = doc.Studio.Rig;
+		if ( index < 0 || index >= rig.Count ) return !Refuse( "Delete chain: that bone no longer exists." );
+		var kill = new List<int> { index };
+		for ( int i = 0; i < kill.Count; i++ )
+			for ( int c = 0; c < rig.Count; c++ )
+				if ( rig.Bones[c].Parent == kill[i] && !kill.Contains( c ) )
+					kill.Add( c );
+		var names = kill.Select( i => rig.Bones[i].Name ).ToList();
+		bool ok = RigEdit( doc, $"delete chain {rig.Bones[index].Name} ({kill.Count} bones)", s =>
+		{
+			foreach ( int i in kill.OrderByDescending( x => x ) )
+				s.Rig.RemoveBone( i );
+			foreach ( var body in s.BodyBoneMap.Where( kv => names.Contains( kv.Value ) ).Select( kv => kv.Key ).ToList() )
+				s.BodyBoneMap.Remove( body );
+			if ( names.Contains( s.Rig.RootBone ) ) s.Rig.RootBone = "";
+			if ( names.Contains( s.Rig.HipsBone ) ) s.Rig.HipsBone = "";
+			return true;
+		} );
+		if ( ok ) { Select( doc, -1 ); GeppettoToolContext.Say( $"Deleted {names[0]} and its chain ({kill.Count} bones)." ); }
+		return ok;
+	}
+
+	/// <summary>Places a bone and its mirror across Y=0 in one undo step: name_L under parent,
+	/// name_R under mirrorParent. Returns both indices, or (-1, -1) when refused.</summary>
+	public static (int Left, int Right) AddBoneMirror( GeppettoDocument doc, int parent, Vec3 head, Vec3 tail, int mirrorParent )
+	{
+		var rig = doc.Studio.Rig;
+		if ( ( tail - head ).Length < 0.01f ) { Refuse( "Bone too short — click further from the last joint." ); return (-1, -1); }
+		string b = rig.UniqueName( NextBoneName( rig ) );
+		Vec3 mhead = new Vec3( head.x, -head.y, head.z );
+		Vec3 mtail = new Vec3( tail.x, -tail.y, tail.z );
+		int left = -1, right = -1;
+		bool ok = RigEdit( doc, $"add bone {b}_L + {b}_R", s =>
+		{
+			left = s.Rig.AddBoneFromPoints( b + "_L", parent, head, tail );
+			right = s.Rig.AddBoneFromPoints( b + "_R", mirrorParent, mhead, mtail );
+			return true;
+		} );
+		if ( !ok ) return (-1, -1);
+		Select( doc, left );
+		return (left, right);
+	}
+
+	/// <summary>Names a bone the character root (index &lt; 0 clears it). The exporter and a future
+	/// retargeter agree on this name. One undo step.</summary>
+	public static bool SetRootBone( GeppettoDocument doc, int index )
+	{
+		var rig = doc.Studio.Rig;
+		string name = index >= 0 && index < rig.Count ? rig.Bones[index].Name : "";
+		if ( rig.RootBone == name ) return false;
+		bool ok = RigEdit( doc, name == "" ? "clear root bone" : $"root bone {name}",
+			s => { s.Rig.RootBone = name; return true; } );
+		if ( ok ) GeppettoToolContext.Say( name == "" ? "Root bone cleared." : $"'{name}' is the root bone now." );
+		return ok;
+	}
+
+	/// <summary>Names a bone the hips bone (index &lt; 0 clears it). One undo step.</summary>
+	public static bool SetHipsBone( GeppettoDocument doc, int index )
+	{
+		var rig = doc.Studio.Rig;
+		string name = index >= 0 && index < rig.Count ? rig.Bones[index].Name : "";
+		if ( rig.HipsBone == name ) return false;
+		bool ok = RigEdit( doc, name == "" ? "clear hips bone" : $"hips bone {name}",
+			s => { s.Rig.HipsBone = name; return true; } );
+		if ( ok ) GeppettoToolContext.Say( name == "" ? "Hips bone cleared." : $"'{name}' is the hips bone now." );
+		return ok;
 	}
 
 	// =========================================================================================

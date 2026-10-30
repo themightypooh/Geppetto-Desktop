@@ -114,6 +114,14 @@ public partial class RigPanel : EditorDock
 		};
 		_snap.Toggled += on => { RigBoneTool.SnapCentre = on; GeppettoTools.Redraw(); };
 		row.AddChild( _snap );
+		var mirrorPlace = new CheckBox
+		{
+			Text = "Mirror",
+			ButtonPressed = RigBoneTool.MirrorPlace,
+			TooltipText = "Place each bone with its mirror across y=0 (_L/_R), so a limb chain builds both sides at once.",
+		};
+		mirrorPlace.Toggled += on => RigBoneTool.MirrorPlace = on;
+		row.AddChild( mirrorPlace );
 
 		// The bone tree.
 		_tree = new Tree
@@ -150,6 +158,9 @@ public partial class RigPanel : EditorDock
 		_menu.AddSubmenuNodeItem( "Parent to", _parentMenu, 1 );
 		_menu.AddSeparator();
 		_menu.AddItem( "Delete", 2 );
+		_menu.AddSeparator();
+		_menu.AddItem( "Set as Root", 3 );
+		_menu.AddItem( "Set as Hips", 4 );
 		_menu.IdPressed += OnMenu;
 		_parentMenu.IndexPressed += OnParentPicked;
 		AddChild( _menu );
@@ -333,7 +344,9 @@ public partial class RigPanel : EditorDock
 		if ( has )
 		{
 			var bone = rig!.Bones[sel];
-			_name.Text = bone.Parent >= 0 ? $"{bone.Name}  (child of {rig.Bones[bone.Parent].Name})" : $"{bone.Name}  (root)";
+			_name.Text = bone.Parent >= 0 ? $"{bone.Name}  (child of {rig.Bones[bone.Parent].Name})" : $"{bone.Name}  (root)"
+				+ ( rig.RootBone == bone.Name ? "  [ROOT]" : "" )
+				+ ( rig.HipsBone == bone.Name ? "  [HIPS]" : "" );
 			var head = rig.HeadWorld( sel );
 			var tail = rig.TailWorld( sel );
 			for ( int k = 0; k < 3; k++ ) { _head[k].Value = Axis( head, k ); _tail[k].Value = Axis( tail, k ); }
@@ -478,6 +491,8 @@ public partial class RigPanel : EditorDock
 		if ( Doc is not { } d || _menuBone < 0 ) return;
 		if ( id == 0 && _tree.GetSelected() is { } it ) BeginRename( it );
 		else if ( id == 2 ) GeppettoRig.DeleteBone( d, _menuBone );
+		else if ( id == 3 ) GeppettoRig.SetRootBone( d, _menuBone );
+		else if ( id == 4 ) GeppettoRig.SetHipsBone( d, _menuBone );
 	}
 
 	void OnParentPicked( long index )
