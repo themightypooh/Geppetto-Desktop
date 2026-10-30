@@ -71,6 +71,13 @@ public static partial class GeppettoTools
 			return true;
 		} );
 
+		Register( "Rig", "Auto Weights", ctx =>
+		{
+			if ( ctx.Doc is not { } doc || ctx.Character is not { } c ) return ctx.Need();
+			RigPanel.Open( ctx.Plugin, c );
+			return GeppettoRig.AutoWeights( doc );
+		} );
+
 		// --- Soft ---
 		Register( "Rig", "Make Soft", ctx =>
 		{
@@ -504,6 +511,66 @@ public static class GeppettoRig
 
 	public static List<Body> BodiesOnBone( GeppettoDocument doc, string boneName ) =>
 		doc.Studio.Bodies.Where( b => doc.Studio.BodyBoneMap.TryGetValue( b.Id, out var n ) && n == boneName ).ToList();
+
+	// =========================================================================================
+	// Weights
+	// =========================================================================================
+
+	/// <summary>Automatic skin weights: bone heat over the surface (no thigh-to-thigh leak),
+	/// falling back to geodesic voxel where heat has no answer, with a BindReport saying which
+	/// method ran where. Unlike s&amp;box, Heat is wired in from day one (s&amp;box's
+	/// RigFeatures declared a HeatBinder hook and never assigned it). The result is baked into
+	/// the studio's WeightPaint layer as one undo step, so Paint Weights paints over it and the
+	/// .effigy saves it. Bodies pinned with Assign Body stay rigid to their pinned bone.</summary>
+	public static bool AutoWeights( GeppettoDocument doc, BindMethod method = BindMethod.Heat )
+	{
+		var studio = doc.Studio;
+		var rig = studio.Rig;
+		if ( rig.Count == 0 ) return !Refuse( "Auto Weights needs a skeleton — place a bone first." );
+
+		var (mesh, ranges) = studio.ToMeshWithBodies();
+		if ( mesh.VertexCount == 0 ) return !Refuse( "Auto Weights needs a body to weight — add a primitive or extrude a sketch first." );
+
+		SkinWeights weights;
+		BindReport report;
+		try
+		{
+			weights = method == BindMethod.Voxel
+				? SkinBinder.BindVoxel( mesh, rig, out report, new AutoWeightOptions() )
+				: SkinBinder.BindHeat( mesh, rig, out report, new AutoWeightOptions(), ranges );
+		}
+		catch ( Exception e ) { return !Refuse( $"Auto Weights could not bind the mesh: {e.Message}" ); }
+
+		// Assign Body pins win: a pinned body's vertices go 100% to their pinned bone.
+		foreach ( var range in ranges )
+			if ( studio.BodyBoneMap.TryGetValue( range.BodyId, out var boneName ) )
+			{
+				int bone = rig.IndexOf( boneName );
+				if ( bone < 0 ) continue;
+				var pinned = new[] { new BoneWeight( bone, 1f ) };
+				for ( int v = range.Start; v < range.Start + range.Count && v < weights.Count; v++ )
+					weights[v] = pinned;
+			}
+
+		var layer = new WeightPaintLayer( mesh );
+		for ( int v = 0; v < weights.Count; v++ )
+			layer.Capture( v, weights[v], rig );
+
+		bool had = studio.WeightPaint is { Count: > 0 };
+		var before = studio.WeightPaint;
+		var after = layer;
+		bool ok = doc.Execute( new DelegateEditCommand( "Auto weights",
+			execute: () => studio.WeightPaint = after,
+			undo: () => studio.WeightPaint = before ), "Geppetto: auto weights" );
+		if ( !ok ) return false;
+
+		foreach ( var note in report.Notes ) GD.Print( $"[weights] {note}" );
+		GeppettoToolContext.Say( $"Auto weights: {report.Used} ran over {mesh.VertexCount} vertices"
+			+ ( report.RigidVertices > 0 ? $", {report.RigidVertices} rigid" : "" )
+			+ ( had ? ", replacing your earlier paint (undo brings it back)" : "" )
+			+ ". See the Output panel for the bind report." );
+		return true;
+	}
 
 	// =========================================================================================
 	// Soft bones

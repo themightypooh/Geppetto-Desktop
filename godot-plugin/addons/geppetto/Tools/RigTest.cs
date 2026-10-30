@@ -137,6 +137,42 @@ public partial class RigTest : RefCounted
 		Check( "soft: Make Soft", GeppettoRig.SetSoft( doc, hand, true ) && rig.Bones[hand].Soft != null );
 		Check( "soft: value edit", GeppettoRig.SetSoftValue( doc, hand, 0, 123f ) && rig.Bones[hand].Soft!.Stiffness == 123f );
 
+		// ---- auto weights ------------------------------------------------------------------
+		{
+			var studioW = doc.Studio;
+			bool ran = GeppettoRig.AutoWeights( doc );
+			Check( "auto weights: ran", ran );
+			var layer = studioW.WeightPaint;
+			Check( "auto weights: layer exists", layer != null && layer.Count > 0, layer == null ? "null" : layer.Count.ToString() );
+			if ( layer != null )
+			{
+				var (am, aranges) = studioW.ToMeshWithBodies();
+				Check( "auto weights: every vertex got a weight", layer.Count == am.VertexCount, $"{layer.Count}/{am.VertexCount}" );
+				float worst = 0f;
+				int over = 0;
+				foreach ( var (vertex, ws) in layer.Painted )
+				{
+					float sum = 0f;
+					foreach ( var (_, w) in ws ) sum += w;
+					worst = MathF.Max( worst, MathF.Abs( sum - 1f ) );
+					if ( ws.Count > 4 ) over++;
+				}
+				Check( "auto weights: partition of unity", worst < 1e-3f, worst.ToString( "0.#####" ) );
+				Check( "auto weights: max 4 influences", over == 0, over.ToString() );
+				var r0 = aranges.First( r => r.BodyId == bodyId );
+				bool rigid = true;
+				foreach ( var (vertex, ws) in layer.Painted )
+					if ( vertex >= r0.Start && vertex < r0.Start + r0.Count
+						&& ( ws.Count != 1 || ws[0].Bone != "shoulder_L" || MathF.Abs( ws[0].Weight - 1f ) > 1e-4f ) )
+					{ rigid = false; break; }
+				Check( "auto weights: pinned body stays rigid to shoulder_L", rigid );
+			}
+			doc.Session.History.Undo();
+			Check( "auto weights: undo clears the layer", studioW.WeightPaint is not { Count: > 0 } );
+			doc.Session.History.Redo();
+			Check( "auto weights: redo brings it back", studioW.WeightPaint is { Count: > 0 } );
+		}
+
 		// ---- the scene: ApplyTo rebuilds the Skeleton3D ------------------------------------
 		var skel = scene.FindChild( "Skeleton3D", true, false ) as Skeleton3D;
 		doc.ApplyTo( scene );
