@@ -1,0 +1,47 @@
+effigy 1
+rollback 2147483647
+feature SketchFeature
+	id c00e95b8
+	name Sketch 1
+	suppressed 0
+	visible 1
+	param Curves rect:0,0,16,8
+	param Plane 0
+	param PlaneOffset 0
+	sketch Sketch
+		tolerance 0.01
+		plane 0 0 0 1 0 0 0 1 0
+		point 0 0
+		point 16 0
+		point 16 8
+		point 0 8
+		line 0 1 4193d74f 0
+		line 1 2 2c5f42ea 0
+		line 2 3 bfcf9362 0
+		line 3 0 a88396bd 0
+	endsketch
+	enum Status UnderDefined
+end
+feature CadToMapFeature
+	id ad5010d9
+	name CAD to Map 1
+	suppressed 0
+	visible 1
+	param Angle 360
+	param AxisDirection 1 0 0
+	param AxisPoint 0 0 0
+	param Conversion 0
+	param Distance 4
+	param Flip 0
+	param MapId test-room
+	param MaterialName brick/brickwall001
+	vec3s Path
+	vec2s RegionSeeds
+	param Result 0
+	param SecondDistance 0
+	texts Sections
+	param Segments 24
+	param Sketch 0
+	param StartOffset 0
+	param Symmetric 0
+end

@@ -1,0 +1,17 @@
+{
+  "comment": "Prop placement fixture: a sealed room with a flat floor (top z=0) and a flat ceiling (bottom z=128), no displacements. crate_above_floor sits 100 above the floor; lamp_below_ceiling sits 64 above the floor, 64 below the ceiling.",
+  "brushes": [
+    { "id": "floor", "min": [-144, -144, -16], "max": [144, 144, 0], "detail": false, "material": "concrete" },
+    { "id": "ceiling", "min": [-144, -144, 128], "max": [144, 144, 144], "detail": false, "material": "concrete" },
+    { "id": "wall-west", "min": [-144, -144, 0], "max": [-128, 144, 128], "detail": false, "material": "concrete" },
+    { "id": "wall-east", "min": [128, -144, 0], "max": [144, 144, 128], "detail": false, "material": "concrete" },
+    { "id": "wall-south", "min": [-128, -144, 0], "max": [128, -128, 128], "detail": false, "material": "concrete" },
+    { "id": "wall-north", "min": [-128, 128, 0], "max": [128, 144, 128], "detail": false, "material": "concrete" }
+  ],
+  "entities": [
+    { "class": "info_player_start", "origin": [0, 0, 0], "yaw": 0 },
+    { "class": "prop_static", "origin": [0, 0, 100], "yaw": 0, "keyvalues": { "model": "props/crate.mdl", "targetname": "crate_above_floor" } },
+    { "class": "prop_static", "origin": [0, 0, 64], "yaw": 45, "keyvalues": { "model": "props/lamp.mdl", "targetname": "lamp_below_ceiling" } }
+  ],
+  "displacements": []
+}

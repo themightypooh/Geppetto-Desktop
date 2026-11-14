@@ -109,6 +109,75 @@ public sealed class SculptMask
 	}
 
 	/// <summary>
+	/// Soften the mask's edges (Blender's Smooth Mask): each vertex takes the average of itself and
+	/// its edge neighbours, <paramref name="iterations"/> times. A hard mask edge becomes a ramp a
+	/// ring or two wide, so a stroke fades across it instead of stopping dead. A uniform mask (all
+	/// held or all free) is unchanged.
+	/// </summary>
+	public void Blur( PolyMesh mesh, int iterations = 1 )
+	{
+		if ( mesh is null || mesh.VertexCount != _values.Length || iterations < 1 )
+			return;
+
+		var edges = mesh.BuildVertexEdges();
+		var next = new float[_values.Length];
+		for ( var it = 0; it < iterations; it++ )
+		{
+			Smoothed( edges, _values, next );
+			Array.Copy( next, _values, _values.Length );
+		}
+
+		Revision++;
+	}
+
+	/// <summary>
+	/// Harden the mask's edges (Blender's Sharpen Mask): each vertex is pushed away from its
+	/// neighbourhood average, so a soft ramp tightens toward a clean held/free boundary. The
+	/// opposite of <see cref="Blur"/>; a fully held or fully free mask is unchanged.
+	/// </summary>
+	public void Sharpen( PolyMesh mesh, int iterations = 1 )
+	{
+		if ( mesh is null || mesh.VertexCount != _values.Length || iterations < 1 )
+			return;
+
+		var edges = mesh.BuildVertexEdges();
+		var avg = new float[_values.Length];
+		for ( var it = 0; it < iterations; it++ )
+		{
+			Smoothed( edges, _values, avg );
+			for ( var i = 0; i < _values.Length; i++ )
+			{
+				// Unsharp mask, then a contrast push about 0.5 so a gentle ramp actually closes up.
+				var v = _values[i] + ( _values[i] - avg[i] );
+				v = 0.5f + ( v - 0.5f ) * 1.5f;
+				_values[i] = Math.Clamp( v, 0f, 1f );
+			}
+		}
+
+		Revision++;
+	}
+
+	static void Smoothed( List<EdgeKey>[] edges, float[] src, float[] dst )
+	{
+		for ( var v = 0; v < src.Length; v++ )
+		{
+			var sum = src[v];
+			var n = 1;
+			var list = edges[v];
+			if ( list is not null )
+			{
+				foreach ( var key in list )
+				{
+					sum += src[key.A == v ? key.B : key.A];
+					n++;
+				}
+			}
+
+			dst[v] = sum / n;
+		}
+	}
+
+	/// <summary>
 	/// Hold everything except the connected piece <paramref name="seed"/> is on — a face set by
 	/// topology: an ear, a hand, a separate eye, whatever the cursor is over, isolated for
 	/// sculpting without a mask brush ever being picked up.

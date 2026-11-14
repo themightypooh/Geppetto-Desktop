@@ -133,6 +133,12 @@ public static partial class UVUnwrap
 		if ( mesh is null )
 			throw new ArgumentNullException( nameof( mesh ) );
 
+		if ( seams is null && mode == UnwrapMode.Angle && flatten == UnwrapFlatten.Conformal )
+		{
+			var native = TryXAtlas( mesh, margin );
+			if ( native is not null )
+				return native;
+		}
 		return UnwrapAll( new[] { mesh }, angleDegrees, margin, seams, mode, flatten );
 	}
 
@@ -159,26 +165,55 @@ public static partial class UVUnwrap
 
 		margin = Math.Clamp( margin, 0f, 0.2f );
 
-		var flattened = new List<Chart>();
-		var skipped = 0;
-		var faceCount = 0;
+		var clock = System.Diagnostics.Stopwatch.StartNew();
+		var seamSets = new IReadOnlySet<EdgeKey>[meshes.Count];
 
 		for ( var owner = 0; owner < meshes.Count; owner++ )
 		{
 			var mesh = meshes[owner] ?? throw new ArgumentException( "A mesh in the list is null.", nameof( meshes ) );
-			var meshSeams = seams is null ? (IReadOnlySet<EdgeKey>)mesh.LiveSeams() : owner == 0 ? seams : null;
+			seamSets[owner] = seams is null ? (IReadOnlySet<EdgeKey>)mesh.LiveSeams() : owner == 0 ? seams : null;
+		}
+
+		var key = CacheByTopology ? TopologyKey( meshes, seamSets, angleDegrees, margin, mode, flatten ) : default;
+
+		if ( CacheByTopology && TryCached( meshes, key, out var cachedReport ) )
+		{
+			Trace( "cache", clock, meshes );
+			return cachedReport;
+		}
+
+		var flattened = new List<Chart>();
+		var skipped = 0;
+		var faceCount = 0;
+		var proxied = 0;
+
+		for ( var owner = 0; owner < meshes.Count; owner++ )
+		{
+			var mesh = meshes[owner];
+			var meshSeams = seamSets[owner];
 			var first = flattened.Count;
 			faceCount += mesh.FaceCount;
+
+			var context = new FlattenContext( mesh, meshSeams, mode );
+
+			if ( flatten == UnwrapFlatten.Conformal && ProxyWorthIt( mesh, meshSeams )
+				&& FlattenByProxy( context, angleDegrees, flattened, ref skipped ) )
+			{
+				proxied++;
+
+				for ( var i = first; i < flattened.Count; i++ )
+					flattened[i].Owner = owner;
+
+				continue;
+			}
 
 			var charts = mode == UnwrapMode.Organic
 				? Components( mesh, meshSeams, 90f )
 				: BuildCharts( mesh, angleDegrees, meshSeams );
 
-			var context = new FlattenContext( mesh, meshSeams, mode );
-
-			foreach ( var faces in charts )
+			if ( flatten == UnwrapFlatten.Planar )
 			{
-				if ( flatten == UnwrapFlatten.Planar )
+				foreach ( var faces in charts )
 				{
 					var chart = Flatten( mesh, faces );
 
@@ -186,11 +221,11 @@ public static partial class UVUnwrap
 						skipped += faces.Count;
 					else
 						flattened.Add( chart );
-
-					continue;
 				}
-
-				skipped += FlattenConformal( context, faces, new HashSet<EdgeKey>(), 0, flattened );
+			}
+			else
+			{
+				skipped += FlattenCharts( context, charts, null, flattened );
 			}
 
 			for ( var i = first; i < flattened.Count; i++ )
@@ -225,7 +260,13 @@ public static partial class UVUnwrap
 			max = MathF.Max( max, worst );
 		}
 
-		return new UnwrapReport( flattened.Count, faceCount - skipped, skipped, scale, measured > 0 ? meanSum / measured : 0f, max );
+		var report = new UnwrapReport( flattened.Count, faceCount - skipped, skipped, scale, measured > 0 ? meanSum / measured : 0f, max );
+
+		if ( CacheByTopology )
+			Store( key, meshes, written, report );
+
+		Trace( proxied > 0 ? "proxy" : "full", clock, meshes );
+		return report;
 	}
 
 	// --- 1. charting ------------------------------------------------------------------------
@@ -850,7 +891,8 @@ public static partial class UVUnwrap
 	/// concave edge is expensive - the two halves meet in the creases. See <see cref="Split"/>.
 	/// </summary>
 	static int FlattenConformal( FlattenContext ctx, List<int> faces, HashSet<EdgeKey> cuts, int depth, List<Chart> output,
-		int loopCuts = 0, int reliefCuts = 0, float before = float.MaxValue, Dictionary<int, Vec2> previous = null )
+		int loopCuts = 0, int reliefCuts = 0, float before = float.MaxValue, Dictionary<int, Vec2> previous = null,
+		Dictionary<int, Vec2> hint = null )
 	{
 		var mesh = ctx.Mesh;
 		var patch = Patch.Build( mesh, faces, ctx.Seams, cuts );
@@ -869,7 +911,7 @@ public static partial class UVUnwrap
 						piece.Add( faces[i] );
 				}
 
-				skipped += FlattenConformal( ctx, piece, cuts, depth, output, loopCuts );
+				skipped += FlattenConformal( ctx, piece, cuts, depth, output, loopCuts, hint: hint );
 			}
 
 			return skipped;
@@ -880,7 +922,7 @@ public static partial class UVUnwrap
 			var opened = new HashSet<EdgeKey>( cuts );
 
 			if ( CutBetweenLoops( ctx, patch, opened ) )
-				return FlattenConformal( ctx, faces, opened, depth, output, loopCuts + 1, reliefCuts, before );
+				return FlattenConformal( ctx, faces, opened, depth, output, loopCuts + 1, reliefCuts, before, hint: hint );
 		}
 
 		Chart chart = null;
@@ -888,10 +930,49 @@ public static partial class UVUnwrap
 
 		if ( patch.Loops > 0 )
 		{
-			uv = Solve( mesh, patch, previous );
+			if ( previous is null && hint is not null && ProxyPolishIterations > 0 )
+			{
+				// A first guess from a proxy (see the proxy flatten) already holds the smooth part of
+				// the answer, so a few CG iterations clean up the local detail. Kept only if it lays
+				// flat without folding and (Organic) without more stretch than the rule allows;
+				// otherwise the full solve below runs from the same guess. The proxy has already
+				// passed this chart under the stretch rule, so the dense chart gets ProxyStretchSlack
+				// on top of it (a decimated surface measures a little less stretch than the dense one).
+				// Two tiers: a short polish, then (usually a jagged boundary still crossing itself)
+				// three times as many again from where the first stopped.
+				var guess = hint;
 
-			if ( uv is not null && Embedded( patch, uv ) )
-				chart = MakeChart( mesh, patch, uv );
+				for ( var tier = 0; tier < 2 && chart is null; tier++ )
+				{
+					uv = Solve( mesh, patch, guess, ProxyPolishIterations * (tier == 0 ? 1 : 3) );
+
+					if ( uv is null )
+						break;
+
+					if ( Embedded( patch, uv ) )
+					{
+						var polished = MakeChart( mesh, patch, uv );
+
+						if ( ctx.Mode != UnwrapMode.Organic || ChartStretch( mesh, polished ) <= OrganicStretchLimit * ProxyStretchSlack )
+							chart = polished;
+						else
+							break;   // stretch is the shape of the chart, more iterations will not fix it
+					}
+
+					guess = ByMeshVertex( patch, uv );
+				}
+
+				if ( chart is null )
+					uv = null;
+			}
+
+			if ( chart is null )
+			{
+				uv = Solve( mesh, patch, previous ?? hint );
+
+				if ( uv is not null && Embedded( patch, uv ) )
+					chart = MakeChart( mesh, patch, uv );
+			}
 		}
 
 		if ( chart is not null )
@@ -900,7 +981,7 @@ public static partial class UVUnwrap
 			var tooStretched = ctx.Mode == UnwrapMode.Organic
 				&& faces.Count >= OrganicMinimumSplit
 				&& depth < OrganicMaximumDepth
-				&& stretch > OrganicStretchLimit;
+				&& stretch > OrganicStretchLimit * (hint is null ? 1f : ProxyStretchSlack);
 
 			if ( !tooStretched )
 			{
@@ -919,7 +1000,7 @@ public static partial class UVUnwrap
 				var opened = new HashSet<EdgeKey>( cuts );
 
 				if ( CutToMostShrunk( ctx, patch, uv, opened ) )
-					return FlattenConformal( ctx, faces, opened, depth, output, loopCuts, reliefCuts + 1, stretch, ByMeshVertex( patch, uv ) );
+					return FlattenConformal( ctx, faces, opened, depth, output, loopCuts, reliefCuts + 1, stretch, ByMeshVertex( patch, uv ), hint );
 			}
 		}
 		else if ( uv is not null && ctx.Mode == UnwrapMode.Organic && reliefCuts < MaximumFoldReliefCuts && faces.Count >= OrganicMinimumSplit )
@@ -930,7 +1011,7 @@ public static partial class UVUnwrap
 			var opened = new HashSet<EdgeKey>( cuts );
 
 			if ( CutToMostShrunk( ctx, patch, uv, opened ) )
-				return FlattenConformal( ctx, faces, opened, depth, output, loopCuts, reliefCuts + 1, before, ByMeshVertex( patch, uv ) );
+				return FlattenConformal( ctx, faces, opened, depth, output, loopCuts, reliefCuts + 1, before, ByMeshVertex( patch, uv ), hint );
 		}
 
 		if ( chart is null && faces.Count == 1 )
@@ -949,8 +1030,8 @@ public static partial class UVUnwrap
 		// The halves start with no cuts of their own. A cut made to open this chart may end inside
 		// one half as a dangling slit, which buys nothing and is the one place LSCM's free boundary
 		// can fold over itself; each half that is still a tube gets its own cut.
-		return FlattenConformal( ctx, first, new HashSet<EdgeKey>(), depth + 1, output )
-			+ FlattenConformal( ctx, second, new HashSet<EdgeKey>(), depth + 1, output );
+		return FlattenConformal( ctx, first, new HashSet<EdgeKey>(), depth + 1, output, hint: hint )
+			+ FlattenConformal( ctx, second, new HashSet<EdgeKey>(), depth + 1, output, hint: hint );
 	}
 
 	/// <summary>
@@ -1251,6 +1332,10 @@ public static partial class UVUnwrap
 	/// where they are given instead - the user's pins - and the first guess is <paramref name="previous"/>
 	/// as it stands, so the layout keeps its place and size. (Groundwork for UV pins; nothing passes it yet.)
 	static double[] Solve( PolyMesh mesh, Patch patch, Dictionary<int, Vec2> previous = null, IReadOnlyDictionary<int, Vec2> userPins = null )
+		=> Solve( mesh, patch, previous, 0, userPins );
+
+	/// <summary><paramref name="maxIterations"/> above zero caps CG (a polish of a good first guess).</summary>
+	static double[] Solve( PolyMesh mesh, Patch patch, Dictionary<int, Vec2> previous, int maxIterations, IReadOnlyDictionary<int, Vec2> userPins = null )
 	{
 		var n = patch.VertexCount;
 		var pinnedByUser = userPins is { Count: >= 2 };
@@ -1488,6 +1573,9 @@ public static partial class UVUnwrap
 		var rz = Dot( r, z );
 		var stop = Math.Max( Dot( rhs, rhs ), 1e-30 ) * 1e-18;
 		var limit = Math.Min( 40000, 10 * n + 500 );
+
+		if ( maxIterations > 0 )
+			limit = Math.Min( limit, maxIterations );
 
 		for ( var iteration = 0; iteration < limit && Dot( r, r ) > stop; iteration++ )
 		{
@@ -1955,4 +2043,810 @@ public static partial class UVUnwrap
 	}
 
 	static Vec3 Normalised( Vec3 v, Vec3 fallback ) => v.LengthSquared > 1e-16f ? v.Normal : fallback;
+
+	// --- PAINT-02: topology cache and proxy-guided flatten ---------------------------------------
+	//
+	// WHY. Entering Paint on a 24.5k-face sculpt inserts an Unwrap, and almost all of its time is the
+	// conformal solve: preconditioned CG on the whole chart, which needs hundreds to thousands of
+	// iterations on a dense chart because the error it has to remove is the smooth, chart-sized part
+	// a local preconditioner cannot see (13.5 s on the A14). Two things cut that:
+	//
+	// TOPOLOGY CACHE. A sculpt stroke moves vertices and keeps the connectivity, so the unwrap after
+	// it is asked about the same faces, seams and settings as the one before. The cache is keyed on
+	// exactly that (face corner lists, live seams, angle, margin, mode, flatten) and hands back the
+	// layout it made last time. Per-corner UVs on unchanged connectivity cannot start overlapping
+	// because the vertices moved, so the reused layout still bakes; what CAN go wrong is stretch (a
+	// box resized in one axis, a horn pulled out of a blob), so a hit is only taken while the reused
+	// layout's stretch on the NEW shape stays near what it was when it was made. Past that it is a
+	// miss and the unwrap runs. Paint keeps its texels in place across a sculpt as a side effect.
+	//
+	// PROXY. A dense mesh with no marked seams is decimated (Garland-Heckbert, Decimate) to a few
+	// thousand triangles and unwrapped there, which is cheap. The proxy's charts then decide the
+	// dense charts (each dense face goes to the chart of the nearest proxy triangle, smoothed by its
+	// neighbours) and the proxy's layout, carried over by nearest point, is the first guess for each
+	// dense solve. That guess already holds the smooth part of the answer, so CG only has the local
+	// detail left to do. The dense solve is still the real one - same Embedded checks, same splits
+	// and relief cuts if it folds or stretches - so the result is a true conformal layout of the
+	// dense mesh, never an interpolated one.
+
+	/// <summary>Reuse an unwrap when the connectivity and settings are unchanged (see above).</summary>
+	public static bool CacheByTopology = true;
+
+	/// <summary>How many recent layouts the cache keeps.</summary>
+	public static int CacheCapacity = 4;
+
+	/// <summary>A hit is taken while the reused layout's mean stretch on the current shape is at most
+	/// this much worse (ratio) than when it was made, plus <see cref="CacheStretchSlack"/>.</summary>
+	public static float CacheStretchGrowth = 1.10f;
+	public static float CacheStretchSlack = 0.03f;
+
+	/// <summary>Meshes with more faces than this (and no marked seams) are flattened through a proxy.
+	/// Zero or less turns the proxy off. The proxy's layout is a true conformal one but cut where the
+	/// PROXY wanted seams, which on a many-limbed body is roughly twice the islands (the 8k-face
+	/// Citizen skin: 44 -> ~85), so it is kept for the dense sculpts that need it (a 24.5k-face
+	/// sculpt: 2 islands either way on a blob, 19 -> 24 by angle).</summary>
+	public static int ProxyAboveFaces = 16000;
+
+	/// <summary>CG iterations that polish a dense chart seeded from the proxy before the full solve is
+	/// tried. Zero always runs the full solve (the proxy then only picks charts and seeds it).</summary>
+	public static int ProxyPolishIterations = 150;
+
+	/// <summary>The Organic stretch limit is this much looser on a chart the proxy already passed.</summary>
+	public static float ProxyStretchSlack = 1.10f;
+
+	/// <summary>Triangles the proxy is decimated to (at least; a very dense mesh gets a twelfth of its own).</summary>
+	public static int ProxyTriangles = 4000;
+
+	/// <summary>How the last unwrap on any thread went: "cache", "proxy" or "full", and its time.</summary>
+	public static volatile string LastPath = "";
+	public static double LastMs;
+	public static int CacheHits, CacheMisses;
+
+	static void Trace( string path, System.Diagnostics.Stopwatch clock, IReadOnlyList<PolyMesh> meshes )
+	{
+		LastMs = clock.Elapsed.TotalMilliseconds;
+		LastPath = path;
+	}
+
+	public static void ClearCache()
+	{
+		lock ( _cache )
+			_cache.Clear();
+	}
+
+	readonly struct TopoKey
+	{
+		public readonly ulong A, B;
+		public readonly int Faces;
+		public TopoKey( ulong a, ulong b, int faces ) { A = a; B = b; Faces = faces; }
+		public bool Same( TopoKey o ) => A == o.A && B == o.B && Faces == o.Faces;
+	}
+
+	sealed class CacheEntry
+	{
+		public TopoKey Key;
+		public int[][] Faces;        // per mesh: the faces the unwrap wrote
+		public Vec2[][][] UVs;       // per mesh, per written face: its corner UVs
+		public int Charts, Written, Skipped;
+		public float Scale, Mean, Max;
+		public double Area3;
+	}
+
+	static readonly LinkedList<CacheEntry> _cache = new();
+
+	static ulong Mix( ulong h )
+	{
+		h ^= h >> 33; h *= 0xff51afd7ed558ccdUL;
+		h ^= h >> 33; h *= 0xc4ceb9fe1a85ec53UL;
+		h ^= h >> 33;
+		return h;
+	}
+
+	static TopoKey TopologyKey( IReadOnlyList<PolyMesh> meshes, IReadOnlySet<EdgeKey>[] seams, float angle, float margin,
+		UnwrapMode mode, UnwrapFlatten flatten )
+	{
+		// Two independent 64-bit hashes (FNV-1a and a running splitmix), so a collision needs both.
+		ulong a = 14695981039346656037UL, b = 0x9E3779B97F4A7C15UL;
+		var faces = 0;
+
+		void Add( long x )
+		{
+			a = (a ^ (ulong)x) * 1099511628211UL;
+			b = Mix( b + (ulong)x + 0x9E3779B97F4A7C15UL );
+		}
+
+		Add( meshes.Count );
+		Add( BitConverter.SingleToInt32Bits( angle ) );
+		Add( BitConverter.SingleToInt32Bits( margin ) );
+		Add( (int)mode );
+		Add( (int)flatten );
+		Add( ProxyAboveFaces );
+		Add( ProxyTriangles );
+
+		for ( var m = 0; m < meshes.Count; m++ )
+		{
+			var mesh = meshes[m];
+			Add( -1 - m );
+			Add( mesh.VertexCount );
+			Add( mesh.FaceCount );
+			faces += mesh.FaceCount;
+
+			foreach ( var face in mesh.Faces )
+			{
+				Add( face.Count );
+
+				foreach ( var i in face.Indices )
+					Add( i );
+			}
+
+			var set = seams[m];
+			Add( set?.Count ?? -1 );
+
+			if ( set is { Count: > 0 } )
+			{
+				var sorted = set.Select( k => ((long)k.A << 32) | (uint)k.B ).ToArray();
+				Array.Sort( sorted );
+
+				foreach ( var k in sorted )
+					Add( k );
+			}
+		}
+
+		return new TopoKey( a, b, faces );
+	}
+
+	static double SurfaceArea( PolyMesh mesh, int[] faces )
+	{
+		var area = 0.0;
+
+		foreach ( var f in faces )
+		{
+			var idx = mesh.Faces[f].Indices;
+
+			for ( var c = 1; c + 1 < idx.Length; c++ )
+			{
+				var p0 = mesh.Positions[idx[0]];
+				area += 0.5 * Vec3.Cross( mesh.Positions[idx[c]] - p0, mesh.Positions[idx[c + 1]] - p0 ).Length;
+			}
+		}
+
+		return area;
+	}
+
+	static bool TryCached( IReadOnlyList<PolyMesh> meshes, TopoKey key, out UnwrapReport report )
+	{
+		report = null;
+		CacheEntry entry = null;
+
+		lock ( _cache )
+		{
+			for ( var node = _cache.First; node is not null; node = node.Next )
+			{
+				if ( !node.Value.Key.Same( key ) )
+					continue;
+
+				entry = node.Value;
+				_cache.Remove( node );
+				_cache.AddFirst( node );
+				break;
+			}
+		}
+
+		if ( entry is null || entry.Faces.Length != meshes.Count )
+		{
+			CacheMisses++;
+			return false;
+		}
+
+		// Measure the reused layout on the shape as it is now, before touching the mesh.
+		var meanSum = 0.0;
+		var max = 0f;
+		var measured = 0;
+		var area3 = 0.0;
+		var probes = new PolyMesh[meshes.Count];
+
+		for ( var m = 0; m < meshes.Count; m++ )
+		{
+			var faces = entry.Faces[m];
+
+			if ( faces.Length == 0 )
+				continue;
+
+			// A shallow probe: the live positions and fresh faces carrying the cached UVs.
+			var probe = new PolyMesh { Positions = meshes[m].Positions };
+
+			for ( var i = 0; i < faces.Length; i++ )
+				probe.Faces.Add( new Face( meshes[m].Faces[faces[i]].Indices, entry.UVs[m][i] ) );
+
+			probes[m] = probe;
+			var (mean, worst) = UVIslands.Distortion( probe );
+			meanSum += mean * faces.Length;
+			measured += faces.Length;
+			max = MathF.Max( max, worst );
+			area3 += SurfaceArea( meshes[m], faces );
+		}
+
+		var meanNow = measured > 0 ? (float)(meanSum / measured) : 0f;
+
+		if ( meanNow > entry.Mean * CacheStretchGrowth + CacheStretchSlack
+			|| max > MathF.Max( entry.Max * 1.5f, entry.Mean * 3f ) + 0.1f )
+		{
+			CacheMisses++;
+			return false;
+		}
+
+		for ( var m = 0; m < meshes.Count; m++ )
+		{
+			var faces = entry.Faces[m];
+
+			for ( var i = 0; i < faces.Length; i++ )
+				meshes[m].Faces[faces[i]].UVs = (Vec2[])entry.UVs[m][i].Clone();
+		}
+
+		// Scale is UV per model unit; the UV area is unchanged, so it follows the surface area.
+		var scale = area3 > 1e-30 && entry.Area3 > 1e-30 ? entry.Scale * (float)Math.Sqrt( entry.Area3 / area3 ) : entry.Scale;
+		CacheHits++;
+		report = new UnwrapReport( entry.Charts, entry.Written, entry.Skipped, scale, meanNow, max );
+		return true;
+	}
+
+	static void Store( TopoKey key, IReadOnlyList<PolyMesh> meshes, List<int>[] written, UnwrapReport report )
+	{
+		var entry = new CacheEntry
+		{
+			Key = key,
+			Faces = new int[meshes.Count][],
+			UVs = new Vec2[meshes.Count][][],
+			Charts = report.Charts,
+			Written = report.Faces,
+			Skipped = report.SkippedFaces,
+			Scale = report.Scale,
+			Mean = report.MeanStretch,
+			Max = report.MaxStretch,
+		};
+
+		for ( var m = 0; m < meshes.Count; m++ )
+		{
+			var faces = written[m].ToArray();
+			entry.Faces[m] = faces;
+			entry.UVs[m] = new Vec2[faces.Length][];
+
+			for ( var i = 0; i < faces.Length; i++ )
+				entry.UVs[m][i] = (Vec2[])meshes[m].Faces[faces[i]].UVs.Clone();
+
+			entry.Area3 += SurfaceArea( meshes[m], faces );
+		}
+
+		lock ( _cache )
+		{
+			for ( var node = _cache.First; node is not null; node = node.Next )
+			{
+				if ( node.Value.Key.Same( key ) )
+				{
+					_cache.Remove( node );
+					break;
+				}
+			}
+
+			_cache.AddFirst( entry );
+
+			while ( _cache.Count > Math.Max( 0, CacheCapacity ) )
+				_cache.RemoveLast();
+		}
+	}
+
+	/// <summary>Flatten charts on several cores when there is enough work. Charts are independent
+	/// (each reads the shared mesh and writes only its own output), and the results are merged in
+	/// chart order, so the layout is the same as flattening them one after another.</summary>
+	public static bool ParallelCharts = true;
+
+	static int FlattenCharts( FlattenContext ctx, List<List<int>> charts, Func<int, Dictionary<int, Vec2>> hintFor, List<Chart> output )
+	{
+		var outs = new List<Chart>[charts.Count];
+		var skips = new int[charts.Count];
+		var total = 0;
+
+		foreach ( var c in charts )
+			total += c.Count;
+
+		void One( int i )
+		{
+			var o = new List<Chart>();
+			skips[i] = FlattenConformal( ctx, charts[i], new HashSet<EdgeKey>(), 0, o, hint: hintFor?.Invoke( i ) );
+			outs[i] = o;
+		}
+
+		if ( ParallelCharts && charts.Count > 1 && total >= 2000 && Environment.ProcessorCount > 1 )
+		{
+			// Biggest first, so one large chart does not start last and run alone.
+			var order = Enumerable.Range( 0, charts.Count ).OrderByDescending( i => charts[i].Count ).ToArray();
+
+			try
+			{
+				System.Threading.Tasks.Parallel.ForEach(
+					System.Collections.Concurrent.Partitioner.Create( order, true ), One );
+			}
+			catch ( AggregateException e ) when ( e.InnerExceptions.Count > 0 )
+			{
+				System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture( e.InnerExceptions[0] ).Throw();
+			}
+		}
+		else
+		{
+			for ( var i = 0; i < charts.Count; i++ )
+				One( i );
+		}
+
+		var skipped = 0;
+
+		for ( var i = 0; i < charts.Count; i++ )
+		{
+			output.AddRange( outs[i] );
+			skipped += skips[i];
+		}
+
+		return skipped;
+	}
+
+	static void Each( int count, Action<int> body )
+	{
+		if ( ParallelCharts && count >= 4096 && Environment.ProcessorCount > 1 )
+			System.Threading.Tasks.Parallel.For( 0, count, body );
+		else
+			for ( var i = 0; i < count; i++ )
+				body( i );
+	}
+
+	static bool ProxyWorthIt( PolyMesh mesh, IReadOnlySet<EdgeKey> seams ) =>
+		ProxyAboveFaces > 0
+		&& mesh.FaceCount > ProxyAboveFaces
+		&& Decimate.TriangleCount( mesh ) > ProxyTriangles * 2
+		// Marked seams are vertex-index edges of the dense mesh; the proxy has no such edges, so a
+		// seamed mesh keeps its own charting.
+		&& (seams is null || seams.Count == 0);
+
+	/// <summary>
+	/// Flatten the dense mesh in <paramref name="ctx"/> using a decimated proxy to choose its charts
+	/// and to seed each conformal solve. False (nothing added) when the proxy cannot be made or laid
+	/// out, so the caller runs the ordinary unwrap.
+	/// </summary>
+	static bool FlattenByProxy( FlattenContext ctx, float angleDegrees, List<Chart> output, ref int skipped )
+	{
+		var mesh = ctx.Mesh;
+		PolyMesh proxy;
+
+		try
+		{
+			// At least a twelfth of the dense triangles: much coarser than that and the proxy's layout
+			// misses detail the polish cannot make up in its few iterations, so the full solve runs.
+			var target = Math.Max( ProxyTriangles, Decimate.TriangleCount( mesh ) / 12 );
+			proxy = Decimate.Run( mesh, new Decimate.Options { TargetTriangles = target, PreserveUVSeams = false } ).Mesh;
+		}
+		catch ( Exception )
+		{
+			return false;
+		}
+
+		if ( proxy is null || proxy.FaceCount < 8 || Decimate.TriangleCount( proxy ) * 2 > Decimate.TriangleCount( mesh ) )
+			return false;
+
+		var none = new HashSet<EdgeKey>();
+		var proxyCharts = ctx.Mode == UnwrapMode.Organic
+			? Components( proxy, none, 90f )
+			: BuildCharts( proxy, angleDegrees, none );
+		var proxyCtx = new FlattenContext( proxy, none, ctx.Mode );
+		var laid = new List<Chart>();
+		FlattenCharts( proxyCtx, proxyCharts, null, laid );
+
+		if ( laid.Count == 0 )
+			return false;
+
+		// Proxy triangles, each with its chart and its corners' chart-local UVs.
+		var chartOfFace = new int[proxy.FaceCount];
+		var uvOfFace = new Vec2[proxy.FaceCount][];
+		Array.Fill( chartOfFace, -1 );
+
+		for ( var c = 0; c < laid.Count; c++ )
+		{
+			for ( var i = 0; i < laid[c].Faces.Count; i++ )
+			{
+				chartOfFace[laid[c].Faces[i]] = c;
+				uvOfFace[laid[c].Faces[i]] = laid[c].Corners[i];
+			}
+		}
+
+		var tris = new List<ProxyTri>();
+
+		for ( var f = 0; f < proxy.FaceCount; f++ )
+		{
+			if ( chartOfFace[f] < 0 )
+				continue;
+
+			var idx = proxy.Faces[f].Indices;
+
+			for ( var c = 1; c + 1 < idx.Length; c++ )
+			{
+				tris.Add( new ProxyTri
+				{
+					A = proxy.Positions[idx[0]], B = proxy.Positions[idx[c]], C = proxy.Positions[idx[c + 1]],
+					UA = uvOfFace[f][0], UB = uvOfFace[f][c], UC = uvOfFace[f][c + 1],
+					Chart = chartOfFace[f],
+				} );
+			}
+		}
+
+		if ( tris.Count == 0 )
+			return false;
+
+		var grid = new ProxyGrid( tris );
+
+		// Each dense face to the chart of the proxy triangle nearest its centroid.
+		var assign = new int[mesh.FaceCount];
+
+		Each( mesh.FaceCount, f =>
+		{
+			var t = grid.Nearest( ctx.Centroids[f], -1, out _ );
+			assign[f] = t < 0 ? 0 : tris[t].Chart;
+		} );
+
+		// Smooth the boundaries: a face most of whose neighbours sit in one other chart joins it.
+		// Leaves no one-face islands along a proxy seam and straightens the sawtooth.
+		var neighbours = FaceNeighbours( mesh, ctx.Seams );
+		var next = new int[assign.Length];
+		var votes = new Dictionary<int, int>();
+
+		for ( var pass = 0; pass < 3; pass++ )
+		{
+			var changed = 0;
+
+			for ( var f = 0; f < assign.Length; f++ )
+			{
+				next[f] = assign[f];
+				var nb = neighbours[f];
+
+				if ( nb.Count == 0 )
+					continue;
+
+				votes.Clear();
+
+				foreach ( var g in nb )
+					votes[assign[g]] = votes.TryGetValue( assign[g], out var v ) ? v + 1 : 1;
+
+				foreach ( var (chart, count) in votes )
+				{
+					if ( chart != assign[f] && count * 2 > nb.Count )
+					{
+						next[f] = chart;
+						changed++;
+						break;
+					}
+				}
+			}
+
+			(assign, next) = (next, assign);
+
+			if ( changed == 0 )
+				break;
+		}
+
+		MergeFragments( assign, neighbours );
+
+		var groups = new List<int>[laid.Count];
+
+		for ( var f = 0; f < assign.Length; f++ )
+			(groups[assign[f]] ??= new List<int>()).Add( f );
+
+		var dense = new List<List<int>>();
+		var chartOf = new List<int>();
+
+		for ( var c = 0; c < groups.Length; c++ )
+		{
+			if ( groups[c] is null )
+				continue;
+
+			dense.Add( groups[c] );
+			chartOf.Add( c );
+		}
+
+		// The proxy's layout of each chart, carried to every dense vertex the chart uses.
+		Dictionary<int, Vec2> HintFor( int i )
+		{
+			var c = chartOf[i];
+			var hint = new Dictionary<int, Vec2>();
+
+			foreach ( var f in dense[i] )
+			{
+				foreach ( var v in mesh.Faces[f].Indices )
+				{
+					if ( hint.ContainsKey( v ) )
+						continue;
+
+					var p = mesh.Positions[v];
+					var t = grid.Nearest( p, c, out _ );
+
+					if ( t >= 0 )
+						hint[v] = tris[t].Carry( p );
+				}
+			}
+
+			return hint;
+		}
+
+		skipped += FlattenCharts( ctx, dense, HintFor, output );
+		return true;
+	}
+
+	/// <summary>
+	/// Give every piece of a chart that is cut off from the chart's main body to the neighbouring
+	/// chart it shares most edges with. Nearest-triangle assignment leaves such crumbs where a thin
+	/// part of the dense mesh sits nearer another chart's proxy triangles, and each crumb would come
+	/// out as an island of its own.
+	/// </summary>
+	static void MergeFragments( int[] assign, List<int>[] neighbours )
+	{
+		var count = assign.Length;
+		var comp = new int[count];
+		var stack = new Stack<int>();
+
+		for ( var round = 0; round < 4; round++ )
+		{
+			Array.Fill( comp, -1 );
+			var sizes = new List<int>();
+			var labels = new List<int>();
+
+			for ( var f = 0; f < count; f++ )
+			{
+				if ( comp[f] >= 0 )
+					continue;
+
+				var id = sizes.Count;
+				var size = 0;
+				comp[f] = id;
+				stack.Push( f );
+
+				while ( stack.Count > 0 )
+				{
+					var x = stack.Pop();
+					size++;
+
+					foreach ( var g in neighbours[x] )
+					{
+						if ( comp[g] < 0 && assign[g] == assign[f] )
+						{
+							comp[g] = id;
+							stack.Push( g );
+						}
+					}
+				}
+
+				sizes.Add( size );
+				labels.Add( assign[f] );
+			}
+
+			// The biggest piece of each chart keeps it.
+			var main = new Dictionary<int, int>();
+
+			for ( var c = 0; c < sizes.Count; c++ )
+			{
+				if ( !main.TryGetValue( labels[c], out var best ) || sizes[c] > sizes[best] )
+					main[labels[c]] = c;
+			}
+
+			// Every other piece: count its edges to each neighbouring chart.
+			var votes = new Dictionary<int, Dictionary<int, int>>();
+
+			for ( var f = 0; f < count; f++ )
+			{
+				var c = comp[f];
+
+				if ( main[labels[c]] == c )
+					continue;
+
+				foreach ( var g in neighbours[f] )
+				{
+					if ( comp[g] == c )
+						continue;
+
+					if ( !votes.TryGetValue( c, out var v ) )
+						votes[c] = v = new Dictionary<int, int>();
+
+					v[assign[g]] = v.TryGetValue( assign[g], out var n ) ? n + 1 : 1;
+				}
+			}
+
+			if ( votes.Count == 0 )
+				return;
+
+			var to = new Dictionary<int, int>();
+
+			foreach ( var (c, v) in votes )
+				to[c] = v.OrderByDescending( kv => kv.Value ).ThenBy( kv => kv.Key ).First().Key;
+
+			for ( var f = 0; f < count; f++ )
+			{
+				if ( to.TryGetValue( comp[f], out var label ) )
+					assign[f] = label;
+			}
+		}
+	}
+
+	sealed class ProxyTri
+	{
+		public Vec3 A, B, C;
+		public Vec2 UA, UB, UC;
+		public int Chart;
+
+		/// <summary>The proxy UV at <paramref name="p"/>: barycentric on the triangle's plane, NOT
+		/// clamped, so a point past the edge of its nearest triangle extrapolates the layout rather
+		/// than piling up on the edge.</summary>
+		public Vec2 Carry( Vec3 p )
+		{
+			var e0 = B - A;
+			var e1 = C - A;
+			var d = p - A;
+			double d00 = Vec3.Dot( e0, e0 ), d01 = Vec3.Dot( e0, e1 ), d11 = Vec3.Dot( e1, e1 );
+			double d20 = Vec3.Dot( d, e0 ), d21 = Vec3.Dot( d, e1 );
+			var den = d00 * d11 - d01 * d01;
+
+			if ( Math.Abs( den ) < 1e-30 )
+				return UA;
+
+			var v = (d11 * d20 - d01 * d21) / den;
+			var w = (d00 * d21 - d01 * d20) / den;
+			var u = 1 - v - w;
+			return new Vec2( (float)(u * UA.x + v * UB.x + w * UC.x), (float)(u * UA.y + v * UB.y + w * UC.y) );
+		}
+
+		public float DistanceSquared( Vec3 p ) => (ClosestOnTriangle( p, A, B, C ) - p).LengthSquared;
+	}
+
+	/// <summary>A uniform grid of the proxy's triangles, for nearest-triangle queries.</summary>
+	sealed class ProxyGrid
+	{
+		readonly List<ProxyTri> _tris;
+		readonly Vec3 _min;
+		readonly float _cell;
+		readonly int _nx, _ny, _nz;
+		readonly List<int>[] _cells;
+
+		public ProxyGrid( List<ProxyTri> tris )
+		{
+			_tris = tris;
+			var min = new Vec3( float.MaxValue, float.MaxValue, float.MaxValue );
+			var max = new Vec3( float.MinValue, float.MinValue, float.MinValue );
+
+			foreach ( var t in tris )
+			{
+				foreach ( var p in new[] { t.A, t.B, t.C } )
+				{
+					min = new Vec3( MathF.Min( min.x, p.x ), MathF.Min( min.y, p.y ), MathF.Min( min.z, p.z ) );
+					max = new Vec3( MathF.Max( max.x, p.x ), MathF.Max( max.y, p.y ), MathF.Max( max.z, p.z ) );
+				}
+			}
+
+			var size = max - min;
+			var area = 0.0;
+
+			foreach ( var t in tris )
+				area += 0.5 * Vec3.Cross( t.B - t.A, t.C - t.A ).Length;
+
+			// Sized by the SURFACE, not the box: a cell a little over one triangle across, so a query
+			// tests a handful of triangles. Never finer than 128 cells along the longest side.
+			var longest = MathF.Max( size.x, MathF.Max( size.y, size.z ) );
+			_cell = 1.5f * (float)Math.Sqrt( area / Math.Max( 1, tris.Count ) );
+			_cell = MathF.Max( _cell, MathF.Max( longest / 128f, 1e-6f ) );
+			_min = min;
+			_nx = Math.Max( 1, (int)(size.x / _cell) + 1 );
+			_ny = Math.Max( 1, (int)(size.y / _cell) + 1 );
+			_nz = Math.Max( 1, (int)(size.z / _cell) + 1 );
+			_cells = new List<int>[_nx * _ny * _nz];
+
+			for ( var i = 0; i < tris.Count; i++ )
+			{
+				var t = tris[i];
+				var lo = Cell( new Vec3( MathF.Min( t.A.x, MathF.Min( t.B.x, t.C.x ) ), MathF.Min( t.A.y, MathF.Min( t.B.y, t.C.y ) ), MathF.Min( t.A.z, MathF.Min( t.B.z, t.C.z ) ) ) );
+				var hi = Cell( new Vec3( MathF.Max( t.A.x, MathF.Max( t.B.x, t.C.x ) ), MathF.Max( t.A.y, MathF.Max( t.B.y, t.C.y ) ), MathF.Max( t.A.z, MathF.Max( t.B.z, t.C.z ) ) ) );
+
+				for ( var z = lo.z; z <= hi.z; z++ )
+					for ( var y = lo.y; y <= hi.y; y++ )
+						for ( var x = lo.x; x <= hi.x; x++ )
+							(_cells[(z * _ny + y) * _nx + x] ??= new List<int>()).Add( i );
+			}
+		}
+
+		(int x, int y, int z) Cell( Vec3 p ) => (
+			Math.Clamp( (int)((p.x - _min.x) / _cell ), 0, _nx - 1 ),
+			Math.Clamp( (int)((p.y - _min.y) / _cell ), 0, _ny - 1 ),
+			Math.Clamp( (int)((p.z - _min.z) / _cell ), 0, _nz - 1 ) );
+
+		/// <summary>The nearest triangle to <paramref name="p"/>, only of <paramref name="chart"/>
+		/// when it is not negative. Searches shells of cells outward until no nearer one can exist.</summary>
+		public int Nearest( Vec3 p, int chart, out float distanceSquared )
+		{
+			var (cx, cy, cz) = Cell( p );
+			var best = -1;
+			var bestD = float.MaxValue;
+			var reach = Math.Max( _nx, Math.Max( _ny, _nz ) );
+
+			for ( var r = 0; r <= reach; r++ )
+			{
+				for ( var z = cz - r; z <= cz + r; z++ )
+				{
+					if ( z < 0 || z >= _nz ) continue;
+
+					for ( var y = cy - r; y <= cy + r; y++ )
+					{
+						if ( y < 0 || y >= _ny ) continue;
+
+						for ( var x = cx - r; x <= cx + r; x++ )
+						{
+							if ( x < 0 || x >= _nx ) continue;
+
+							// Only the shell at distance r; the inside was searched already.
+							if ( Math.Abs( x - cx ) != r && Math.Abs( y - cy ) != r && Math.Abs( z - cz ) != r ) continue;
+
+							var list = _cells[(z * _ny + y) * _nx + x];
+
+							if ( list is null ) continue;
+
+							foreach ( var i in list )
+							{
+								if ( chart >= 0 && _tris[i].Chart != chart ) continue;
+
+								var d = _tris[i].DistanceSquared( p );
+
+								if ( d < bestD )
+								{
+									bestD = d;
+									best = i;
+								}
+							}
+						}
+					}
+				}
+
+				// Anything in shell r+1 is at least r cells away from p's own cell.
+				if ( best >= 0 && bestD <= (r * _cell) * (r * _cell) )
+					break;
+			}
+
+			distanceSquared = bestD;
+			return best;
+		}
+	}
+
+	/// <summary>Closest point on triangle abc (Ericson, Real-Time Collision Detection 5.1.5).</summary>
+	static Vec3 ClosestOnTriangle( Vec3 p, Vec3 a, Vec3 b, Vec3 c )
+	{
+		var ab = b - a;
+		var ac = c - a;
+		var ap = p - a;
+		var d1 = Vec3.Dot( ab, ap );
+		var d2 = Vec3.Dot( ac, ap );
+		if ( d1 <= 0f && d2 <= 0f ) return a;
+
+		var bp = p - b;
+		var d3 = Vec3.Dot( ab, bp );
+		var d4 = Vec3.Dot( ac, bp );
+		if ( d3 >= 0f && d4 <= d3 ) return b;
+
+		var vc = d1 * d4 - d3 * d2;
+		if ( vc <= 0f && d1 >= 0f && d3 <= 0f ) return a + ab * (d1 / (d1 - d3));
+
+		var cp = p - c;
+		var d5 = Vec3.Dot( ab, cp );
+		var d6 = Vec3.Dot( ac, cp );
+		if ( d6 >= 0f && d5 <= d6 ) return c;
+
+		var vb = d5 * d2 - d1 * d6;
+		if ( vb <= 0f && d2 >= 0f && d6 <= 0f ) return a + ac * (d2 / (d2 - d6));
+
+		var va = d3 * d6 - d5 * d4;
+		if ( va <= 0f && (d4 - d3) >= 0f && (d5 - d6) >= 0f ) return b + (c - b) * ((d4 - d3) / ((d4 - d3) + (d5 - d6)));
+
+		var denom = 1f / (va + vb + vc);
+		var v = vb * denom;
+		var w = vc * denom;
+		return a + ab * v + ac * w;
+	}
 }

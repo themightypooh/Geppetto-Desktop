@@ -191,6 +191,9 @@ public sealed class WeightPaintSession
 	/// <see cref="MirrorAxis"/>.</summary>
 	public MirrorAxis Mirror;
 
+	/// <summary>Optional per-vertex paint mask: 0 skips a vertex, 1 paints it fully.</summary>
+	public float[] Mask;
+
 	/// <summary>Fraction of the radius the cursor must travel to earn another sample.</summary>
 	public float Spacing = 0.25f;
 
@@ -422,7 +425,7 @@ public sealed class WeightPaintSession
 		var stroke = NewStroke();
 		stroke.Samples.Add( new WeightSample( point, Radius, Strength ) );
 
-		var sampleUndo = WeightBrush.Apply( _mesh, _weights, stroke, mask: null, _bvh );
+		var sampleUndo = WeightBrush.Apply( _mesh, _weights, stroke, mask: Mask, _bvh );
 
 		_undo.Absorb( sampleUndo );
 

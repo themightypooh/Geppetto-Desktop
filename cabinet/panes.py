@@ -139,6 +139,7 @@ class Pane(QObject):
     shownOp = Property(str, lambda self: live_runs.revision_op(self.run, self.displayed_revision)
                        if self.run and self.displayed_revision else "", notify=changed)
     shownRevision = Property(int, lambda self: self.displayed_revision, notify=changed)
+    stepChangeText = Property(str, lambda self: getattr(self, "stepChange", ""), notify=changed)   # "NEW tail · CHANGED head"
     replay = Property("QVariantMap", lambda self: self._replay, notify=replayChanged)
     owner = Property("QVariantMap", lambda self: self._owner, notify=ownerChanged)
 
@@ -306,6 +307,7 @@ class Pane(QObject):
                 self.host.live_states[self.run] = ev
                 self._maybe_send_off(ev)
             elif kind == "ai-preview":
+                self.stepChange = step_change_words(ev)
                 self.displayed_revision = ev.get("revision", 0)
                 part_focus.follow(self, self.run, self.displayed_revision, self._replay)   # the part this step touched glows
                 if self._replay:
@@ -466,3 +468,15 @@ class Pane(QObject):
         self.host.note_sent(r, text)
         self._replay = dict(r, notes=live_runs.notes(r["dir"]))
         self.replayChanged.emit()
+
+
+def step_change_words(ev):
+    """What a shown step did, in plain words: "added: tail fur · edited: head, body" (the pane flashes the same parts)."""
+    said = []
+    for key, word in (("added", "added:"), ("changed", "edited:")):
+        names = ev.get(key) or []
+        if names:
+            said.append(word + " " + ", ".join(names[:4]) + (" +%d" % (len(names) - 4) if len(names) > 4 else ""))
+    if ev.get("removed"):
+        said.append("removed: %d part(s)" % ev["removed"])
+    return " · ".join(said)

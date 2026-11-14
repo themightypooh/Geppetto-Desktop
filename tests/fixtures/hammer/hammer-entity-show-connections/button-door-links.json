@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "entities": [
+    { "id": "button_01", "classname": "func_button", "origin": [0, 0, 64], "targetname": "button_01" },
+    { "id": "door_01", "classname": "func_door", "origin": [256, 0, 64], "targetname": "door_01" }
+  ],
+  "entity_io": {
+    "version": 1,
+    "outputs": [
+      {
+        "source_entity": "button_01",
+        "event": "OnPressed",
+        "target": "door_01",
+        "input": "Open",
+        "parameter": "",
+        "delay": 0.5,
+        "max_fires": -1,
+        "enabled": true
+      }
+    ]
+  }
+}

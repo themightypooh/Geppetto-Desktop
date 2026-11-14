@@ -235,7 +235,7 @@ public static partial class BuildScript
 		{
 			if ( !File.Exists( image.Path ) || !image.Path.EndsWith( ".png", StringComparison.OrdinalIgnoreCase ) ) continue;
 			try { var (_, h, _, _) = Raster.LoadPng( image.Path ); scales[image.View] = RefImageMath.WorldPerPixel( image, h ); }
-			catch { /* a picture that will not load is reported by its own verbs */ }
+			catch (System.Exception soft) { Effigy.KernelLog.Soft( "BuildScript.RefTools.RefCheckVerb", soft ); /* a picture that will not load is reported by its own verbs */ }
 		}
 		if ( scales.Count >= 2 )
 		{

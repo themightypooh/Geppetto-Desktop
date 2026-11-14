@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using Effigy;
 using Marionette.Desktop;
+using FaceAnimCallers = Marionette.Desktop.FaceAnimCallers;
 
 internal static class FaceAnimCallersTests
 {

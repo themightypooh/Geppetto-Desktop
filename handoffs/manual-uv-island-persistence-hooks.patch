@@ -1,0 +1,144 @@
+# Manual UV island persistence hooks -- APPLY AFTER the UV-islands ticket lands.
+#
+# Ticket: preserve-manual-uv-island-edits-and-improve-automatic-unwrap (muse-3-b).
+# Why a patch, not an edit: PartStudio.cs is owned by the in-flight
+# port-assembly-mate-feature worker and StudioDocument.cs by the in-flight
+# cad-configurations-design-variants worker (both actively editing at
+# 2026-11-13 10:15 EST). One writer per file; the final integrator (or those
+# owners) applies this. Do NOT apply the reverse direction: the Version=4 /
+# VersionConfiguration hunks in the live StudioDocument diff are Desktop-newer
+# (cad-configurations) and are deliberately NOT in this patch.
+#
+# What it wires (verbatim from Mobile vendor kernel, same lines):
+#   PartStudio.cs: ManualUVEdits list + rebuild fingerprint/cache-index fields,
+#     fingerprint check in Rebuild(), cache restore, UVProject invalidation,
+#     apply-before-PaintFeature, final apply + fingerprint store.
+#   StudioDocument.cs: write each edit as a `manualuv ...` line; read the line
+#     back into studio.ManualUVEdits (malformed lines are dropped by ReadLine).
+# Requires (already landed by this ticket): kernel/Effigy/ManualUVIslandEdit.cs.
+# After applying: add the studio round-trip check (edit survives rebuild, undo
+# and save/reopen) to tests/ManualUvIslandTests.cs and register that file in
+# tests/TestRegistry.cs; then run inventory.py generate + check.
+#
+# Derived 2026-11-13 10:16 EST from Desktop files at:
+#   PartStudio.cs sha 9779ea8ea4f5c392
+#   StudioDocument.cs sha b0894feb46cc3d88
+# If `patch` reports offsets, re-derive with:
+#   diff -u <desktop file> <mobile vendor file>  (keep manualuv hunks only)
+#
+--- a/kernel/Effigy/Features/PartStudio.cs
++++ b/kernel/Effigy/Features/PartStudio.cs
+@@ -113,6 +113,10 @@
+ 	/// </summary>
+ 	public Dictionary<int, Vec2> MaterialScales = new();
+ 
++	/// <summary>Hand-authored UV island transforms, keyed by stable body id and island topology.
++	/// Reapplied after feature rebuilds and written with the document.</summary>
++	public List<ManualUVIslandEdit> ManualUVEdits = new();
++
+ 	/// <summary>
+ 	/// What each slot looks like, for the slots somebody gave a look (`material 2 preset=pcb_green`):
+ 	/// colour, roughness, metalness, glow. The renderers and the viewer shade the slot with it and
+@@ -404,6 +408,8 @@
+ 	// _cache[i] is the state AFTER feature i ran.
+ 	readonly List<Snapshot> _cache = new();
+ 	int _dirtyFrom;
++	string _manualUVCacheFingerprint = "";
++	Dictionary<string, int> _manualUVCacheIndexByBody = new();
+ 
+ 	public PartStudio()
+ 	{
+@@ -435,6 +441,8 @@
+ 
+ 		_cache.Clear();
+ 		_dirtyFrom = Features.Count;
++		_manualUVCacheFingerprint = "";
++		_manualUVCacheIndexByBody.Clear();
+ 	}
+ 
+ 	// --- editing ---------------------------------------------------------------------------
+@@ -560,6 +568,12 @@
+ 	{
+ 		var report = new RebuildReport();
+ 		var count = EffectiveCount;
++		var manualUVFingerprint = ManualUVIslandEdit.Fingerprint( ManualUVEdits );
++		if ( manualUVFingerprint != _manualUVCacheFingerprint )
++		{
++			MarkAllDirty();
++			_manualUVCacheIndexByBody.Clear();
++		}
+ 
+ 		// Variables first, and not lazily inside a parameter read: a feature's value must not
+ 		// depend on when it happened to be asked, and a cycle has to fail before any geometry
+@@ -592,6 +606,15 @@
+ 			report.FeaturesReused = reusableUpTo;
+ 		}
+ 
++		var manualUVAppliedToCache = new HashSet<string>();
++		var manualUVCacheIndexByBody = new Dictionary<string, int>();
++		foreach ( var (bodyId, index) in _manualUVCacheIndexByBody )
++			if ( reusableUpTo > index && ctx.Bodies.Any( b => b.Id == bodyId ) )
++			{
++				manualUVAppliedToCache.Add( bodyId );
++				manualUVCacheIndexByBody[bodyId] = index;
++			}
++
+ 		// Keep body ids climbing past anything already present, so a rebuild starting mid-tree
+ 		// does not reissue an id a cached body already holds.
+ 		ctx.SeedIdCounter( HighestBodyNumber( ctx.Bodies ) + 1 );
+@@ -616,6 +639,18 @@
+ 		for ( var i = reusableUpTo; i < count; i++ )
+ 		{
+ 			var feature = Features[i];
++			if ( feature is UVProjectFeature uvProject )
++				foreach ( var body in ctx.Bodies.Where( uvProject.Bodies.Matches ) )
++				{
++					manualUVAppliedToCache.Remove( body.Id );
++					manualUVCacheIndexByBody.Remove( body.Id );
++				}
++			if ( feature is PaintFeature )
++			{
++				ManualUVIslandEdit.Apply( ctx.Bodies, ManualUVEdits, manualUVAppliedToCache );
++				foreach ( var bodyId in manualUVAppliedToCache )
++					if ( !manualUVCacheIndexByBody.ContainsKey( bodyId ) ) manualUVCacheIndexByBody[bodyId] = i;
++			}
+ 
+ 			// Bodies added by this feature inherit its visibility. Doing it here rather than in
+ 			// every feature's Execute means a new feature type gets it for free and cannot forget.
+@@ -683,6 +718,9 @@
+ 		// because the cache holds clones taken inside the loop and ctx.Bodies was cloned back out of
+ 		// it — what this touches is never what the next rebuild reads.
+ 		MaterialScale.Apply( this );
++		ManualUVIslandEdit.Apply( Bodies, ManualUVEdits, manualUVAppliedToCache );
++		_manualUVCacheIndexByBody = manualUVCacheIndexByBody;
++		_manualUVCacheFingerprint = manualUVFingerprint;
+ 
+ 		_dirtyFrom = count;
+ 
+
+--- a/kernel/Effigy/Features/StudioDocument.cs
++++ b/kernel/Effigy/Features/StudioDocument.cs
+@@ -150,6 +140,10 @@
+ 			sb.Append( "materialscale " ).Append( slot ).Append( ' ' )
+ 				.Append( Num( scale.x ) ).Append( ' ' ).Append( Num( scale.y ) ).Append( '\n' );
+ 
++		foreach ( var edit in studio.ManualUVEdits )
++			if ( edit is not null && !string.IsNullOrWhiteSpace( edit.BodyId ) && !string.IsNullOrWhiteSpace( edit.FaceKey ) )
++				sb.Append( edit.WriteLine() ).Append( '\n' );
++
+ 		// Only the slots that have a look, so documents without one keep their bytes.
+ 		foreach ( var (slot, look) in studio.MaterialLooks.OrderBy( kv => kv.Key ) )
+ 			if ( look is not null )
+@@ -843,6 +837,12 @@
+ 				continue;
+ 			}
+ 
++			if ( line.StartsWith( "manualuv " ) )
++			{
++				if ( ManualUVIslandEdit.ReadLine( line ) is { } edit ) studio.ManualUVEdits.Add( edit );
++				continue;
++			}
++
+ 			if ( line.StartsWith( "materiallook " ) )
+ 			{
+ 				var (slot, rest) = Split( line[13..] );

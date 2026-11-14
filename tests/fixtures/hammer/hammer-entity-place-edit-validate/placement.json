@@ -1,0 +1,9 @@
+{
+  "comment": "Worked placement example for MapEntitiesTests 'fixture placement places four entities and reports its two issues'. Two deliberate problems: light_spot targets 'ghost_sign' (nothing has that targetname) and both func_doors share targetname 'door_main'. Brushes are names only; the test maps each name to a TestBrush.",
+  "entities": [
+    { "class": "info_player_start", "origin": [0, 0, 0], "angles": [0, 0, 0], "keyvalues": {} },
+    { "class": "light_spot", "origin": [128, 64, 128], "angles": [0, 90, 0], "keyvalues": { "_light": "255 200 100", "target": "ghost_sign" } },
+    { "class": "func_door", "origin": [0, 0, 0], "keyvalues": { "targetname": "door_main", "speed": "100" }, "brushes": ["door-left", "door-right"] },
+    { "class": "func_door", "origin": [256, 0, 0], "keyvalues": { "targetname": "door_main", "speed": "150" }, "brushes": ["door-left-2", "door-right-2"] }
+  ]
+}

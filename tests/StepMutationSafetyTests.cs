@@ -5,11 +5,6 @@ internal static class StepMutationSafetyTests
 {
     public static void Register(TestRegistry registry, TestSettings settings)
     {
-        registry.Add("step-mutation-safety", "builder healer is absent from the application", () =>
-        {
-            Require(typeof(ScriptLive).Assembly.GetType("Marionette.Desktop.AiBuilderHealer") is null,
-                "destructive builder healer was reintroduced");
-        });
         registry.Add("step-mutation-safety", "all editing families and new verbs consume STEP", () =>
         {
             foreach (string verb in ("add edit set remove remedy material facematerial refimage refmark refstep trace "

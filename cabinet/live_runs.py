@@ -1,8 +1,10 @@
 """Run protocol helpers, independent of Qt and any visible window."""
 import plain_words
+import gate
 import json
 import math
 import os
+import re
 import time
 import uuid
 import hashlib
@@ -337,6 +339,81 @@ def request_cancel(root):
     finally:
         if os.path.exists(temp):
             os.unlink(temp)
+
+
+_STOPPED_RESUME_RE = re.compile(r"^resume$", re.IGNORECASE)
+_STOPPED_STEER_RE = re.compile(r"^steer\s*:?\s*(.+)$", re.IGNORECASE | re.DOTALL)
+
+
+def run_script_path(root):
+    """The build script a run was started from (<run>.json "script"), or ""."""
+    try:
+        with open(root.rstrip("/") + ".json") as stream:
+            script = json.load(stream).get("script", "")
+        return script if isinstance(script, str) else ""
+    except (OSError, ValueError, AttributeError):
+        return ""
+
+
+def unread_note_texts(root):
+    """Texts of the run's unread notes, oldest first; read-only, marks nothing."""
+    return [n.get("text", "") for n in notes(root)
+            if not n.get("read") and isinstance(n.get("text"), str) and n.get("text").strip()]
+
+
+def parse_stopped_command(text):
+    """RESUME / STEER <notes> typed in chat while a stopped-step record is pending.
+    Returns ("resume", ""), ("steer", notes), or (None, None). Exact words only:
+    "resume the game" is ordinary chat, not a resume."""
+    t = (text or "").strip()
+    if _STOPPED_RESUME_RE.match(t):
+        return "resume", ""
+    m = _STOPPED_STEER_RE.match(t)
+    if m and m.group(1).strip():
+        return "steer", m.group(1).strip()
+    return None, None
+
+
+def finish_stopped_step(root, notes=""):
+    """Write the stopped-step record for a run that is already at its step
+    boundary (open/held/checkpoint, or paused after its current operation):
+    run dir, revision, script, saved .effigy snapshot, user notes. The record
+    is the resume point (notice-ready proposal section 6). Returns
+    {"record": ..., "revision": ..., "op": ..., "halted": ...}."""
+    final = read_state(root)
+    revision = (final.get("snapshot") or {}).get("revision", 0)
+    if not isinstance(revision, int):
+        revision = 0
+    op = revision_op(root, revision) if revision else ""
+    script = run_script_path(root)
+    snap = revision_path(root, revision) if revision else ""
+    parts = [notes.strip()] if isinstance(notes, str) and notes.strip() else []
+    parts.extend(unread_note_texts(root))
+    record = gate.write_stopped_step(root, revision, script, notes="\n".join(parts), snapshot=snap)
+    halted = bool(control_state(final).get("paused")) or final.get("state") in OPEN
+    return {"record": record, "revision": revision, "op": op, "halted": halted}
+
+
+def stop_hold(root, notes="", timeout_s=30.0):
+    """STOP-button path: halt a live run at its current step boundary, then write
+    the stopped-step record. An open/held/checkpoint run is already between
+    steps, so its record is written at once; a building run gets a "pause"
+    command and the halt is polled (the run's control watcher holds it after
+    its current operation -- never mid-step). Raises ValueError when there is
+    nothing live to stop."""
+    state = read_state(root)
+    if not state.get("runId"):
+        raise ValueError("Run has not published its control identity yet")
+    if state.get("state") in TERMINAL:
+        raise ValueError("Run has finished; controls never restart it")
+    if state.get("state") not in OPEN:
+        send_command(root, "pause")
+        deadline = time.monotonic() + max(0.0, timeout_s)
+        while time.monotonic() < deadline:
+            if control_state(read_state(root)).get("paused"):
+                break
+            time.sleep(0.2)
+    return finish_stopped_step(root, notes=notes)
 
 
 # ---- replay and notes ---------------------------------------------------------------------

@@ -397,7 +397,23 @@ public static class LineworkRaster
 		return ( x, y, weight, r, g, b, erase ) =>
 		{
 			if ( x < 0 || y < 0 || x >= canvas.Width || y >= canvas.Height || weight <= 0f ) return;
-			if ( erase ) canvas.Erase( x, y, weight );
+			if ( erase )
+			{
+				canvas.Erase( x, y, weight );
+				// A texel erased to fully transparent must read as cleared, not as
+				// a red texel with zero alpha: Erase is destination-out on straight
+				// alpha, so it leaves RGB untouched, and a read-back counting the
+				// colour channel would still see the "erased" colour. Zero the
+				// colour once nothing is left to show it; a partly erased texel
+				// keeps its colour, as straight alpha says it should.
+				var i = (y * canvas.Width + x) * 4;
+				if ( canvas.Rgba[i + 3] == 0 )
+				{
+					canvas.Rgba[i] = 0;
+					canvas.Rgba[i + 1] = 0;
+					canvas.Rgba[i + 2] = 0;
+				}
+			}
 			else canvas.Blend( x, y, r, g, b, weight );
 			result.Pixels++;
 			if ( result.MinX < 0 ) { result.MinX = result.MaxX = x; result.MinY = result.MaxY = y; }
@@ -411,7 +427,7 @@ public static class LineworkRaster
 		};
 	}
 
-	static (byte R, byte G, byte B) ParseColorOrDefault( string color )
+	public static (byte R, byte G, byte B) ParseColorOrDefault( string color )
 	{
 		if ( TryParseColor( color, out var r, out var g, out var b ) ) return (r, g, b);
 		return (0xEC, 0xEB, 0xE6); // reader default #ecebe6

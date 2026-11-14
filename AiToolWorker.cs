@@ -93,7 +93,7 @@ public static class AiToolWorker
             if (new FileInfo(path).Length > 16 * 1024 * 1024) throw new ArgumentException("Native job too large.");
             var request = JsonNode.Parse(File.ReadAllText(path))!;
             string name = request["name"]!.GetValue<string>();
-            if (name is not ("add_feature" or "edit_feature" or "remove_feature" or "render")) throw new ArgumentException("Unsupported native worker operation.");
+            if (name is not ("add_feature" or "edit_feature" or "remove_feature" or "render" or "rig_command" or "edit_op" or "measure_model" or "anim_command" or "bake_export" or "map_command")) throw new ArgumentException("Unsupported native worker operation.");
             tools.Studio = StudioDocument.Read(request["studio"]!.GetValue<string>());
             tools.RejectUnownedStrokeAlpha(); // F3 belt-and-braces: before the first rebuild can read the path
             var report = tools.Studio.Rebuild();

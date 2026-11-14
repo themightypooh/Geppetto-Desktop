@@ -2,6 +2,7 @@ using System.Numerics;
 using Effigy;
 using Marionette.Desktop;
 using Silk.NET.OpenGL;
+using NormalMapConvention = Marionette.Desktop.NormalMapConvention;
 
 internal static class MaterialChannelGpuTests
 {

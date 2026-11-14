@@ -14,6 +14,15 @@ namespace Marionette.Desktop;
 /// Uses declared 2.54 cm per kernel inch scale factor so 1 kernel inch stays 1 inch on export.
 /// Non-destructive: does not cull or clamp bones to the 220 viewport limit.
 /// Enforces atomic write staging and overwrite policy.
+///
+/// Animated FBX: this adapter writes STATIC rigged FBX only — mesh + skeleton + skin,
+/// no animation. There is no AnimStack, no animation curves and no RigAnim → FBX writer
+/// on Desktop (<c>FbxWriter.WriteBinaryFile</c> takes a mesh and a rig, not a clip;
+/// contrast Mobile's <c>AnimExport.AddFbxAnimations</c>, which Desktop has not ported).
+/// Animated portable interchange on Desktop is GLB via
+/// <see cref="GlbExport.WriteAnimated"/> (bone TRS + morph weights per clip) or native
+/// <c>.riganim</c>. The import direction is covered: <c>FbxClipConverter</c> turns an
+/// FBX take into a <c>RigAnimFile</c>, audited by <c>FbxAnimationFeasibility</c>.
 /// </summary>
 public static class FbxExportAdapter
 {
@@ -22,6 +31,7 @@ public static class FbxExportAdapter
 	/// <summary>
 	/// Exports a PolyMesh and optional Skeleton to binary FBX format.
 	/// If skeleton is null or has 0 bones, exports as a static model with no armature.
+	/// Static only: no animation curves are written (see the class remarks).
 	/// </summary>
 	public static string ExportBinary(
 		PolyMesh mesh,
@@ -76,7 +86,8 @@ public static class FbxExportAdapter
 	}
 
 	/// <summary>
-	/// Exports model from DocumentSession to binary FBX.
+	/// Exports model from DocumentSession to binary FBX. Static rigged export only;
+	/// no animation curves are written (see the class remarks).
 	/// </summary>
 	public static ExportResult Export(
 		DocumentSession session,

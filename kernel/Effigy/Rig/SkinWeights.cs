@@ -157,13 +157,16 @@ public sealed class SkinWeights
 		// returning a short set in whatever order it arrived exports the wrong parent bone. A vertex
 		// weighted [(0, 0.2), (1, 0.8)] would name bone 0 as its parent.
 		//
+		// Always renormalise too: NormalizeWeights (and export) need every kept influence set to sum
+		// to 1, including the common case where the vertex already has ≤ max influences but the
+		// weights were painted incomplete. Empty stays empty (early return above).
+		//
 		// Copying rather than returning the caller's array matters for the same reason it always
 		// does: a caller that prunes and then edits the result would otherwise be editing the mesh's
 		// own weights through the back door.
-		if ( weights.Length <= max )
-			return weights.OrderByDescending( w => w.Weight ).ToArray();
-
-		var kept = weights.OrderByDescending( w => w.Weight ).Take( max ).ToArray();
+		var kept = (weights.Length <= max
+			? weights.OrderByDescending( w => w.Weight )
+			: weights.OrderByDescending( w => w.Weight ).Take( max )).ToArray();
 		var total = kept.Sum( w => w.Weight );
 
 		if ( total <= 1e-9f )

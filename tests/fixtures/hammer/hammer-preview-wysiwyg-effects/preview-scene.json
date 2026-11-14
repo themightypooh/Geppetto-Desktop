@@ -1,0 +1,75 @@
+{
+  "comment": "Hammer Desktop P2 preview-effects fixture (hammer-preview-wysiwyg-effects). One of each preview input plus the hand-computed expected values the tests check. Units are Source inches, Z-up; colours in fog are 0..1, in renderFx 0..255.",
+  "particleSystem": {
+    "name": "smoke",
+    "origin": [0, 0, 64],
+    "direction": [0, 0, 1],
+    "emissionRate": 10,
+    "lifetime": 2,
+    "speed": 50,
+    "spread": 0,
+    "gravity": [0, 0, 0],
+    "startSize": 4,
+    "endSize": 8
+  },
+  "particleAtT1": {
+    "aliveCount": 11,
+    "particle0Position": [0, 0, 114],
+    "particle0LifeFraction": 0.5,
+    "particle0Size": 6,
+    "particle0Alpha": 0.5
+  },
+  "fog": {
+    "origin": [0, 0, 0],
+    "start": 128,
+    "end": 1024,
+    "maxDensity": 0.9,
+    "color": [0.5, 0.6, 0.7],
+    "enabled": true
+  },
+  "fogAtDistance512": {
+    "factor": 0.4285714,
+    "density": 0.3857143
+  },
+  "rope": {
+    "start": [-64, 0, 128],
+    "end": [64, 0, 128],
+    "slack": 8,
+    "segments": 16
+  },
+  "ropeExpected": {
+    "sagDepth": 19.5959,
+    "midpoint": [0, 0, 108.4041]
+  },
+  "proxy": {
+    "material": "brick/scroll",
+    "scrollU": 0.25,
+    "scrollV": 0,
+    "scaleU": 2,
+    "scaleV": 1,
+    "rotateRate": 0,
+    "frames": 0,
+    "frameRate": 0
+  },
+  "proxyAtT2": {
+    "offsetU": 0.5,
+    "offsetV": 0,
+    "rotationDegrees": 0,
+    "frameIndex": -1
+  },
+  "renderFx": {
+    "className": "prop_static",
+    "mode": 4,
+    "fx": 0,
+    "color": [255, 128, 0],
+    "amt": 128,
+    "bodyGroup": 2,
+    "scale": 1.5,
+    "time": 0
+  },
+  "renderFxExpected": {
+    "alpha": 0.5019608,
+    "color": [1, 0.5019608, 0],
+    "visible": true
+  }
+}

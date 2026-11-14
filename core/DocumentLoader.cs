@@ -103,6 +103,28 @@ public sealed class DocumentLoader
 
 					session = DocumentSession.CreateFbx( path, imported, rawBytes: rawBytes, clipPath: clipPath, clipJson: clipJson, clip: clip );
 				}
+				else if ( path.EndsWith( ".glb", StringComparison.OrdinalIgnoreCase ) || path.EndsWith( ".gltf", StringComparison.OrdinalIgnoreCase ) )
+				{
+					// Portable GLB import (this ticket): an engine-independent glTF 2.0 reader
+					// that produces the same FbxImport.Result shape as the FBX path, so the
+					// session, snapshot and paint machinery downstream never learn the file
+					// was not an FBX. The session is created through CreateFbx on purpose:
+					// there is no Glb source kind yet (DocumentSession.cs belongs to the
+					// paint-channels task), so the true format is recorded in Result.Notes
+					// and the cache note below; a proper GlbSourceData / SourceKind.Glb is a
+					// follow-up for a session ticket. Static only — see GlbImport.
+					if ( fbxClipBytes != null )
+						throw new NotSupportedException(
+							"An animated FBX clip needs an FBX document so its skeleton is available for target mapping." );
+
+					_phase = "document";
+					byte[] rawBytes = System.IO.File.ReadAllBytes( path );
+					var imported = GlbImport.Read( rawBytes, path );
+					loadSeconds = sw.Elapsed.TotalSeconds;
+					cacheNote = $"glb import: {imported.Pieces.Count} piece(s), {imported.MaterialSlots.Count} material(s)";
+
+					session = DocumentSession.CreateFbx( path, imported, rawBytes: rawBytes, clipPath: clipPath, clipJson: clipJson, clip: clip );
+				}
 				else
 				{
 					if ( fbxClipBytes != null )

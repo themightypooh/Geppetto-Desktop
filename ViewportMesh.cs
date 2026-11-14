@@ -371,6 +371,18 @@ public sealed class ViewportMesh : IDisposable
 		for ( int i = 0; i < Batches.Length; i++ )
 		{
 			var batch = Batches[i];
+            bool isFur = Cpu.FurSlots.TryGetValue(batch.MaterialSlot, out var fur);
+            shader.SetInt(shader.Uniform("uFur"), isFur ? 1 : 0);
+            if (isFur)
+            {
+                var color = fur.Color;
+                shader.SetVec3(shader.Uniform("uFurColor"), MathF.Pow(color.x, 2.2f), MathF.Pow(color.y, 2.2f), MathF.Pow(color.z, 2.2f));
+                shader.SetVec3(shader.Uniform("uFurRim"), MathF.Pow(fur.Rim.x,2.2f), MathF.Pow(fur.Rim.y,2.2f), MathF.Pow(fur.Rim.z,2.2f));
+                shader.SetFloat(shader.Uniform("uFurDensity"), fur.Density);
+                shader.SetFloat(shader.Uniform("uFurDarkRoots"), fur.DarkRoots);
+                shader.SetFloat(shader.Uniform("uFurClump"), fur.Clump);
+            }
+
 			if ( batch.Translucent != ( group == 1 ) ) continue;
 			// R10: skip binds the previous batch already made (fallback maps are shared).
 			Bind( gl, bound, 1, _batchAlbedoTextures[i] );
@@ -426,6 +438,7 @@ public sealed class ViewportMesh : IDisposable
 			if ( blend ) { gl.Disable( EnableCap.Blend ); gl.DepthMask( true ); }
 		}
 		}
+		shader.SetInt(shader.Uniform("uFur"), 0); // Live overlays share this shader.
 		gl.BindVertexArray( 0 );
 		for ( int unit = 1; unit <= 6; unit++ )
 		{

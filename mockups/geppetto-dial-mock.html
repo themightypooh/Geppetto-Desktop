@@ -1,0 +1,785 @@
+<title>Geppetto in Poohdot</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400&display=swap">
+<style>
+/* Layout: a fixed 1600x900 copy of the Poohdot editor, scaled to fit, with a mock-only control strip above it.
+   Single dark look on purpose: it mirrors the real editor. */
+:root {
+  color-scheme: dark;
+  --page: #08090a;
+  --ink: #e6e7ea;
+  --ink-dim: #9a9ea8;
+  --ink-faint: #6b6f78;
+  --chrome: #0c0d0f;
+  --tabrow: #131417;
+  --field: #1a1c21;
+  --dock: #1d1f25;
+  --dock-tab: #23252b;
+  --panel: #1b1b1b;
+  --strip: #202020;
+  --strip-on: #2d2d2d;
+  --sect: #282828;
+  --sel: #323742;
+  --accent: #2e70ea;
+  --accent-soft: #294f96;
+  --accent-ink: #6ea0ff;
+  --warn: #f2c94c;
+  --ok: #4fbf6f;
+  --bad: #e5534b;
+  --gep: #e8a03a;
+  --mock: #f1efe9;
+  --mock-ink: #1b1c1f;
+  --ui: "Inter", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", monospace;
+}
+html, body { height: 100%; }
+body { background: var(--page); color: var(--ink); font-family: var(--ui); margin: 0;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 14px; box-sizing: border-box; }
+* { box-sizing: border-box; }
+button { font: inherit; color: inherit; }
+button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 1px; }
+
+/* ---------- mock controls ---------- */
+.mockbar { background: var(--mock); color: var(--mock-ink); border-radius: 8px; padding: 10px 12px; display: grid; gap: 8px; max-width: 1600px; margin: 0 auto 12px; }
+.mockrow { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
+.mockbar .lbl { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; font-weight: 700; color: #6a6458; min-width: 92px; }
+.mockbar .grp { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
+.mockbar button { background: #fff; border: 1px solid #d8d3c8; border-radius: 6px; padding: 6px 10px; font-size: 13px; cursor: pointer; color: var(--mock-ink); }
+.mockbar button[aria-pressed="true"] { background: var(--mock-ink); color: #fff; border-color: var(--mock-ink); }
+.mockbar .note { font-size: 13px; color: #3f3b35; line-height: 1.45; max-width: 110ch; }
+
+/* ---------- scaled editor frame ---------- */
+.stage { max-width: 1600px; margin: 0 auto; position: relative; }
+.stage-inner { width: 1600px; height: 900px; transform-origin: 0 0; position: absolute; left: 0; top: 0; }
+.ed { width: 1600px; height: 900px; background: var(--chrome); display: grid; grid-template-rows: 36px 1fr; font-size: 13px; overflow: hidden; border-radius: 6px; box-shadow: 0 20px 60px rgba(0,0,0,.5); user-select: none; position: relative; }
+
+.top { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 0 8px; }
+.menus { display: flex; gap: 14px; }
+.ws { display: flex; gap: 20px; font-weight: 600; font-size: 14px; }
+.ws span { display: flex; align-items: center; gap: 5px; }
+.ws span.on { color: var(--accent-ink); }
+.play { display: flex; gap: 14px; justify-content: flex-end; color: var(--ink-dim); }
+.play i { width: 22px; height: 22px; display: grid; place-items: center; font-style: normal; font-size: 12px; }
+
+.body { display: grid; grid-template-columns: 236px 1fr 272px; gap: 3px; padding: 0 3px 3px; min-height: 0; }
+.dock { background: var(--dock); display: grid; grid-template-rows: 28px 1fr; min-height: 0; border-radius: 3px; overflow: hidden; }
+.dtabs { display: flex; align-items: stretch; background: var(--tabrow); }
+.dtabs span { padding: 0 9px; display: flex; align-items: center; color: var(--ink-dim); gap: 5px; white-space: nowrap; }
+.dtabs span.on { background: var(--dock-tab); color: var(--ink); }
+.dtabs span.g::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--gep); }
+.dtabs .kebab { margin-left: auto; color: var(--ink-faint); }
+.dbody { min-height: 0; overflow: hidden; }
+.filter { display: flex; align-items: center; gap: 8px; padding: 6px 8px; color: var(--ink-dim); }
+.filter .f { flex: 1; background: var(--field); border-radius: 3px; padding: 4px 8px; color: var(--ink-faint); font-size: 12.5px; display: flex; justify-content: space-between; }
+
+.tree { padding: 2px 4px; }
+.row { display: flex; align-items: center; gap: 6px; height: 21px; padding-left: calc(var(--d, 0) * 12px + 6px); border-radius: 3px; font-size: 13px; white-space: nowrap; }
+.row.sel { background: var(--sel); }
+.row.err { color: #ff8a80; }
+.row .eye { margin-left: auto; color: var(--ink-dim); font-size: 11px; padding-right: 4px; }
+.row .car { width: 8px; color: var(--ink-faint); font-size: 9px; }
+.row .dim { color: var(--ink-faint); font-size: 11.5px; }
+.subhead { padding: 8px 10px 3px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-faint); font-weight: 600; display: flex; justify-content: space-between; }
+svg.ic { width: 13px; height: 13px; flex: none; }
+
+.center { display: grid; grid-template-rows: 28px 30px 1fr auto; min-height: 0; }
+.scenetabs { display: flex; align-items: stretch; background: var(--tabrow); border-radius: 3px 3px 0 0; }
+.scenetabs .t { display: flex; align-items: center; gap: 7px; padding: 0 10px; background: var(--dock-tab); color: var(--accent-ink); }
+.scenetabs .t .o { width: 8px; height: 8px; border: 1.5px solid var(--bad); border-radius: 50%; }
+.scenetabs .plus { padding: 0 10px; display: flex; align-items: center; color: var(--ink-dim); }
+.vtool { display: flex; align-items: center; gap: 3px; padding: 0 6px; background: var(--chrome); white-space: nowrap; }
+.vtool .b { display: flex; align-items: center; gap: 5px; padding: 3px 7px; border-radius: 3px; }
+.vtool .b.on { background: #2a2c31; }
+.vtool .sep { width: 1px; height: 16px; background: #2a2c31; margin: 0 5px; }
+.vtool .gsel { border: 1px solid rgba(232,160,58,.45); color: var(--gep); }
+
+.vp { position: relative; min-height: 0; background: #191919; overflow: hidden; }
+.vp canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab; }
+.vp .persp { position: absolute; left: 10px; top: 9px; background: rgba(60,62,66,.85); color: #d5d6d6; padding: 4px 9px; border-radius: 3px; }
+.vp .cube { position: absolute; right: 14px; top: 12px; width: 58px; height: 58px; border: 1px solid rgba(255,255,255,.35); background: rgba(40,42,46,.7); display: grid; place-items: center; font-size: 10px; letter-spacing: .08em; color: #d5d6d6; transform: perspective(200px) rotateX(-12deg) rotateY(22deg); }
+.vp .result { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); display: flex; background: rgba(20,21,24,.92); border-radius: 4px; overflow: hidden; font-size: 12px; }
+.vp .result span { padding: 5px 10px; border-right: 1px solid #2a2c31; color: var(--ink-dim); }
+.vp .result span b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.vp .result span.ok { color: var(--ok); }
+.side-tools { position: absolute; left: 0; top: 0; bottom: 0; width: 132px; background: rgba(12,13,15,.94); padding: 8px 6px; display: grid; align-content: start; gap: 2px; }
+.side-tools .h { padding: 2px 6px 4px; }
+.side-tools .tb { padding: 5px 8px; border-radius: 3px; display: flex; gap: 7px; align-items: center; }
+.side-tools .tb.on { background: #2a2c31; }
+
+.bottom { display: grid; grid-template-rows: 1fr 30px; background: var(--panel); height: 214px; margin-top: 3px; border-radius: 3px; overflow: hidden; }
+.bstrip { display: flex; align-items: stretch; background: var(--strip); padding: 0 4px; }
+.bstrip span { padding: 0 10px; display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+.bstrip span.on { background: var(--strip-on); }
+.bstrip span.g::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--gep); }
+.bstrip .ver { margin-left: auto; color: var(--ink-dim); }
+.console { font-family: var(--mono); font-size: 11.5px; line-height: 1.5; padding: 10px 12px; color: #d4d4d4; overflow: hidden; white-space: pre; }
+.console .w { color: var(--warn); }
+.fs { display: grid; grid-template-columns: 200px 1fr; min-height: 0; }
+.fs .side { padding: 8px 10px; border-right: 1px solid #111; display: grid; gap: 4px; align-content: start; }
+.fs .grid { display: flex; gap: 26px; padding: 14px 20px; align-items: flex-start; }
+.fs .tile { display: grid; justify-items: center; gap: 8px; font-size: 12.5px; width: 84px; text-align: center; }
+.fs .thumb { width: 60px; height: 52px; border-radius: 6px; display: grid; place-items: center; }
+
+.ins-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px; }
+.ins-head .nm { flex: 1; background: var(--field); border-radius: 3px; padding: 4px 8px; display: flex; gap: 7px; align-items: center; }
+.sect { background: var(--sect); text-align: center; font-weight: 600; padding: 6px; margin: 6px 4px 2px; border-radius: 3px; display: flex; justify-content: center; align-items: center; gap: 7px; }
+.fold { padding: 4px 10px 4px 12px; font-weight: 600; display: flex; gap: 6px; align-items: center; }
+.fold::before { content: "›"; color: var(--ink-faint); }
+.prop { display: grid; grid-template-columns: 92px 1fr; align-items: center; gap: 6px; padding: 3px 10px; color: var(--ink-dim); font-size: 12.5px; }
+.prop .v { background: var(--field); border-radius: 3px; padding: 3px 7px; color: var(--ink); font-variant-numeric: tabular-nums; display: flex; justify-content: space-between; }
+.vec { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; }
+.vec b { font-weight: 400; background: var(--field); border-radius: 3px; padding: 2px 5px; color: var(--ink); font-variant-numeric: tabular-nums; display: flex; gap: 4px; }
+.vec b i { font-style: normal; } .vec b i.x { color: #e5534b; } .vec b i.y { color: #8bc34a; } .vec b i.z { color: #4a9cf0; }
+.addc { margin: 10px; padding: 6px; text-align: center; background: var(--field); border-radius: 3px; }
+.h { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-faint); font-weight: 600; }
+
+/* ---------- Geppetto chrome (ported from the s&box version) ---------- */
+.gwsbar { height: 32px; display: flex; align-items: stretch; background: #101114; padding: 0 6px; gap: 2px; }
+.gwsbar .w { padding: 0 14px; display: flex; align-items: center; color: var(--ink-dim); cursor: pointer; font-weight: 500; position: relative; }
+.gwsbar .w.on { color: #fff; }
+.gwsbar .w.on::after { content: ""; position: absolute; left: 10px; right: 10px; bottom: 0; height: 2px; background: var(--gep); }
+.gwsbar .div { width: 1px; background: #2a2c31; margin: 8px 6px; }
+.gwsbar .trail { margin-left: auto; display: flex; gap: 10px; align-items: center; color: var(--ink-dim); font-size: 12px; }
+.gwsbar .trail .pill { border: 1px solid #2f3239; border-radius: 3px; padding: 2px 7px; }
+.gtabs { height: 30px; display: flex; align-items: stretch; background: #15161a; padding: 0 6px; }
+.gtabs .s { padding: 0 11px; display: flex; align-items: center; gap: 6px; color: var(--ink-dim); cursor: pointer; font-size: 12.5px; }
+.gtabs .s .n { font-size: 10.5px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.gtabs .s.on { color: #fff; background: #1f2126; }
+.gtabs .mode { margin-left: auto; display: flex; align-items: center; gap: 10px; color: var(--ink-faint); font-size: 11px; letter-spacing: .08em; }
+.gtabs .mode .fin { color: var(--ok); letter-spacing: 0; font-size: 12.5px; border: 1px solid rgba(79,191,111,.4); border-radius: 3px; padding: 2px 8px; }
+.gtools { height: 42px; display: flex; align-items: center; gap: 4px; background: #1f2126; padding: 0 8px; white-space: nowrap; overflow: hidden; }
+.gtools .tb { height: 30px; padding: 0 10px; display: flex; align-items: center; gap: 7px; border-radius: 4px; font-size: 12.5px; }
+.gtools .tb:first-child { box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); }
+.gtools .tb svg { width: 15px; height: 15px; }
+.gstatus { height: 24px; background: #101114; color: var(--ink-faint); font-size: 12px; display: flex; align-items: center; padding: 0 10px; gap: 16px; }
+.gstatus b { color: var(--ink-dim); font-weight: 500; }
+
+.list { display: grid; gap: 1px; background: #15161a; border-radius: 3px; overflow: hidden; margin: 0 8px; }
+.list > div { display: flex; align-items: center; gap: 7px; padding: 5px 8px; background: var(--field); white-space: nowrap; }
+.list > div.sel { background: var(--sel); }
+.list .r { margin-left: auto; color: var(--ink-faint); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.sw { width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(255,255,255,.15); flex: none; }
+.mats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 4px 8px; }
+.mats div { display: grid; gap: 4px; font-size: 11px; color: var(--ink-dim); text-align: center; }
+.mats i { aspect-ratio: 1; border-radius: 4px; display: block; }
+.btn { background: #2a2d34; border-radius: 3px; padding: 6px 8px; margin: 4px 8px; display: flex; align-items: center; gap: 7px; justify-content: center; }
+.btn.primary { background: var(--accent); color: #fff; font-weight: 600; }
+.slider { display: grid; grid-template-columns: 74px 1fr 40px; gap: 6px; align-items: center; color: var(--ink-dim); padding: 4px 10px; }
+.slider .tr { height: 4px; background: #33363e; border-radius: 2px; position: relative; }
+.slider .tr::after { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: var(--v); background: var(--accent); border-radius: 2px; }
+.slider .tr::before { content: ""; position: absolute; left: calc(var(--v) - 5px); top: -4px; width: 10px; height: 12px; background: #cfd3da; border-radius: 2px; z-index: 1; }
+.slider span:last-child { text-align: right; color: var(--ink); font-variant-numeric: tabular-nums; }
+
+/* timeline (Marionette) */
+.tl { display: grid; grid-template-columns: 150px 1fr; min-height: 0; font-size: 12px; }
+.tl .names { border-right: 1px solid #111; }
+.tl .names div, .tl .lanes div { height: 22px; display: flex; align-items: center; padding: 0 10px; border-bottom: 1px solid #202226; }
+.tl .lanes { position: relative; }
+.tl .ruler { color: var(--ink-faint); font-variant-numeric: tabular-nums; justify-content: space-between; }
+.tl .key { position: absolute; width: 8px; height: 8px; background: #e8c46a; transform: rotate(45deg); margin-top: 7px; margin-left: -4px; }
+.tl .head { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); }
+
+/* tool placements (inside the viewport) */
+.rail { position: absolute; left: 0; top: 0; bottom: 0; display: flex; z-index: 2; }
+.rail .tabs { width: 86px; background: rgba(12,13,15,.95); padding: 6px 4px; display: grid; align-content: start; gap: 2px; }
+.rail .tabs span { align-items: center; padding: 7px 8px; border-radius: 3px; color: var(--ink-dim); cursor: pointer; display: flex; justify-content: space-between; font-size: 12.5px; }
+.rail .tabs span.on { background: #2a2c31; color: #fff; box-shadow: inset 2px 0 0 var(--gep); }
+.rail .tabs span .n { color: var(--ink-faint); font-size: 10.5px; }
+.rail .fly { width: 150px; background: rgba(31,33,38,.95); padding: 6px; display: grid; align-content: start; gap: 2px; border-right: 1px solid #2a2c31; }
+.rail .fly .tb { padding: 6px 8px; border-radius: 3px; display: flex; gap: 8px; align-items: center; font-size: 12.5px; }
+.rail .fly .tb:first-child { background: #2a2c31; }
+.rail .fly .tb svg, .shelf .tb svg { width: 14px; height: 14px; flex: none; }
+.shelf { position: absolute; left: 50%; bottom: 44px; transform: translateX(-50%); background: rgba(16,17,20,.95); border-radius: 6px; box-shadow: 0 6px 24px rgba(0,0,0,.45), 0 0 0 1px #2a2c31; z-index: 2; max-width: calc(100% - 40px); }
+.shelf .tools { display: flex; gap: 2px; padding: 5px; flex-wrap: wrap; justify-content: center; }
+.shelf .tb { padding: 6px 10px; border-radius: 4px; display: flex; gap: 7px; align-items: center; font-size: 12.5px; white-space: nowrap; }
+.shelf .tb:first-child { background: #2a2c31; }
+.shelf .tabs { display: flex; border-top: 1px solid #2a2c31; justify-content: center; padding: 0 4px; }
+.shelf .tabs span { padding: 5px 10px; font-size: 12px; color: var(--ink-dim); cursor: pointer; }
+.shelf .tabs span.on { color: #fff; box-shadow: inset 0 2px 0 var(--gep); }
+.vp.withshelf .result { bottom: 8px; }
+.dial { position: absolute; left: 0; bottom: 0; width: 460px; height: 460px; z-index: 2; pointer-events: none; transform-origin: 172px 300px; }
+.dial .grip { cursor: grab; } .dial .grip[data-grip="size"] { cursor: nwse-resize; }
+.dial .grip:hover circle { stroke: #e8a03a; }
+.dial svg { pointer-events: none; overflow: visible; }
+.dial svg g[data-name], .dial svg g[data-grip], .dial svg g[data-core], .dial .sh, .dial .mring > path:first-child { pointer-events: auto; }
+.dial [data-name], .dial [data-core] { cursor: pointer; }
+.dial .tile .wf { transition: filter .12s; }
+.dial .tile:hover .wf { filter: brightness(1.28); }
+.dial .pick { transition: transform .12s; transform-box: fill-box; transform-origin: center; }
+.dial .pick:hover { transform: scale(1.14); }
+.dial .sh:hover { stroke: #fff; stroke-width: 1.5; }
+.dial .tab:hover path:first-child { filter: brightness(1.2); }
+.dial .core:hover circle:first-child { stroke: #e8a03a; }
+.dial .tiles.fan .tile { animation: fan .26s cubic-bezier(.2,.8,.2,1) both; animation-delay: calc(var(--i) * 18ms); transform-box: view-box; transform-origin: 172px 300px; }
+@keyframes fan { from { opacity: 0; transform: rotate(-24deg) scale(.82); } to { opacity: 1; transform: none; } }
+.dial .mring.pop { animation: pop .24s cubic-bezier(.2,.8,.2,1) both; transform-box: view-box; transform-origin: 172px 300px; }
+@keyframes pop { from { opacity: 0; transform: scale(.86) rotate(-8deg); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .dial .tiles.fan .tile, .dial .mring.pop { animation: none; } }
+.dial-name { position: absolute; left: 404px; bottom: 214px; background: rgba(18,19,23,.95); border: 1px solid #2f3239; border-radius: 4px; padding: 4px 9px 4px 6px; font-size: 12px; font-weight: 600; white-space: nowrap; display: flex; align-items: center; gap: 7px; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
+.dial-name i { width: 12px; height: 12px; border-radius: 50%; display: inline-block; box-shadow: inset -2px -2px 3px rgba(0,0,0,.4); }
+.dial-name span { color: var(--ink-faint); font-family: var(--mono); font-weight: 400; font-size: 11px; }
+.vp.withdial .result { left: auto; right: 14px; transform: none; }
+.wheel { position: absolute; width: 300px; height: 300px; z-index: 2; pointer-events: none; }
+.wheel svg { width: 100%; height: 100%; overflow: visible; }
+.wheel-hint { position: absolute; left: 12px; bottom: 12px; background: rgba(16,17,20,.9); padding: 6px 10px; border-radius: 4px; font-size: 12px; color: var(--ink-dim); z-index: 2; }
+.wheel-hint b { color: var(--ink); font-weight: 600; }
+
+/* own-window placement */
+.win-veil { position: absolute; inset: 0; background: rgba(0,0,0,.45); }
+.win { position: absolute; left: 70px; top: 54px; right: 70px; bottom: 30px; background: var(--chrome); border-radius: 6px; box-shadow: 0 24px 70px rgba(0,0,0,.7), 0 0 0 1px #2b2e35; display: grid; grid-template-rows: 30px 26px auto 1fr 24px; overflow: hidden; }
+.win .title { display: flex; align-items: center; gap: 8px; padding: 0 10px; background: #17181c; font-size: 12.5px; color: var(--ink-dim); }
+.win .title b { color: var(--ink); font-weight: 600; }
+.win .title .ctl { margin-left: auto; display: flex; gap: 14px; }
+.win .menu { display: flex; gap: 14px; padding: 0 10px; align-items: center; font-size: 12.5px; background: var(--chrome); }
+.win .wbody { display: grid; grid-template-columns: 230px 1fr 260px; grid-template-rows: 1fr 150px; gap: 3px; padding: 3px; min-height: 0; }
+.win .wbody .vp { grid-column: 2; grid-row: 1; }
+.win .wbody .left { grid-column: 1; grid-row: 1 / 3; }
+.win .wbody .right { grid-column: 3; grid-row: 1 / 3; }
+.win .wbody .wb { grid-column: 2; grid-row: 2; display: grid; grid-template-rows: 26px 1fr; background: var(--panel); border-radius: 3px; overflow: hidden; }
+</style>
+
+<div class="mockbar" role="group" aria-label="Mock controls">
+  <div class="mockrow"><span class="lbl">Mock only</span>
+    <div class="grp" id="placeGrp" aria-label="Where Geppetto lives">
+      <button id="pA" data-p="A" aria-pressed="false">A · Its own window</button>
+      <button id="pB" data-p="B" aria-pressed="true">B · Geppetto tab in the top bar</button>
+      <button id="pC" data-p="C" aria-pressed="false">C · Inside the 3D view</button>
+    </div>
+  </div>
+  <div class="mockrow" id="toolsRow"><span class="lbl">Tool buttons</span>
+    <div class="grp" id="toolsGrp" aria-label="Where the tool buttons go">
+      <button id="t-rows" data-t="rows" aria-pressed="false">1 · Two rows on top</button>
+      <button id="t-rail" data-t="rail" aria-pressed="false">2 · Left rail</button>
+      <button id="t-shelf" data-t="shelf" aria-pressed="false">3 · Bottom shelf</button>
+      <button id="t-dial" data-t="dial" aria-pressed="false">4 · Viewport dial (Linework style)</button>
+    </div>
+  </div>
+  <div class="mockrow"><span class="lbl">Workspace</span>
+    <div class="grp" id="wsGrp" aria-label="Geppetto workspace"></div>
+  </div>
+  <div class="mockrow"><span class="lbl">What this is</span><span class="note" id="placeNote"></span></div>
+</div>
+
+<div class="stage" id="stage"><div class="stage-inner" id="inner"><div class="ed" id="ed"></div></div></div>
+
+<script>
+/* Workspaces, stages and tool names are copied from Geppetto's s&box code:
+   EffigyWorkspaceBar.cs, the CreateTools table in EffigyWindow.cs, EffigyWindow.Workspaces.cs,
+   EffigyWindow.Clothing.cs, and Marionette's RigControlWindow.cs. */
+const WS = {
+  CAD: { tip: "Sketches, solids and the feature tree", panel: "Materials", def: 1, stages: [
+    ["Sketch", ["Sketch", "Plane", "Primitive", "Import", "Profile"]],
+    ["Solid", ["Part", "Extrude", "Revolve", "Sweep", "Loft", "Spline", "Boolean"]],
+    ["Detail", ["Fillet", "Chamfer", "Shell", "Move Face", "Delete Face", "Draft", "Hole"]],
+    ["Repeat", ["Mirror", "Linear Pattern", "Circular Pattern", "Transform", "Bend Along Curve", "Simple Deform", "Lattice"]],
+    ["Finish", ["Face Material"]] ] },
+  Model: { tip: "Edit vertices, edges and faces, or sculpt", panel: "Shape Keys", def: 2, mode: "EDIT", stages: [
+    ["Select", ["Vertex", "Edge", "Face", "Grow", "Shrink", "Linked", "Invert"]],
+    ["Transform", ["Move", "Rotate", "Scale", "Edge slide", "Shrink/Fatten", "Bend"]],
+    ["Add", ["Extrude", "Inset", "Duplicate", "Bridge", "Spin", "Fill", "Pipe"]],
+    ["Clean up", ["Merge", "Dissolve", "Delete", "Smooth", "Relax", "Flip", "Triangulate"]],
+    ["Modifiers", ["Crease", "Clear crease"]],
+    ["UV", ["Mark seam", "Project UVs", "Cylinder projection", "Sphere projection"]] ] },
+  Paint: { tip: "Lay colour onto a body's texture", panel: "Layers", def: 0, mode: "PAINT", stages: [
+    ["Channel", ["Colour", "Roughness", "Metal", "Normal"]],
+    ["Layers", ["New Layer", "Fill Layer"]],
+    ["Brush", ["Brush radius", "Paint strength", "Channel value"]] ] },
+  Rig: { tip: "Place bones and pin bodies to them", panel: "Rig", def: 0, mode: "RIG", stages: [
+    ["Bones", ["Add Bone", "Bone from Part", "Delete"]],
+    ["Bind", ["Assign Body", "Mirror bones"]],
+    ["Soft", ["Make Soft", "Preview", "Rest"]],
+    ["Weights", ["Paint Weights"]],
+    ["Mesh", ["Subdivide", "Remesh"]],
+    ["Export", ["Check model", "Wrinkle Maps"]] ] },
+  Clothing: { tip: "Load a wearer, cut a garment from it, grow fur", panel: "Garment", def: 1, mode: "CLOTHING", stages: [
+    ["Wearer", ["Wearer"]],
+    ["Garment", ["Garment", "Trim", "Fur"]],
+    ["Shape", ["Shape garment"]],
+    ["Material", ["Fabric"]],
+    ["Details", ["Pocket", "Hardware", "Wear", "Glow"]],
+    ["Check", ["Check", "Push out", "Clear marks"]],
+    ["Publish", ["Make clothing", "Make live cloth"]] ] },
+  Animate: { tip: "Marionette: pose, keyframe, play", panel: "Scene", def: 0, mode: "MARIONETTE", stages: [
+    ["Pose", ["Move  W", "Rotate  E", "Scale  R", "Key  K", "Auto-Key"]],
+    ["Constraints", ["Two-bone IK", "Joint limit"]],
+    ["Scene", ["Prop", "Light", "Camera", "First Person View"]],
+    ["Events", ["Spawn model", "Morph event"]],
+    ["Export", ["Export Animation…"]] ] },
+};
+const WS_ORDER = ["CAD", "Model", "Paint", "Rig", "Clothing", "Animate"];
+const NOTES = {
+  A: "Closest to s&box today. Tools ▸ Geppetto (or double-clicking a .effigy) opens a separate Geppetto window over Poohdot, with its own menu, workspaces, Features, panels and console. Poohdot's own Hierarchy and Inspector aren't used.",
+  B: "Geppetto gets a tab next to 3D, Script and Game. Its workspaces and tool rows replace the middle. Features docks on the left beside Hierarchy, the workspace's panel docks on the right beside Inspector, and Console or Timeline sit in the bottom strip.",
+  C: "No separate place. You stay in the normal 3D view with your scene. A Geppetto picker joins the 3D toolbar, the current tool row runs down the left edge of the viewport, and Features and panels dock beside Hierarchy and Inspector.",
+};
+const TOOL_NOTES = {
+  rows: "Tools: the s&box layout. Workspaces, then stage tabs, then that stage's buttons, all stacked above the viewport.",
+  rail: "Tools: the stage names run down the left edge of the viewport, and the picked stage's buttons fold out next to them. The top keeps only the workspaces.",
+  shelf: "Tools: a floating shelf near the bottom of the viewport, stage tabs under the buttons. The top keeps only the workspaces, so the view gets taller.",
+  dial: "Tools: a dial on the viewport, built like Linework's. It starts in the bottom-left; drag its two grips to move it or resize it (Ctrl+scroll on it resizes too), and it remembers where you left it. Its ring holds this workspace's stages; click one and it fans open into that stage's tools. Click the middle and a material ring opens around it: your materials, recent picks numbered 1 to 8, colour shades and sliders. Right-click stays the camera.",
+};
+let place = "B", ws = "CAD", tools = "dial", stageIdx = {}, yaw = -0.5;
+let dialPos = { x: 0, y: 0 }, dialScale = 1;
+try { const d = JSON.parse(localStorage.getItem("gep-dial") || "{}"); if (d.pos) dialPos = d.pos; if (d.scale) dialScale = d.scale; } catch (e) {}
+const saveDial = () => { try { localStorage.setItem("gep-dial", JSON.stringify({ pos: dialPos, scale: dialScale })); } catch (e) {} };
+let animFan = false, animRing = false, dialOpen = -1, matOpen = true, matMode = "materials", curMat = 0, curTool = {}, recent = [0, 4, 1, 3, 6, 2];
+try { const s = JSON.parse(localStorage.getItem("gep-mock3") || "{}"); if (NOTES[s.place]) place = s.place; if (WS[s.ws]) ws = s.ws; if (TOOL_NOTES[s.tools]) tools = s.tools; } catch (e) {}
+const save = () => { try { localStorage.setItem("gep-mock3", JSON.stringify({ place, ws, tools })); } catch (e) {} };
+const curStage = () => stageIdx[ws] ?? WS[ws].def;
+
+const ICON = {
+  go: '<svg class="ic" viewBox="0 0 16 16" fill="none" stroke="#e6e7ea" stroke-width="1.4"><path d="M8 1.8 13.5 5v6L8 14.2 2.5 11V5z"/><path d="M2.5 5 8 8.2 13.5 5M8 8.2v6"/></svg>',
+  gep: '<svg class="ic" viewBox="0 0 16 16" fill="none" stroke="#e8a03a" stroke-width="1.5"><circle cx="8" cy="3.6" r="2"/><path d="M8 5.6v4.6M4.2 7.4h7.6M8 10.2 5.6 14.4M8 10.2l2.4 4.2"/></svg>',
+  bone: '<svg class="ic" viewBox="0 0 16 16" fill="none" stroke="#c9a46a" stroke-width="1.4"><path d="M4.5 11.5 11.5 4.5"/><circle cx="3.6" cy="12.4" r="1.6"/><circle cx="12.4" cy="3.6" r="1.6"/></svg>',
+  sk: '<svg class="ic" viewBox="0 0 16 16" fill="none" stroke="#8ab4ff" stroke-width="1.4"><path d="M2 13 7 3l4 6 3-3"/></svg>',
+  sol: '<svg class="ic" viewBox="0 0 16 16" fill="none" stroke="#c9ccd3" stroke-width="1.4"><path d="M3 5.5 8 3l5 2.5v5L8 13l-5-2.5z"/><path d="M3 5.5 8 8l5-2.5M8 8v5"/></svg>',
+  rep: '<svg class="ic" viewBox="0 0 16 16" fill="none" stroke="#b39ddb" stroke-width="1.4"><path d="M8 2v12" stroke-dasharray="2 2"/><rect x="2" y="5" width="4" height="6"/><rect x="10" y="5" width="4" height="6"/></svg>',
+  rig: '<svg class="ic" viewBox="0 0 16 16" fill="none" stroke="#e8a03a" stroke-width="1.4"><circle cx="8" cy="3" r="1.6"/><path d="M8 4.6v5M8 9.6l-3 4M8 9.6l3 4M4 6.5h8"/></svg>',
+  shirt: '<svg class="ic" viewBox="0 0 16 16" fill="none" stroke="#d08a6a" stroke-width="1.4"><path d="M5.5 2.5 2 5l1.8 2.5L5 6.8V14h6V6.8l1.2.7L14 5l-3.5-2.5C10 3.6 9 4.2 8 4.2S6 3.6 5.5 2.5z"/></svg>',
+  paint: '<svg class="ic" viewBox="0 0 16 16" fill="none" stroke="#7fd1a0" stroke-width="1.4"><path d="M3 13c2 0 3-1 3-2.5S7.5 8 9 9.5 14 3 14 3s-6 3.5-4.5 5S8 9 6.5 9 3 10 3 13z"/></svg>',
+  tool: '<svg viewBox="0 0 16 16" fill="none" stroke="#c9ccd3" stroke-width="1.4"><rect x="2.5" y="2.5" width="11" height="11" rx="2"/><path d="M5.5 8h5M8 5.5v5"/></svg>',
+};
+
+/* ---------- Geppetto pieces ---------- */
+function wsBar() {
+  return `<div class="gwsbar">${WS_ORDER.map(w => `${w === "Animate" ? '<span class="div"></span>' : ""}<span class="w${w === ws ? " on" : ""}" data-ws="${w}" title="${WS[w].tip}">${w}</span>`).join("")}
+    <span class="trail"><span>⌕ Find tool</span><span class="pill">Citizen size</span><span class="pill">Grid 1 u</span></span></div>`;
+}
+function stageTabs() {
+  const W = WS[ws], si = curStage();
+  return `<div class="gtabs">${W.stages.map(([n, t], i) => `<span class="s${i === si ? " on" : ""}" data-stage="${i}">${n}<span class="n">${t.length}</span></span>`).join("")}
+    <span class="mode">${W.mode || "PART"}${ws === "CAD" ? "" : ' <span class="fin">✔ Done</span>'}</span></div>`;
+}
+function toolRow() {
+  const tools = WS[ws].stages[curStage()][1];
+  return `<div class="gtools">${tools.map(t => `<span class="tb">${ICON.tool}${t}</span>`).join("")}</div>`;
+}
+function features() {
+  if (ws === "Animate") return `<div class="subhead">Bones<span>pose</span></div><div class="tree">${boneRows()}</div>`;
+  return `<div class="filter"><span>＋</span><div class="f">Filter features<span>⌕</span></div></div>
+  <div class="tree">
+    <div class="row"><span class="car">▾</span>${ICON.sk}Origin<span class="eye">👁</span></div>
+    <div class="row" style="--d:1"><span class="car"></span>${ICON.sk}Sketch 1 <span class="dim">torso outline</span></div>
+    <div class="row" style="--d:1"><span class="car"></span>${ICON.sol}Extrude 1 <span class="dim">Torso</span></div>
+    <div class="row" style="--d:1"><span class="car"></span>${ICON.sol}Revolve 1 <span class="dim">Head</span></div>
+    <div class="row" style="--d:1"><span class="car"></span>${ICON.sol}Primitive 1 <span class="dim">Arm.L</span></div>
+    <div class="row" style="--d:1"><span class="car"></span>${ICON.sol}Primitive 2 <span class="dim">Leg.L</span></div>
+    <div class="row" style="--d:1"><span class="car"></span>${ICON.rep}Mirror 1 <span class="dim">X</span></div>
+    <div class="row err" style="--d:1"><span class="car"></span>${ICON.sol}Fillet 1 <span class="dim">edge lost</span></div>
+    <div class="row" style="--d:1"><span class="car"></span>${ICON.paint}Paint 1</div>
+    <div class="row${ws === "Rig" ? " sel" : ""}" style="--d:1"><span class="car"></span>${ICON.rig}Rig <span class="dim">16 bones</span></div>
+    <div class="row${ws === "Clothing" ? " sel" : ""}" style="--d:1"><span class="car"></span>${ICON.shirt}Garment 1 <span class="dim">T-shirt</span></div>
+  </div>
+  <div class="subhead">Parts<span>6</span></div>
+  <div class="tree">${["Torso", "Head", "Arm.L", "Arm.R", "Leg.L", "Leg.R"].map(p => `<div class="row" style="--d:0">${ICON.sol}${p}<span class="eye">👁</span></div>`).join("")}</div>`;
+}
+const BONES = [["pelvis", 0], ["spine_01", 1], ["spine_02", 2], ["chest", 3], ["neck", 4], ["head", 5], ["clavicle_L", 4], ["upperarm_L", 5], ["forearm_L", 6], ["hand_L", 7], ["thigh_L", 1], ["calf_L", 2], ["foot_L", 3]];
+function boneRows() { return BONES.map(([b, d]) => `<div class="row${b === "upperarm_L" ? " sel" : ""}" style="--d:${Math.min(d, 7)}">${ICON.bone}${b}</div>`).join(""); }
+function wsPanel() {
+  switch (ws) {
+    case "CAD": return `<div class="filter"><div class="f">Search materials<span>⌕</span></div></div><div class="mats">${[["#b5532e", "Clay"], ["#2f3b4c", "Denim"], ["#d9c9a3", "Canvas"], ["#7b5a3c", "Leather"], ["#9aa0a8", "Steel"], ["#e8d7c0", "Skin"], ["#3a5f3a", "Felt"], ["#c64b6a", "Plastic"]].map(([c, n]) => `<div><i style="background:${c}"></i>${n}</div>`).join("")}</div><div class="subhead">On selected face</div><div class="list"><div><span class="sw" style="background:#b5532e"></span>Clay<span class="r">Torso</span></div></div>`;
+    case "Model": return `<div class="subhead">Shape keys<span>3</span></div><div class="list"><div>Basis<span class="r">—</span></div><div class="sel">smile<span class="r">0.60</span></div><div>blink_L<span class="r">0.00</span></div></div><div class="btn">＋ Add shape key</div><div class="subhead">Selection</div><div class="prop">Vertices<span class="v">212</span></div><div class="prop">Faces<span class="v">198</span></div>`;
+    case "Paint": return `<div class="subhead">Layers<span>3</span></div><div class="list"><div class="sel"><span class="sw" style="background:#c98a5a"></span>Freckles<span class="r">70%</span></div><div><span class="sw" style="background:#b5532e"></span>Base colour<span class="r">100%</span></div><div><span class="sw" style="background:#555"></span>Dirt (fill)<span class="r">35%</span></div></div><div class="subhead">Brush</div><div class="slider"><span>Radius</span><div class="tr" style="--v:30%"></div><span>12 px</span></div><div class="slider"><span>Strength</span><div class="tr" style="--v:65%"></div><span>0.65</span></div>`;
+    case "Rig": return `<div class="subhead">Skeleton<span>Citizen names ✓</span></div><div class="tree">${boneRows()}</div><div class="subhead">upperarm_L</div><div class="prop">Parent<span class="v">clavicle_L</span></div><div class="prop">Bound body<span class="v">Arm.L</span></div><div class="prop">Soft<span class="v">off</span></div>`;
+    case "Clothing": return `<div class="subhead">Wearer</div><div class="list"><div>${ICON.gep}character.vmdl<span class="r">reference</span></div></div><div class="subhead">Garment 1 · T-shirt</div><div class="slider"><span>Fit</span><div class="tr" style="--v:40%"></div><span>0.40</span></div><div class="slider"><span>Length</span><div class="tr" style="--v:55%"></div><span>0.55</span></div><div class="slider"><span>Drape</span><div class="tr" style="--v:25%"></div><span>0.25</span></div><div class="prop">Fabric<span class="v">Cotton ▾</span></div><div class="prop">Trim<span class="v">None ▾</span></div>`;
+    case "Animate": return `<div class="prop">Source Model<span class="v">character.vmdl</span></div><div class="prop">Clip<span class="v">wave.riganim</span></div><div class="prop">Frame rate<span class="v">30</span></div><div class="subhead">upperarm_L</div><div class="prop">Rotation<div class="vec"><b><i class="x">x</i>12</b><b><i class="y">y</i>-40</b><b><i class="z">z</i>65</b></div></div><div class="prop">Easing<span class="v">Smooth ▾</span></div><div class="subhead">Constraints</div><div class="list"><div>Two-bone IK<span class="r">hand_L</span></div><div>Limit<span class="r">forearm_L</span></div></div>`;
+  }
+}
+function timeline() {
+  const lanes = ["pelvis", "chest", "clavicle_L", "upperarm_L", "forearm_L", "hand_L"];
+  const keys = { pelvis: [0, 60], chest: [0, 30, 60], clavicle_L: [0, 20, 45], upperarm_L: [0, 12, 24, 36, 48, 60], forearm_L: [0, 18, 36, 54], hand_L: [0, 30] };
+  return `<div class="tl"><div class="names"><div class="ruler" style="color:var(--ink-dim)">wave · 2.0 s</div>${lanes.map(l => `<div${l === "upperarm_L" ? ' style="background:var(--sel)"' : ""}>${l}</div>`).join("")}</div>
+  <div class="lanes"><div class="ruler">${[0, 10, 20, 30, 40, 50, 60].map(n => `<span>${n}</span>`).join("")}</div>${lanes.map(l => `<div>${keys[l].map(k => `<span class="key" style="left:${k / 60 * 96 + 2}%"></span>`).join("")}</div>`).join("")}<span class="head" style="left:${24 / 60 * 96 + 2}%"></span></div></div>`;
+}
+function geppettoConsole() {
+  return `<div class="console">Effigy: opened character.effigy (11 features, 6 parts)
+Effigy: rebuild 38 ms
+<span class="w">Fillet 1: the edge it rounded no longer exists. Pick a new edge or delete the fillet.</span>
+Rig: 16 bones, all match Citizen names
+Export: character.glb written to res://characters/</div>`;
+}
+function viewport(opts = {}) {
+  const res = `<div class="result"><span>Bodies <b>6</b></span><span>Tris <b>8,412</b></span><span>Bones <b>16</b></span><span class="ok">Watertight ✓</span></div>`;
+  let side = "";
+  if (opts.sideTools) {
+    const tools = WS[ws].stages[curStage()][1];
+    side = `<div class="side-tools"><div class="h">${WS[ws].stages[curStage()][0]}</div>${tools.map((t, i) => `<span class="tb${i === 0 ? " on" : ""}">${t}</span>`).join("")}</div>`;
+  }
+  let over = "", cls = "", perspLeft = opts.sideTools ? 142 : 10;
+  if (opts.toolMode === "rail") { over = railTools(); perspLeft = 248; }
+  if (opts.toolMode === "shelf") { over = shelfTools(); cls = " withshelf"; }
+  if (opts.toolMode === "dial") { over = dialTools(); cls = " withdial"; }
+  return `<div class="vp${cls}" id="vp"><canvas id="cv"></canvas>${side}${over}<div class="persp" style="left:${perspLeft}px">⋮ Perspective</div><div class="cube">FRONT</div>${res}</div>`;
+}
+function railTools() {
+  const W = WS[ws], si = curStage();
+  return `<div class="rail"><div class="tabs">${W.stages.map(([n, t], i) => `<span class="${i === si ? "on" : ""}" data-stage="${i}">${n}<span class="n">${t.length}</span></span>`).join("")}</div>
+    <div class="fly">${W.stages[si][1].map(t => `<span class="tb">${ICON.tool}${t}</span>`).join("")}</div></div>`;
+}
+function shelfTools() {
+  const W = WS[ws], si = curStage();
+  return `<div class="shelf"><div class="tools">${W.stages[si][1].map(t => `<span class="tb">${ICON.tool}${t}</span>`).join("")}</div>
+    <div class="tabs">${W.stages.map(([n], i) => `<span class="${i === si ? "on" : ""}" data-stage="${i}">${n}</span>`).join("")}</div></div>`;
+}
+const MATS = [["Clay", "#b5532e"], ["Skin", "#e2b896"], ["Denim", "#34507a"], ["Canvas", "#d9c9a3"], ["Leather", "#7b5a3c"], ["Steel", "#9aa3ad"],
+  ["Felt", "#3f7a48"], ["Plastic", "#d0466e"], ["Rubber", "#2e2f33"], ["Wood", "#a0703f"], ["Gold", "#d9a83c"], ["Glass", "#8fd0e3"]];
+
+/* Icons on a 24px grid, drawn as 1.8px round-capped strokes. Stages first, then tools; anything missing falls back to its stage's icon. */
+const GI = {
+  // stages
+  Sketch: "M4 19 9 6l5 9 3-5 3 4", Solid: "M4 8l8-4 8 4v8l-8 4-8-4z M4 8l8 4 8-4M12 12v8", Detail: "M5 19V9a4 4 0 0 1 4-4h10 M5 19h14",
+  Repeat: "M12 3v18 M3 7h6v10H3z M15 7h6v10h-6z", Finish: "M5 20 15 10 M14 5l5 5 M12 7l5 5-3 3-5-5z",
+  Select: "M5 4l13 7-6 1.5L9 19z", Transform: "M12 3v18M3 12h18 M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3",
+  Add: "M12 5v14M5 12h14", "Clean up": "M6 19 17 8 M14 5l5 5 M4 20h7", Modifiers: "M4 7h10M18 7h2M4 17h2M10 17h10 M14 4v6M6 14v6",
+  UV: "M4 4h16v16H4z M4 12h16M12 4v16", Channel: "M12 3a9 9 0 1 0 0 18 M12 3v18 M12 8h6M12 13h8", Layers: "M12 3l9 5-9 5-9-5z M3 13l9 5 9-5",
+  Brush: "M4 20c3 0 4-1 4-3s2-3 3.5-1.5S20 4 20 4 10 9 11.5 10.5 10 13 8 13s-4 1-4 7z", Bones: "M7 17 17 7 M5 15a2 2 0 1 0 4 4 M15 5a2 2 0 1 0 4 4",
+  Bind: "M9 15l-3 3a3 3 0 0 1-4-4l3-3 M15 9l3-3a3 3 0 0 0-4-4l-3 3 M8 16l8-8", Soft: "M4 14c3-6 5-6 8 0s5 6 8 0", Weights: "M6 20h12l-2-11H8z M9 9a3 3 0 0 1 6 0",
+  Mesh: "M4 8l8-4 8 4v8l-8 4-8-4z M4 8l16 8M20 8 4 16M12 4v16", Export: "M12 4v11M7 10l5 5 5-5M4 20h16",
+  Wearer: "M12 3a2.5 2.5 0 1 0 0 5 2.5 2.5 0 1 0 0-5 M7 21v-7l-2-3 3-3h8l3 3-2 3v7", Garment: "M8 3 3 6l2 4 2-1v12h10V9l2 1 2-4-5-3c-.5 1.5-2 2.5-4 2.5S8.5 4.5 8 3z",
+  Shape: "M5 19c0-8 3-14 7-14s7 6 7 14", Material: "M4 4h7v7H4z M13 13h7v7h-7z M13 4h7v7h-7z M4 13h7v7H4z", Details: "M12 3l2.5 6H21l-5 4 2 7-6-4-6 4 2-7-5-4h6.5z",
+  Check: "M4 12l5 5L20 6", Publish: "M12 20V8 M7 13l5-5 5 5 M4 4h16", Pose: "M12 3a2 2 0 1 0 0 4 2 2 0 1 0 0-4 M12 7v7 M6 9l6 2 6-4 M12 14l-4 7M12 14l4 7",
+  Constraints: "M7 7a3 3 0 1 0 0 .1 M17 17a3 3 0 1 0 0 .1 M9 9l6 6", Scene: "M3 7h13v10H3z M16 10l5-3v10l-5-3", Events: "M13 3 5 14h6l-1 7 8-11h-6z",
+  // tools
+  Plane: "M3 15 9 7h12l-6 8z", Primitive: "M12 4a8 8 0 1 0 0 16 8 8 0 1 0 0-16 M4 12h16", Import: "M12 4v11M7 10l5 5 5-5M4 20h16", Profile: "M5 19V5h6a4 4 0 0 1 0 8H5",
+  Part: "M5 5h14v14H5z", Extrude: "M5 15h14v5H5z M12 13V4M8 8l4-4 4 4", Revolve: "M12 3v18 M8 6a6 6 0 1 0 8 0", Sweep: "M4 18c4 0 4-12 8-12s4 12 8 12",
+  Loft: "M6 4h12M4 20h16M6 4 4 20M18 4l2 16", Spline: "M3 17C7 3 13 21 21 7", Boolean: "M9 5a6 6 0 1 0 0 12 6 6 0 1 0 0-12 M15 7a6 6 0 1 0 0 12 6 6 0 1 0 0-12",
+  Fillet: "M5 19V11a6 6 0 0 1 6-6h8", Chamfer: "M5 19v-9l5-5h9", Shell: "M4 6h16v13H4z M7 9h10v7H7z", "Move Face": "M4 14h10v6H4z M9 11V3M6 6l3-3 3 3",
+  "Delete Face": "M4 4h16v16H4z M8 8l8 8M16 8l-8 8", Draft: "M7 20 9 4h6l2 16z", Hole: "M12 7a5 5 0 1 0 0 10 5 5 0 1 0 0-10 M4 4h16v16H4z",
+  Mirror: "M12 3v18 M8 7 4 12l4 5z M16 7l4 5-4 5z", "Linear Pattern": "M3 9h4v6H3zM10 9h4v6h-4zM17 9h4v6h-4z", "Circular Pattern": "M12 3a2 2 0 1 0 0 4 2 2 0 1 0 0-4M19 10a2 2 0 1 0 0 4M5 10a2 2 0 1 0 0 4M12 17a2 2 0 1 0 0 4",
+  "Bend Along Curve": "M3 18c6 0 8-12 18-12 M6 15l2 3M10 11l2 3", "Simple Deform": "M6 4c4 4 4 12 0 16M18 4c-4 4-4 12 0 16", Lattice: "M4 4h16v16H4zM9 4v16M15 4v16M4 9h16M4 15h16",
+  "Face Material": "M4 4h16v16H4z M4 4l16 16", Vertex: "M12 9a3 3 0 1 0 0 6 3 3 0 1 0 0-6", Edge: "M5 19 19 5", Face: "M4 6h16v12H4z",
+  Move: "M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3", Rotate: "M20 12a8 8 0 1 1-3-6.3 M20 4v5h-5", Scale: "M4 20 20 4 M14 4h6v6M4 14v6h6",
+  Extrude2: "", Inset: "M4 4h16v16H4z M8 8h8v8H8z", Bridge: "M3 8h5v8H3zM16 8h5v8h-5z M8 10h8M8 14h8", Merge: "M5 5l7 7 7-7 M12 12v8",
+  Smooth: "M3 14c3-4 6-4 9 0s6 4 9 0", Delete: "M5 7h14M10 11v6M14 11v6M7 7l1 13h8l1-13M9 7V4h6v3", "Mark seam": "M4 20 20 4 M7 13l4 4M11 9l4 4",
+  "Add Bone": "M7 17 17 7 M17 13v6M14 16h6", "Bone from Part": "M4 4h8v8H4z M10 14l6-6 M16 8a2 2 0 1 0 0 .1", "Assign Body": "M12 3l9 5-9 5-9-5z M12 13v8",
+  "Paint Weights": "M4 20c3 0 4-1 4-3s2-3 3.5-1.5S20 4 20 4", "Check model": "M4 12l5 5L20 6", Garment2: "", Trim: "M4 14c2-3 4-3 6 0s4 3 6 0 4-3 4 0", Fur: "M5 20c0-6 2-12 2-12M10 20c0-7 1-14 1-14M15 20c0-6 2-12 2-12",
+  "Key  K": "M12 4l8 8-8 8-8-8z", "Auto-Key": "M12 4a8 8 0 1 0 0 16 8 8 0 1 0 0-16 M12 8v4l3 2", "Two-bone IK": "M4 20 10 10l10-4 M10 10a1.5 1.5 0 1 0 0 .1",
+  Light: "M9 18h6M10 21h4 M12 3a6 6 0 0 0-4 10.5c.7.6 1 1.5 1 2.5h6c0-1 .3-1.9 1-2.5A6 6 0 0 0 12 3z", Camera: "M3 7h13v10H3z M16 10l5-3v10l-5-3",
+};
+const ICON_ALIAS = { "Move  W": "Move", "Rotate  E": "Rotate", "Scale  R": "Scale" };
+function gicon(name, stage) { return GI[ICON_ALIAS[name] || name] || GI[stage] || GI.Add; }
+const clean = t => t.replace(/  [A-Z]$/, "");
+
+function polar(cx, cy, r, deg) { const a = deg * Math.PI / 180; return [cx + r * Math.cos(a), cy + r * Math.sin(a)]; }
+function wedgePath(cx, cy, r0, r1, a0, a1) {
+  const [x0, y0] = polar(cx, cy, r1, a0), [x1, y1] = polar(cx, cy, r1, a1), [x2, y2] = polar(cx, cy, r0, a1), [x3, y3] = polar(cx, cy, r0, a0);
+  const big = a1 - a0 > 180 ? 1 : 0;
+  return `M${x0},${y0} A${r1},${r1} 0 ${big} 1 ${x1},${y1} L${x2},${y2} A${r0},${r0} 0 ${big} 0 ${x3},${y3}Z`;
+}
+function arcPath(cx, cy, r, a0, a1) { const [x0, y0] = polar(cx, cy, r, a0), [x1, y1] = polar(cx, cy, r, a1); return `M${x0},${y0} A${r},${r} 0 0 1 ${x1},${y1}`; }
+function shade(hex, k) { // k > 0 lightens toward white, k < 0 darkens
+  const n = parseInt(hex.slice(1), 16), c = [n >> 16, (n >> 8) & 255, n & 255].map(v => Math.round(k > 0 ? v + (255 - v) * k : v * (1 + k)));
+  return "#" + c.map(v => v.toString(16).padStart(2, "0")).join("");
+}
+function ballDefs() {
+  return MATS.map(([, c], i) => `<radialGradient id="ball${i}" cx="38%" cy="32%" r="75%"><stop offset="0" stop-color="${shade(c, .55)}"/><stop offset=".35" stop-color="${c}"/><stop offset="1" stop-color="${shade(c, -.62)}"/></radialGradient>`).join("");
+}
+function ball(i, x, y, r, extra = "") {
+  return `<circle cx="${x}" cy="${y + r * .18}" r="${r}" fill="rgba(0,0,0,.45)"/><circle cx="${x}" cy="${y}" r="${r}" fill="url(#ball${i})" ${extra}/>
+    <ellipse cx="${x - r * .3}" cy="${y - r * .38}" rx="${r * .32}" ry="${r * .18}" fill="rgba(255,255,255,.35)"/>`;
+}
+
+function dialTools() {
+  const W = WS[ws], cx = 172, cy = 300, rCore = 50, rRing = 122, F = 'font-family="Inter, sans-serif"';
+  const tool = curTool[ws] || W.stages[W.def][1][0];
+  const toolStage = W.stages.find(([, t]) => t.includes(tool))[0];
+  const defs = `<defs>
+    <filter id="dsh" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="6" stdDeviation="9" flood-color="#000" flood-opacity=".55"/></filter>
+    <radialGradient id="plate" cx="${cx}" cy="${cy}" r="${rRing + 10}" gradientUnits="userSpaceOnUse"><stop offset=".4" stop-color="#121316"/><stop offset=".93" stop-color="#1b1d22"/><stop offset="1" stop-color="#2a2d33"/></radialGradient>
+    <radialGradient id="wN" cx="${cx}" cy="${cy}" r="${rRing}" gradientUnits="userSpaceOnUse"><stop offset=".42" stop-color="#24272d"/><stop offset="1" stop-color="#363a42"/></radialGradient>
+    <radialGradient id="wH" cx="${cx}" cy="${cy}" r="${rRing}" gradientUnits="userSpaceOnUse"><stop offset=".42" stop-color="#2d3139"/><stop offset="1" stop-color="#474c56"/></radialGradient>
+    <radialGradient id="wA" cx="${cx}" cy="${cy}" r="${rRing}" gradientUnits="userSpaceOnUse"><stop offset=".42" stop-color="#c27a1c"/><stop offset="1" stop-color="#f3b553"/></radialGradient>
+    <radialGradient id="wB" cx="${cx}" cy="${cy}" r="${rRing}" gradientUnits="userSpaceOnUse"><stop offset=".42" stop-color="#1b1d22"/><stop offset="1" stop-color="#2a2d33"/></radialGradient>
+    <radialGradient id="core" cx="45%" cy="38%" r="70%"><stop offset="0" stop-color="#25282e"/><stop offset="1" stop-color="#101114"/></radialGradient>
+    <linearGradient id="tabN" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a3e46"/><stop offset="1" stop-color="#26292f"/></linearGradient>
+    <linearGradient id="tabA" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f6bd5e"/><stop offset="1" stop-color="#d48a24"/></linearGradient>
+    ${ballDefs()}
+  </defs>`;
+  let ring = "";
+  if (matOpen) {
+    const A0 = -128, A1 = 22;
+    ring += `<path d="${wedgePath(cx, cy, rRing + 14, 262, A0 - 3, A1 + 3)}" fill="rgba(18,19,23,.93)" stroke="rgba(255,255,255,.06)" filter="url(#dsh)"/>`;
+    ring += `<path d="${arcPath(cx, cy, 262, A0 - 3, A1 + 3)}" fill="none" stroke="rgba(255,255,255,.10)" stroke-width="1"/>`;
+    // recent picks on the inner track: keys 1-8
+    ring += `<path d="${arcPath(cx, cy, 150, A0 + 2, A0 + 2 + 7 * 12.5)}" fill="none" stroke="rgba(255,255,255,.035)" stroke-width="20" stroke-linecap="round"/>`;
+    recent.forEach((m, i) => {
+      const [x, y] = polar(cx, cy, 150, A0 + 2 + i * 12.5);
+      ring += `<g class="pick" data-mat="${m}" data-name="${MATS[m][0]} · key ${i + 1}">${ball(m, x, y, 8.5)}${m === curMat ? `<circle cx="${x}" cy="${y}" r="11.5" fill="none" stroke="#e8a03a" stroke-width="2"/>` : ""}
+        <text x="${polar(cx, cy, 168, A0 + 2 + i * 12.5)[0]}" y="${polar(cx, cy, 168, A0 + 2 + i * 12.5)[1] + 3}" text-anchor="middle" font-size="8" font-weight="700" ${F} fill="#7d828c">${i + 1}</text></g>`;
+    });
+    if (matMode === "materials") {
+      const n = MATS.length, sw = (A1 - A0) / n;
+      MATS.forEach(([name], i) => {
+        const [x, y] = polar(cx, cy, 196, A0 + sw * (i + .5)), on = i === curMat;
+        ring += `<g class="pick" data-mat="${i}" data-name="${name}">${on ? `<circle cx="${x}" cy="${y}" r="20.5" fill="none" stroke="#e8a03a" stroke-width="2.5"/>` : ""}${ball(i, x, y, 16)}</g>`;
+      });
+    } else if (matMode === "shades") {
+      const hues = 16, sw = (A1 - A0) / hues;
+      for (let h = 0; h < hues; h++) for (let k = 0; k < 5; k++) {
+        const r0 = 170 + k * 12, a0 = A0 + h * sw, col = `hsl(${h * 22.5},${50 + k * 7}%,${18 + k * 14}%)`;
+        ring += `<path class="sh" d="${wedgePath(cx, cy, r0 + 1, r0 + 11.5, a0 + .55, a0 + sw - .55)}" fill="${col}" data-name="${col}" rx="2"/>`;
+      }
+    } else {
+      [["Hue", f => `hsl(${f * 3.6},75%,52%)`, .04], ["Saturation", f => `hsl(14,${f}%,46%)`, .62], ["Lightness", f => `hsl(14,60%,${f}%)`, .45]].forEach(([lab, f, v], row) => {
+        const r = 176 + row * 24, steps = 60, sw = (A1 - A0) / steps;
+        for (let i = 0; i < steps; i++) ring += `<path d="${arcPath(cx, cy, r, A0 + i * sw, A0 + (i + 1) * sw + .4)}" fill="none" stroke="${f(i * 100 / steps)}" stroke-width="10" ${i === 0 || i === steps - 1 ? 'stroke-linecap="round"' : ""}/>`;
+        const [kx, ky] = polar(cx, cy, r, A0 + v * (A1 - A0));
+        ring += `<circle cx="${kx}" cy="${ky}" r="8" fill="${f(v * 100)}" stroke="#fff" stroke-width="2.5" filter="url(#dsh)"/>`;
+        const [tx, ty] = polar(cx, cy, r, A1 + 6);
+        ring += `<text x="${tx}" y="${ty + 3}" font-size="9" font-weight="600" ${F} fill="#9a9ea8">${lab[0]}</text>`;
+      });
+    }
+    // mode tabs, labels running along the arc
+    [["materials", "MATERIALS", -128, -96], ["shades", "SHADES", -95, -73], ["hsl", "HSL", -72, -59], ["pick", "PICK", -58, -44]].forEach(([k, lab, a0, a1]) => {
+      const on = matMode === k;
+      ring += `<g class="tab" data-matmode="${k}" data-name="${{ materials: "Materials", shades: "Colour shades", hsl: "HSL sliders", pick: "Pick off the model" }[k]}"><path d="${wedgePath(cx, cy, 232, 254, a0 + .6, a1 - .6)}" fill="url(#${on ? "tabA" : "tabN"})" stroke="#0c0d0f" stroke-width="1"/>
+        <path d="${arcPath(cx, cy, 253, a0 + 1, a1 - 1)}" fill="none" stroke="rgba(255,255,255,${on ? .45 : .14})" stroke-width="1"/>
+        <path id="tp-${k}" d="${arcPath(cx, cy, 240, a0, a1)}" fill="none"/>
+        <text font-size="8.5" font-weight="700" letter-spacing=".1em" ${F} fill="${on ? "#2a1a03" : "#c9ccd3"}"><textPath href="#tp-${k}" startOffset="50%" text-anchor="middle">${lab}</textPath></text></g>`;
+    });
+  }
+  // the dial
+  let dial = `<circle cx="${cx}" cy="${cy}" r="${rRing + 10}" fill="url(#plate)" filter="url(#dsh)"/><circle cx="${cx}" cy="${cy}" r="${rRing + 9.5}" fill="none" stroke="rgba(255,255,255,.08)"/>`;
+  const tiles = dialOpen < 0 ? W.stages.map(([n]) => n) : W.stages[dialOpen][1].concat(["__back"]);
+  const sw = 360 / tiles.length;
+  let tilesSvg = "";
+  tiles.forEach((t, i) => {
+    const mid = -90 + i * sw, a0 = mid - sw / 2, a1 = mid + sw / 2, back = t === "__back";
+    const isCur = dialOpen < 0 ? t === toolStage : t === tool;
+    const fill = isCur ? "url(#wA)" : back ? "url(#wB)" : "url(#wN)";
+    const [ix, iy] = polar(cx, cy, (rCore + rRing) / 2 + 4, mid);
+    const attr = dialOpen < 0 ? `data-dstage="${i}"` : back ? `data-dback="1"` : `data-dtool="${t}"`;
+    const name = back ? "All stages" : clean(t);
+    const stroke = isCur ? "#2a1a03" : "#d5d7dc";
+    const label = back ? "BACK" : clean(t).toUpperCase();
+    const fs = tiles.length > 6 ? 7.5 : 8.5;
+    const short = label.length > (tiles.length > 6 ? 9 : 11) ? label.split(" ")[0].slice(0, 9) : label;
+    tilesSvg += `<g class="tile" ${attr} data-name="${name}" style="--i:${i}">
+      <path d="${wedgePath(cx, cy, rCore + 4, rRing, a0 + 1.1, a1 - 1.1)}" fill="${fill}" class="wf"/>
+      <path d="${arcPath(cx, cy, rRing - 1.5, a0 + 2, a1 - 2)}" fill="none" stroke="rgba(255,255,255,${isCur ? .5 : .13})" stroke-width="1.5"/>
+      <path d="${arcPath(cx, cy, rCore + 5.5, a0 + 3, a1 - 3)}" fill="none" stroke="rgba(0,0,0,.45)" stroke-width="1.5"/>
+      <g transform="translate(${ix - 10},${iy - 15}) scale(.84)"><path d="${back ? "M10 6 4 12l6 6M4 12h16" : gicon(t, dialOpen < 0 ? t : W.stages[dialOpen][0])}" fill="none" stroke="${stroke}" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/></g>
+      <text x="${ix}" y="${iy + 15}" text-anchor="middle" font-size="${fs}" font-weight="700" letter-spacing=".05em" ${F} fill="${isCur ? "#2a1a03" : "#aeb2ba"}">${short}</text></g>`;
+  });
+  dial += `<g class="tiles${animFan ? " fan" : ""}" style="transform-origin:${cx}px ${cy}px">${tilesSvg}</g>`;
+  // grips: drag to move the dial, drag to resize it
+  [["move", 46, "M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3", "Drag to move the dial"], ["size", 62, "M5 19 19 5 M13 5h6v6 M5 13v6h6", "Drag to resize the dial"]].forEach(([k, ang, d, tip]) => {
+    const [gx, gy] = polar(cx, cy, rRing + 24, ang);
+    dial += `<g class="grip" data-grip="${k}" data-name="${tip}"><circle cx="${gx}" cy="${gy}" r="12" fill="#1d1f24" stroke="#3a3e46"/><g transform="translate(${gx - 7},${gy - 7}) scale(.58)"><path d="${d}" fill="none" stroke="#aeb2ba" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></g></g>`;
+  });
+  // core: current material and tool, and the readout while hovering
+  const [mn] = MATS[curMat];
+  dial += `<g class="core" data-core="1" data-name="${matOpen ? "Close materials" : "Open materials"}">
+    <circle cx="${cx}" cy="${cy}" r="${rCore}" fill="url(#core)" stroke="${matOpen ? "#e8a03a" : "#0c0d0f"}" stroke-width="2"/>
+    <circle cx="${cx}" cy="${cy}" r="${rCore - 5}" fill="none" stroke="rgba(255,255,255,.06)"/>
+    ${ball(curMat, cx, cy - 2, 15)}
+    <text x="${cx}" y="${cy - 26}" text-anchor="middle" font-size="8" font-weight="700" letter-spacing=".12em" ${F} fill="#7d828c">${mn.toUpperCase()}</text>
+    <text id="dialRead" x="${cx}" y="${cy + 30}" text-anchor="middle" font-size="9" font-weight="700" letter-spacing=".04em" ${F} fill="#e6e7ea">${clean(tool).toUpperCase().slice(0, 14)}</text></g>`;
+  return `<div class="dial${matOpen ? " mat-open" : ""}" id="dial" style="transform:translate(${dialPos.x}px,${dialPos.y}px) scale(${dialScale})"><svg viewBox="0 0 460 460" width="460" height="460">${defs}<g class="mring${animRing ? " pop" : ""}">${ring}</g>${dial}</svg>
+    ${matOpen ? `<div class="dial-name" id="dialName"><i style="background:${MATS[curMat][1]}"></i>${mn}<span>${MATS[curMat][1].toUpperCase()}</span></div>` : ""}</div>`;
+}
+function wireDial(root) {
+  const dialEl = root.querySelector("#dial");
+  if (dialEl) dialEl.querySelectorAll("[data-grip]").forEach(g => g.addEventListener("pointerdown", e => {
+    e.preventDefault(); e.stopPropagation();
+    const k = g.dataset.grip, sc = document.getElementById("inner").getBoundingClientRect().width / 1600;
+    const sx = e.clientX, sy = e.clientY, p0 = { ...dialPos }, s0 = dialScale;
+    const vp = dialEl.parentElement.getBoundingClientRect();
+    const move = ev => {
+      const dx = (ev.clientX - sx) / sc, dy = (ev.clientY - sy) / sc;
+      if (k === "move") {
+        dialPos = { x: Math.max(-60, Math.min(vp.width / sc - 300, p0.x + dx)), y: Math.max(-(vp.height / sc - 260), Math.min(60, p0.y + dy)) };
+      } else dialScale = Math.max(.6, Math.min(1.5, s0 + (dx - dy) / 300));
+      dialEl.style.transform = `translate(${dialPos.x}px,${dialPos.y}px) scale(${dialScale})`;
+    };
+    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); saveDial(); };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+  }));
+  if (dialEl) dialEl.addEventListener("wheel", e => {
+    if (!e.ctrlKey && !e.altKey) return;
+    e.preventDefault();
+    dialScale = Math.max(.6, Math.min(1.5, dialScale * (e.deltaY < 0 ? 1.06 : 1 / 1.06)));
+    dialEl.style.transform = `translate(${dialPos.x}px,${dialPos.y}px) scale(${dialScale})`; saveDial();
+  }, { passive: false });
+  const read = root.querySelector("#dialRead"), name = root.querySelector("#dialName");
+  if (!read) return;
+  const base = read.textContent, baseName = name ? name.innerHTML : "";
+  root.querySelectorAll("#dial [data-name]").forEach(el => {
+    el.addEventListener("mouseenter", () => {
+      const n = el.dataset.name;
+      if (el.closest(".mring") && name) name.innerHTML = n.startsWith("hsl") ? `<i style="background:${n}"></i>Shade<span>${n}</span>` : `<i style="background:${el.dataset.mat ? MATS[+el.dataset.mat][1] : "#3a3d44"}"></i>${n}`;
+      else read.textContent = n.toUpperCase().slice(0, 16);
+    });
+    el.addEventListener("mouseleave", () => { read.textContent = base; if (name) name.innerHTML = baseName; });
+  });
+}
+
+/* ---------- Poohdot pieces ---------- */
+function topbar(gepTab) {
+  const items = ["2D", "3D", "Script", "Game"];
+  return `<div class="top"><div class="menus"><span>Scene</span><span>Project</span><span>Debug</span><span>Editor</span><span>Help</span></div>
+    <div class="ws">${items.map(n => `<span class="${!gepTab && n === "3D" ? "on" : ""}">${n}</span>`).join("")}${gepTab ? `<span class="on">${ICON.gep} Geppetto</span>` : ""}<span>⇩ Asset Store</span></div>
+    <div class="play"><i>▶</i><i>❚❚</i><i>■</i><i>▣</i><i>▤</i><i>⌕</i></div></div>`;
+}
+function hierarchyTree() {
+  return `<div class="filter"><span>＋</span><span>⛓</span><div class="f">Filter Nodes<span>⌕</span></div><span>⋮</span></div>
+  <div class="tree">
+    <div class="row"><span class="car">▾</span>${ICON.go}TestRoom<span class="eye">👁</span></div>
+    <div class="row" style="--d:1"><span class="car"></span>${ICON.go}Sun<span class="eye">👁</span></div>
+    <div class="row" style="--d:1"><span class="car"></span>${ICON.go}Floor<span class="eye">👁</span></div>
+    <div class="row" style="--d:1"><span class="car"></span>${ICON.go}Camera<span class="eye">👁</span></div>
+    <div class="row sel" style="--d:1"><span class="car"></span>${ICON.gep}Character<span class="eye">👁</span></div>
+  </div>`;
+}
+function leftDock(mode) {
+  if (mode === "plain") return `<div class="dock"><div class="dtabs"><span class="on">Hierarchy</span><span>Import</span><span class="kebab">⋮&nbsp;</span></div><div class="dbody">${hierarchyTree()}</div></div>`;
+  return `<div class="dock"><div class="dtabs"><span>Hierarchy</span><span class="on g">${ws === "Animate" ? "Bones" : "Features"}</span><span class="kebab">⋮&nbsp;</span></div><div class="dbody">${features()}</div></div>`;
+}
+function rightDock(mode) {
+  if (mode === "plain") return `<div class="dock"><div class="dtabs"><span class="on">Inspector</span><span>Signals</span><span>Groups</span><span>History</span><span class="kebab">⋮&nbsp;</span></div><div class="dbody">
+    <div class="ins-head"><div class="nm">${ICON.go}Floor</div></div>
+    <div class="sect">ModelRenderer</div><div class="fold">Skeleton</div><div class="fold">Surface Material Override</div>
+    <div class="sect">Transform</div><div class="prop">Position<div class="vec"><b><i class="x">x</i>0</b><b><i class="y">y</i>0</b><b><i class="z">z</i>0</b></div></div>
+    <div class="prop">Scale<div class="vec"><b><i class="x">x</i>8</b><b><i class="y">y</i>1</b><b><i class="z">z</i>8</b></div></div><div class="addc">＋ Add Component</div></div></div>`;
+  return `<div class="dock"><div class="dtabs"><span>Inspector</span><span class="on g">${WS[ws].panel}</span>${ws === "Animate" ? "<span>Constraints</span>" : ""}<span class="kebab">⋮&nbsp;</span></div><div class="dbody">${wsPanel()}</div></div>`;
+}
+function bottomPanel(gep) {
+  const base = ["Assets", "Console", "Debugger", "Audio", "Animation", "Shader Editor"];
+  let on = "Assets", content;
+  if (gep && ws === "Animate") { on = "Timeline"; content = timeline(); }
+  else if (gep) { on = "Console"; content = geppettoConsole(); }
+  else content = `<div class="fs"><div class="side"><span>★ Favorites</span><span>▾ 📁 res://</span><span style="padding-left:14px">› 📁 addons</span><span style="padding-left:14px">› 📁 characters</span></div>
+    <div class="grid"><div class="tile"><div class="thumb" style="background:#5f88d3"></div>characters</div>
+    <div class="tile"><div class="thumb" style="background:#2a2d34">${ICON.gep.replace('class="ic"', 'class="ic" style="width:28px;height:28px"')}</div>character.effigy</div>
+    <div class="tile"><div class="thumb" style="background:#2a2d34">${ICON.go.replace('class="ic"', 'class="ic" style="width:26px;height:26px"')}</div>test_room.tscn</div></div></div>`;
+  const tabs = base.map(t => `<span class="${t === on ? "on" : ""}">${t}</span>`).join("") + (gep ? `<span class="g${on === "Timeline" ? " on" : ""}">Timeline</span>` : "");
+  return `<div class="bottom">${content}<div class="bstrip">${tabs}<span class="ver">4.7.2.stable.mono&nbsp;&nbsp;⤒&nbsp;&nbsp;⇣</span></div></div>`;
+}
+function vtool(extra) {
+  return `<div class="vtool"><span class="b on">⬚ Select</span><span class="b">✥ Move</span><span class="b">⟳ Rotate</span><span class="b">⤢ Scale</span><span class="sep"></span><span class="b">⬢ Local</span><span class="b">⁘ Snap</span><span class="sep"></span><span class="b">Transform</span><span class="b">View</span><span class="sep"></span><span class="b">＋ GameObject</span>${extra || ""}</div>`;
+}
+function sceneTabs(name) { return `<div class="scenetabs"><span class="t"><span class="o"></span>${name}<span style="color:var(--ink-dim)">✕</span></span><span class="plus">＋</span></div>`; }
+
+/* ---------- placements ---------- */
+function buildA() {
+  const center = `<div class="center">${sceneTabs("test_room")}${vtool()}<div class="vp" style="background:#3e352b"></div>${bottomPanel(false)}</div>`;
+  const ed = topbar(false) + `<div class="body">${leftDock("plain")}${center}${rightDock("plain")}</div>`;
+  const win = `<div class="win-veil"></div><div class="win">
+    <div class="title">${ICON.gep}<b>Geppetto</b> · character.effigy<span class="ctl"><span>—</span><span>▢</span><span>✕</span></span></div>
+    <div class="menu"><span>File</span><span>Edit</span><span>View</span><span>Help</span></div>
+    <div>${wsBar()}${stageTabs()}${toolRow()}</div>
+    <div class="wbody">
+      <div class="dock left"><div class="dtabs"><span class="on">${ws === "Animate" ? "Bones" : "Features"}</span>${ws === "Animate" ? "" : "<span>Variables</span>"}</div><div class="dbody">${features()}</div></div>
+      ${viewport()}
+      <div class="dock right"><div class="dtabs"><span class="on">${WS[ws].panel}</span>${ws === "Animate" ? "<span>Inspector</span><span>Constraints</span>" : "<span>Rig</span><span>UV</span>".replace(`<span>${WS[ws].panel}</span>`, "")}</div><div class="dbody">${wsPanel()}</div></div>
+      <div class="wb"><div class="bstrip">${ws === "Animate" ? '<span class="on">Timeline</span><span>Tutorial</span>' : '<span class="on">Console</span><span>Tutorial</span>'}</div>${ws === "Animate" ? timeline() : geppettoConsole()}</div>
+    </div>
+    <div class="gstatus"><b>Status</b> Hover over anything and this line explains it.<span style="margin-left:auto">Undo: one history for Geppetto</span></div></div>`;
+  return ed + win;
+}
+function buildB() {
+  const head = tools === "rows" ? wsBar() + stageTabs() + toolRow() : wsBar();
+  const center = `<div class="center" style="grid-template-rows:auto 1fr 24px auto"><div>${head}</div>${viewport({ toolMode: tools === "rows" ? null : tools })}<div class="gstatus"><b>Status</b> ${tools === "dial" ? "Dial: click a stage for its tools · click the middle for materials · 1–8 pick a recent material · drag its grips to move or resize it" : "Hover over anything and this line explains it."}</div>${bottomPanel(true)}</div>`;
+  return topbar(true) + `<div class="body">${leftDock("gep")}${center}${rightDock("gep")}</div>`;
+}
+function buildC() {
+  const picker = `<span class="sep"></span><span class="b gsel">${ICON.gep} ${ws} ▾</span>${WS[ws].stages.map(([n], i) => `<span class="b${i === curStage() ? " on" : ""}" data-stage="${i}" style="cursor:pointer">${n}</span>`).join("")}`;
+  const center = `<div class="center">${sceneTabs("test_room")}${vtool(picker)}${viewport({ sideTools: true })}${bottomPanel(true)}</div>`;
+  return topbar(false) + `<div class="body">${leftDock("gep")}${center}${rightDock("gep")}</div>`;
+}
+
+function render() {
+  const ed = document.getElementById("ed");
+  ed.innerHTML = place === "A" ? buildA() : place === "B" ? buildB() : buildC();
+  if (place === "C") ed.querySelector(".vtool").style.overflow = "hidden";
+  document.getElementById("placeNote").textContent = NOTES[place] + (place === "B" ? " " + TOOL_NOTES[tools] : "");
+  document.querySelectorAll("#placeGrp button").forEach(b => b.setAttribute("aria-pressed", b.dataset.p === place));
+  document.getElementById("toolsRow").hidden = place !== "B";
+  document.querySelectorAll("#toolsGrp button").forEach(b => b.setAttribute("aria-pressed", b.dataset.t === tools));
+  document.getElementById("wsGrp").innerHTML = WS_ORDER.map(w => `<button id="w-${w}" data-w="${w}" aria-pressed="${w === ws}">${w}</button>`).join("");
+  document.querySelectorAll("#wsGrp button").forEach(b => b.addEventListener("click", () => { ws = b.dataset.w; dialOpen = -1; save(); render(); }));
+  ed.querySelectorAll("[data-ws]").forEach(b => b.addEventListener("click", () => { ws = b.dataset.ws; dialOpen = -1; save(); render(); }));
+  ed.querySelectorAll("[data-dstage]").forEach(g => g.addEventListener("click", () => { dialOpen = +g.dataset.dstage; animFan = true; render(); }));
+  ed.querySelectorAll("[data-dback]").forEach(g => g.addEventListener("click", () => { dialOpen = -1; animFan = true; render(); }));
+  ed.querySelectorAll("[data-dtool]").forEach(g => g.addEventListener("click", () => { curTool[ws] = g.dataset.dtool; render(); }));
+  ed.querySelectorAll("[data-core]").forEach(g => g.addEventListener("click", () => { matOpen = !matOpen; animRing = matOpen; render(); }));
+  ed.querySelectorAll("[data-mat]").forEach(g => g.addEventListener("click", () => { curMat = +g.dataset.mat; recent = [curMat].concat(recent.filter(m => m !== curMat)).slice(0, 6); render(); }));
+  ed.querySelectorAll("[data-matmode]").forEach(g => g.addEventListener("click", () => { if (g.dataset.matmode !== "pick") matMode = g.dataset.matmode; render(); }));
+  ed.querySelectorAll("[data-stage]").forEach(b => b.addEventListener("click", () => { stageIdx[ws] = +b.dataset.stage; render(); }));
+  wireDial(ed); animFan = animRing = false;
+  setupCanvas();
+}
+document.querySelectorAll("#placeGrp button").forEach(b => b.addEventListener("click", () => { place = b.dataset.p; save(); render(); }));
+document.querySelectorAll("#toolsGrp button").forEach(b => b.addEventListener("click", () => { tools = b.dataset.t; save(); render(); }));
+
+/* ---------- viewport drawing ---------- */
+const J = { hips:[0,.95,0], spine:[0,1.18,0], chest:[0,1.38,0], neck:[0,1.55,0], head:[0,1.74,0],
+  shL:[.19,1.45,0], elL:[.36,1.18,.02], haL:[.46,.94,.04], shR:[-.19,1.45,0], elR:[-.36,1.18,.02], haR:[-.46,.94,.04],
+  hpL:[.1,.92,0], knL:[.12,.5,.03], ftL:[.13,.06,.06], hpR:[-.1,.92,0], knR:[-.12,.5,.03], ftR:[-.13,.06,.06] };
+const WAVE = { elL:[.36,1.62,.06], haL:[.52,1.86,.1] };
+const LIMBS = [["hips","chest",.17],["chest","neck",.15],["shL","elL",.065],["elL","haL",.055],["shR","elR",.065],["elR","haR",.055],["hpL","knL",.085],["knL","ftL",.07],["hpR","knR",.085],["knR","ftR",.07],["shL","shR",.08]];
+const BONELINES = [["hips","spine"],["spine","chest"],["chest","neck"],["neck","head"],["chest","shL"],["shL","elL"],["elL","haL"],["chest","shR"],["shR","elR"],["elR","haR"],["hips","hpL"],["hpL","knL"],["knL","ftL"],["hips","hpR"],["hpR","knR"],["knR","ftR"]];
+let cv, ctx, W, H;
+function joint(k) { return ws === "Animate" && WAVE[k] ? WAVE[k] : J[k]; }
+function setupCanvas() {
+  cv = document.getElementById("cv"); if (!cv) return;
+  ctx = cv.getContext("2d");
+  const r = cv.getBoundingClientRect(), s = document.getElementById("inner").getBoundingClientRect().width / 1600;
+  if (!r.width) return;
+  W = r.width / s; H = r.height / s;
+  const dpr = Math.min(2, (window.devicePixelRatio || 1) * Math.max(s, .5));
+  cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  let drag = null;
+  cv.onpointerdown = e => { drag = e.clientX; cv.setPointerCapture(e.pointerId); };
+  cv.onpointermove = e => { if (drag === null) return; yaw += (e.clientX - drag) * .008; drag = e.clientX; draw(); };
+  cv.onpointerup = () => { drag = null; };
+  draw();
+}
+function proj(p) {
+  const c = Math.cos(yaw), s = Math.sin(yaw);
+  let x = p[0] * c + p[2] * s, z = -p[0] * s + p[2] * c, y = p[1] - 1.3;
+  z -= 3.4;
+  const cp = Math.cos(.18), sp = Math.sin(.18);
+  const y2 = y * cp + z * sp, z2 = -y * sp + z * cp, d = -z2, f = H * 1.2;
+  return [W / 2 + x / d * f, H * .5 - y2 / d * f, d];
+}
+function line(a, b, col, w) { const p = proj(a), q = proj(b); ctx.strokeStyle = col; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(q[0], q[1]); ctx.stroke(); }
+function draw() {
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, "#c9cacb"); g.addColorStop(.3, "#5a5550"); g.addColorStop(.31, "#3e352b"); g.addColorStop(1, "#40362a");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  ctx.lineCap = "round";
+  for (let i = -8; i <= 8; i++) {
+    line([i * .5, 0, -6], [i * .5, 0, 2.6], i === 0 ? "#3d8ef0" : "rgba(255,255,255,.10)", i === 0 ? 1.4 : 1);
+    line([-4, 0, i * .5 - 1.5], [4, 0, i * .5 - 1.5], "rgba(255,255,255,.10)", 1);
+  }
+  line([-4, 0, 0], [4, 0, 0], "#e5435b", 1.4);
+  const sc = proj([0, 0, 0]); ctx.fillStyle = "rgba(0,0,0,.35)"; ctx.beginPath(); ctx.ellipse(sc[0], sc[1], 50, 13, 0, 0, Math.PI * 2); ctx.fill();
+  const showBones = ws === "Rig" || ws === "Animate", dressed = ws === "Clothing", painted = ws === "Paint";
+  const parts = LIMBS.map(([a, b, r]) => ({ a, b, r, d: (proj(joint(a))[2] + proj(joint(b))[2]) / 2 })).sort((x, y) => y.d - x.d);
+  for (const p of parts) {
+    const pa = proj(joint(p.a)), w = p.r * 2 / pa[2] * H * 1.2;
+    let col = painted ? "#c98a5a" : "#9a9da3";
+    if (ws === "CAD" && p.a === "hips") col = "#a9b6cf";
+    if (dressed && (p.a === "hips" || p.a === "chest" || p.a.startsWith("sh"))) col = "#b5532e";
+    if (dressed && (p.a.startsWith("hp") || p.a.startsWith("kn"))) col = "#2f3b4c";
+    line(joint(p.a), joint(p.b), "rgba(0,0,0,.25)", w + 2); line(joint(p.a), joint(p.b), col, w);
+  }
+  const hp = proj(J.head), hr = .12 / hp[2] * H * 1.2;
+  ctx.fillStyle = painted ? "#d39a6a" : "#b9bcc2"; ctx.beginPath(); ctx.arc(hp[0], hp[1], hr, 0, Math.PI * 2); ctx.fill();
+  if (ws === "CAD") { const t = proj(J.chest); ctx.strokeStyle = "#6ea0ff"; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]); ctx.strokeRect(t[0] - 40, t[1] - 30, 80, 100); ctx.setLineDash([]); }
+  if (showBones) {
+    for (const [a, b] of BONELINES) { const sel = a === "shL" && b === "elL"; line(joint(a), joint(b), sel ? "#ffd27a" : "rgba(232,160,58,.9)", sel ? 3.4 : 2); }
+    for (const k in J) { const p = proj(joint(k)); ctx.fillStyle = k === "shL" ? "#ffd27a" : "#e8a03a"; ctx.beginPath(); ctx.arc(p[0], p[1], 3.2, 0, Math.PI * 2); ctx.fill(); }
+  }
+}
+
+function fit() {
+  const st = document.getElementById("stage"), w = st.clientWidth, s = Math.min(1, w / 1600);
+  document.getElementById("inner").style.transform = `scale(${s})`;
+  st.style.height = 900 * s + "px";
+  setupCanvas();
+}
+window.addEventListener("resize", fit);
+render(); fit();
+</script>

@@ -138,6 +138,18 @@ public sealed class SketchConstraint
 	/// <summary>The driven value, for the kinds that carry one: Distance, Radius, Diameter, Angle,
 	/// the x of a Fixed, and a non-zero flag for internal tangency on TangentArcs.</summary>
 	public float Value;
+	public string Expr = "";
+
+	/// <summary>
+	/// A driven (reference) dimension: it REPORTS what the geometry measures instead of driving
+	/// it. The solver skips it entirely — it moves no points, removes no freedom, and can never
+	/// conflict with a driving rule — and <see cref="SketchDiagnosis.MeasureDriven"/> writes the
+	/// measured value back into <see cref="Value"/> after a solve. That is the Fusion/Onshape
+	/// distinction between a dimension that holds a size and one that reads it back, and a driven
+	/// dimension that disagreed with a driving one used to be silently impossible to express at
+	/// all: the solver would fight itself and report a conflict that was not one.
+	/// </summary>
+	public bool Driven;
 
 	/// <summary>The second half of a two-number value. Only Fixed uses it, for the y coordinate —
 	/// a fix is the one rule whose value is a position rather than a magnitude.</summary>
@@ -281,7 +293,9 @@ public sealed class SketchConstraint
 		PointC = PointC,
 		PointD = PointD,
 		Value = Value,
-		ValueY = ValueY
+		ValueY = ValueY,
+		Expr = Expr,
+		Driven = Driven
 	};
 }
 

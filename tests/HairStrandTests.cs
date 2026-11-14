@@ -36,13 +36,14 @@ internal static class HairStrandTests
             svc.Cut(2);
             if (svc.Strands[0].Points.Count != 2) throw new Exception("not cut");
         });
-        registry.Add("hair", "clump aligns roots", () =>
+        registry.Add("hair", "clump converges tips, roots stay put", () =>
         {
             var svc = new HairStrandService();
-            svc.AddStrand(new[] { (1f,0f,0f),(1f,1f,0f) });
-            svc.AddStrand(new[] { (-1f,0f,0f),(-1f,1f,0f) });
+            svc.AddStrand(new[] { (0.1f,0f,0f),(1f,1f,0f) });
+            svc.AddStrand(new[] { (-0.1f,0f,0f),(-1f,1f,0f) });
             svc.Clump(0.5f);
-            if (svc.Strands[0].Points[0] != svc.Strands[1].Points[0]) throw new Exception("not clumped");
+            if (svc.Strands[0].Points[0] != (0.1f,0f,0f) || svc.Strands[1].Points[0] != (-0.1f,0f,0f)) throw new Exception("clump moved a root");
+            if (svc.Strands[0].Points[1] != svc.Strands[1].Points[1]) throw new Exception("clump did not converge tips");
         });
         registry.Add("hair", "wind moves strand", () =>
         {

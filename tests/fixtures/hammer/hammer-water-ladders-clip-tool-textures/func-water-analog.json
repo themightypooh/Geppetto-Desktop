@@ -1,0 +1,1 @@
+{"schemaVersion":1,"name":"water-ladders-func-water-analog","classes":[{"name":"func_water_analog","kind":"brush","description":"Water volume: the tied brushes must be water brushes (top face water, other faces nodraw). Makes the volume swimmable.","baseClasses":["Targetname"],"keyvalues":[],"spawnflags":[],"inputs":[],"outputs":[],"helpers":[{"kind":"origin"}]}]}

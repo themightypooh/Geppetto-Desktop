@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Remove="fixtures/**/*.cs;**/obj/**/*.cs;**/bin/**/*.cs" />
     <ProjectReference Include="../Marionette.Desktop.csproj" />
   </ItemGroup>
 </Project>

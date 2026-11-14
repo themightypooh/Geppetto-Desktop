@@ -1,0 +1,11 @@
+# Occluders for the two-room doorway map (hammer-optimisation-areaportal-occluder).
+#
+# One line per occluder:
+#   occluder <name> <centre x y z> <normal x y z> <width> <height>
+#
+# The quad is centred on <centre>, faces along <normal>, and spans width x height
+# (model units). curtain-b is the 128x128 curtain across room B at x = 128,
+# facing -X toward room A; postage-stamp is a 16x16 quad, deliberately below the
+# 4096 minimum area, for the too-small validation test.
+occluder curtain-b 128 0 64 -1 0 0 128 128
+occluder postage-stamp 200 100 64 -1 0 0 16 16

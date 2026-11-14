@@ -63,6 +63,30 @@ public sealed class PaintFeature : Feature
 	public readonly FloatParam Opacity = new( "Opacity", 1f, 0f, 1f );
 
 	/// <summary>
+	/// Clipping mask: the layer shows only where the layer below it has paint (that layer's own
+	/// coverage after its opacity and mask, or, when the layer below is clipped too, the base it clips
+	/// to). Off by default, so every older document builds exactly as before.
+	/// </summary>
+	public readonly BoolParam ClipToBelow = new( "Clip To Below", false );
+
+	/// <summary>Colour adjustment on this layer's colour, before it composites (non-destructive).
+	/// Hue shift in degrees; Saturation and Brightness are multipliers; Levels are input black/white
+	/// points and a midtone gamma. Defaults change nothing.</summary>
+	public readonly FloatParam AdjustHue = new( "Adjust Hue", 0f, -180f, 180f );
+	public readonly FloatParam AdjustSaturation = new( "Adjust Saturation", 1f, 0f, 2f );
+	public readonly FloatParam AdjustBrightness = new( "Adjust Brightness", 1f, 0f, 2f );
+	public readonly FloatParam LevelsBlack = new( "Levels Black", 0f, 0f, 1f );
+	public readonly FloatParam LevelsWhite = new( "Levels White", 1f, 0f, 1f );
+	public readonly FloatParam LevelsGamma = new( "Levels Gamma", 1f, 0.1f, 4f );
+
+	public PaintAdjust Adjust => new( AdjustHue.Clamped, AdjustSaturation.Clamped, AdjustBrightness.Clamped,
+		LevelsBlack.Clamped, MathF.Max( LevelsWhite.Clamped, LevelsBlack.Clamped + 0.01f ), LevelsGamma.Clamped );
+
+	/// <summary>The clip coverage the last build used (resolution x resolution), or null when the layer
+	/// is not clipped. The live paint session multiplies it into its preview.</summary>
+	public float[] ClipMask { get; private set; }
+
+	/// <summary>
 	/// Whether the layer starts fully covered with the fill values below, rather than empty. A fill
 	/// layer is how a whole surface gets one material — rust, dirt, wet sheen — that a mask then
 	/// confines; strokes on the layer still paint over the fill.
@@ -154,6 +178,25 @@ public sealed class PaintFeature : Feature
 	/// <summary>Seed for the spot grid jitter, so the same recipe always lands the same spots.</summary>
 	public readonly IntParam SpotsSeed = new( "Spots Seed", 1, 0 ) { Slider = false };
 
+	/// <summary>
+	/// Whether stroke patterns are sampled tri-planar (see <see cref="TriPlanar"/>) instead of
+	/// plain: with a pattern set, each texel's coverage is its falloff weight times the pattern
+	/// sampled in world space at that texel's surface point.
+	/// </summary>
+	public readonly BoolParam TriPlanar = new( "Tri-Planar Pattern", false );
+
+	/// <summary>The pattern a tri-planar layer samples. None means "no pattern", even with Tri-Planar on.</summary>
+	public readonly ChoiceParam Pattern = new( "Pattern", new[] { "None", "Stripes", "Checker", "Spots" } );
+
+	/// <summary>World units per pattern repeat for the pattern.</summary>
+	public readonly FloatParam PatternScale = new( "Pattern Scale", 1f, 0.01f );
+
+	/// <summary>Blend sharpness for the pattern.</summary>
+	public readonly FloatParam PatternSharpness = new( "Pattern Sharpness", 4f, 0.5f, 16f );
+
+	/// <summary>The tri-planar pattern this layer samples, or None.</summary>
+	public TriPlanarPattern PatternKind => (TriPlanarPattern)Math.Clamp( Pattern.Index, 0, Enum.GetValues<TriPlanarPattern>().Length - 1 );
+
 	/// <summary>World-space tri-planar pattern modulating this layer's strokes (P2).
 	/// None is the plain path, exactly as before; Fbm/Worley/Ridged are the 3D
 	/// noise patterns from TriPlanar, sampled on world position so they do not
@@ -166,19 +209,41 @@ public sealed class PaintFeature : Feature
 	/// <summary>Blend sharpness for the tri-planar pattern (see TriPlanar.Weights).</summary>
 	public readonly FloatParam TriSharpness = new( "Tri Sharpness", 4f, 0.5f, 16f );
 
+	/// <summary>Cross-layer anchor (synced from s&box): None leaves the mask alone; Below Height reads
+	/// the painted height of the layers below and confines this layer to it.</summary>
+	public readonly ChoiceParam AnchorSource = new( "Anchor Source", new[] { "None", "Below Height" } );
+
+	/// <summary>Peaks shows where the anchor is high, Valleys where it is low.</summary>
+	public readonly ChoiceParam AnchorMode = new( "Anchor Mode", new[] { "Peaks", "Valleys" } );
+
+	/// <summary>Where the anchor's shaped range switches from hidden to shown, 0..1.</summary>
+	public readonly FloatParam AnchorLevel = new( "Anchor Level", 0.5f, 0f, 1f );
+
+	/// <summary>How wide the anchor's switch is: 0 is a hard edge, 1 a long fade.</summary>
+	public readonly FloatParam AnchorSoftness = new( "Anchor Softness", 0.3f, 0f, 1f );
+
+	/// <summary>Whether the anchor reads the painted height of the layers below.</summary>
+	public bool AnchorOn => AnchorSource.Index == Array.IndexOf( AnchorSource.Options, "Below Height" );
+
+	/// <summary>The anchor's shaped factor, or null with no anchor / no height below.</summary>
+	public float[] AnchorMask { get; private set; }
+
 	/// <summary>
 	/// Every layer setting, for the script and the feature dialog. Blend is carried for old documents
 	/// and deliberately absent: showing a combo that changes nothing is a bug report waiting to be filed.
 	/// </summary>
 	public override IReadOnlyList<IParam> Parameters => new IParam[]
 	{
-		Bodies, Resolution, Mode, Opacity,
+		Bodies, Resolution, Mode, Opacity, ClipToBelow,
+		AdjustHue, AdjustSaturation, AdjustBrightness, LevelsBlack, LevelsWhite, LevelsGamma,
 		Fill, FillUseColor, FillColor, FillUseRoughness, FillRoughness, FillUseMetalness, FillMetalness, FillUseHeight, FillHeight,
 		MaskGenerator, MaskLevel, MaskSoftness, InvertMask, MaskSlot,
 		Recipe, GradientAxis, GradientStart, GradientEnd, GradientFalloff,
 		BandsAxis, BandsSpacing, BandsWidth, BandsTaperAxis, BandsWarp, BandsRangeMin, BandsRangeMax,
 		SpotsRadius, SpotsSpacing, SpotsJitter, SpotsRingWidth, SpotsSeed,
+		TriPlanar, Pattern, PatternScale, PatternSharpness,
 		TriPattern, TriScale, TriSharpness,
+		AnchorSource, AnchorMode, AnchorLevel, AnchorSoftness,
 	};
 
 	public PaintBlendMode BlendMode => (PaintBlendMode)Math.Clamp( Mode.Index, 0, Enum.GetValues<PaintBlendMode>().Length - 1 );
@@ -249,7 +314,9 @@ public sealed class PaintFeature : Feature
 	PaintLayerMaps _compositeLayer;
 	string _compositeKey;
 
-	public override bool IsStale => Revision != _builtRevision;
+	// 2026-11-14: a suppressed layer never runs, so it never records a build; counting it stale made every
+	// rebuild re-run everything from the first switched-off layer down. Turning it back on still reads stale.
+	public override bool IsStale => !Suppressed && Revision != _builtRevision;
 
 	/// <summary>The paint this feature put on its body — the layers below with this one composited
 	/// over them — or null before a build. The editor shows it after a rebuild.</summary>
@@ -384,23 +451,41 @@ public sealed class PaintFeature : Feature
 		var shaped = _generated is null ? null : PaintLayers.Shape( (float[])_generated.Clone(), MaskLevel.Clamped, MaskSoftness.Clamped );
 		GeneratorMask = shaped;
 
+		// Clipping mask: the base coverage the canvas below carries, at this layer's resolution.
+		// Clipped to a stack with no base (nothing painted below) the layer shows nowhere.
+		ClipMask = null;
+
+		if ( ClipToBelow.Value )
+		{
+			var cb = below?.ClipBase;
+			ClipMask = cb is null
+				? new float[resolution * resolution]
+				: PaintLayers.Resample( cb, below.Width, below.Height, resolution, resolution );
+		}
+
 		if ( !hasStrokes && !hasTexel && !fill )
 		{
 			// A fresh layer with nothing on it yet. Not a failure — it is how every layer starts —
 			// and the body's paint passes through untouched.
 			_cachedCanvas = below;
+			AnchorMask = null;
 			Mask = null;
 			_builtRevision = Revision;
 			return;
 		}
 
-		var triKey = $"{TriPattern.Index}|{TriScale.Clamped}|{TriSharpness.Clamped}";
+		var useTri = (TriPlanar.Value && PatternKind != TriPlanarPattern.None) || TriPattern.Index > 0;
+		var triKind = (TriPlanar.Value && PatternKind != TriPlanarPattern.None) ? PatternKind : (TriPlanarPattern)TriPattern.Index;
+		var triScale = (TriPlanar.Value && PatternKind != TriPlanarPattern.None) ? PatternScale.Clamped : TriScale.Clamped;
+		var triSharpness = (TriPlanar.Value && PatternKind != TriPlanarPattern.None) ? PatternSharpness.Clamped : TriSharpness.Clamped;
+		var triKey = $"{TriPlanar.Value}|{Pattern.Index}|{PatternScale.Clamped}|{PatternSharpness.Clamped}|{TriPattern.Index}|{TriScale.Clamped}|{TriSharpness.Clamped}";
+
 		if ( _strokeMaps is null || _topologyId != topology || _atlasId != atlas
 			|| _canvasRevision != Revision || _canvasResolution != resolution || _triKey != triKey )
 		{
-			_strokeMaps = TriPattern.Index == 0
-				? PaintLayers.Replay( mesh, Strokes, resolution )
-				: PaintLayers.ReplayTriPlanar( mesh, Strokes, resolution, (TriPlanarPattern)TriPattern.Index, TriScale.Clamped, TriSharpness.Clamped );
+			_strokeMaps = useTri
+				? PaintLayers.ReplayTriPlanar( mesh, Strokes, resolution, triKind, triScale, triSharpness )
+				: PaintLayers.Replay( mesh, Strokes, resolution );
 			_triKey = triKey;
 			_topologyId = topology;
 			_atlasId = atlas;
@@ -443,6 +528,53 @@ public sealed class PaintFeature : Feature
 
 		Mask = PaintLayers.FinalMask( shaped, effectiveMaps.MaskPaint, InvertMask.Value, resolution, resolution );
 
+		// Cross-layer anchor: the painted height below (grey times coverage) multiplies the mask.
+		AnchorMask = null;
+
+		if ( AnchorOn )
+		{
+			var height = below?.Channel( PaintChannel.Height );
+
+			if ( height is null )
+			{
+				Warn( "Anchor has no height below",
+					"Anchor Source is Below Height but no layer below this one painted height, so the anchor has nothing to read.",
+					"Paint height on a lower layer first",
+					"Or turn Anchor Source back to None" );
+			}
+			else
+			{
+				var h = height.Width == resolution && height.Height == resolution
+					? height
+					: PaintLayers.Resample( height, resolution, resolution );
+				var vals = new float[resolution * resolution];
+				var valleys = AnchorMode.Index == Array.IndexOf( AnchorMode.Options, "Valleys" );
+
+				for ( var i = 0; i < vals.Length; i++ )
+				{
+					var o = i * 4;
+					var v = (h.Rgba[o] / 255f) * (h.Rgba[o + 3] / 255f);
+					vals[i] = valleys ? 1f - v : v;
+				}
+
+				AnchorMask = PaintLayers.Shape( vals, AnchorLevel.Clamped, AnchorSoftness.Clamped );
+				Mask = Mask is null ? AnchorMask : MultiplyMasks( Mask, AnchorMask );
+			}
+		}
+
+		if ( ClipMask is not null )
+		{
+			Mask = Mask is null ? ClipMask : MultiplyMasks( Mask, ClipMask );
+
+			if ( below?.ClipBase is null )
+			{
+				Warn( "Clipped to nothing",
+					"Clip To Below is on but no layer below this one has paint, so there is nothing to clip to and this layer shows nowhere.",
+					"Paint on the layer below first",
+					"Or turn Clip To Below off" );
+			}
+		}
+
 		if ( !effectiveMaps.HasSurface )
 		{
 			Warn( "This layer only has mask paint",
@@ -465,12 +597,21 @@ public sealed class PaintFeature : Feature
 				"Paint white on the Layer Mask where it should show" );
 		}
 
-		var compositeKey = $"{BlendMode}|{Opacity.Clamped}|{MaskLevel.Clamped}|{MaskSoftness.Clamped}|{InvertMask.Value}|{generatedKey}";
+		var compositeKey = $"{BlendMode}|{Opacity.Clamped}|{MaskLevel.Clamped}|{MaskSoftness.Clamped}|{InvertMask.Value}|{generatedKey}|{AnchorSource.Index}|{AnchorMode.Index}|{AnchorLevel.Clamped}|{AnchorSoftness.Clamped}|{ClipToBelow.Value}|{Adjust}";
 
 		if ( _cachedCanvas is null || !ReferenceEquals( _compositeBelow, below ) || !ReferenceEquals( _compositeLayer, effectiveMaps )
 			|| _compositeKey != compositeKey )
 		{
-			_cachedCanvas = PaintLayers.CompositeSet( below, effectiveMaps, BlendMode, Opacity.Clamped, Mask );
+			_cachedCanvas = PaintLayers.CompositeSet( below, Adjust.Apply( effectiveMaps ), BlendMode, Opacity.Clamped, Mask );
+
+			// What a clipped layer above clips to: a clipped layer hands its base on, an unclipped one
+			// becomes the base. Only set on a canvas this layer made (CompositeSet hands the backdrop
+			// back unchanged when the layer has no surface, and that one belongs to the layer below).
+			if ( !ReferenceEquals( _cachedCanvas, below ) )
+				_cachedCanvas.ClipBase = ClipToBelow.Value
+					? below?.ClipBase is { } baseCov ? PaintLayers.Resample( baseCov, below.Width, below.Height, _cachedCanvas.Width, _cachedCanvas.Height ) : null
+					: OwnCoverage( effectiveMaps, Opacity.Clamped, Mask, _cachedCanvas.Width, _cachedCanvas.Height );
+
 			_compositeBelow = below;
 			_compositeLayer = effectiveMaps;
 			_compositeKey = compositeKey;
@@ -485,7 +626,9 @@ public sealed class PaintFeature : Feature
 
 	/// <summary>A deep copy of a layer's maps, channel by channel. PaintCanvas.Clone also
 	/// clones companions, but layer maps carry their channels as separate fields with null
-	/// companions, so this is just the four (or five) canvases, copied.</summary>
+	/// companions, so this is just the canvases, copied — colour, roughness, metalness, height,
+	/// emissive, opacity and normal, plus the mask. Normal is cloned here too: Mobile's
+	/// CloneMaps drops it, which loses painted normals on a copy; Desktop keeps them.</summary>
 	static PaintLayerMaps CloneMaps( PaintLayerMaps maps )
 	{
 		if ( maps is null )
@@ -497,9 +640,58 @@ public sealed class PaintFeature : Feature
 			Roughness = maps.Roughness?.Clone(),
 			Metalness = maps.Metalness?.Clone(),
 			Height = maps.Height?.Clone(),
+			Emissive = maps.Emissive?.Clone(),
+			Opacity = maps.Opacity?.Clone(),
+			Normal = maps.Normal?.Clone(),
 			MaskPaint = maps.MaskPaint?.Clone(),
 			Size = maps.Size,
 		};
+	}
+
+	void SetAnchorChoice( ChoiceParam param, string name, string what, string options )
+	{
+		var key = name.Replace( "_", " " ).Replace( "-", " " ).Trim();
+		var i = Array.FindIndex( param.Options, o => string.Equals( o, key, StringComparison.OrdinalIgnoreCase )
+			|| string.Equals( o.Replace( " ", "" ), key.Replace( " ", "" ), StringComparison.OrdinalIgnoreCase ) );
+
+		if ( i >= 0 ) param.Index = i;
+		else FailOn( "Recipe", $"Unknown {what} '{name}'.", $"Choices are: {options}.", "Check the spelling, or clear the Recipe" );
+	}
+
+	/// <summary>Element-wise product of two masks into a new array; neither input is touched.</summary>
+	/// <summary>This layer's own alpha per texel at width x height: the most covered surface channel,
+	/// times opacity and mask. What a clipped layer above is confined to.</summary>
+	static float[] OwnCoverage( PaintLayerMaps maps, float opacity, float[] mask, int width, int height )
+	{
+		var n = width * height;
+		var cov = new float[n];
+
+		foreach ( var c in new[] { maps.Color, maps.Roughness, maps.Metalness, maps.Height, maps.Emissive, maps.Opacity } )
+		{
+			if ( c is null ) continue;
+			var src = c.Width == width && c.Height == height ? c : PaintLayers.Resample( c, width, height );
+
+			for ( var i = 0; i < n; i++ )
+				cov[i] = MathF.Max( cov[i], src.Rgba[i * 4 + 3] / 255f );
+		}
+
+		var m = mask is not null && mask.Length != n ? null : mask;
+
+		for ( var i = 0; i < n; i++ )
+			cov[i] *= opacity * (m is null ? 1f : m[i]);
+
+		return cov;
+	}
+
+	static float[] MultiplyMasks( float[] a, float[] b )
+	{
+		var n = Math.Min( a.Length, b.Length );
+		var r = new float[n];
+
+		for ( var i = 0; i < n; i++ )
+			r[i] = a[i] * b[i];
+
+		return r;
 	}
 
 	/// <summary>Parse <see cref="Recipe"/> into the dialog parameters. No-op when the recipe is empty,
@@ -610,9 +802,23 @@ public sealed class PaintFeature : Feature
 					if ( args.TryGetValue( "size", out var size ) ) Resolution.Value = (int)ParseFloat( size );
 					if ( args.TryGetValue( "resolution", out var res ) ) Resolution.Value = (int)ParseFloat( res );
 					break;
+				case "triplanar":
+					if ( !args.TryGetValue( "pattern", out var tPat ) ) args.TryGetValue( "triplanar", out tPat );
+					if ( tPat is not null ) SetAnchorChoice( Pattern, tPat, "pattern", "None, Stripes, Checker, Spots" );
+					if ( args.TryGetValue( "scale", out var tScale ) ) PatternScale.Value = ParseFloat( tScale );
+					if ( args.TryGetValue( "sharpness", out var tSharp ) ) PatternSharpness.Value = ParseFloat( tSharp );
+					TriPlanar.Value = true;
+					break;
+				case "anchor":
+					if ( !args.TryGetValue( "source", out var aSrc ) ) args.TryGetValue( "anchor", out aSrc );
+					if ( aSrc is not null ) SetAnchorChoice( AnchorSource, aSrc, "anchor source", "None, Below Height" );
+					if ( args.TryGetValue( "mode", out var aMode ) ) SetAnchorChoice( AnchorMode, aMode, "anchor mode", "Peaks, Valleys" );
+					if ( args.TryGetValue( "level", out var aLevel ) ) AnchorLevel.Value = ParseFloat( aLevel );
+					if ( args.TryGetValue( "softness", out var aSoft ) ) AnchorSoftness.Value = ParseFloat( aSoft );
+					break;
 				default:
 					FailOn( "Recipe", $"Unknown recipe directive '{tokens[0]}'.",
-						"Directives are: fill, gradient, bands, spots, edgewear, dirt, cavityridge, mask, opacity, blend, size.",
+						"Directives are: fill, gradient, bands, spots, edgewear, dirt, cavityridge, mask, opacity, blend, size, triplanar, anchor.",
 						"Check the spelling, or clear the Recipe and use the dialog parameters instead" );
 					break;
 			}
@@ -883,6 +1089,9 @@ public sealed class PaintFeature : Feature
 		maps.Roughness = Over( FillUseRoughness.Value ? Grey( FillRoughness.Clamped, size ) : null, strokes.Roughness );
 		maps.Metalness = Over( FillUseMetalness.Value ? Grey( FillMetalness.Clamped, size ) : null, strokes.Metalness );
 		maps.Height = Over( FillUseHeight.Value ? Grey( FillHeight.Clamped, size ) : null, strokes.Height );
+		// Emissive and opacity have no fill of their own; their strokes pass through.
+		maps.Emissive = strokes.Emissive;
+		maps.Opacity = strokes.Opacity;
 
 		return maps;
 	}
@@ -942,5 +1151,329 @@ public sealed class PaintFeature : Feature
 
 			return hash;
 		}
+	}
+}
+
+/// <summary>
+/// Layer-stack operations on a body's paint layers — the kernel half of Mobile's
+/// PaintOps layer commands (AddPaintLayer / RemovePaintLayer / MovePaintLayer /
+/// MergePaintLayerDown / FlattenPaintLayers / SetClipToBelow), without the app's
+/// session, undo-checkpoint or UI concerns.
+///
+/// UNDO: these mutate the studio directly, exactly like Mobile's ops mutate it
+/// after _doc.Checkpoint(). The caller must checkpoint first (the BuildScript
+/// `checkpoint` verb / EditHistory) and rebuild after, or the op is not undoable.
+/// Every op marks the studio dirty from the earliest changed feature, and stroke
+/// folds go through ReplaceStrokes / AddTexelStroke so the feature Revision moves.
+/// A layer that is not in the studio is refused, never silently added.
+/// </summary>
+public static class PaintLayerOps
+{
+	/// <summary>Every Paint on the same body, bottom to top in tree order (s&amp;box PaintLayersOf).</summary>
+	public static List<PaintFeature> LayersOf( PartStudio studio, PaintFeature feature )
+	{
+		var layers = new List<PaintFeature>();
+		if ( studio is null || feature is null )
+			return layers;
+
+		Body body = null;
+		foreach ( var b in studio.Bodies )
+		{
+			if ( feature.Bodies.Matches( b ) )
+			{
+				body = b;
+				break;
+			}
+		}
+
+		if ( body is null )
+		{
+			layers.Add( feature );
+			return layers;
+		}
+
+		foreach ( var f in studio.Features )
+		{
+			if ( f is PaintFeature p && ( ReferenceEquals( p, feature ) || p.Bodies.BodyIds.Count == 0 || p.Bodies.BodyIds.Contains( body.Id ) ) )
+				layers.Add( p );
+		}
+
+		return layers;
+	}
+
+	/// <summary>"New Layer" / "Fill Layer" above <paramref name="current"/> (or at the
+	/// rollback bar when there is none): same body and resolution as the layer above it.
+	/// A fill needs UVs — the caller checks that, as Mobile's AddPaintLayer does.</summary>
+	public static PaintFeature AddLayer( PartStudio studio, PaintFeature current, bool fill, string bodyId, out string error )
+	{
+		error = null;
+		if ( studio is null )
+		{
+			error = "No studio.";
+			return null;
+		}
+
+		var layer = new PaintFeature();
+		layer.Fill.Value = fill;
+
+		if ( current is not null && studio.Features.Contains( current ) )
+		{
+			layer.Bodies.BodyIds = new List<string>( current.Bodies.BodyIds );
+			layer.Resolution.Value = current.Resolution.Value;
+			var at = studio.Features.IndexOf( current ) + 1;
+			if ( studio.RollbackIndex < studio.Features.Count && studio.RollbackIndex >= at )
+				studio.RollbackIndex++;
+			studio.Insert( at, layer );
+		}
+		else
+		{
+			if ( bodyId is not null )
+				layer.Bodies.BodyIds = new List<string> { bodyId };
+			studio.Insert( Math.Min( studio.RollbackIndex, studio.Features.Count ), layer );
+		}
+
+		return layer;
+	}
+
+	/// <summary>Remove a layer. Returns the neighbour that should stay open (below, else
+	/// above, else null), like Mobile's RemovePaintLayer. Refused when the layer is not
+	/// in the studio.</summary>
+	public static PaintFeature RemoveLayer( PartStudio studio, PaintFeature layer, out string error )
+	{
+		error = null;
+		if ( studio is null || layer is null || !studio.Features.Contains( layer ) )
+		{
+			error = "That layer is not in the history.";
+			return null;
+		}
+
+		var stack = LayersOf( studio, layer );
+		var i = stack.IndexOf( layer );
+		PaintFeature next = null;
+		if ( i > 0 )
+			next = stack[i - 1];
+		else if ( stack.Count > 1 )
+			next = stack[1];
+
+		studio.Remove( layer );
+		return next;
+	}
+
+	/// <summary>Move a layer one step in the stack: +1 up (painted over the next), -1 down.
+	/// Swaps tree positions with the stack neighbour via PartStudio.Move.</summary>
+	public static bool MoveLayer( PartStudio studio, PaintFeature layer, int direction, out string error )
+	{
+		error = null;
+		if ( studio is null || layer is null )
+		{
+			error = "No layer.";
+			return false;
+		}
+
+		var stack = LayersOf( studio, layer );
+		var i = stack.IndexOf( layer );
+		var n = i + Math.Sign( direction );
+		if ( i < 0 || n < 0 || n >= stack.Count )
+		{
+			error = direction > 0 ? "That layer is already on top." : "That layer is already at the bottom.";
+			return false;
+		}
+
+		studio.Move( studio.Features.IndexOf( layer ), studio.Features.IndexOf( stack[n] ) );
+		return true;
+	}
+
+	/// <summary>Merge a layer into the one below it: strokes and texel strokes are appended
+	/// (upper opacity baked into Strength), a fill on the upper is taken if the below has
+	/// none, then the upper is removed. Returns the surviving layer below.</summary>
+	public static PaintFeature MergeLayerDown( PartStudio studio, PaintFeature layer, out string error )
+	{
+		error = null;
+		if ( studio is null || layer is null || !studio.Features.Contains( layer ) )
+		{
+			error = "That layer is not in the history.";
+			return null;
+		}
+
+		var stack = LayersOf( studio, layer );
+		var i = stack.IndexOf( layer );
+		if ( i <= 0 )
+		{
+			error = "That layer is already at the bottom — nothing below to merge into.";
+			return null;
+		}
+
+		var below = stack[i - 1];
+		FoldLayerInto( below, layer );
+		studio.MarkDirty( below );
+		studio.Remove( layer );
+		return below;
+	}
+
+	/// <summary>Fold every paint layer on the same body into the bottom one (strokes / texels /
+	/// fill), remove the rest. Returns the surviving bottom layer. Needs at least two layers.</summary>
+	public static PaintFeature FlattenLayers( PartStudio studio, PaintFeature any, out string error )
+	{
+		error = null;
+		if ( studio is null )
+		{
+			error = "No studio.";
+			return null;
+		}
+
+		if ( any is null )
+		{
+			for ( var k = studio.Features.Count - 1; k >= 0; k-- )
+			{
+				if ( studio.Features[k] is PaintFeature p )
+				{
+					any = p;
+					break;
+				}
+			}
+		}
+
+		if ( any is null )
+		{
+			error = "No paint layers to flatten.";
+			return null;
+		}
+
+		var stack = LayersOf( studio, any );
+		if ( stack.Count < 2 )
+		{
+			error = "Need at least two layers to flatten.";
+			return null;
+		}
+
+		var bottom = stack[0];
+		for ( var i = 1; i < stack.Count; i++ )
+			FoldLayerInto( bottom, stack[i] );
+
+		studio.MarkDirty( bottom );
+		for ( var i = stack.Count - 1; i >= 1; i-- )
+			studio.Remove( stack[i] );
+
+		return bottom;
+	}
+
+	/// <summary>Turn Clip To Below on or off. Refused on the bottom layer: there is no layer
+	/// below to clip to. A no-op when already in the requested state.</summary>
+	public static bool SetClipToBelow( PartStudio studio, PaintFeature layer, bool on, out string error )
+	{
+		error = null;
+		if ( studio is null || layer is null )
+		{
+			error = "No layer.";
+			return false;
+		}
+
+		if ( layer.ClipToBelow.Value == on )
+			return true;
+
+		if ( on && LayersOf( studio, layer ).IndexOf( layer ) <= 0 )
+		{
+			error = "This is the bottom layer: there is no layer below to clip to. Move it up or add a layer under it first.";
+			return false;
+		}
+
+		layer.ClipToBelow.Value = on;
+		studio.MarkDirty( layer );
+		return true;
+	}
+
+	/// <summary>Set a layer's colour adjustment (HSV / levels). The feature's Adjust getter
+	/// clamps the values, so out-of-range input is clamped, never stored raw.</summary>
+	public static bool SetAdjust( PartStudio studio, PaintFeature layer, PaintAdjust adjust, out string error )
+	{
+		error = null;
+		if ( studio is null || layer is null || !studio.Features.Contains( layer ) )
+		{
+			error = "That layer is not in the history.";
+			return false;
+		}
+
+		layer.AdjustHue.Value = adjust.Hue;
+		layer.AdjustSaturation.Value = adjust.Saturation;
+		layer.AdjustBrightness.Value = adjust.Brightness;
+		layer.LevelsBlack.Value = adjust.Black;
+		layer.LevelsWhite.Value = adjust.White;
+		layer.LevelsGamma.Value = adjust.Gamma;
+		studio.MarkDirty( layer );
+		return true;
+	}
+
+	/// <summary>Append upper's strokes / texels into below; inherit fill when below has none.
+	/// Does not checkpoint — the caller does that before the op that calls this.</summary>
+	static void FoldLayerInto( PaintFeature below, PaintFeature upper )
+	{
+		if ( below is null || upper is null )
+			return;
+
+		float uOp = upper.Opacity.Value;
+		float bOp = Math.Max( below.Opacity.Value, 1e-3f );
+		bool scale = Math.Abs( uOp - 1f ) > 1e-6f;
+
+		if ( upper.Strokes is { Count: > 0 } )
+		{
+			var list = below.Strokes != null ? new List<PaintStroke>( below.Strokes ) : new List<PaintStroke>();
+			foreach ( var s in upper.Strokes )
+			{
+				var c = CopyPaintStroke( s );
+				if ( scale )
+					c.Strength = Math.Clamp( c.Strength * uOp / bOp, 0f, 1f );
+				list.Add( c );
+			}
+			below.ReplaceStrokes( list );
+		}
+
+		if ( upper.TexelStrokes is { Count: > 0 } )
+		{
+			foreach ( var s in upper.TexelStrokes )
+				below.AddTexelStroke( CopyTexelStroke( s ) );
+		}
+
+		// Fill sits under strokes in Execute: take the upper's fill only when below has none.
+		if ( upper.Fill.Value && !below.Fill.Value )
+		{
+			below.Fill.Value = true;
+			below.FillUseColor.Value = upper.FillUseColor.Value;
+			below.FillColor.Value = upper.FillColor.Value;
+			below.FillUseRoughness.Value = upper.FillUseRoughness.Value;
+			below.FillRoughness.Value = upper.FillRoughness.Value;
+			below.FillUseMetalness.Value = upper.FillUseMetalness.Value;
+			below.FillMetalness.Value = upper.FillMetalness.Value;
+			below.FillUseHeight.Value = upper.FillUseHeight.Value;
+			below.FillHeight.Value = upper.FillHeight.Value;
+		}
+
+		// Fill-only fold (no strokes) still needs a rebuild: bump via ReplaceStrokes of the current list.
+		if ( ( upper.Strokes == null || upper.Strokes.Count == 0 ) && ( upper.TexelStrokes == null || upper.TexelStrokes.Count == 0 ) )
+			below.ReplaceStrokes( below.Strokes );
+	}
+
+	static PaintStroke CopyPaintStroke( PaintStroke s )
+	{
+		var c = new PaintStroke
+		{
+			R = s.R, G = s.G, B = s.B, A = s.A,
+			Radius = s.Radius, Strength = s.Strength, Falloff = s.Falloff, Spacing = s.Spacing,
+			Erase = s.Erase, Clone = s.Clone, CloneOffset = s.CloneOffset, Smudge = s.Smudge, Blur = s.Blur,
+			Channel = s.Channel,
+		};
+		c.Path.AddRange( s.Path );
+		return c;
+	}
+
+	static TexelStroke CopyTexelStroke( TexelStroke s )
+	{
+		var c = new TexelStroke
+		{
+			R = s.R, G = s.G, B = s.B, A = s.A,
+			Radius = s.Radius, Strength = s.Strength, Falloff = s.Falloff, Spacing = s.Spacing,
+			Erase = s.Erase, Channel = s.Channel,
+		};
+		c.Path.AddRange( s.Path );
+		return c;
 	}
 }

@@ -1430,3 +1430,132 @@ public static class GeoNodes
 		return tokens;
 	}
 }
+
+/// <summary>
+/// What one bot-facing GeoNodes evaluation did. <see cref="Ok"/> is false with
+/// <see cref="Error"/> set when the graph was refused — a refused graph never
+/// produces a mesh, so a bot cannot mistake an empty result for a built one.
+/// <see cref="InstanceOrigins"/> are the scatter points' positions (empty when the
+/// graph produced no instances). Realized counts are -1 unless
+/// <see cref="GeoNodesCommands.Evaluate(string, bool)"/> was asked to realize.
+/// </summary>
+public sealed class GeoNodesCommandResult
+{
+	public bool Ok;
+	public string Error = "";
+	public bool HasMesh;
+	public bool HasCurves;
+	public bool HasInstances;
+	public int PointCount;
+	public int FaceCount;
+	public int InstanceCount;
+	public Vec3[] InstanceOrigins = Array.Empty<Vec3>();
+	public int RealizedPointCount = -1;
+	public int RealizedFaceCount = -1;
+	public float MinX, MinY, MinZ, MaxX, MaxY, MaxZ;
+	public bool HasBounds;
+
+	public static GeoNodesCommandResult Fail( string error ) => new() { Ok = false, Error = error };
+}
+
+/// <summary>
+/// Bot-facing GeoNodes evaluation: graph in, evaluated mesh out, without creating
+/// a feature or a body. This is the evaluate-only probe — the feature path already
+/// exists (<see cref="GeoNodesFeature"/> via <c>add GeoNodes</c> / add_feature),
+/// but a bot that wants to check a graph before committing it to the feature tree
+/// needs an answer that is not a rebuilt document. Evaluation runs through the
+/// same <see cref="GeoNodes.EvaluateGraph"/> the feature uses, so the probe and
+/// the build cannot disagree. The hair/fur scatter seam is covered here too: a
+/// DistributePointsOnFaces + InstanceOnPoints graph reports the scattered
+/// instance count and origins, and realizing it bakes the prototypes into a mesh.
+/// </summary>
+public static class GeoNodesCommands
+{
+	/// <summary>Node types the registry knows, for a bot to check a spelling before sending a graph.</summary>
+	public static IReadOnlyList<string> NodeTypes => GeoNodes.NodeTypes;
+
+	/// <summary>
+	/// Evaluate a graph string (JSON when it starts with '{', otherwise the pipe
+	/// DSL). With <paramref name="realizeInstances"/>, instances are baked into a
+	/// mesh and the realized counts are reported; a mesh result realizes to itself,
+	/// and a curves-only graph is refused honestly instead of baking to junk.
+	/// </summary>
+	public static GeoNodesCommandResult Evaluate( string graph, bool realizeInstances = false )
+	{
+		if ( string.IsNullOrWhiteSpace( graph ) )
+			return GeoNodesCommandResult.Fail( "a GeoNodes graph is required (JSON or pipe DSL)" );
+		GeometrySet result;
+		try { result = GeoNodes.EvaluateGraph( graph ); }
+		catch ( GeoGraphException e )
+		{
+			return GeoNodesCommandResult.Fail( "graph failed: " + string.Join( "; ", e.Errors ) );
+		}
+		catch ( GeoNodeFailure e )
+		{
+			return GeoNodesCommandResult.Fail( "graph failed: " + e.Message );
+		}
+		var r = new GeoNodesCommandResult { Ok = true };
+		r.HasMesh = result.Mesh is not null;
+		r.HasCurves = result.Curves is not null;
+		r.HasInstances = result.Instances is not null;
+		if ( result.Mesh is not null )
+		{
+			r.PointCount = result.Mesh.PointCount;
+			r.FaceCount = result.Mesh.FaceCount;
+			FillBounds( result.Mesh.Poly, r );
+		}
+		if ( result.Instances is not null )
+		{
+			r.InstanceCount = result.Instances.Count;
+			r.InstanceOrigins = result.Instances.Transforms.Select( t => t.Origin ).ToArray();
+		}
+		if ( !realizeInstances ) return r;
+		// Instances win: RealizeInstances appends the input mesh AND the baked
+		// prototypes, so a points mesh with instances realizes to the full scatter,
+		// not just the bare points. A mesh with no instances realizes to itself.
+		PolyMesh realised;
+		if ( result.Instances is not null )
+		{
+			GeometrySet done;
+			try
+			{
+				done = GeoNodeImpl.RealizeInstances(
+					new GeoNodeCall { Type = "RealizeInstances" },
+					new GeoEvalContext { Named = new Dictionary<string, GeometrySet>(), Input = result } );
+			}
+			catch ( GeoNodeFailure e )
+			{
+				return GeoNodesCommandResult.Fail( "realize failed: " + e.Message );
+			}
+			if ( done.Mesh is null )
+				return GeoNodesCommandResult.Fail( "the graph produced instances but no mesh to realise" );
+			realised = done.Mesh.Poly;
+		}
+		else if ( result.Mesh is not null )
+			realised = result.Mesh.Poly;
+		else
+			return GeoNodesCommandResult.Fail( "the graph produced curves but no mesh, and a realised mesh is a mesh" );
+		r.RealizedPointCount = realised.Positions.Count;
+		r.RealizedFaceCount = realised.Faces.Count;
+		return r;
+	}
+
+	static void FillBounds( PolyMesh poly, GeoNodesCommandResult r )
+	{
+		if ( poly.Positions.Count == 0 ) return;
+		var minX = float.MaxValue; var minY = float.MaxValue; var minZ = float.MaxValue;
+		var maxX = float.MinValue; var maxY = float.MinValue; var maxZ = float.MinValue;
+		foreach ( var p in poly.Positions )
+		{
+			if ( p.x < minX ) minX = p.x;
+			if ( p.y < minY ) minY = p.y;
+			if ( p.z < minZ ) minZ = p.z;
+			if ( p.x > maxX ) maxX = p.x;
+			if ( p.y > maxY ) maxY = p.y;
+			if ( p.z > maxZ ) maxZ = p.z;
+		}
+		r.MinX = minX; r.MinY = minY; r.MinZ = minZ;
+		r.MaxX = maxX; r.MaxY = maxY; r.MaxZ = maxZ;
+		r.HasBounds = true;
+	}
+}

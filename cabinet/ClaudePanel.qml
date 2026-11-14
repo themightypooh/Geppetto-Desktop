@@ -250,7 +250,7 @@ Item {
             C.ToolTip.visible: titleMouse.containsMouse
             C.ToolTip.text: card.folded ? "Show conversation" : "Fold conversation"
         }
-        CardKey { id: stopKey; objectName: "claudeStopAll"; anchors.right: closeKey.left; anchors.rightMargin: 6; y: 3; text: "STOP"; tip: "Stop all modeling and chat work"; danger: true; onClicked: { if (typeof host.claudeStopAll !== "function") { card.stopNote = "STOP needs a host restart to take effect"; } else if (host.claudeStopAll()) { card.stopNote = "STOPPED"; stopNoteTimer.restart(); } else { card.stopNote = ""; } } }
+        CardKey { id: stopKey; objectName: "claudeStopAll"; anchors.right: closeKey.left; anchors.rightMargin: 6; y: 3; text: "STOP"; tip: "Stop all modeling and chat work \u2014 runs halt at the current step; reply RESUME to continue"; danger: true; onClicked: { if (typeof host.claudeStopAll !== "function") { card.stopNote = "STOP needs a host restart to take effect"; } else if (host.claudeStopAll()) { card.stopNote = "STOPPED"; stopNoteTimer.restart(); } else { card.stopNote = ""; } } }
         Timer { id: stopNoteTimer; interval: 3000; repeat: false; onTriggered: card.stopNote = "" }
         CardKey { id: closeKey; anchors.right: parent.right; y: 3; text: "×"; tip: "Close chat"; onClicked: card.closed() }
     }

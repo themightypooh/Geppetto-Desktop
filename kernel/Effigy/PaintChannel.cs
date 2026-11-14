@@ -20,6 +20,14 @@ public enum PaintChannel
 	Metalness,
 	Height,
 	Mask,
+	/// <summary>Self-illumination mask (grey): 0 is no glow, 1 glows at the full albedo. s&amp;box complex.vfx
+	/// TextureSelfIllumMask; glTF emissive.</summary>
+	Emissive,
+	/// <summary>Opacity (grey): 1 is solid, 0 is see-through. s&amp;box TextureTranslucency; glTF base colour alpha.</summary>
+	Opacity,
+	/// <summary>A painted tangent-space normal map (RGB, s&amp;box DirectX green): (128,128,255) is flat. Painted like
+	/// colour, combined with the normal derived from Height on export (PaintTextureSet.Images).</summary>
+	Normal,
 }
 
 /// <summary>
@@ -28,8 +36,10 @@ public enum PaintChannel
 /// The five separable modes every layer-based painter shares, with the W3C compositing definitions
 /// (Compositing and Blending Level 1, §5.8 and §10): Normal is plain source-over, Multiply darkens,
 /// Screen lightens, Overlay multiplies the darks and screens the lights of what is underneath, Add
-/// sums and clips. The same list <see cref="FleshBlend"/> uses, so a layer behaves the same whether
-/// it was painted or generated.
+/// sums and clips. The same first five <see cref="FleshBlend"/> uses, so a layer behaves the same whether
+/// it was painted or generated. After those, the rest of the W3C separable set: Darken, Lighten,
+/// Difference, Exclusion, Soft Light, Hard Light, Color Dodge, Color Burn. New modes are appended so
+/// a saved layer's mode index never changes meaning.
 /// </summary>
 public enum PaintBlendMode
 {
@@ -38,14 +48,32 @@ public enum PaintBlendMode
 	Screen,
 	Overlay,
 	Add,
+	Darken,
+	Lighten,
+	Difference,
+	Exclusion,
+	SoftLight,
+	HardLight,
+	ColorDodge,
+	ColorBurn,
 }
 
-/// <summary>What each channel is called and what an unpainted texel of it means.</summary>
+/// <summary>What each channel is called and what an unpainted texel of it means.
+///
+/// Colour spaces: Colour and Emissive are sRGB; Roughness, Metalness, Height, Opacity and Normal
+/// are linear data (Normal is tangent-space, DirectX green). The baked ambient occlusion a
+/// composite carries is linear data too; it is not a channel and never exports from here.</summary>
 public static class PaintChannels
 {
 	/// <summary>The surface channels a body's paint carries, in the order they export.</summary>
 	public static readonly PaintChannel[] Surface =
-		{ PaintChannel.Color, PaintChannel.Roughness, PaintChannel.Metalness, PaintChannel.Height };
+		{ PaintChannel.Color, PaintChannel.Roughness, PaintChannel.Metalness, PaintChannel.Height, PaintChannel.Emissive, PaintChannel.Opacity, PaintChannel.Normal };
+
+	/// <summary>True for the channels a stroke paints in full RGB (colour and the normal map); the rest are greys.</summary>
+	public static bool IsRgb( PaintChannel channel ) => channel is PaintChannel.Color or PaintChannel.Normal;
+
+	/// <summary>The flat tangent-space normal, as bytes: an unpainted Normal texel.</summary>
+	public const byte FlatNormalR = 128, FlatNormalG = 128, FlatNormalB = 255;
 
 	/// <summary>The label the editor shows, and the name a saved stroke carries.</summary>
 	public static string Label( PaintChannel channel ) => channel switch
@@ -55,6 +83,9 @@ public static class PaintChannels
 		PaintChannel.Metalness => "Metallic",
 		PaintChannel.Height => "Height",
 		PaintChannel.Mask => "Layer Mask",
+		PaintChannel.Emissive => "Emissive",
+		PaintChannel.Opacity => "Opacity",
+		PaintChannel.Normal => "Normal",
 		_ => channel.ToString(),
 	};
 
@@ -66,6 +97,9 @@ public static class PaintChannels
 		PaintChannel.Metalness => "metal",
 		PaintChannel.Height => "height",
 		PaintChannel.Mask => "mask",
+		PaintChannel.Emissive => "emit",
+		PaintChannel.Opacity => "opacity",
+		PaintChannel.Normal => "normal",
 		_ => null,
 	};
 
@@ -95,6 +129,9 @@ public static class PaintChannels
 		PaintChannel.Metalness => 0f,
 		PaintChannel.Height => 0.5f,
 		PaintChannel.Mask => 1f,
+		PaintChannel.Emissive => 0f,
+		PaintChannel.Opacity => 1f,
+		PaintChannel.Normal => 0.5f,
 		_ => PaintMaterial.DefaultBaseR / 255f,
 	};
 }

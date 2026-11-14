@@ -5,7 +5,7 @@ using Effigy;
 using Marionette.Desktop;
 using Silk.NET.OpenGL;
 
-// M4 item 2: after the 20-float vertex layout change, skinning, picking and the shadow pass
+// M4 item 2: after the 24-float vertex layout change (Wave-5 added per-vertex colour), skinning, picking and the shadow pass
 // must all consume the one posed ViewportMesh and the one palette. Each assertion is a
 // cross-over — the same probe pixel/ray is checked under two palettes — so a stale mesh or a
 // palette read from a different source cannot satisfy all of them by accident.
@@ -38,21 +38,23 @@ internal static class PoseAgreementTests
 			var caster = new MaterialPalette.Entry( "caster", .82f, .10f, .10f, .85f );
 			var receiver = new MaterialPalette.Entry( "receiver", .55f, .55f, .55f, .9f );
 
-			// GPU side: two quads written straight into the production 20-float layout so the
+			// GPU side: two quads written straight into the production 24-float layout so the
 			// batch path, the skinning path and the shadow pass all read this exact buffer.
 			int AddQuad( Vector3 center, Vector3 right, Vector3 up, Vector3 normal, int bone )
 			{
 				int indexOffset = idx.Count;
-				uint first = (uint)( verts.Count / 20 );
+				uint first = (uint)( verts.Count / ViewportMesh.FloatsPerVertex );
 				var positions = new[] { center - right - up, center + right - up, center + right + up, center - right + up };
 				var uvs = new[] { new Vector2( 0, 0 ), new Vector2( 1, 0 ), new Vector2( 1, 1 ), new Vector2( 0, 1 ) };
 				var tangent = Vector3.Normalize( right );
 				for ( int corner = 0; corner < 4; corner++ )
 				{
 					var p = positions[corner];
+					// 24 floats/vertex = CpuMesh.FloatsPerVertex (colour appended, white).
 					verts.AddRange( new[] { p.X, p.Y, p.Z, normal.X, normal.Y, normal.Z,
 						bone, 0f, 0f, 0f, 1f, 0f, 0f, 0f,
-						uvs[corner].X, uvs[corner].Y, tangent.X, tangent.Y, tangent.Z, 1f } );
+						uvs[corner].X, uvs[corner].Y, tangent.X, tangent.Y, tangent.Z, 1f,
+						1f, 1f, 1f, 1f } );
 				}
 				idx.AddRange( new[] { first, first + 1, first + 2, first, first + 2, first + 3 } );
 				return indexOffset;

@@ -87,7 +87,7 @@ public static class ClipBake
 	{
 		var line = new List<int>();
 
-		for ( var b = root; b >= 0; b = skeleton.Children( b ).DefaultIfEmpty( -1 ).First() )
+		for ( var b = root; b >= 0; b = (skeleton.Children( b ) ?? Array.Empty<int>()).DefaultIfEmpty( -1 ).First() )
 		{
 			if ( b == pin )
 				return line;
@@ -115,7 +115,7 @@ public static class ClipBake
 		var driven = LiveIkBones( clip, skeleton );
 		var chain = new List<int>();
 
-		for ( var b = root; b >= 0; b = skeleton.Children( b ).DefaultIfEmpty( -1 ).First() )
+		for ( var b = root; b >= 0; b = (skeleton.Children( b ) ?? Array.Empty<int>()).DefaultIfEmpty( -1 ).First() )
 		{
 			if ( driven.Contains( skeleton.Bones[b].Name ) )
 				result.SkippedForIk.Add( skeleton.Bones[b].Name );

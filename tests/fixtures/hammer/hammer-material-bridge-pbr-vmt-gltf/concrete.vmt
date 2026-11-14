@@ -1,0 +1,16 @@
+"LightmappedGeneric"
+{
+	"$basetexture" "concrete/concretefloor001a"
+	"$surfaceprop" "concrete"
+	"$roughness" "0.900"
+	"$bumpmap" "concrete/concretefloor001a_normal"
+	"$custom_vendor_key" "keepme"
+	"Proxies"
+	{
+		"AnimatedTexture"
+		{
+			"animatedtexturevar" "$basetexture"
+			"animatedtextureframerate" "30"
+		}
+	}
+}

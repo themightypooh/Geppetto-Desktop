@@ -191,3 +191,252 @@ public static class LineworkStrokes
 		};
 	}
 }
+
+/// <summary>
+/// What one bot-facing Linework command did. <see cref="Ok"/> is false with
+/// <see cref="Error"/> set when the command was refused — a refused command never
+/// touches the document, so a bot cannot mistake a no-op for a drawing.
+/// Raster bounds are -1 when nothing was painted.
+/// </summary>
+public sealed class LineworkCommandResult
+{
+	public bool Ok;
+	public string Error = "";
+	public string StrokeId = "";
+	public string Layer = "";
+	public int StrokesDrawn;
+	public int FillsDrawn;
+	public int Pixels;
+	public int MinX = -1, MinY = -1, MaxX = -1, MaxY = -1;
+	public int StrokeCount;
+	public int SampledPoints;
+
+	public static LineworkCommandResult Fail( string error ) => new() { Ok = false, Error = error };
+}
+
+/// <summary>
+/// Bot-facing Linework draw commands: stroke in with a pressure spline, fill,
+/// erase, rasterize-and-read-back, and document save/reopen. This is the command
+/// layer only — it builds <see cref="LineworkStroke"/> values and hands them to
+/// the existing <see cref="LineworkStrokes"/> / <see cref="LineworkRaster"/> /
+/// <see cref="LineworkReader"/> / <see cref="LineworkWriter"/> pipeline, so a
+/// bot-drawn stroke rasterizes exactly like a hand-drawn one. It never invents a
+/// second document model or a second rasterizer.
+/// </summary>
+public static class LineworkCommands
+{
+	/// <summary>
+	/// Find a layer by name or id (case-insensitive, the reader's rule), creating
+	/// it when <paramref name="createIfMissing"/> and it does not exist. An empty,
+	/// over-long or control-character layer name is refused honestly instead of
+	/// creating a layer the save round-trip cannot name.
+	/// </summary>
+	public static bool TryResolveLayer( LineworkDocument doc, string layerName, bool createIfMissing, out LineworkLayer layer, out string error )
+	{
+		layer = null;
+		error = null;
+		if ( doc is null ) { error = "no Linework document is open"; return false; }
+		if ( string.IsNullOrWhiteSpace( layerName ) ) { error = "layer name is empty: name the layer to draw on"; return false; }
+		var name = layerName.Trim();
+		if ( name.Length > 128 ) { error = "layer name is longer than 128 characters"; return false; }
+		foreach ( var c in name )
+			if ( char.IsControl( c ) ) { error = "layer name contains a control character"; return false; }
+		foreach ( var l in doc.Layers )
+			if ( l.Name.Equals( name, StringComparison.OrdinalIgnoreCase )
+				|| l.Id.Equals( name, StringComparison.OrdinalIgnoreCase ) )
+			{ layer = l; return true; }
+		if ( !createIfMissing ) { error = $"no layer named '{name}'"; return false; }
+		layer = new LineworkLayer { Id = name, Name = name, Visible = true };
+		doc.Layers.Add( layer );
+		return true;
+	}
+
+	/// <summary>
+	/// Draw an open stroke on a layer: control points plus per-point pressures
+	/// (missing pressures are full pressure, the spline rule). The stroke is
+	/// validated through the real pressure-spline path before it is added, so a
+	/// stored stroke is always one the rasterizer can draw.
+	/// </summary>
+	public static LineworkCommandResult AddStroke( LineworkDocument doc, string layerName,
+		IReadOnlyList<Vec2> points, IReadOnlyList<float> pressures,
+		string tool, string color, float size, bool closed = false, float opacity = 1f )
+	{
+		var invalid = ValidateStrokeArgs( points, tool, color, size, closed, opacity );
+		if ( invalid is not null ) return LineworkCommandResult.Fail( invalid );
+		if ( !TryResolveLayer( doc, layerName, true, out var layer, out var error ) )
+			return LineworkCommandResult.Fail( error );
+		return AddStrokeCore( layer, points, pressures, tool, color, size, closed, opacity );
+	}
+
+	/// <summary>Fill a closed ring on a layer with a solid colour (a closed pen stroke).</summary>
+	public static LineworkCommandResult Fill( LineworkDocument doc, string layerName,
+		IReadOnlyList<Vec2> ring, string color, float opacity = 1f )
+	{
+		var invalid = ValidateStrokeArgs( ring, "pen", color, 1f, true, opacity );
+		if ( invalid is not null ) return LineworkCommandResult.Fail( invalid );
+		if ( !TryResolveLayer( doc, layerName, true, out var layer, out var error ) )
+			return LineworkCommandResult.Fail( error );
+		return AddStrokeCore( layer, ring, null, "pen", color, 1f, true, opacity );
+	}
+
+	/// <summary>
+	/// Erase along a stroke: an eraser stroke, so the rasterizer clears exactly
+	/// the dabs the stroke covers and nothing else. Erasing never deletes strokes
+	/// from the document — the eraser stroke itself is the record.
+	/// </summary>
+	public static LineworkCommandResult Erase( LineworkDocument doc, string layerName,
+		IReadOnlyList<Vec2> points, float size, IReadOnlyList<float> pressures = null )
+	{
+		var invalid = ValidateStrokeArgs( points, "eraser", "#000000", size, false, 1f );
+		if ( invalid is not null ) return LineworkCommandResult.Fail( invalid );
+		if ( !TryResolveLayer( doc, layerName, true, out var layer, out var error ) )
+			return LineworkCommandResult.Fail( error );
+		return AddStrokeCore( layer, points, pressures, "eraser", "#000000", size, false, 1f );
+	}
+
+	/// <summary>
+	/// Validate a stroke's arguments BEFORE any layer is resolved, so a refused
+	/// command never leaves a layer behind. This mirrors the checks in
+	/// <see cref="AddStrokeCore"/> exactly — the two must stay in sync; the core
+	/// keeps its own checks as a second line of defence. Returns null when valid,
+	/// else the refusal message.
+	/// </summary>
+	static string ValidateStrokeArgs( IReadOnlyList<Vec2> points,
+		string tool, string color, float size, bool closed, float opacity )
+	{
+		if ( points is null || points.Count == 0 )
+			return "stroke has no points: give at least one point";
+		if ( tool is null || !(tool.Equals( "pen", StringComparison.OrdinalIgnoreCase )
+			|| tool.Equals( "eraser", StringComparison.OrdinalIgnoreCase )) )
+			return $"tool '{tool}' is not pen or eraser";
+		if ( !LineworkRaster.TryParseColor( color, out _, out _, out _ ) )
+			return $"color '{color}' is not #RRGGBB";
+		if ( !float.IsFinite( size ) || size <= 0f )
+			return "size must be a positive number";
+		if ( !float.IsFinite( opacity ) || opacity <= 0f || opacity > 1f )
+			return "opacity must be above 0 and at most 1";
+		if ( closed && !LineworkReader.CleanRing( new List<Vec2>( points ), out _ ) )
+			return "a closed fill needs at least 3 distinct points";
+		return null;
+	}
+
+	static LineworkCommandResult AddStrokeCore( LineworkLayer layer,
+		IReadOnlyList<Vec2> points, IReadOnlyList<float> pressures,
+		string tool, string color, float size, bool closed, float opacity )
+	{
+		if ( points is null || points.Count == 0 )
+			return LineworkCommandResult.Fail( "stroke has no points: give at least one point" );
+		if ( tool is null || !(tool.Equals( "pen", StringComparison.OrdinalIgnoreCase )
+			|| tool.Equals( "eraser", StringComparison.OrdinalIgnoreCase )) )
+			return LineworkCommandResult.Fail( $"tool '{tool}' is not pen or eraser" );
+		if ( !LineworkRaster.TryParseColor( color, out _, out _, out _ ) )
+			return LineworkCommandResult.Fail( $"color '{color}' is not #RRGGBB" );
+		if ( !float.IsFinite( size ) || size <= 0f )
+			return LineworkCommandResult.Fail( "size must be a positive number" );
+		if ( !float.IsFinite( opacity ) || opacity <= 0f || opacity > 1f )
+			return LineworkCommandResult.Fail( "opacity must be above 0 and at most 1" );
+		if ( closed && !LineworkReader.CleanRing( new List<Vec2>( points ), out _ ) )
+			return LineworkCommandResult.Fail( "a closed fill needs at least 3 distinct points" );
+		var stroke = new LineworkStroke
+		{
+			Id = NextStrokeId( layer ),
+			Tool = tool.ToLowerInvariant(),
+			Color = color.Trim(),
+			Size = size,
+			Opacity = opacity,
+			Closed = closed,
+		};
+		foreach ( var p in points ) stroke.Points.Add( p );
+		for ( var i = 0; i < points.Count; i++ )
+			stroke.Pressures.Add( pressures is not null && i < pressures.Count
+				? Math.Clamp( pressures[i], 0f, 1f ) : 1f );
+		int sampled;
+		if ( closed )
+			sampled = stroke.Points.Count;
+		else
+		{
+			var spline = LineworkStrokes.StrokeToSpline( stroke, layer.Name );
+			if ( spline is null )
+				return LineworkCommandResult.Fail( "stroke has no usable points after cleaning" );
+			sampled = spline.Points.Count;
+		}
+		layer.Strokes.Add( stroke );
+		return new LineworkCommandResult
+		{
+			Ok = true,
+			StrokeId = stroke.Id,
+			Layer = layer.Name,
+			StrokeCount = layer.Strokes.Count,
+			SampledPoints = sampled,
+		};
+	}
+
+	static string NextStrokeId( LineworkLayer layer )
+	{
+		var n = layer.Strokes.Count + 1;
+		while ( true )
+		{
+			var id = "stroke-" + n;
+			var taken = false;
+			foreach ( var s in layer.Strokes ) if ( s.Id == id ) { taken = true; break; }
+			if ( !taken ) return id;
+			n++;
+		}
+	}
+
+	/// <summary>
+	/// Rasterize a document (or one layer) into a fresh canvas and hand the canvas
+	/// back for pixel read-back. The map auto-fits the drawn points, so the same
+	/// drawing lands on the same texels whatever its drawing units were. The canvas
+	/// is never cleared or reused between calls — each rasterize is its own evidence.
+	/// </summary>
+	public static (PaintCanvas Canvas, LineworkRasterResult Result, string Error) Rasterize(
+		LineworkDocument doc, int width, int height, string layerFilter = null, LineworkRasterOptions options = null )
+	{
+		if ( doc is null ) return (null, null, "no Linework document is open");
+		if ( width <= 0 || height <= 0 ) return (null, null, "raster size must be positive");
+		var filter = string.IsNullOrWhiteSpace( layerFilter ) ? null : layerFilter.Trim();
+		var points = new List<Vec2>();
+		foreach ( var layer in doc.Layers )
+		{
+			if ( filter is not null )
+			{
+				if ( !layer.Name.Equals( filter, StringComparison.OrdinalIgnoreCase )
+					&& !layer.Id.Equals( filter, StringComparison.OrdinalIgnoreCase ) )
+					continue;
+			}
+			else if ( !layer.Visible ) continue;
+			foreach ( var s in layer.Strokes ) points.AddRange( s.Points );
+		}
+		if ( points.Count == 0 ) return (null, null, "nothing to rasterize: the document has no points");
+		var map = RasterMap.AutoFitForPoints( points, width, height, 1f );
+		var canvas = new PaintCanvas( width, height );
+		var result = LineworkRaster.RenderDocument( canvas, doc, layerFilter, map, options );
+		return (canvas, result, null);
+	}
+
+	/// <summary>A fresh, empty document. Layers are created on demand by the first draw.</summary>
+	public static LineworkDocument NewDocument( string name = "" ) => new() { Name = name ?? "" };
+
+	/// <summary>Save a document to a .linework file. False + error on failure; nothing is written then.</summary>
+	public static bool TrySave( LineworkDocument doc, string path, out string error )
+	{
+		error = null;
+		if ( doc is null ) { error = "no Linework document is open"; return false; }
+		if ( string.IsNullOrWhiteSpace( path ) ) { error = "save path is empty"; return false; }
+		return LineworkWriter.TrySave( doc, path.Trim(), out error );
+	}
+
+	/// <summary>Load a .linework file (path, or a drawing id under ~/.local/share/linework/drawings/).</summary>
+	public static bool TryLoadFile( string path, out LineworkDocument doc, out string error )
+	{
+		doc = null;
+		error = null;
+		if ( string.IsNullOrWhiteSpace( path ) ) { error = "load path is empty"; return false; }
+		return LineworkReader.TryLoad( path.Trim(), out doc, out _, out error );
+	}
+
+	/// <summary>Parse .linework JSON text. False + error on bad input, never a throw.</summary>
+	public static bool TryLoadJson( string json, out LineworkDocument doc, out string error ) =>
+		LineworkReader.TryParse( json, out doc, out error );
+}

@@ -1,3 +1,5 @@
+using System.Collections;
+using System.Collections.Generic;
 using System.Text;
 
 namespace Effigy;
@@ -234,4 +236,49 @@ public static class VmdlAnimation
 
 		return sb.ToString();
 	}
+
+	/// <summary>
+	/// Lane D: an animation event that fires during playback. Source 2 / s&box AnimEvent node.
+	/// </summary>
+	public sealed record AnimEvent( string EventClass, int Frame, string Attachment = "", string Sound = "" );
+
+	/// <summary>
+	/// The AnimEventList node, or empty when there are no events. Indented to sit among an
+	/// AnimationList's children (or a clip's children) the same way BindPose does.
+	/// </summary>
+	public static string AnimEventList( IEnumerable<AnimEvent> events )
+	{
+		if ( events is null )
+			return "";
+		var body = new StringBuilder();
+		foreach ( var e in events )
+		{
+			if ( string.IsNullOrWhiteSpace( e.EventClass ) )
+				continue;
+			body.Append( "\t\t\t\t\t{\n" );
+			body.Append( "\t\t\t\t\t\t_class = \"AnimEvent\"\n" );
+			body.Append( $"\t\t\t\t\t\tevent_class = \"{e.EventClass}\"\n" );
+			body.Append( $"\t\t\t\t\t\tevent_frame = {e.Frame}\n" );
+			body.Append( "\t\t\t\t\t\tevent_keys = \n" );
+			body.Append( "\t\t\t\t\t\t{\n" );
+			if ( !string.IsNullOrWhiteSpace( e.Attachment ) )
+				body.Append( $"\t\t\t\t\t\t\tAttachment = \"{e.Attachment}\"\n" );
+			if ( !string.IsNullOrWhiteSpace( e.Sound ) )
+				body.Append( $"\t\t\t\t\t\t\tSound = \"{e.Sound}\"\n" );
+			body.Append( "\t\t\t\t\t\t}\n" );
+			body.Append( "\t\t\t\t\t},\n" );
+		}
+		if ( body.Length == 0 )
+			return "";
+		var sb = new StringBuilder();
+		sb.Append( "\t\t\t{\n" );
+		sb.Append( "\t\t\t\t_class = \"AnimEventList\"\n" );
+		sb.Append( "\t\t\t\tchildren = \n" );
+		sb.Append( "\t\t\t\t[\n" );
+		sb.Append( body );
+		sb.Append( "\t\t\t\t]\n" );
+		sb.Append( "\t\t\t},\n" );
+		return sb.ToString();
+	}
 }
+

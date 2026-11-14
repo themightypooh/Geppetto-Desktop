@@ -118,7 +118,104 @@ public static class FaceDelete
 			result = merged;
 		}
 
+		// When capping leaves a pair of coincident, opposite-facing faces (such as deleting an extruded
+		// boss whose interface face was already coincident with the base face, capped by a reverse loop),
+		// remove both zero-thickness opposite faces.
+		var cleaned = result.Clone();
+		if ( RemoveOpposingDuplicateFaces( cleaned ) )
+		{
+			var cleanedCheck = MeshValidator.Validate( cleaned );
+			var cleanedVolume = cleaned.SignedVolume();
+			if ( cleanedCheck.IsValid && cleanedCheck.IsClosed
+				&& MathF.Abs( cleanedVolume - afterVolume ) <= MathF.Max( 1e-3f, MathF.Abs( afterVolume ) * 1e-4f )
+				&& MeshSplit.PieceCount( cleaned ) >= 1 && MeshSplit.PieceCount( cleaned ) <= beforePieces )
+			{
+				result = cleaned;
+			}
+		}
+
 		return MeshEditSession.RemoveUnusedVertices( result );
+	}
+
+	/// <summary>
+	/// Drop pairs of coincident faces that share the same vertex positions in opposite winding order.
+	/// </summary>
+	static bool RemoveOpposingDuplicateFaces( PolyMesh mesh )
+	{
+		if ( mesh is null || mesh.FaceCount < 2 )
+			return false;
+
+		var remove = new HashSet<int>();
+		for ( int i = 0; i < mesh.Faces.Count; i++ )
+		{
+			if ( remove.Contains( i ) ) continue;
+			var fi = mesh.Faces[i];
+			if ( fi.Count < 3 ) continue;
+
+			for ( int j = i + 1; j < mesh.Faces.Count; j++ )
+			{
+				if ( remove.Contains( j ) ) continue;
+				var fj = mesh.Faces[j];
+				if ( fj.Count != fi.Count ) continue;
+
+				if ( IsOppositeFace( mesh, fi, fj ) )
+				{
+					remove.Add( i );
+					remove.Add( j );
+					break;
+				}
+			}
+		}
+
+		if ( remove.Count > 0 )
+		{
+			var newFaces = new List<Face>( mesh.FaceCount - remove.Count );
+			for ( int i = 0; i < mesh.FaceCount; i++ )
+			{
+				if ( !remove.Contains( i ) )
+					newFaces.Add( mesh.Faces[i] );
+			}
+			mesh.Faces = newFaces;
+			return true;
+		}
+
+		return false;
+	}
+
+	static bool IsOppositeFace( PolyMesh mesh, Face a, Face b )
+	{
+		if ( a.Count != b.Count || a.Count < 3 )
+			return false;
+
+		// Normals must be opposite: these are the two sides of a zero-thickness sliver.
+		var na = mesh.FaceNormal( a );
+		var nb = mesh.FaceNormal( b );
+		if ( na.LengthSquared < 1e-20f || nb.LengthSquared < 1e-20f )
+			return false;
+		if ( Vec3.Dot( na.Normal, nb.Normal ) > -0.999f )
+			return false;
+
+		// The vertex sets must agree (coincident faces).
+		int n = a.Count;
+		var used = new bool[n];
+		for ( int i = 0; i < n; i++ )
+		{
+			var pa = mesh.Positions[a.Indices[i]];
+			bool found = false;
+			for ( int j = 0; j < n; j++ )
+			{
+				if ( used[j] ) continue;
+				if ( ( mesh.Positions[b.Indices[j]] - pa ).LengthSquared < 1e-6f )
+				{
+					used[j] = true;
+					found = true;
+					break;
+				}
+			}
+			if ( !found ) return false;
+		}
+
+		return true;
 	}
 
 	/// <summary>One face across a boundary ring, wound against the faces that still use those

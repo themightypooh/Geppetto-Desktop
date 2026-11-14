@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
 
 namespace Effigy;
 
@@ -430,6 +432,110 @@ public static partial class SkinBinder
 		}
 
 		return result;
+	}
+
+	/// <summary>
+	/// <see cref="Deform"/> without allocating: skin matrices go into <paramref name="skin"/> (at least one per
+	/// bone, caller-owned and reused) and positions into <paramref name="result"/> (at least one per vertex).
+	/// For playback, which deforms the same body every frame: the allocating call put a fresh vertex array on
+	/// the large-object heap per frame. Results are bit-identical to <see cref="Deform"/> — the vector path
+	/// runs the same multiplies and adds in the same order, one lane per axis.
+	/// </summary>
+	public static void DeformInto( IReadOnlyList<Vec3> positions, SkinWeights weights,
+		IReadOnlyList<Xform> bindWorld, IReadOnlyList<Xform> poseWorld, Span<Vec3> result, Span<Xform> skin )
+	{
+		if ( bindWorld is null ) throw new ArgumentNullException( nameof( bindWorld ) );
+		if ( poseWorld is null ) throw new ArgumentNullException( nameof( poseWorld ) );
+		if ( skin.Length < bindWorld.Count ) throw new ArgumentException( "Skin buffer is smaller than the bone count", nameof( skin ) );
+
+		for ( var b = 0; b < bindWorld.Count; b++ )
+			skin[b] = poseWorld[b] * bindWorld[b].Inverse;
+
+		DeformInto( positions, weights, skin[..bindWorld.Count], result );
+	}
+
+	/// <summary>Skin with ready-made skin matrices (<c>pose * bind⁻¹</c> per bone). A caller that keeps
+	/// the inverse bind per bone builds these without walking the bone chain every frame.</summary>
+	public static void DeformInto( IReadOnlyList<Vec3> positions, SkinWeights weights, ReadOnlySpan<Xform> skin, Span<Vec3> result )
+	{
+		if ( positions is null ) throw new ArgumentNullException( nameof( positions ) );
+		if ( weights is null ) throw new ArgumentNullException( nameof( weights ) );
+		if ( result.Length < positions.Count ) throw new ArgumentException( "Result buffer is smaller than the vertex count", nameof( result ) );
+		if ( weights.Count < positions.Count ) throw new ArgumentException( $"{weights.Count} weight sets for {positions.Count} vertices", nameof( weights ) );
+
+		ReadOnlySpan<Vec3> src = positions switch
+		{
+			Vec3[] a => a,
+			List<Vec3> l => CollectionsMarshal.AsSpan( l ),
+			_ => default,
+		};
+		var sets = CollectionsMarshal.AsSpan( weights.Vertices );
+
+		if ( src.Length != positions.Count )
+		{
+			// Some other list type: scalar path through the indexer, still allocation-free.
+			for ( var v = 0; v < positions.Count; v++ )
+				result[v] = DeformOne( positions[v], sets[v], skin );
+			return;
+		}
+
+		if ( !Vector128.IsHardwareAccelerated )
+		{
+			for ( var v = 0; v < src.Length; v++ )
+				result[v] = DeformOne( src[v], sets[v], skin );
+			return;
+		}
+
+		// Vector128 is NEON (AdvSimd) on the phone's arm64 and SSE on x64. A bone's skin matrix is four
+		// columns of one Vec3 each, packed once per call (on the stack for any normal rig); one vertex is
+		// then three broadcast multiplies and four adds per influence.
+		var cols = skin.Length <= 256 ? stackalloc Vector128<float>[skin.Length * 4] : new Vector128<float>[skin.Length * 4];
+
+		for ( var b = 0; b < skin.Length; b++ )
+		{
+			ref readonly var m = ref skin[b];
+			cols[b * 4] = Vector128.Create( m.X.x, m.X.y, m.X.z, 0f );
+			cols[b * 4 + 1] = Vector128.Create( m.Y.x, m.Y.y, m.Y.z, 0f );
+			cols[b * 4 + 2] = Vector128.Create( m.Z.x, m.Z.y, m.Z.z, 0f );
+			cols[b * 4 + 3] = Vector128.Create( m.Origin.x, m.Origin.y, m.Origin.z, 0f );
+		}
+
+		for ( var v = 0; v < src.Length; v++ )
+		{
+			var p = src[v];
+			var ws = sets[v];
+
+			if ( ws is null || ws.Length == 0 )
+			{
+				result[v] = p;
+				continue;
+			}
+
+			var px = Vector128.Create( p.x );
+			var py = Vector128.Create( p.y );
+			var pz = Vector128.Create( p.z );
+			var acc = Vector128<float>.Zero;
+
+			foreach ( var bw in ws )
+			{
+				var c = cols.Slice( bw.Bone * 4, 4 );
+				var t = c[0] * px + c[1] * py;
+				t = t + c[2] * pz;
+				t = t + c[3];
+				acc = acc + t * Vector128.Create( bw.Weight );
+			}
+
+			result[v] = new Vec3( acc.GetElement( 0 ), acc.GetElement( 1 ), acc.GetElement( 2 ) );
+		}
+	}
+
+	static Vec3 DeformOne( Vec3 p, BoneWeight[] ws, ReadOnlySpan<Xform> skin )
+	{
+		if ( ws is null || ws.Length == 0 ) return p;
+		var acc = Vec3.Zero;
+		foreach ( var bw in ws )
+			acc += skin[bw.Bone].TransformPoint( p ) * bw.Weight;
+		return acc;
 	}
 
 	/// <summary>

@@ -1,0 +1,10 @@
+{
+  "comment": "hammer-hotspot-texturing fixture: hotspots for trim/trim001, a 256x256 trim sheet in UV space. trim_horizontal is the 8:1 top strip (v 0.875..1), trim_vertical the 1:8 side strip, panel_square a 1:1 panel, panel_wide a 2:1 panel. A 128x16 world trim face is 8:1 and matches trim_horizontal exactly; a 64x64 face is 1:1 and matches panel_square; a 100x30 face (3.33:1) fits nothing (closest, panel_wide at 2:1, is aspect error 0.511 > 0.35).",
+  "material": "trim/trim001",
+  "hotspots": [
+    { "name": "trim_horizontal", "material": "trim/trim001", "rect": [0, 0.875, 1, 1] },
+    { "name": "trim_vertical", "material": "trim/trim001", "rect": [0, 0, 0.125, 1] },
+    { "name": "panel_square", "material": "trim/trim001", "rect": [0, 0, 0.5, 0.5] },
+    { "name": "panel_wide", "material": "trim/trim001", "rect": [0.5, 0, 1, 0.25] }
+  ]
+}

@@ -75,6 +75,10 @@ public readonly struct Vec3 : IEquatable<Vec3>
 public readonly struct Vec4
 {
 	public readonly float x, y, z, w;
+	public float r => x;
+	public float g => y;
+	public float b => z;
+	public float a => w;
 
 	public Vec4( float x, float y, float z, float w )
 	{

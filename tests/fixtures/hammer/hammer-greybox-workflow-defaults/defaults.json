@@ -1,0 +1,8 @@
+{
+  "comment": "hammer-greybox-workflow-defaults fixture: a GreyboxDefaults JSON document with dev mode off, nodraw-first on, and the wall role re-skinned to the canonical measure texture. GreyboxDefaults.FromJsonString loads it; the missing ceiling/trim roles fall back to defaults.",
+  "devTextureMode": false,
+  "nodrawFirst": true,
+  "devMaterials": {
+    "wall": "dev/dev_measuregeneric01"
+  }
+}

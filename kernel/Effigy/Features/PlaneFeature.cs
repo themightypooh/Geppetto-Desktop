@@ -121,6 +121,9 @@ public sealed class PlaneFeature : Feature
 
 		ctx.Planes[Id] = plane;
 
+		var axis = OffsetAxis( plane );
+		AddHandle( FeatureHandle.Of( Offset, plane.Origin - axis * Offset.Value, axis ) );
+
 		// WHICH PART THIS PLANE GREW OUT OF, carried through so an extrude drawn on it can add to
 		// that part rather than starting a new one. A sketch on a face already publishes this (see
 		// SketchFeature.Execute) and a plane a few units off that same face means the same thing: a

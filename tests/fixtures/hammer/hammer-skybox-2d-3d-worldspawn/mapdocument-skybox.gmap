@@ -1,0 +1,31 @@
+gmap 1
+docid a1b2c3d4
+name skybox-test
+rollback 2147483647
+op add-visgroup vg-skybox
+name 3D Skybox
+colour #0080FF
+visible 1
+compilevisible 1
+endop
+op add-brush 2
+name Mountain
+layer -
+visgroups vg-skybox
+face -1 0 0 -512 NATURE/CLIFF 0 0 1 1 0 16 0
+face 1 0 0 672 NATURE/CLIFF 0 0 1 1 0 16 0
+face 0 -1 0 -512 NATURE/CLIFF 0 0 1 1 0 16 0
+face 0 1 0 672 NATURE/CLIFF 0 0 1 1 0 16 0
+face 0 0 -1 -512 NATURE/CLIFF 0 0 1 1 0 16 0
+face 0 0 1 672 NATURE/CLIFF 0 0 1 1 0 16 0
+endop
+op add-entity 3
+class sky_camera
+origin 512 512 512
+angles 0 0 0
+layer -
+visgroups -
+key scale 16
+key targetname sky_cam
+endop
+op set-compile 0 16 sky_day01_01

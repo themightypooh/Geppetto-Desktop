@@ -1,0 +1,13 @@
+{
+  "comment": "hammer-face-material-uv-model fixture: the six faces of a brush box. Top and walls are textured, the unseen bottom is nodraw. The FaceMaterialTests 'box fixture' check loads this file and asserts 6 faces, 5 baked, bottom nodraw.",
+  "expectedFaceCount": 6,
+  "expectedBakedFaces": 5,
+  "faces": [
+    { "material": "brick/brickwall001", "uv": { "offset": [0, 0], "scale": [0.5, 0.5], "rotation": 0, "lightmapScale": 16, "smoothingGroup": 1 } },
+    { "material": "brick/brickwall001", "uv": { "offset": [0.25, 0], "scale": [1, 1], "rotation": 0, "lightmapScale": 16, "smoothingGroup": 1 } },
+    { "material": "metal/metalwall001", "uv": { "offset": [0, 0], "scale": [2, 2], "rotation": 90, "lightmapScale": 8, "smoothingGroup": 2 } },
+    { "material": "brick/brickwall001", "uv": { "offset": [0, 0], "scale": [1, 1], "rotation": 0, "lightmapScale": 16, "smoothingGroup": 1 } },
+    { "material": "brick/brickwall001", "uv": { "offset": [0, 0], "scale": [1, 1], "rotation": 45, "lightmapScale": 16, "smoothingGroup": 1 } },
+    { "material": "tools/toolsnodraw", "uv": { "offset": [0, 0], "scale": [1, 1], "rotation": 0, "lightmapScale": 16, "smoothingGroup": 0 } }
+  ]
+}

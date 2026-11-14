@@ -70,9 +70,13 @@ public static class HeadlessImageChecks
 			for (int corner = 0; corner < 4; corner++)
 			{
 				var p = positions[corner]; var uv = uvs[corner];
+				// 24 floats/vertex = CpuMesh.FloatsPerVertex (pos 3 + nrm 3 + bones 4 +
+				// weights 4 + UV 2 + tangent/sign 4 + colour 4). The colour was missing here
+				// (20-float packing) and every vertex past the first rendered misaligned.
 				_vertices.AddRange(new[] { p.X, p.Y, p.Z, normal.X, normal.Y, normal.Z,
 					0f, 0f, 0f, 0f, 1f, 0f, 0f, 0f,
-					uv.X, uv.Y, tangent.X, tangent.Y, tangent.Z, 1f });
+					uv.X, uv.Y, tangent.X, tangent.Y, tangent.Z, 1f,
+					1f, 1f, 1f, 1f });
 			}
 			_indices.AddRange(new[] { first, first + 1, first + 2, first, first + 2, first + 3 });
 			_batches.Add(new CpuMesh.DrawBatch(name, material, offset * sizeof(uint), 6));

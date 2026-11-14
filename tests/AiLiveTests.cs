@@ -9,6 +9,26 @@ internal static class AiLiveTests
     static void Check(bool ok, string message) { if (!ok) throw new Exception(message); }
     public static void Register(TestRegistry registry, TestSettings settings)
     {
+        registry.Add("ai-live", "piece cache invalidates vertex paint without geometry changes", () =>
+        {
+            var studio = new PartStudio();
+            var result = BuildScript.Run(studio, "add Primitive name=Body width=4 depth=4 height=4");
+            Check(result.Ok && studio.Bodies.Count > 0, "fixture build failed");
+            var source = studio.Bodies[0].Mesh;
+            var cache = new CpuMesh.PieceCache();
+            CpuMesh.LivePieces = cache;
+            try
+            {
+                var before = CpuMesh.FromStudio(studio, 0, "paint.effigy");
+                source.VertexColors = Enumerable.Repeat(new Vec4(1, 0, 0, 1), source.VertexCount).ToArray();
+                var after = CpuMesh.FromStudio(studio, 0, "paint.effigy");
+                Check(cache.Misses == 1, "paint reused stale cached geometry");
+                Check(!before.Vertices.SequenceEqual(after.Vertices), "paint did not reach vertex buffer");
+                CpuMesh.FromStudio(studio, 0, "paint.effigy");
+                Check(cache.Hits == 1, "unchanged paint should reuse cache");
+            }
+            finally { CpuMesh.LivePieces = null; }
+        });
         registry.Add("ai-live", "successful mutations, empty removal and restore publish immutable revisions", () =>
         {
             var tools = new AiSuiteTools(Path.Combine(settings.WorkDirectory, "live-commits"));
@@ -312,6 +332,36 @@ internal static class AiLiveTests
             }
         });
 
+        registry.Add("ai-live", "CPU step flash: each shown step names the bodies it made and the ones it changed (po: see what a step did)", () =>
+        {
+            var tools = new AiSuiteTools(Path.Combine(settings.WorkDirectory, "live-step-flash"));
+            tools.Live = new AiLiveRun(tools);
+            tools.ExecuteAsync("add_feature", JsonNode.Parse("""{"type":"Primitive","fields":{"SizeX":4}}""")!, default).GetAwaiter().GetResult();
+            using var preview = new AiLivePreview(tools.Root);
+            AiLivePreview.Update Next(long revision)
+            {
+                var clock = System.Diagnostics.Stopwatch.StartNew();
+                while (clock.ElapsedMilliseconds < 20000)
+                {
+                    Check(preview.Error is null, "preview error: " + preview.Error);
+                    if (preview.Take() is { } u) { u.Mesh.Dispose(); if (u.Revision >= revision) return u; }
+                    Thread.Sleep(10);
+                }
+                throw new TimeoutException("preview did not deliver revision " + revision);
+            }
+            var first = Next(tools.Live.Revision);
+            Check(first.Added.Length == 0 && first.Changed.Length == 0, "the first load flashed parts");
+            string a = tools.Studio.Bodies[0].Id;
+            tools.ExecuteAsync("add_feature", JsonNode.Parse("""{"type":"Primitive","fields":{"SizeX":2}}""")!, default).GetAwaiter().GetResult();
+            var added = Next(tools.Live.Revision);
+            string b = tools.Studio.Bodies.Select(x => x.Id).Single(x => x != a);
+            Check(added.Added.SequenceEqual(new[] { b }) && added.Changed.Length == 0,
+                $"add step: added=[{string.Join(",", added.Added)}] changed=[{string.Join(",", added.Changed)}], want added=[{b}]");
+            tools.ExecuteAsync("edit_feature", new JsonObject { ["id"] = tools.Studio.Features[0].Id, ["fields"] = new JsonObject { ["SizeX"] = 7d } }, default).GetAwaiter().GetResult();
+            var edited = Next(tools.Live.Revision);
+            Check(edited.Changed.SequenceEqual(new[] { a }) && edited.Added.Length == 0,
+                $"edit step: added=[{string.Join(",", edited.Added)}] changed=[{string.Join(",", edited.Changed)}], want changed=[{a}]");
+        });
         registry.Add("ai-live", "hardware EGL viewer shows every revision in order, none skipped (po: a pane follows each step)", () =>
         {
             var tools = new AiSuiteTools(Path.Combine(settings.WorkDirectory, "live-every-step"));

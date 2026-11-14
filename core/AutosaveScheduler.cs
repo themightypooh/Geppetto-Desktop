@@ -7,6 +7,8 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Effigy;
+
 namespace Marionette.Desktop;
 
 public enum AutosaveStatus
@@ -57,8 +59,19 @@ public sealed class AutosaveScheduler : IDisposable
 	public DesktopPreferences Preferences { get; }
 	public DocumentSession? ActiveSession { get; set; }
 
+	/// <summary>Map wired to this scheduler (hammer-undo-autosave-map-commands).
+	/// The map side is <see cref="IMapAutosaveSource"/>: MapDocument implements it
+	/// (or is adapted to it) — see kernel/Effigy/Map/MapUndo.cs. Until MapDocument
+	/// lands (hammer-map-document-model, in progress), tests drive this through
+	/// <see cref="InMemoryMapUndoTarget"/>. Map autosaves go NEXT TO the map file,
+	/// not into RecoveryDirectory; RecoveryDirectory is only the fallback for a map
+	/// that has never been saved.</summary>
+	public IMapAutosaveSource? ActiveMap { get; set; }
+
 	public long LastAutosavedRevision { get; private set; }
 	public string? LastAutosavedDocumentId { get; private set; }
+	public long LastMapAutosavedRevision { get; private set; }
+	public string? LastMapAutosavedDocumentId { get; private set; }
 	public bool IsSaveInProgress => _saveLock.CurrentCount == 0;
 
 	public AutosaveScheduler(
@@ -194,6 +207,114 @@ public sealed class AutosaveScheduler : IDisposable
 	}
 
 	/// <summary>
+	/// Triggers a map autosave pass on the specified map or ActiveMap.
+	/// Mirrors TriggerAutosaveAsync (clean / unchanged-revision / busy skips, one
+	/// save at a time on the shared lock, dirty state never cleared) but writes via
+	/// <see cref="MapAutosave"/>: the payload + recovery record go next to the map
+	/// file, with the crash marker left set until a clean shutdown clears it.
+	/// </summary>
+	public async Task<AutosaveResult> TriggerMapAutosaveAsync(
+		IMapAutosaveSource? map = null,
+		CancellationToken cancellationToken = default )
+	{
+		ObjectDisposedException.ThrowIf( _disposed, this );
+
+		var targetMap = map ?? ActiveMap;
+		if ( targetMap == null )
+		{
+			return new AutosaveResult( AutosaveStatus.NoSession, null, 0, "No active map to autosave." );
+		}
+
+		if ( !targetMap.IsDirty )
+		{
+			return new AutosaveResult(
+				AutosaveStatus.SkippedClean,
+				targetMap.DocumentId,
+				targetMap.Revision,
+				"Map is clean."
+			);
+		}
+
+		if ( targetMap.Revision == LastMapAutosavedRevision &&
+		     targetMap.DocumentId == LastMapAutosavedDocumentId )
+		{
+			return new AutosaveResult(
+				AutosaveStatus.SkippedUnchangedRevision,
+				targetMap.DocumentId,
+				targetMap.Revision,
+				"Revision has already been autosaved."
+			);
+		}
+
+		if ( !_saveLock.Wait( 0 ) )
+		{
+			return new AutosaveResult(
+				AutosaveStatus.SkippedBusy,
+				targetMap.DocumentId,
+				targetMap.Revision,
+				"Another autosave operation is already in progress."
+			);
+		}
+
+		try
+		{
+			if ( cancellationToken.IsCancellationRequested )
+			{
+				return new AutosaveResult( AutosaveStatus.Cancelled, targetMap.DocumentId, targetMap.Revision, "Autosave cancelled." );
+			}
+
+			long capturedRevision = targetMap.Revision;
+			string capturedDocId = targetMap.DocumentId;
+
+			var record = await Task.Run( () =>
+			{
+				return MapAutosave.WriteAutosave( targetMap, targetMap.SourcePath, RecoveryDirectory );
+			}, cancellationToken );
+
+			LastMapAutosavedRevision = record.Revision;
+			LastMapAutosavedDocumentId = record.DocumentId;
+
+			return new AutosaveResult(
+				AutosaveStatus.Success,
+				capturedDocId,
+				capturedRevision,
+				"Map autosaved to " + record.AutosavePath
+			);
+		}
+		catch ( OperationCanceledException )
+		{
+			return new AutosaveResult( AutosaveStatus.Cancelled, targetMap.DocumentId, targetMap.Revision, "Autosave cancelled." );
+		}
+		catch ( Exception ex )
+		{
+			_logDiagnostic?.Invoke( $"Map autosave snapshot failed: {ex.Message}" );
+			return new AutosaveResult( AutosaveStatus.Failed, targetMap.DocumentId, targetMap.Revision, ex.Message );
+		}
+		finally
+		{
+			_saveLock.Release();
+		}
+	}
+
+	/// <summary>
+	/// Autosave on backgrounding: the host calls this when the app loses focus /
+	/// backgrounds, so work survives even if the scheduled interval has not fired.
+	/// Same path as the scheduled trigger; a clean map is a cheap no-op.
+	/// </summary>
+	public Task<AutosaveResult> SaveMapOnBackgroundingAsync(
+		IMapAutosaveSource? map = null,
+		CancellationToken cancellationToken = default ) =>
+		TriggerMapAutosaveAsync( map, cancellationToken );
+
+	/// <summary>
+	/// Crash-recovery discovery for one map: returns the recovery record when a
+	/// crashed session left an autosave next to the map, else null. The host offers
+	/// the autosave FIRST on open when this returns a record.
+	/// </summary>
+	public static MapAutosaveRecord? FindMapRecovery( string mapPath ) =>
+		MapAutosave.TryFindRecovery( mapPath );
+
+	/// <summary>
 	/// Starts the background periodic autosave timer.
 	/// </summary>
 	public void Start( TimeSpan? customInterval = null )
@@ -215,6 +336,7 @@ public sealed class AutosaveScheduler : IDisposable
 				try
 				{
 					await TriggerAutosaveAsync( null, token );
+					if ( ActiveMap != null ) await TriggerMapAutosaveAsync( null, token );
 				}
 				catch
 				{

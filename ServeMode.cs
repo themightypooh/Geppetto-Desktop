@@ -173,6 +173,29 @@ public static class ServeMode
 		string subPath = null;
 		renderer.Live.Layers.AddRange( sub.Layers() );
 		renderer.Live.Layers.Add( focus );
+		// 2026-11-14 step flash: the bodies a shown step made (green) or changed (amber) light up, then fade,
+		// worked out from the meshes themselves, so paint, sculpt, material steps and scrubs show too.
+		var flashNew = new FocusLayer( new Vector3( 1f, .7f, .2f ), new Vector3( .75f, .45f, .08f ), .55f );   // the tint is amber for both
+		var flashEdit = new FocusLayer( new Vector3( 1f, .7f, .2f ), new Vector3( .75f, .45f, .08f ), .55f );
+		var outlineNew = new FocusOutline( flashNew, new Vector3( .3f, 1f, .4f ) );      // green: new part
+		var outlineEdit = new FocusOutline( flashEdit, new Vector3( 1f, .65f, .1f ) );   // amber: edited part
+		renderer.Live.Layers.Add( flashNew ); renderer.Live.Layers.Add( flashEdit );
+		renderer.Live.Layers.Add( outlineNew ); renderer.Live.Layers.Add( outlineEdit );
+		double flashAt = -1;
+		const double FlashHold = 1.5, FlashFade = 0.8;
+		List<int> PicksOf( string[] ids )
+		{
+			var found = new List<int>();
+			for ( int i = 0; i < mesh.BodyPicks.Length; i++ )
+				if ( Array.IndexOf( ids, mesh.BodyPicks[i].Id ) >= 0 ) found.Add( i );
+			return found;
+		}
+		JsonArray Names( string[] ids )
+		{
+			var names = new JsonArray();
+			foreach ( int i in PicksOf( ids ) ) names.Add( mesh.BodyPicks[i].Name ?? mesh.BodyPicks[i].Id );
+			return names;
+		}
 		void Refocus()
 		{
 			focusMesh = mesh;
@@ -449,8 +472,13 @@ public static class ServeMode
 									}
 									framedLive = true;
 								}
+								flashNew.Set( mesh.Picker, PicksOf( update.Added ) );
+								flashEdit.Set( mesh.Picker, PicksOf( update.Changed ) );
+								flashAt = flashNew.Visible || flashEdit.Visible ? clock.Elapsed.TotalSeconds : -1;
+								outlineNew.Visible = flashNew.Visible; outlineEdit.Visible = flashEdit.Visible;
+								if ( flashAt >= 0 ) { flashNew.Fade( .55f ); flashEdit.Fade( .55f ); outlineNew.Fade( 1f ); outlineEdit.Fade( 1f ); }
 								renderer.ResetTemporalHistory(); dirty = true;
-								Emit( new JsonObject { ["ev"] = "ai-preview", ["runId"] = update.RunId, ["revision"] = update.Revision,
+								Emit( new JsonObject { ["ev"] = "ai-preview", ["added"] = Names( update.Added ), ["changed"] = Names( update.Changed ), ["removed"] = update.Removed.Length, ["runId"] = update.RunId, ["revision"] = update.Revision,
 									["path"] = update.Path, ["tris"] = mesh.TriangleCount, ["load_ms"] = update.LoadMs,
 									["upload_ms"] = upload.Elapsed.TotalMilliseconds, ["cache"] = update.CacheNote } );
 							}
@@ -481,6 +509,16 @@ public static class ServeMode
 					if ( g >= 1 ) glideAt = -1;
 				}
 				if ( focusName.Length > 0 && focusMesh != mesh ) Refocus();
+				if ( flashAt >= 0 )
+				{
+					double age = clock.Elapsed.TotalSeconds - flashAt;
+					float k = age < FlashHold ? 1f : (float)Math.Max( 0, 1 - (age - FlashHold) / FlashFade );
+					// two soft pulses while it holds, so the eye catches it
+					float pulse = age < FlashHold ? .75f + .25f * MathF.Cos( (float)age * MathF.PI * 2f / .7f ) : 1f;
+					flashNew.Fade( .55f * k * pulse ); flashEdit.Fade( .55f * k * pulse ); outlineNew.Fade( k ); outlineEdit.Fade( k );
+					if ( k <= 0 ) { flashNew.Visible = flashEdit.Visible = outlineNew.Visible = outlineEdit.Visible = false; flashAt = -1; }
+					renderer.ResetTemporalHistory(); dirty = true;
+				}
 				if ( FlyMoving() ) { camera.MoveFly( flyMove.X, flyMove.Y, flyMove.Z, dt, flyFast ); dirty = true; }
 				if ( sendoffAt >= 0 )
 				{

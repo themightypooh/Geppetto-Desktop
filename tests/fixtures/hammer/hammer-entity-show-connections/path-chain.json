@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "entities": [
+    { "id": "node_01", "classname": "path_track", "origin": [0, 0, 64], "targetname": "node_01", "properties": { "target": "node_02" } },
+    { "id": "node_02", "classname": "path_track", "origin": [128, 0, 64], "targetname": "node_02", "properties": { "target": "node_03" } },
+    { "id": "node_03", "classname": "path_track", "origin": [256, 128, 64], "targetname": "node_03", "properties": {} }
+  ],
+  "entity_io": { "version": 1, "outputs": [] }
+}

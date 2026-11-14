@@ -10,15 +10,34 @@ namespace Effigy;
 ///
 /// Built ON <see cref="StrandSolver"/>, not a second solver. Guides are settled by
 /// StrandSolver.Settle (straight strands, gravity + wind, rest-length projection, sphere
-/// colliders); this class adds the groom layer on top: parting, curl/wave/kink, braid,
-/// gather, frizz/flyaways, and root-preserving clumped children. Collision is the same
-/// deliberate approximation as StrandsFeature — one bounding sphere per upstream body —
-/// NOT full MeshBVH surface collision; the roadmap's BVH comb is future work and is not
-/// claimed here.
+/// colliders for non-target bodies, exact MeshBVH collision against the target bodies via
+/// <see cref="StrandSolver.BvhSurfaceCollider"/>); this class adds the groom layer on top:
+/// parting, crown whorl, curl/wave/kink, braid, gather, frizz/flyaways, and root-preserving
+/// clumped children. Styles come from <see cref="HairStylePreset"/> and the Andre Walker
+/// 1A-4C <see cref="HairCurlType"/> taxonomy (see <see cref="ApplyPreset"/>).
 ///
 /// Determinism: same roots, same options, same strands, every rebuild. All randomness is
 /// a seeded System.Random consumed in a fixed order.
 /// </summary>
+/// <summary>Andre Walker 1A-4C curl taxonomy (spec 2.1 A). The type is the authority for
+/// curl shape: <see cref="HairGroom.ApplyCurlType"/> maps it onto CurlRadius / CurlFreq /
+/// WaveAmp / WaveFreq / KinkAmp / Frizz.</summary>
+public enum HairCurlType
+{
+	Straight_1A, Wavy_2A, Wavy_2B, Wavy_2C,
+	Curly_3A, Curly_3B, Coily_4A, Coily_4B, Coily_4C
+}
+
+/// <summary>Named groom styles (spec 2.1 A). <see cref="HairGroom.ApplyPreset"/> maps each
+/// one onto guide count, clump, curl and gather; a caller-supplied CurlType or GatherPoint
+/// wins over the preset's values for that field.</summary>
+public enum HairStylePreset
+{
+	Custom, ShortCrop, BuzzCut, SlickedBack, SidePartPompadour, BobCut, LongLayered,
+	Ponytail, HighBun, TwinTails, FrenchBraid, Dreadlocks, Cornrows, Afro, Mohawk,
+	WolfMane, LionMane, HorseTail, FacialStubble, FullBeard, Mustache, Eyebrows, Eyelashes
+}
+
 public static class HairGroom
 {
 	public sealed class Options
@@ -50,6 +69,13 @@ public static class HairGroom
 		public bool Interpolate = false;
 		public float LengthVariation = 0f;
 		public float WidthVariation = 0f;
+		public HairStylePreset Preset = HairStylePreset.Custom;
+		public HairCurlType CurlType = HairCurlType.Straight_1A;
+		// Crown whorl (spec 2.1 A): spiral centre and twist in radians (+CW, -CCW).
+		// 0 = whorl off, which keeps every existing groom byte-identical; presets that
+		// want a visible vertex spiral set 0.35, the spec's value.
+		public Vec3 CrownCenter = new( 0f, -1.8f, 4.2f );
+		public float CrownSwirl = 0f;
 	}
 
 	/// <summary>One groomed strand: points from root (index 0) to tip.</summary>
@@ -116,11 +142,158 @@ public static class HairGroom
 		return curve[^1].V;
 	}
 
+	/// <summary>Map an Andre Walker curl type onto the curl/wave/kink shape fields, in place.
+	/// The type is the authority for shape: a caller that wants hand-tuned radii should leave
+	/// CurlType at Straight_1A and set CurlRadius / CurlFreq / WaveAmp / WaveFreq / KinkAmp /
+	/// Frizz directly. Reset first, so switching types never leaves a previous type's residue.</summary>
+	public static void ApplyCurlType( Options o, HairCurlType curl )
+	{
+		if ( o is null ) throw new ArgumentNullException( nameof( o ) );
+		o.CurlRadius = 0f; o.CurlFreq = 1f; o.WaveAmp = 0f; o.WaveFreq = 1f; o.KinkAmp = 0f; o.Frizz = 0f;
+		o.CurlType = curl;
+		switch ( curl )
+		{
+			case HairCurlType.Straight_1A: break;
+			case HairCurlType.Wavy_2A: o.WaveAmp = 0.15f; o.WaveFreq = 1f; break;
+			case HairCurlType.Wavy_2B: o.WaveAmp = 0.3f; o.WaveFreq = 1.5f; break;
+			case HairCurlType.Wavy_2C: o.WaveAmp = 0.45f; o.WaveFreq = 2f; o.CurlRadius = 0.05f; o.CurlFreq = 1f; break;
+			case HairCurlType.Curly_3A: o.CurlRadius = 0.25f; o.CurlFreq = 2f; break;
+			case HairCurlType.Curly_3B: o.CurlRadius = 0.35f; o.CurlFreq = 3f; break;
+			case HairCurlType.Coily_4A: o.CurlRadius = 0.2f; o.CurlFreq = 5f; o.KinkAmp = 0.05f; break;
+			case HairCurlType.Coily_4B: o.CurlRadius = 0.25f; o.CurlFreq = 4f; o.KinkAmp = 0.15f; o.Frizz = 0.1f; break;
+			case HairCurlType.Coily_4C: o.CurlRadius = 0.12f; o.CurlFreq = 6f; o.KinkAmp = 0.2f; o.Frizz = 0.15f; break;
+		}
+	}
+
+	/// <summary>Apply a named style preset to <paramref name="o"/>, in place (guide count,
+	/// clump, curl and gather). A caller-supplied CurlType wins over the preset's curl, and a
+	/// caller-supplied GatherPoint wins over the preset's conventional tie point, so a scripted
+	/// <c>preset=FrenchBraid curl=Wavy_2B</c> or <c>preset=Ponytail gather=...</c> keeps the
+	/// caller's values for those fields. A preset that needs a tie point (Ponytail, HighBun,
+	/// TwinTails, HorseTail) falls back to a conventional back-of-head point when the caller
+	/// gives none; the caller should pass the real tie point for a real head. TwinTails has a
+	/// single tie point here — a second tie needs a second groom pass.</summary>
+	public static void ApplyPreset( Options o )
+	{
+		if ( o is null ) throw new ArgumentNullException( nameof( o ) );
+		if ( o.Preset == HairStylePreset.Custom ) return;
+		var callerCurl = o.CurlType;
+		var presetCurl = HairCurlType.Straight_1A;
+		switch ( o.Preset )
+		{
+			case HairStylePreset.ShortCrop:
+				o.GuideCount = 48; o.Length = 1.2f; presetCurl = HairCurlType.Straight_1A;
+				o.ClumpCurve = "0:0,0.4:0.6,1:0.95"; o.Spread = 0.15f; o.Part = "Center"; o.CrownSwirl = 0.35f;
+				break;
+			case HairStylePreset.BuzzCut:
+				o.GuideCount = 64; o.ChildrenPerGuide = 2; o.Length = 0.4f; presetCurl = HairCurlType.Straight_1A;
+				o.Spread = 0.1f; o.Part = "Center"; o.CrownSwirl = 0.35f;
+				break;
+			case HairStylePreset.SlickedBack:
+				o.GuideCount = 48; o.Length = 4f; presetCurl = HairCurlType.Wavy_2A;
+				o.Part = "None"; o.CrownSwirl = 0.35f; o.Comb = new Vec3( 0, -1, 0 );
+				break;
+			case HairStylePreset.SidePartPompadour:
+				o.GuideCount = 48; o.Length = 5f; presetCurl = HairCurlType.Wavy_2B;
+				o.Part = "SideLeft"; o.CrownSwirl = 0.35f;
+				break;
+			case HairStylePreset.BobCut:
+				o.GuideCount = 56; o.Length = 6f; presetCurl = HairCurlType.Wavy_2A;
+				o.Part = "Center"; o.CrownSwirl = 0.35f;
+				break;
+			case HairStylePreset.LongLayered:
+				o.GuideCount = 64; o.Length = 12f; presetCurl = HairCurlType.Wavy_2B;
+				o.LengthVariation = 0.25f; o.Part = "Center"; o.CrownSwirl = 0.35f;
+				break;
+			case HairStylePreset.Ponytail:
+				o.GuideCount = 56; o.Length = 10f; presetCurl = HairCurlType.Wavy_2A;
+				o.Part = "Center"; o.CrownSwirl = 0.35f; o.GatherPoint ??= new Vec3( 0, -2.2f, 2.5f );
+				break;
+			case HairStylePreset.HighBun:
+				o.GuideCount = 56; o.Length = 8f; presetCurl = HairCurlType.Wavy_2A;
+				o.Part = "Center"; o.CrownSwirl = 0.35f; o.GatherPoint ??= new Vec3( 0, -2f, 4f );
+				break;
+			case HairStylePreset.TwinTails:
+				o.GuideCount = 64; o.Length = 10f; presetCurl = HairCurlType.Wavy_2B;
+				o.Part = "Center"; o.CrownSwirl = 0.35f; o.GatherPoint ??= new Vec3( 0, -2.2f, 2.5f );
+				break;
+			case HairStylePreset.FrenchBraid:
+				o.GuideCount = 48; o.Length = 10f; presetCurl = HairCurlType.Wavy_2A;
+				o.Part = "Center"; o.CrownSwirl = 0.35f;
+				o.Braid = true; o.BraidLobes = 12; o.BraidWidth = 0.6f;
+				break;
+			case HairStylePreset.Dreadlocks:
+				o.GuideCount = 40; o.Length = 9f; presetCurl = HairCurlType.Coily_4C;
+				o.ClumpCurve = "0:0,0.4:0.7,1:0.98"; o.Spread = 0.12f; o.Part = "Center"; o.CrownSwirl = 0.35f;
+				break;
+			case HairStylePreset.Cornrows:
+				o.GuideCount = 48; o.Length = 4f; presetCurl = HairCurlType.Straight_1A;
+				o.Part = "Center"; o.CrownSwirl = 0f; o.Interpolate = true;
+				o.Braid = true; o.BraidLobes = 8; o.BraidWidth = 0.3f;
+				break;
+			case HairStylePreset.Afro:
+				o.GuideCount = 96; o.ChildrenPerGuide = 6; o.Length = 3f; presetCurl = HairCurlType.Coily_4B;
+				o.ClumpCurve = "0:0,0.4:0.4,1:0.8"; o.Spread = 0.6f; o.Part = "Center"; o.CrownSwirl = 0.35f;
+				break;
+			case HairStylePreset.Mohawk:
+				o.GuideCount = 32; o.Length = 5f; presetCurl = HairCurlType.Wavy_2C;
+				o.Spread = 0.1f; o.Part = "Center"; o.CrownSwirl = 0f;
+				break;
+			case HairStylePreset.WolfMane:
+				o.GuideCount = 80; o.Length = 12f; presetCurl = HairCurlType.Wavy_2C;
+				o.LengthVariation = 0.2f; o.Part = "None"; o.CrownSwirl = 0.35f;
+				break;
+			case HairStylePreset.LionMane:
+				o.GuideCount = 96; o.ChildrenPerGuide = 6; o.Length = 10f; presetCurl = HairCurlType.Curly_3A;
+				o.Spread = 0.5f; o.Part = "None"; o.CrownSwirl = 0.35f;
+				break;
+			case HairStylePreset.HorseTail:
+				o.GuideCount = 56; o.Length = 14f; presetCurl = HairCurlType.Wavy_2A;
+				o.Part = "Center"; o.CrownSwirl = 0.35f; o.GatherPoint ??= new Vec3( 0, -2.2f, 2.5f );
+				break;
+			case HairStylePreset.FacialStubble:
+				o.GuideCount = 96; o.Length = 0.3f; presetCurl = HairCurlType.Straight_1A;
+				o.Spread = 0.1f; o.Part = "None"; o.CrownSwirl = 0f;
+				break;
+			case HairStylePreset.FullBeard:
+				o.GuideCount = 64; o.Length = 3f; presetCurl = HairCurlType.Wavy_2A;
+				o.Spread = 0.3f; o.Part = "None"; o.CrownSwirl = 0f;
+				break;
+			case HairStylePreset.Mustache:
+				o.GuideCount = 32; o.Length = 1.2f; presetCurl = HairCurlType.Wavy_2A;
+				o.Spread = 0.2f; o.Part = "None"; o.CrownSwirl = 0f;
+				break;
+			case HairStylePreset.Eyebrows:
+				o.GuideCount = 32; o.Length = 0.8f; presetCurl = HairCurlType.Straight_1A;
+				o.Spread = 0.1f; o.Part = "None"; o.CrownSwirl = 0f;
+				break;
+			case HairStylePreset.Eyelashes:
+				o.GuideCount = 32; o.Length = 0.5f; presetCurl = HairCurlType.Straight_1A;
+				o.Spread = 0.05f; o.Part = "None"; o.CrownSwirl = 0f;
+				break;
+			default: return;
+		}
+		ApplyCurlType( o, callerCurl != HairCurlType.Straight_1A ? callerCurl : presetCurl );
+	}
+
+	/// <summary>Crown whorl tangent initializer (spec 2.1 B.1): the radial direction from the
+	/// crown centre, projected onto the tangent plane, rotated by the swirl angle around the
+	/// surface normal: d_whorl = cos(swirl) * d_radial + sin(swirl) * (n x d_radial). A root
+	/// sitting on the crown centre has no radial direction, so the surface normal is returned.</summary>
+	public static Vec3 WhorlDirection( Vec3 root, Vec3 normal, Vec3 crownCenter, float swirl )
+	{
+		var n = normal.LengthSquared > 1e-12f ? normal.Normal : new Vec3( 0, 0, 1 );
+		var toRoot = root - crownCenter;
+		var radial = toRoot - n * Vec3.Dot( toRoot, n );
+		if ( radial.LengthSquared < 1e-12f ) return n;
+		radial = radial.Normal;
+		return (radial * MathF.Cos( swirl ) + Vec3.Cross( n, radial ) * MathF.Sin( swirl )).Normal;
+	}
 	/// <summary>
 	/// Build guides from roots + outward normals, then run the operators in roadmap order:
-	/// parting (into the initial direction), settle, curl/wave/kink, braid, gather,
-	/// frizz/flyaways. Children are derived from the finished guides, so they inherit
-	/// every operator for free.
+	/// preset/curl (see <see cref="ApplyPreset"/>), parting and crown whorl (into the initial
+	/// direction), settle, curl/wave/kink, braid, gather, frizz/flyaways. Children are derived
+	/// from the finished guides, so they inherit every operator for free.
 	/// </summary>
 	public static List<Strand> Build( IReadOnlyList<Vec3> roots, IReadOnlyList<Vec3> normals,
 		IReadOnlyList<(Vec3 Centre, float Radius)> colliders, Options o )
@@ -133,6 +306,12 @@ public static class HairGroom
 	{
 		if ( roots is null || roots.Count == 0 )
 			throw new ArgumentException( "A groom needs at least one root.", nameof( roots ) );
+
+		// Preset first (it fills guide count, clump, curl and gather); a bare CurlType
+		// without a preset still maps onto the curl shape fields. Neither consumes RNG,
+		// so the seeded sequence below is unchanged for existing grooms.
+		if ( o.Preset != HairStylePreset.Custom ) ApplyPreset( o );
+		else if ( o.CurlType != HairCurlType.Straight_1A ) ApplyCurlType( o, o.CurlType );
 
 		var rng = new Random( o.Seed );
 		var centre = Vec3.Zero;
@@ -153,16 +332,29 @@ public static class HairGroom
 			if ( flows is not null && i < flows.Count && flows[i].LengthSquared > 1e-12f )
 				d = (d + flows[i]).Normal;
 
+			if ( o.CrownSwirl != 0f )
+			{
+				// Crown whorl tangent initializer (spec 2.1 B.1): tilt the initial direction
+				// toward the spiral tangent around the crown centre; the tilt weight is |swirl|.
+				// Skipped entirely at the 0 default, so existing grooms are unchanged.
+				var nrm = normals is not null && i < normals.Count ? normals[i] : new Vec3( 0, 0, 1 );
+				var whorl = WhorlDirection( roots[i], nrm, o.CrownCenter, o.CrownSwirl );
+				var w = Math.Clamp( MathF.Abs( o.CrownSwirl ), 0f, 1f );
+				d = (d * (1f - w) + whorl * w).Normal;
+			}
+
 			dirs.Add( ApplyParting( d, roots[i], centre, o.Part ) );
 		}
 
-		var surface = surfaceMeshes is not null && surfaceRadius > 0f ? StrandSolver.SurfaceCollider.Build( surfaceMeshes ) : null;
+		// Exact MeshBVH collision (spec 2.1 B.2) supersedes the uniform-grid SurfaceCollider
+		// on this path; the sphere colliders still guard non-target bodies.
+		var bvhSurface = surfaceMeshes is not null && surfaceRadius > 0f ? StrandSolver.BvhSurfaceCollider.Build( surfaceMeshes ) : null;
 		var settled = StrandSolver.Settle( roots, dirs,
 			new StrandSolver.Options
 			{
 				Length = o.Length, Segments = o.Segments, Steps = o.Steps,
 				Gravity = o.Gravity, Wind = o.Wind, Comb = o.Comb,
-			}, colliders, surface, surfaceRadius );
+			}, colliders, null, surfaceRadius, bvhSurface );
 
 		var guides = new List<Strand>();
 

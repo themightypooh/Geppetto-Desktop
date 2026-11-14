@@ -113,7 +113,7 @@ public sealed class SlotLook
 
 	public SlotLook Clone() => new() { Color = Color, Rough = Rough, Metal = Metal, Emit = Emit, Preset = Preset, Toon = Toon, ToonBands = ToonBands, ToonRim = ToonRim, Stylized = Stylized, OutlineWidth = OutlineWidth, OutlineColor = OutlineColor, Clearcoat = Clearcoat, ClearcoatRoughness = ClearcoatRoughness, Subsurface = Subsurface, SubsurfaceColor = SubsurfaceColor, Opacity = Opacity, ShadowTint = ShadowTint, Iridescence = Iridescence , AlbedoMap = AlbedoMap, RoughnessMap = RoughnessMap, MetalnessMap = MetalnessMap, NormalMap = NormalMap, AoMap = AoMap, NormalStrength = NormalStrength, MapScale = MapScale, Aniso = Aniso, AnisoRotation = AnisoRotation, AnisoMap = AnisoMap, Sheen = Sheen, SheenTint = SheenTint, SheenRoughness = SheenRoughness, SheenMap = SheenMap, LayerColor = LayerColor, LayerRough = LayerRough, LayerMetal = LayerMetal, LayerAmount = LayerAmount, LayerMaskAo = LayerMaskAo, LayerMaskMin = LayerMaskMin, LayerMaskMax = LayerMaskMax, LayerBlend = LayerBlend, TransmissionMap = TransmissionMap, ScatterDist = ScatterDist, ScatterDistSet = ScatterDistSet, Specular = Specular, SpecularTint = SpecularTint, Ior = Ior, EmitMap = EmitMap, EmitStrength = EmitStrength, HeightMap = HeightMap, HeightStrength = HeightStrength, DetailNormalMap = DetailNormalMap, DetailScale = DetailScale, MapOffset = MapOffset, ClampMaps = ClampMaps, ImplicitCoat = ImplicitCoat, BurleyDiffuse = BurleyDiffuse };
 
-	/// <summary>The shipped hard-surface looks, by name.</summary>
+	/// <summary>The shipped looks, by name: the roadmap Lane H set plus wave-4 skin_caucasian_sss.</summary>
 	public static readonly IReadOnlyDictionary<string, SlotLook> Presets = new Dictionary<string, SlotLook>( StringComparer.OrdinalIgnoreCase )
 	{
 		["abs_matte"] = Make( "abs_matte", "#2b2d31", 0.55f, 0f ),
@@ -134,6 +134,9 @@ public sealed class SlotLook
 		["eye_cornea"] = Make( "eye_cornea", "#20242a", 0.08f, 0f, clearcoat: 1f, clearcoatRough: 0.03f, subsurface: 0.2f ),
 		["wet_mucus"] = Make( "wet_mucus", "#6a8a7a", 0.15f, 0f, clearcoat: 0.9f, subsurface: 0.3f ),
 		["flesh_sss"] = Make( "flesh_sss", "#c98a7a", 0.55f, 0f, subsurface: 0.7f, subsurfaceColor: "#d94a2a" ),
+		// Wave-4 SSS: a named caucasian skin look, distinct from generic flesh_sss
+		// (lighter base, stronger scatter, warm red scatter colour, light oil sheen).
+		["skin_caucasian_sss"] = Make( "skin_caucasian_sss", "#d9a184", 0.55f, 0f, subsurface: 0.85f, subsurfaceColor: "#e05a33", clearcoat: 0.25f, clearcoatRough: 0.35f ),
 		["chitin_iridescent"] = Make( "chitin_iridescent", "#2a3a4a", 0.18f, 0.3f, stylized: 0.4f, clearcoat: 0.7f, iridescence: 0.7f ),
 		// Wave-4 SSS: a named caucasian skin look, distinct from generic flesh_sss
 		// (lighter base, stronger scatter, warm red scatter colour, light oil sheen).
@@ -278,7 +281,7 @@ public sealed class SlotLook
 					look.Emit = e;
 					break;
 				case "rough" or "metal":
-					if ( !float.TryParse( value, NumberStyles.Float, CultureInfo.InvariantCulture, out var f ) || f < 0f || f > 1f )
+					if ( !float.TryParse( value, NumberStyles.Float, CultureInfo.InvariantCulture, out var f ) || !float.IsFinite( f ) || f < 0f || f > 1f )
 					{
 						error = $"{key}={value}: give a number from 0 to 1";
 						return null;
@@ -401,7 +404,7 @@ public sealed class SlotLook
 					look.ToonBands = b;
 					break;
 				case "outline":
-					if ( !float.TryParse( value, NumberStyles.Float, CultureInfo.InvariantCulture, out var w ) || w < 0f )
+					if ( !float.TryParse( value, NumberStyles.Float, CultureInfo.InvariantCulture, out var w ) || !float.IsFinite( w ) || w < 0f )
 					{
 						error = $"{key}={value}: give an outline width in inches, 0 or more";
 						return null;
@@ -702,10 +705,14 @@ public sealed class SlotLook
 			(headless.Count > 0 ? $"// Headless-only look fields (no complex.vfx equivalent, see the look): {string.Join( ", ", headless )}\n" : "") +
 			"Layer0\n{\n" +
 			"\tshader \"complex.vfx\"\n" +
+			"\tTextureColor \"[1.000000 1.000000 1.000000 1.000000]\"\n" +
+			"\tTextureNormal \"materials/default/default_normal.tga\"\n" +
+			"\tTextureRoughness \"[1.000000 1.000000 1.000000 1.000000]\"\n" +
+			"\tTextureAmbientOcclusion \"materials/default/default_ao.tga\"\n" +
 			$"\tg_vColorTint \"[{N6( Color.x )} {N6( Color.y )} {N6( Color.z )} 0.000000]\"\n" +
 			"\tg_flModelTintAmount \"1.000\"\n" +
-			$"\tg_flMetalness \"{N( Metal )}\"\n" +
-			$"\tg_flRoughnessScaleFactor \"{N( Rough )}\"\n";
+			$"\tg_flMetalness \"{N( Math.Clamp( Metal, 0f, 1f ) )}\"\n" +
+			$"\tg_flRoughnessScaleFactor \"{N( Math.Clamp( Rough, 0.03f, 1f ) )}\"\n";
 
 		if ( !string.IsNullOrEmpty( EmitMap ) && !Glows )
 		{
@@ -720,6 +727,7 @@ public sealed class SlotLook
 		{
 			var peak = MathF.Max( Emit.x, MathF.Max( Emit.y, Emit.z ) );
 			s += "\tF_SELF_ILLUM 1\n" +
+				"\tTextureSelfIllumMask \"[1.000000 1.000000 1.000000 1.000000]\"\n" +
 				"\tg_flSelfIllumAlbedoFactor \"1.000\"\n" +
 				$"\tg_flSelfIllumBrightness \"{N( 2f * peak )}\"\n" +
 				$"\tg_vSelfIllumTint \"[{N6( Emit.x / peak )} {N6( Emit.y / peak )} {N6( Emit.z / peak )} 0.000000]\"\n";
@@ -753,11 +761,18 @@ public sealed class SlotLook
 
 			if ( !name.EndsWith( ".vmat", StringComparison.OrdinalIgnoreCase ) )
 			{
-				log?.Add( $"export: slot {slot} has a look but no .vmat path, so it exports as {name}; give it one: material {slot} materials/<name>.vmat" );
+				log?.Add( $"export: slot {slot} has no explicit .vmat path; using a model-local look sidecar" );
 				continue;
 			}
 
-			var path = System.IO.Path.Combine( assetsRoot ?? ".", name );
+			var root = System.IO.Path.GetFullPath( assetsRoot ?? "." );
+			var path = System.IO.Path.GetFullPath( System.IO.Path.Combine( root, name.Replace( '\\', '/' ) ) );
+			var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+			if ( !path.StartsWith( System.IO.Path.TrimEndingDirectorySeparator( root ) + System.IO.Path.DirectorySeparatorChar, comparison ) )
+			{
+				log?.Add( $"export: refused slot {slot} material outside the assets root: {name}" );
+				continue;
+			}
 
 			if ( System.IO.File.Exists( path ) && !IsOurs( System.IO.File.ReadAllText( path ) ) )
 			{

@@ -82,7 +82,7 @@ public static partial class BuildScript
 		null or "" or "echo" => false,
 		"describe" or "measure" or "at" or "measurebody" or "fitreport" or "distance"
 			or "symmetry" or "clearance" or "topology" or "section" or "validate"
-			or "render" or "turnaround" or "uvcheck" or "match" or "save" or "export" or "exportvalidate" => false,
+			or "render" or "turnaround" or "uvcheck" or "match" or "save" or "export" or "exportvalidate" or "map_validate" or "map_export" => false,
 		_ => true
 	};
 
@@ -1132,6 +1132,10 @@ public static partial class BuildScript
 				// Rig verbs (bone, chain, rig, bind, skin, twist, mirror bones, subdivide) - BuildScriptRig.cs.
 				if ( RigCommand( studio, verb, args, baseDir, r, out var handled ) )
 					return handled;
+
+				// Map verbs (BuildScript.Map.cs) — hammer-ai-buildscript-verbs-map.
+				if ( TryRunMapVerb( studio, verb, args, baseDir, r, out var mapOk ) )
+					return mapOk;
 
 				return Fail( r, $"Unknown command '{verb}'. Commands: {string.Join( ", ", VerbNames )}." );
 		}
@@ -3115,6 +3119,9 @@ public static partial class BuildScript
 
 	// --- lexing -------------------------------------------------------------------------------------
 
+    /// <summary>Tokens used by the script runner, for callers validating run-owned file arguments.</summary>
+    public static IReadOnlyList<string> TokensOf(string line) => Tokenise(line ?? "");
+
 	static List<string> Tokenise( string line )
 	{
 		// Escape-aware: a \" inside a value is a literal quote, not a quoting toggle, so
@@ -3880,11 +3887,14 @@ public static partial class BuildScript
 	static bool SculptVerb( PartStudio studio, List<string> args, Result r )
 	{
 		if ( args.Count < 2 )
-			return Fail( r, "sculpt needs a body and an operation: sculpt Body dab at=x,y,z dir=x,y,z [brush=draw] [radius=0.25] [strength=0.05]" );
+			return Fail( r, "sculpt needs a body and an operation: sculpt Body dab at=x,y,z dir=x,y,z [brush=draw] [radius=0.25] [strength=0.05] [mirror=x] [topomirror=on] | sculpt Body topomap [mirror=x]" );
 		var body = ModelMeasure.FindBody( studio, args[0] );
 		if ( body?.Mesh is null ) return Fail( r, $"No body called '{args[0]}'." );
-		if ( args[1].ToLowerInvariant() != "dab" )
-			return Fail( r, $"No sculpt operation '{args[1]}'. Available: dab." );
+		var op = args[1].ToLowerInvariant();
+		if ( op == "topomap" )
+			return SculptTopoMap( body, Pairs( args.Skip( 2 ) ), r );
+		if ( op != "dab" )
+			return Fail( r, $"No sculpt operation '{args[1]}'. Available: dab, topomap." );
 		var opts = Pairs( args.Skip( 2 ) );
 		if ( !opts.TryGetValue( "at", out var atText ) || !ModelMeasure.TryParseVec3( atText, out var at ) )
 			return Fail( r, "sculpt dab needs at=x,y,z (a point on or near the surface) and dir=x,y,z (the ray direction, usually the inward normal)." );
@@ -3898,12 +3908,19 @@ public static partial class BuildScript
 		var radius = opts.TryGetValue( "radius", out var radText ) ? Number( radText ) : 0.25f;
 		var strength = opts.TryGetValue( "strength", out var strText ) ? Number( strText ) : 0.05f;
 		if ( radius <= 0f ) return Fail( r, "sculpt dab needs radius > 0." );
+		var mirror = MirrorAxis.None;
+		if ( opts.TryGetValue( "mirror", out var mirrorText ) && !Enum.TryParse<MirrorAxis>( mirrorText, ignoreCase: true, out mirror ) )
+			return Fail( r, $"sculpt dab mirror '{mirrorText}' is not an axis (x, y, z, none)." );
+		var topoMirror = opts.TryGetValue( "topomirror", out var topoText )
+			&& topoText is "1" or "on" or "yes" or "true";
+		if ( topoMirror && mirror == MirrorAxis.None )
+			return Fail( r, "sculpt dab topomirror=on needs exactly one mirror plane: add mirror=x (or y, or z). Without a plane there is no twin map, so the dab would silently fall back to a positional mirror." );
 		// One click through SculptSession: BeginStroke dabs at the ray hit, EndStroke commits
 		// it as one edit. The ray starts outside the model along -dir from the dab point, so
 		// the hit lands on the surface near `at`. Level 0 only: Evaluate(0) is the cage, so
 		// the edit's vertex indices write straight back onto the body's mesh.
 		var sculpt = new MultiresSculpt( body.Mesh );
-		var session = new SculptSession( sculpt ) { Brush = brush, Radius = radius, Strength = strength };
+		var session = new SculptSession( sculpt ) { Brush = brush, Radius = radius, Strength = strength, Mirror = mirror, TopologyMirror = topoMirror };
 		var origin = at - dir.Normal * 100f;
 		SculptEdit edit;
 		try
@@ -3919,7 +3936,28 @@ public static partial class BuildScript
 			return true;
 		}
 		edit.Write( body.Mesh, forward: true );
-		r.Log.Add( $"sculpt: {brush} dab on {body.Name ?? body.Id} moved {edit.Count} vertices (run-time mesh operation, like fix: a later rebuild from features does not keep it — `add Stroke` is the persistent stroke)" );
+		r.Log.Add( $"sculpt: {brush} dab on {body.Name ?? body.Id} moved {edit.Count} vertices{( topoMirror ? ", topology-mirrored" : "" )} (run-time mesh operation, like fix: a later rebuild from features does not keep it — `add Stroke` is the persistent stroke)" );
+		return true;
+	}
+
+	/// <summary>Report the topology-mirror twin map for a body's cage: how many vertices have a
+	/// twin across the mirror plane and how complete the pairing is. Read-only — it builds
+	/// the map and throws it away, so it never touches the model. A bot checks this before a
+	/// topology-mirrored dab: a posed or lopsided model keeps a high coverage here where a
+	/// positional mirror would find nothing.</summary>
+	static bool SculptTopoMap( Body body, Dictionary<string, string> opts, Result r )
+	{
+		var mirror = MirrorAxis.X;
+		if ( opts.TryGetValue( "mirror", out var mirrorText ) && !Enum.TryParse<MirrorAxis>( mirrorText, ignoreCase: true, out mirror ) )
+			return Fail( r, $"sculpt topomap mirror '{mirrorText}' is not an axis (x, y, z)." );
+		if ( mirror == MirrorAxis.None )
+			return Fail( r, "sculpt topomap needs a mirror plane: mirror=x (or y, or z)." );
+		var map = TopologySymmetry.Build( body.Mesh, mirror );
+		var paired = 0;
+		foreach ( var m in map )
+			if ( m >= 0 )
+				paired++;
+		r.Log.Add( $"sculpt: topology map for {body.Name ?? body.Id} (mirror {mirror.ToString().ToLowerInvariant()}): {paired}/{map.Length} vertices paired ({TopologySymmetry.Coverage( map ):P1})" );
 		return true;
 	}
 

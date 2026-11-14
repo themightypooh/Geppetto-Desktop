@@ -104,7 +104,7 @@ internal static class OverlayDepthTests
 	static ViewportMesh Wall( Vector3 a, Vector3 b, Vector3 c, Vector3 d )
 	{
 		var vertices = new List<float>();
-		foreach ( var p in new[] { a, b, c, d } ) vertices.AddRange( new[] { p.X, p.Y, p.Z, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1f } );
+		foreach ( var p in new[] { a, b, c, d } ) vertices.AddRange( new[] { p.X, p.Y, p.Z, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1f, 1, 1, 1, 1 } ); // 24 floats/vertex (CpuMesh.FloatsPerVertex): white colour appended
 		var material = new MaterialPalette.Entry( "wall", 0.6f, 0.6f, 0.6f );
 		var data = vertices.ToArray();
 		return new ViewportMesh

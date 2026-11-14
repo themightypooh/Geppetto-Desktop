@@ -1,0 +1,20 @@
+{
+  "SchemaVersion": 1,
+  "DocumentId": "map-sealed-room",
+  "Revision": 1,
+  "SavedAtUtc": "2026-11-13T20:00:00Z",
+  "Brushes": [
+    { "Id": "brush-floor", "Min": [ -256, -256, -16 ], "Max": [ 256, 256, 0 ], "Material": "concrete/floor" },
+    { "Id": "brush-ceiling", "Min": [ -256, -256, 128 ], "Max": [ 256, 256, 144 ], "Material": "concrete/ceiling" },
+    { "Id": "brush-wall-north", "Min": [ -256, 240, 0 ], "Max": [ 256, 256, 128 ], "Material": "concrete/wall" },
+    { "Id": "brush-wall-south", "Min": [ -256, -256, 0 ], "Max": [ 256, -240, 128 ], "Material": "concrete/wall" },
+    { "Id": "brush-wall-east", "Min": [ 240, -256, 0 ], "Max": [ 256, 256, 128 ], "Material": "concrete/wall" },
+    { "Id": "brush-wall-west", "Min": [ -256, -256, 0 ], "Max": [ -240, 256, 128 ], "Material": "concrete/wall" }
+  ],
+  "Entities": [
+    { "Id": "ent-player-start", "ClassName": "info_player_start", "Origin": [ 0, 0, 16 ], "Properties": { "angles": "0 90 0" } },
+    { "Id": "ent-light", "ClassName": "light", "Origin": [ 0, 0, 96 ], "Properties": { "light": "200", "_color": "255 255 255" } }
+  ],
+  "Displacements": [],
+  "IoConnections": []
+}

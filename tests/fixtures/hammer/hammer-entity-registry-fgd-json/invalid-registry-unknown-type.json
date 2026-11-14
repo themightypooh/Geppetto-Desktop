@@ -1,0 +1,1 @@
+{"classes":[{"description":"Registry with a keyvalue type that does not exist; the loader must reject it.","keyvalues":[{"description":"Not a real keyvalue type.","name":"mystery","type":"quaternion"}],"kind":"point","name":"prop_bad_type"}],"name":"bad-type","schemaVersion":1}

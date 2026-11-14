@@ -15,11 +15,41 @@ namespace Marionette.Desktop;
 public sealed class AiLivePreview : IDisposable
 {
     public sealed record Update(ViewportMesh Mesh, string Path, string RunId, string DocumentId, long Revision,
-        double LoadMs, string CacheNote, string PublishedAt, ReferenceImage[] Refs);
+        double LoadMs, string CacheNote, string PublishedAt, ReferenceImage[] Refs)
+    {
+        /// <summary>Bodies (by id) that this step made / changed, against the step shown before it. Empty on the first load.</summary>
+        public string[] Added { get; init; } = Array.Empty<string>();
+        public string[] Changed { get; init; } = Array.Empty<string>();
+        public string[] Removed { get; init; } = Array.Empty<string>();
+    }
+    Dictionary<string, ulong>? lastLook; string? carriedRun;   // per-body fingerprint of the last step shown (loader thread only)
+    /// <summary>Fingerprint of what a body looks like: shape, paint and the looks of the slots it uses.</summary>
+    static ulong Fingerprint(Body b, PartStudio studio)
+    {
+        ulong h = 1469598103934665603UL;
+        void M(ulong v) { h ^= v; h *= 1099511628211UL; }
+        void F(float v) => M((ulong)BitConverter.SingleToInt32Bits(v));
+        var m = b.Mesh;
+        M((ulong)m.Positions.Count); M((ulong)m.Faces.Count); M(b.Visible ? 1UL : 0UL);
+        foreach (var p in m.Positions) { F(p.x); F(p.y); F(p.z); }
+        if (m.VertexColors is { } vc) foreach (var c in vc) { F(c.x); F(c.y); F(c.z); F(c.w); }
+        var slots = new SortedSet<int>(); foreach (var f in m.Faces) slots.Add(f.Material);
+        foreach (int slot in slots)
+        {
+            M((ulong)slot);
+            if (studio.MaterialLooks.TryGetValue(slot, out var l))
+            {
+                F(l.Color.x); F(l.Color.y); F(l.Color.z); F(l.Rough); F(l.Metal); F(l.Emit.x); F(l.Emit.y); F(l.Emit.z); F(l.Opacity);
+                M((ulong)(l.Preset ?? "").GetHashCode()); M((ulong)(l.AlbedoMap ?? "").GetHashCode());
+            }
+        }
+        return h;
+    }
     readonly object gate = new();
     readonly CancellationTokenSource stop = new();
     readonly string root;
     readonly CpuMesh.PieceCache pieces = new();   // used only by the loader thread
+    PartStudio? carried; string? carriedPath;     // the last step built, kept for the next one (loader thread only)
     Update? pending;
     JsonObject? state;
     long seek, seekLoaded;      // replay: 0 follows the latest revision, N pins revision N
@@ -67,7 +97,7 @@ public sealed class AiLivePreview : IDisposable
                         string id = latest["runId"]!.GetValue<string>();
                         string documentId = latest["documentId"]!.GetValue<string>();
                         // A root belongs to one run. Never accept a journal graft from another run.
-                        bool joined = run is null;
+
                         run ??= id;
                         long revision = latest["snapshot"]?["revision"]?.GetValue<long>() ?? 0;
                         long want; bool back;
@@ -87,16 +117,16 @@ public sealed class AiLivePreview : IDisposable
                         }
                         else if (id == run)
                         {
-                            if (joined || back)
+                            if (back)
                             {
-                                // joining a run (or back from scrubbing it): straight to where it is now, not through its history
+                                // Returning from scrubbing explicitly resumes at the current document.
                                 queue.Clear(); attempted = 0;
                                 if (revision > 0 && latest["snapshot"]?["path"] is { } p0)
                                 { queue.Enqueue((p0.GetValue<string>(), revision, latest["snapshot"]!["committedAt"]!.GetValue<string>())); attempted = revision; }
                             }
                             else
                             {
-                                // every revision the run committed since the last look, in order: none is skipped
+                                // Include existing journal history on initial attachment, then every new revision.
                                 foreach (var ev in fresh)
                                 {
                                     if (ev["state"]?.GetValue<string>() != "revision" || ev["runId"]!.GetValue<string>() != run) continue;
@@ -142,7 +172,13 @@ public sealed class AiLivePreview : IDisposable
         if (!relative.StartsWith(".live/revisions/", StringComparison.Ordinal) || !path.EndsWith(".effigy", StringComparison.Ordinal))
             throw new IOException("Invalid preview revision path.");
         var clock = System.Diagnostics.Stopwatch.StartNew();
-        var studio = StudioCache.Load(path, out string note);
+        // 2026-11-14: build on the last shown step instead of re-running the whole tree for every step.
+        // A painted model took ~45 s per step, so the pane fell minutes behind the build and a scrub sat
+        // on the old model. Stepping back is a restore from the kept per-feature snapshots.
+        PartStudio studio; string note;
+        try { studio = StudioCache.LoadOnto(carried!, carriedPath!, path, out note); }
+        catch { carried = null; carriedPath = null; studio = StudioCache.Load(path, out note); }
+        carried = studio; carriedPath = path;
         // per-body pieces from earlier revisions: only the bodies this revision changed are re-extracted
         ViewportMesh.LivePieces = pieces;
         ViewportMesh mesh;
@@ -154,7 +190,20 @@ public sealed class AiLivePreview : IDisposable
         finally { ViewportMesh.LivePieces = null; }
         note += $"; {pieces.Hits} body(ies) reused, {pieces.Misses} rebuilt";
         var refs = studio.ReferenceImages.Select(r => r.Clone()).ToArray();
-        var update = new Update(mesh, path, id, documentId, revision, clock.Elapsed.TotalMilliseconds, note, committedAt, refs);
+        // what this step did to the model, against the step on screen before it (a scrub compares too)
+        var look = new Dictionary<string, ulong>();
+        foreach (var b in studio.Bodies)
+            if (b.Visible && b.Mesh is { FaceCount: > 0 } && b.Id is { } bid) look[bid] = Fingerprint(b, studio);
+        string[] added = Array.Empty<string>(), changed = added, removed = added;
+        if (lastLook is not null && carriedRun == id)
+        {
+            added = look.Keys.Where(k => !lastLook.ContainsKey(k)).ToArray();
+            changed = look.Where(kv => lastLook.TryGetValue(kv.Key, out var o) && o != kv.Value).Select(kv => kv.Key).ToArray();
+            removed = lastLook.Keys.Where(k => !look.ContainsKey(k)).ToArray();
+        }
+        lastLook = look; carriedRun = id;
+        var update = new Update(mesh, path, id, documentId, revision, clock.Elapsed.TotalMilliseconds, note, committedAt, refs)
+            { Added = added, Changed = changed, Removed = removed };
         lock (gate)
         {
             if (disposed) mesh.Dispose();

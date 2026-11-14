@@ -1,0 +1,10 @@
+"LightmappedGeneric"
+{
+	"$basetexture" "glass/glasswindow001a"
+	"$surfaceprop" "glass"
+	"$roughness" "0.050"
+	"$translucent" "1"
+	"$alpha" "0.350"
+	"$envmap" "env_cubemap"
+	"$custom_tint" "[0.9 0.95 1.0]"
+}

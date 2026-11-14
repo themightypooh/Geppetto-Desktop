@@ -1,0 +1,151 @@
+{
+  "brushes": [
+    {
+      "id": "floor",
+      "min": [
+        -272,
+        -144,
+        -16
+      ],
+      "max": [
+        272,
+        144,
+        0
+      ],
+      "detail": false,
+      "material": "concrete"
+    },
+    {
+      "id": "ceiling",
+      "min": [
+        -272,
+        -144,
+        128
+      ],
+      "max": [
+        272,
+        144,
+        144
+      ],
+      "detail": false,
+      "material": "concrete"
+    },
+    {
+      "id": "wall-west",
+      "min": [
+        -272,
+        -144,
+        0
+      ],
+      "max": [
+        -256,
+        144,
+        128
+      ],
+      "detail": false,
+      "material": "concrete"
+    },
+    {
+      "id": "wall-east",
+      "min": [
+        256,
+        -144,
+        0
+      ],
+      "max": [
+        272,
+        144,
+        128
+      ],
+      "detail": false,
+      "material": "concrete"
+    },
+    {
+      "id": "wall-south",
+      "min": [
+        -256,
+        -144,
+        0
+      ],
+      "max": [
+        256,
+        -128,
+        128
+      ],
+      "detail": false,
+      "material": "concrete"
+    },
+    {
+      "id": "wall-north",
+      "min": [
+        -256,
+        128,
+        0
+      ],
+      "max": [
+        256,
+        144,
+        128
+      ],
+      "detail": false,
+      "material": "concrete"
+    },
+    {
+      "id": "shared-south",
+      "min": [
+        -8,
+        -128,
+        0
+      ],
+      "max": [
+        8,
+        -24,
+        128
+      ],
+      "detail": false,
+      "material": "concrete"
+    },
+    {
+      "id": "shared-north",
+      "min": [
+        -8,
+        24,
+        0
+      ],
+      "max": [
+        8,
+        128,
+        128
+      ],
+      "detail": false,
+      "material": "concrete"
+    },
+    {
+      "id": "shared-lintel",
+      "min": [
+        -8,
+        -24,
+        96
+      ],
+      "max": [
+        8,
+        24,
+        128
+      ],
+      "detail": false,
+      "material": "concrete"
+    }
+  ],
+  "entities": [
+    {
+      "class": "info_player_start",
+      "origin": [
+        -192,
+        0,
+        0
+      ],
+      "yaw": 0
+    }
+  ],
+  "displacements": []
+}

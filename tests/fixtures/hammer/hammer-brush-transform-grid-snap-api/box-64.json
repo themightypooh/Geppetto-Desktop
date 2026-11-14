@@ -1,0 +1,29 @@
+{
+  "name": "box-64",
+  "description": "Canonical 64-unit box brush (-32..32 on every axis) for hammer-brush-transform-grid-snap-api. Face order is +X, -X, +Y, -Y, +Z, -Z. Each face is a plane (normal + distance from origin, core-spec form: points satisfy n.x = distance) with a per-face material id and a UV mapping (world-space u/v axes, offset, scale, rotationDegrees). UV axes are the MapUvMapping.DefaultForNormal values for each face normal. The maptransform test group loads this file and checks it against the in-code box and the spec numbers below; the check SKIPs (does not fail) when the file is not found under the repo root.",
+  "box": {
+    "min": [-32, -32, -32],
+    "max": [32, 32, 32],
+    "faces": [
+      { "normal": [1, 0, 0], "distance": 32, "material": "dev/brick", "uv": { "uAxis": [0, 0, -1], "vAxis": [0, 1, 0], "offset": [0, 0], "scale": [1, 1], "rotationDegrees": 0 } },
+      { "normal": [-1, 0, 0], "distance": 32, "material": "dev/brick", "uv": { "uAxis": [0, 0, 1], "vAxis": [0, 1, 0], "offset": [0, 0], "scale": [1, 1], "rotationDegrees": 0 } },
+      { "normal": [0, 1, 0], "distance": 32, "material": "dev/brick", "uv": { "uAxis": [0, 0, 1], "vAxis": [1, 0, 0], "offset": [0, 0], "scale": [1, 1], "rotationDegrees": 0 } },
+      { "normal": [0, -1, 0], "distance": 32, "material": "dev/brick", "uv": { "uAxis": [0, 0, -1], "vAxis": [1, 0, 0], "offset": [0, 0], "scale": [1, 1], "rotationDegrees": 0 } },
+      { "normal": [0, 0, 1], "distance": 32, "material": "dev/brick", "uv": { "uAxis": [1, 0, 0], "vAxis": [0, 1, 0], "offset": [0, 0], "scale": [1, 1], "rotationDegrees": 0 } },
+      { "normal": [0, 0, -1], "distance": 32, "material": "dev/brick", "uv": { "uAxis": [-1, 0, 0], "vAxis": [0, 1, 0], "offset": [0, 0], "scale": [1, 1], "rotationDegrees": 0 } }
+    ]
+  },
+  "expected": {
+    "snapMove": { "delta": 10, "grid": 16, "snapped": 16 },
+    "snapAngle": { "degrees": 17, "snap": 15, "snapped": 15 },
+    "translate": { "delta": [10, 0, 0], "plusXDistance": 42, "minusXDistance": 22 },
+    "textureLock": {
+      "face": "+Z",
+      "point": [2, 3, 32],
+      "uv": [2, 3],
+      "delta": [10, 0, 0],
+      "lockedUvAtMovedPoint": [2, 3],
+      "unlockedUvAtMovedPoint": [12, 3]
+    }
+  }
+}

@@ -1046,7 +1046,7 @@ public sealed class SdfBlend : Sdf
 	int _nx, _ny, _nz;
 	float _cell;
 	Vec3 _gridMin;
-	int[][] _cells;
+	volatile int[][] _cells;
 	float _pad;
 
 	public SdfBlend( float k, params Sdf[] children )
@@ -1172,7 +1172,7 @@ public sealed class SdfBlend : Sdf
 			lo = new Vec3( MathF.Min( lo.x, cmin.x ), MathF.Min( lo.y, cmin.y ), MathF.Min( lo.z, cmin.z ) );
 			hi = new Vec3( MathF.Max( hi.x, cmax.x ), MathF.Max( hi.y, cmax.y ), MathF.Max( hi.z, cmax.z ) );
 		}
-		_min = lo;
+		_min = lo;   // no smin padding: children are already culled with _pad, and padding shifts the mesher grid (thin-shell non-manifold test)
 		_max = hi;
 		_bounded = true;
 	}

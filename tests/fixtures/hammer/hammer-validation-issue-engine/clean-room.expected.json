@@ -1,0 +1,5 @@
+{
+  "map": "clean-room",
+  "note": "Sealed 256x256 room, floor z=0, ceiling z=128, 16-unit walls, info_player_start at (0,0,32), light at (0,0,100). Zero issues.",
+  "expected": []
+}

@@ -32,7 +32,7 @@ public static class PngReader
 		if ( png is null || png.Length < 8 || png[0] != 0x89 || png[1] != (byte)'P' || png[2] != (byte)'N' || png[3] != (byte)'G' )
 			throw new InvalidDataException( "Not a PNG." );
 		int width = 0, height = 0, depth = 0, colour = 0, interlace = 0;
-		var idat = new MemoryStream();
+		using var idat = new MemoryStream();
 		var at = 8;
 		while ( at + 8 <= png.Length )
 		{

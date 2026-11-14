@@ -70,6 +70,15 @@ public sealed class CpuMesh : IDisposable
 			NormalImage = RoughnessImage = MetallicImage = EmissionImage = OcclusionImage = null;
 			NormalBinding = RoughnessBinding = MetallicBinding = EmissionBinding = OcclusionBinding = null;
 			Lobes = MaterialLobes.None;
+			// Name-based palette entries never set a look: default to the old behaviour
+			// (opaque, white shadow tint) or the lit shader discards every fragment
+			// (uLookOpacity 0 reads as fully transparent) and blacks the ambient
+			// (uLookShadowTint 0). Mirrors the MaterialDescriptor defaults.
+			LookToon = 0f; LookToonBands = 3; LookToonRim = 0f; LookStylized = 0f;
+			LookOutlineWidth = 0f; LookOutlineR = 0.05f; LookOutlineG = 0.05f; LookOutlineB = 0.07f;
+			LookOpacity = 1f; LookShadowR = 1f; LookShadowG = 1f; LookShadowB = 1f;
+			LookIridescence = 0f; LookClearcoat = 0f; LookClearcoatRough = 0.03f;
+			LookSubsurface = 0f; LookSubsurfaceR = 0.85f; LookSubsurfaceG = 0.22f; LookSubsurfaceB = 0.15f;
 		}
 
 		/// <summary>R9: same resolved material, new index range (re-extracted modified geometry).</summary>
@@ -184,6 +193,9 @@ public sealed class CpuMesh : IDisposable
 				{ result.Batches[i] = new DrawBatch( Batches[j], result.Batches[i].IndexOffset, result.Batches[i].IndexCount ); break; }
 		result.Picker = Picker;
 		result.MorphWeights = MorphWeights;
+        result.SourceMaterialSlots = new(SourceMaterialSlots);
+        result.PaintCanvases = new(PaintCanvases);
+        result.FurSlots = new(FurSlots);
 		return result;
 	}
 
@@ -197,7 +209,7 @@ public sealed class CpuMesh : IDisposable
 		var decoded = new HashSet<DecodedImage>();
 		for ( int i = 0; i < Batches.Length; i++ )
 		{
-			var resolved = resolver.ResolveSlot( Batches[i].MaterialSlot, Batches[i].MaterialName );
+			var resolved = resolver.ResolveSlot( SourceSlot(Batches[i].MaterialSlot), Batches[i].MaterialName );
 			if ( !resolved.Success ) throw new InvalidOperationException( $"Material '{Batches[i].MaterialName}' could not be resolved." );
 			var descriptor = resolved.Descriptor;
 			foreach ( var (binding, space, channel) in new[] {
@@ -229,6 +241,13 @@ public sealed class CpuMesh : IDisposable
 		Budget.RecordDecode( decodeClock.Elapsed.TotalSeconds, Batches.Length, decodedBytes, decoded.Count, decoded.Count );
 	}
 
+    // Render-only slots keep independent body atlases separate without changing saved material IDs.
+    public Dictionary<int, int> SourceMaterialSlots = new();
+    public Dictionary<int, PaintCanvas> PaintCanvases = new();
+    public sealed record FurAppearance(Vec3 Color, Vec3 Rim, float Density, float DarkRoots, float Clump);
+    public Dictionary<int, FurAppearance> FurSlots = new();
+    public int SourceSlot(int slot) => SourceMaterialSlots.TryGetValue(slot, out var source) ? source : slot;
+
 	public static CpuMesh FromStudio( PartStudio studio, double loadSeconds, string documentPath )
 	{
 		var sw = Stopwatch.StartNew();
@@ -237,6 +256,8 @@ public sealed class CpuMesh : IDisposable
 			&& FromStudioPieces( studio, loadSeconds, pieces ) is { } incremental )
 			return incremental;
 		PolyMesh mesh;
+        var sourceSlots = new Dictionary<int, int>();
+        var paintCanvases = new Dictionary<int, PaintCanvas>();
 		if ( System.IO.Path.GetFileName( documentPath ).Equals( "camhead.effigy", StringComparison.OrdinalIgnoreCase ) )
 		{
 			mesh = CamheadAssembly.Load( studio, documentPath );
@@ -246,6 +267,25 @@ public sealed class CpuMesh : IDisposable
 			var (m, ranges) = studio.ToMeshWithBodies( b => b.Visible );
 			if ( studio.Rig is { Count: > 0 } )
 				m.Skin = BindLikeExport( studio, m, ranges );
+            int nextSlot = 0;
+            foreach (var f in m.Faces) nextSlot = Math.Max(nextSlot, f.Material + 1);
+            foreach (var range in ranges)
+            {
+                var body = studio.Bodies.Find(b => b.Id == range.BodyId);
+                if (body?.Mesh?.Paint is not { } canvas) continue;
+                var remap = new Dictionary<int, int>();
+                foreach (var face in m.Faces)
+                {
+                    if (face.Count == 0 || !range.Contains(face.Indices[0])) continue;
+                    int original = face.Material;
+                    if (!remap.TryGetValue(original, out int renderSlot))
+                    {
+                        renderSlot = nextSlot++; remap[original] = renderSlot;
+                        sourceSlots[renderSlot] = original; paintCanvases[renderSlot] = canvas;
+                    }
+                    face.Material = renderSlot;
+                }
+            }
 			mesh = m;
 		}
 
@@ -281,8 +321,10 @@ public sealed class CpuMesh : IDisposable
 			return (bodyPicks, picker);
 		} );
 		var hasSkin = mesh.Skin is not null && mesh.Skin.Count == mesh.VertexCount && studio.Rig is { Count: > 0 };
-		var result = Extract( mesh, slot => studio.NameForSlot( slot ), studio.Rig, hasSkin, null, studio.Bodies.Count, loadSeconds );
+		var result = Extract( mesh, slot => studio.NameForSlot( sourceSlots.TryGetValue(slot, out var original) ? original : slot ), studio.Rig, hasSkin, null, studio.Bodies.Count, loadSeconds );
 		var (bodyPicks, picker) = picksTask.GetAwaiter().GetResult();
+		result.SourceMaterialSlots = sourceSlots;
+        result.PaintCanvases = paintCanvases;
 		result.BodyPicks = bodyPicks.ToArray();
 		result.Picker = picker;
 		result.ExtractSeconds = sw.Elapsed.TotalSeconds;
@@ -352,6 +394,9 @@ public sealed class CpuMesh : IDisposable
 			return h;
 		}
 		h = Mix( h, System.Runtime.InteropServices.MemoryMarshal.AsBytes( System.Runtime.InteropServices.CollectionsMarshal.AsSpan( m.Positions ) ) );
+		// Vertex paint is part of the uploaded vertex buffer, even when geometry is unchanged.
+		if ( m.VertexColors is { } colors )
+			h = Mix( h, System.Runtime.InteropServices.MemoryMarshal.AsBytes( colors.AsSpan() ) );
 		foreach ( var f in m.Faces )
 		{
 			h = (h ^ (ulong)(uint)f.Material ^ ((ulong)(uint)f.Count << 32)) * 1099511628211UL;
@@ -369,7 +414,7 @@ public sealed class CpuMesh : IDisposable
 	static CpuMesh FromStudioPieces( PartStudio studio, double loadSeconds, PieceCache cache )
 	{
 		var sw = Stopwatch.StartNew();
-		if ( studio.Rig is { Count: > 0 } ) return null;
+		if ( studio.Rig is { Count: > 0 } || studio.Bodies.Exists(b => b.Visible && b.Mesh?.Paint is not null) ) return null;
 		var render = new List<Body>();
 		foreach ( var b in studio.Bodies )
 		{

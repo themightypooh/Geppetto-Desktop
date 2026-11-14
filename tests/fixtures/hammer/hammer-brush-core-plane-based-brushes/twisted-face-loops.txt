@@ -1,0 +1,8 @@
+# The box as face loops. The top loop's last vertex is at z = 2.5, 0.5 out of its
+# plane. Invalid: NonPlanarFace (and ConcaveInput, the vertex pokes out of the solid).
+loop -1 -1.5 -2 1 -1.5 -2 1 1.5 -2 -1 1.5 -2
+loop -1 -1.5 2 1 -1.5 2 1 1.5 2 -1 1.5 2.5
+loop -1 -1.5 -2 -1 1.5 -2 -1 1.5 2 -1 -1.5 2
+loop 1 -1.5 -2 1 1.5 -2 1 1.5 2 1 -1.5 2
+loop -1 -1.5 -2 1 -1.5 -2 1 -1.5 2 -1 -1.5 2
+loop -1 1.5 -2 1 1.5 -2 1 1.5 2 -1 1.5 2

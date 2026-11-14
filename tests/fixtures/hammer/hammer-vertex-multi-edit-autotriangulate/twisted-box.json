@@ -1,0 +1,1 @@
+{"expected":{"defects":["non-planar"],"invalid_faces":[1],"valid":false,"volume":9.333333},"faces":[[0,3,2,1],[4,5,6,7],[0,1,5,4],[3,7,6,2],[0,4,7,3],[1,2,6,5]],"materials":["bottom","top","front","back","left","right"],"name":"twisted-box","vertices":[[-1,-1,-1],[1,-1,-1],[1,1,-1],[-1,1,-1],[-1,-1,1],[1,-1,1],[1,1,2],[-1,1,1]]}

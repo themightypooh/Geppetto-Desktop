@@ -57,6 +57,9 @@ public sealed class WeightStroke
 	/// <see cref="MirrorAxis"/>.</summary>
 	public MirrorAxis Mirror;
 
+	/// <summary>Bone index to paint at the reflected samples. -1 keeps the original bone.</summary>
+	public int MirrorBone = -1;
+
 	public readonly List<WeightSample> Samples = new();
 }
 
@@ -160,18 +163,27 @@ public static class WeightBrush
 		var neighbours = mesh.BuildVertexEdges();
 		var found = new List<int>();
 		var undo = new WeightUndo();
-
-		foreach ( var sample in stroke.Samples )
+		WeightStroke mirroredStroke = null;
+		if ( stroke.Mirror != MirrorAxis.None )
 		{
+			mirroredStroke = new WeightStroke
+			{
+				Kind = stroke.Kind,
+				Falloff = stroke.Falloff,
+				Bone = stroke.MirrorBone >= 0 ? stroke.MirrorBone : stroke.Bone,
+				Target = stroke.Target,
+			};
+			foreach ( var sample in stroke.Samples )
+				mirroredStroke.Samples.Add( new WeightSample( Brush.Mirror( sample.Position, stroke.Mirror ), sample.Radius, sample.Strength ) );
+		}
+
+		for ( var i = 0; i < stroke.Samples.Count; i++ )
+		{
+			var sample = stroke.Samples[i];
 			ApplySample( mesh, weights, stroke, mask, bvh, neighbours, found, undo, sample );
 
-			if ( stroke.Mirror == MirrorAxis.None )
-				continue;
-
-			var flipped = Brush.Mirror( sample.Position, stroke.Mirror );
-
-			ApplySample( mesh, weights, stroke, mask, bvh, neighbours, found, undo,
-				new WeightSample( flipped, sample.Radius, sample.Strength ) );
+			if ( mirroredStroke is not null )
+				ApplySample( mesh, weights, mirroredStroke, mask, bvh, neighbours, found, undo, mirroredStroke.Samples[i] );
 		}
 
 		return undo;

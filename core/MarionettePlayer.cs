@@ -28,6 +28,22 @@ public sealed class MarionettePlayer
 	RigLimit[][] _limits;
 	LiveIkSolverBuffers _liveIkBuffers;
 	public bool Loop { get; set; } = true;
+	ClipTimeRemap? _timeRemap;
+
+	/// <summary>Optional time remap applied at playback: output frames are mapped to source frames
+	/// through <see cref="ClipTimeRemap.MapOutputToSource(float)"/>, so a 2-second clip remapped to
+	/// 4 seconds plays at half speed. The clip itself is unchanged; bake with
+	/// <see cref="ClipEditService.BakeRemappedClip(RigAnimFile, ClipTimeRemap)"/> for export.
+	/// A remap is validated by its factories, so setting one here never throws mid-frame.</summary>
+	public ClipTimeRemap? TimeRemap
+	{
+		get => _timeRemap;
+		set
+		{
+			_timeRemap = value;
+			_poseDirty = true;
+		}
+	}
 	public bool UsesKernelSolver { get; private set; }
 	public float Time
 	{
@@ -270,10 +286,14 @@ public sealed class MarionettePlayer
 	{
 		int fps = Math.Max( 1, Clip.FrameRate );
 		float rawFrame = seconds * fps;
-		float frame = _lastFrame <= 0 ? 0 : Loop && Playing
-			? ((rawFrame % _lastFrame) + _lastFrame) % _lastFrame
-			: Math.Clamp( rawFrame, 0, _lastFrame );
-		if ( !Loop && rawFrame >= _lastFrame ) Playing = false;
+		// With a remap the loop/clamp bound is the remap's output length in frames, and the
+		// sampled frame is the remap's source frame; without one this is exactly the old behaviour.
+		int last = _timeRemap is null ? _lastFrame : Math.Max( (int)MathF.Round( _timeRemap.OutputDuration * fps ), 0 );
+		float frame = last <= 0 ? 0 : Loop && Playing
+			? ((rawFrame % last) + last) % last
+			: Math.Clamp( rawFrame, 0, last );
+		if ( !Loop && rawFrame >= last ) Playing = false;
+		if ( _timeRemap is not null ) frame = _timeRemap.MapOutputToSource( frame / fps ) * fps;
 		if ( UsesKernelSolver )
 		{
 			_liveIkBuffers.Sample( frame );

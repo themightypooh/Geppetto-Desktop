@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "mapId": "test-room",
+  "workspaceId": "default",
+  "activePanelId": "properties",
+  "panels": [
+    { "panelId": "entities", "zone": "Left", "size": 280, "visible": true, "order": 0, "floatX": 0, "floatY": 0, "floatWidth": 480, "floatHeight": 360 },
+    { "panelId": "layers", "zone": "Left", "size": 280, "visible": true, "order": 1, "floatX": 0, "floatY": 0, "floatWidth": 480, "floatHeight": 360 },
+    { "panelId": "properties", "zone": "Right", "size": 320, "visible": true, "order": 0, "floatX": 0, "floatY": 0, "floatWidth": 480, "floatHeight": 360 },
+    { "panelId": "textures", "zone": "Right", "size": 280, "visible": true, "order": 1, "floatX": 0, "floatY": 0, "floatWidth": 480, "floatHeight": 360 },
+    { "panelId": "console", "zone": "Bottom", "size": 200, "visible": true, "order": 0, "floatX": 0, "floatY": 0, "floatWidth": 480, "floatHeight": 360 },
+    { "panelId": "build", "zone": "Bottom", "size": 200, "visible": false, "order": 1, "floatX": 0, "floatY": 0, "floatWidth": 480, "floatHeight": 360 },
+    { "panelId": "tool-options", "zone": "Top", "size": 48, "visible": true, "order": 0, "floatX": 0, "floatY": 0, "floatWidth": 480, "floatHeight": 360 },
+    { "panelId": "face-edit", "zone": "FloatingDocked", "size": 480, "visible": true, "order": 0, "floatX": 120, "floatY": 90, "floatWidth": 480, "floatHeight": 360 }
+  ]
+}

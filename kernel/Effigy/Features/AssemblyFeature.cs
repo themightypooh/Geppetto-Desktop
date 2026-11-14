@@ -175,8 +175,9 @@ public sealed class AssemblyFeature : Feature
 			}
 			else if ( ext == ".effigy" )
 			{
-				var sub = StudioCache.Load( path );
-				sub.Rebuild();
+				// Load already rebuilt it, or restored it from the disk cache: a second Rebuild after a cache
+				// hit is a full one (a restore leaves no snapshots), so it would throw the hit away.
+				var sub = StudioCache.Load( path, out _, keepSnapshots: false );
 				foreach ( var b in sub.Bodies.Where( b => !b.IsReference && b.Mesh is not null && b.Mesh.FaceCount > 0 ) )
 				{
 					var mesh = b.Mesh.Clone();

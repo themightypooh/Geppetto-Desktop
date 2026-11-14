@@ -1,0 +1,618 @@
+{
+  "schemaVersion": 1,
+  "name": "source1-gameplay",
+  "description": "Source-1 gameplay entity set for Geppetto Desktop (hammer-triggers-volumes-gameplay-entities): triggers, doors, buttons, movers, breakables, spawns, items/weapons, NPC nodes. Additive to registry/core-source1.json — none of these classes is in core. Every class implicitly accepts the base keyvalues classname (string), targetname (string), parentname (target), angles (angle) and spawnflags (int); they are not repeated per class.",
+  "classes": [
+    {
+      "name": "trigger_push",
+      "kind": "brush",
+      "description": "Brush volume that pushes entities touching it in a direction.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [
+        {"name": "pushdir", "type": "angle", "description": "Direction to push (pitch yaw roll)."},
+        {"name": "speed", "type": "float", "default": "100", "description": "Push speed in units per second."},
+        {"name": "filtername", "type": "target", "description": "Filter entity that decides which entities are pushed."},
+        {"name": "StartDisabled", "type": "int", "default": "0", "description": "Start disabled. 0 = off, 1 = on."}
+      ],
+      "spawnflags": [
+        {"value": 1, "name": "Clients", "description": "Trigger on players."},
+        {"value": 2, "name": "NPCs", "description": "Trigger on NPCs."},
+        {"value": 4, "name": "Pushables", "description": "Trigger on physics props."},
+        {"value": 8, "name": "Physics Objects", "description": "Trigger on physics objects."}
+      ],
+      "inputs": [
+        {"name": "Enable", "argumentType": "void", "description": "Enable the trigger."},
+        {"name": "Disable", "argumentType": "void", "description": "Disable the trigger."},
+        {"name": "Toggle", "argumentType": "void", "description": "Toggle the trigger."}
+      ],
+      "outputs": [
+        {"name": "OnStartTouch", "argumentType": "void", "description": "Fired when an entity enters the volume."},
+        {"name": "OnEndTouch", "argumentType": "void", "description": "Fired when an entity leaves the volume."},
+        {"name": "OnTrigger", "argumentType": "void", "description": "Fired when the trigger fires."}
+      ],
+      "helpers": [{"kind": "origin"}]
+    },
+    {
+      "name": "trigger_teleport",
+      "kind": "brush",
+      "description": "Brush volume that teleports entities touching it to a destination.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [
+        {"name": "target", "type": "target", "description": "Teleport destination (info_target or info_teleport_destination)."},
+        {"name": "filtername", "type": "target", "description": "Filter entity that decides which entities are teleported."},
+        {"name": "StartDisabled", "type": "int", "default": "0", "description": "Start disabled. 0 = off, 1 = on."}
+      ],
+      "spawnflags": [
+        {"value": 1, "name": "Clients", "description": "Trigger on players."},
+        {"value": 2, "name": "NPCs", "description": "Trigger on NPCs."},
+        {"value": 4, "name": "Pushables", "description": "Trigger on physics props."},
+        {"value": 8, "name": "Physics Objects", "description": "Trigger on physics objects."}
+      ],
+      "inputs": [
+        {"name": "Enable", "argumentType": "void", "description": "Enable the trigger."},
+        {"name": "Disable", "argumentType": "void", "description": "Disable the trigger."},
+        {"name": "Toggle", "argumentType": "void", "description": "Toggle the trigger."}
+      ],
+      "outputs": [
+        {"name": "OnStartTouch", "argumentType": "void", "description": "Fired when an entity enters the volume."},
+        {"name": "OnTrigger", "argumentType": "void", "description": "Fired when the trigger fires."}
+      ],
+      "helpers": [{"kind": "origin"}]
+    },
+    {
+      "name": "func_door_rotating",
+      "kind": "brush",
+      "description": "Rotating door. Rotates around the axis set by spawnflags (default Z).",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [
+        {"name": "speed", "type": "float", "default": "100", "description": "Rotation speed in degrees per second."},
+        {"name": "wait", "type": "float", "default": "4", "description": "Seconds before the door closes again. -1 = stay open."},
+        {"name": "distance", "type": "float", "default": "90", "description": "Rotation distance in degrees."},
+        {"name": "dmg", "type": "int", "default": "0", "description": "Damage dealt to entities blocking the door."},
+        {"name": "health", "type": "int", "default": "0", "description": "Health. 0 = unbreakable; breaking it opens the door."},
+        {"name": "locked", "type": "int", "default": "0", "description": "Starts locked. 0 = off, 1 = on."},
+        {"name": "noise1", "type": "sound", "description": "Sound played while the door moves."},
+        {"name": "noise2", "type": "sound", "description": "Sound played when the door stops moving."}
+      ],
+      "spawnflags": [
+        {"value": 1, "name": "Starts Open", "description": "The door starts in the open position."},
+        {"value": 2, "name": "Reverse Dir", "description": "The door rotates in the opposite direction."},
+        {"value": 8, "name": "X Axis", "description": "Rotate around the X axis."},
+        {"value": 16, "name": "Y Axis", "description": "Rotate around the Y axis."}
+      ],
+      "inputs": [
+        {"name": "Open", "argumentType": "void", "description": "Open the door."},
+        {"name": "Close", "argumentType": "void", "description": "Close the door."},
+        {"name": "Toggle", "argumentType": "void", "description": "Toggle the door."},
+        {"name": "Lock", "argumentType": "void", "description": "Lock the door."},
+        {"name": "Unlock", "argumentType": "void", "description": "Unlock the door."}
+      ],
+      "outputs": [
+        {"name": "OnFullyOpen", "argumentType": "void", "description": "Fired when the door finishes opening."},
+        {"name": "OnFullyClosed", "argumentType": "void", "description": "Fired when the door finishes closing."},
+        {"name": "OnLockedUse", "argumentType": "void", "description": "Fired when a locked door is used."},
+        {"name": "OnOpen", "argumentType": "void", "description": "Fired when the door starts opening."},
+        {"name": "OnClose", "argumentType": "void", "description": "Fired when the door starts closing."}
+      ],
+      "helpers": [{"kind": "origin"}]
+    },
+    {
+      "name": "func_rot_button",
+      "kind": "brush",
+      "description": "Brush button that rotates when pressed and fires outputs.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [
+        {"name": "speed", "type": "float", "default": "100", "description": "Rotation speed in degrees per second."},
+        {"name": "distance", "type": "float", "default": "90", "description": "Rotation distance in degrees."},
+        {"name": "wait", "type": "float", "default": "1", "description": "Seconds before the button resets. -1 = never reset."},
+        {"name": "health", "type": "int", "default": "0", "description": "Health. 0 = unbreakable; breaking it presses the button."}
+      ],
+      "inputs": [
+        {"name": "Press", "argumentType": "void", "description": "Press the button."},
+        {"name": "Lock", "argumentType": "void", "description": "Lock the button."},
+        {"name": "Unlock", "argumentType": "void", "description": "Unlock the button."}
+      ],
+      "outputs": [
+        {"name": "OnPressed", "argumentType": "void", "description": "Fired when the button is pressed."},
+        {"name": "OnDamaged", "argumentType": "void", "description": "Fired when the button takes damage."},
+        {"name": "OnIn", "argumentType": "void", "description": "Fired when the button reaches its pressed position."},
+        {"name": "OnOut", "argumentType": "void", "description": "Fired when the button returns to its rest position."}
+      ],
+      "helpers": [{"kind": "origin"}]
+    },
+    {
+      "name": "func_movelinear",
+      "kind": "brush",
+      "description": "Brush that slides along a direction between two positions.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [
+        {"name": "movedir", "type": "angle", "description": "Direction of travel (pitch yaw roll)."},
+        {"name": "movedistance", "type": "float", "default": "0", "description": "Distance to move in units."},
+        {"name": "speed", "type": "float", "default": "100", "description": "Movement speed in units per second."},
+        {"name": "startposition", "type": "float", "default": "0", "description": "Starting position as a fraction 0..1 along the travel."},
+        {"name": "StartDisabled", "type": "int", "default": "0", "description": "Start disabled. 0 = off, 1 = on."}
+      ],
+      "inputs": [
+        {"name": "Open", "argumentType": "void", "description": "Move to the open (far) position."},
+        {"name": "Close", "argumentType": "void", "description": "Move to the closed (near) position."},
+        {"name": "SetPosition", "argumentType": "float", "description": "Move to a position (0..1)."},
+        {"name": "SetSpeed", "argumentType": "float", "description": "Set the movement speed."}
+      ],
+      "outputs": [
+        {"name": "OnFullyOpen", "argumentType": "void", "description": "Fired when the mover reaches the open position."},
+        {"name": "OnFullyClosed", "argumentType": "void", "description": "Fired when the mover reaches the closed position."}
+      ],
+      "helpers": [{"kind": "origin"}]
+    },
+    {
+      "name": "func_tracktrain",
+      "kind": "brush",
+      "description": "Brush train that follows a path_track route. The train itself fires no outputs; path_tracks fire OnPass as it passes them.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [
+        {"name": "target", "type": "target", "description": "First path_track of the route."},
+        {"name": "speed", "type": "float", "default": "0", "description": "Speed in units per second."},
+        {"name": "startspeed", "type": "float", "default": "0", "description": "Speed when the train starts."},
+        {"name": "StartDisabled", "type": "int", "default": "0", "description": "Start disabled. 0 = off, 1 = on."}
+      ],
+      "spawnflags": [
+        {"value": 1, "name": "No Pitch (X-rot)", "description": "The train does not pitch."},
+        {"value": 2, "name": "No Yaw (Y-rot)", "description": "The train does not yaw."},
+        {"value": 4, "name": "No Roll (Z-rot)", "description": "The train does not roll."}
+      ],
+      "inputs": [
+        {"name": "StartForward", "argumentType": "void", "description": "Start moving forward along the route."},
+        {"name": "StartBackward", "argumentType": "void", "description": "Start moving backward along the route."},
+        {"name": "Stop", "argumentType": "void", "description": "Stop the train."},
+        {"name": "Toggle", "argumentType": "void", "description": "Toggle the train."},
+        {"name": "SetSpeed", "argumentType": "float", "description": "Set the train speed."},
+        {"name": "Reverse", "argumentType": "void", "description": "Reverse the train direction."},
+        {"name": "TeleportToPathNode", "argumentType": "string", "description": "Teleport the train to a path_track."}
+      ],
+      "outputs": [],
+      "helpers": [{"kind": "origin"}]
+    },
+    {
+      "name": "func_plat",
+      "kind": "brush",
+      "description": "Elevator platform: a brush that moves up and down by its height.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [
+        {"name": "height", "type": "float", "default": "0", "description": "Travel height in units."},
+        {"name": "speed", "type": "float", "default": "150", "description": "Movement speed in units per second."}
+      ],
+      "inputs": [
+        {"name": "GoUp", "argumentType": "void", "description": "Move the platform up."},
+        {"name": "GoDown", "argumentType": "void", "description": "Move the platform down."},
+        {"name": "Toggle", "argumentType": "void", "description": "Toggle the platform."}
+      ],
+      "outputs": [],
+      "helpers": [{"kind": "origin"}]
+    },
+    {
+      "name": "func_breakable",
+      "kind": "brush",
+      "description": "Breakable brush: breaks when its health reaches zero, firing OnBreak.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [
+        {"name": "health", "type": "int", "default": "0", "description": "Health. 0 = unbreakable."},
+        {"name": "material", "type": "int", "default": "0", "description": "Material type: 0 = glass, 1 = wood, 2 = metal, 3 = flesh, 4 = cinder block, 5 = ceiling tile, 6 = computer, 7 = unbreakable glass, 8 = rock."},
+        {"name": "explodemagnitude", "type": "int", "default": "0", "description": "Explosion magnitude when broken. 0 = no explosion."}
+      ],
+      "inputs": [
+        {"name": "Break", "argumentType": "void", "description": "Break the brush."},
+        {"name": "SetHealth", "argumentType": "int", "description": "Set the health."}
+      ],
+      "outputs": [
+        {"name": "OnBreak", "argumentType": "void", "description": "Fired when the brush breaks."},
+        {"name": "OnHealthChanged", "argumentType": "float", "description": "Fired when health changes; passes the new health."}
+      ],
+      "helpers": [{"kind": "origin"}]
+    },
+    {
+      "name": "func_pushable",
+      "kind": "brush",
+      "description": "Pushable brush: a physics brush the player can push around.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [
+        {"name": "health", "type": "int", "default": "0", "description": "Health. 0 = unbreakable."},
+        {"name": "friction", "type": "float", "default": "0", "description": "Friction against the ground. 0 = default."}
+      ],
+      "inputs": [
+        {"name": "Break", "argumentType": "void", "description": "Break the brush."}
+      ],
+      "outputs": [
+        {"name": "OnBreak", "argumentType": "void", "description": "Fired when the brush breaks."},
+        {"name": "OnHealthChanged", "argumentType": "float", "description": "Fired when health changes; passes the new health."}
+      ],
+      "helpers": [{"kind": "origin"}]
+    },
+    {
+      "name": "info_player_teamspawn",
+      "kind": "point",
+      "description": "Team spawn point: a player spawn for one team.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [
+        {"name": "TeamNum", "type": "int", "default": "0", "description": "Team number. 0 = any team."}
+      ],
+      "inputs": [],
+      "outputs": [],
+      "helpers": [{"kind": "origin"}, {"kind": "angles"}]
+    },
+    {
+      "name": "info_player_deathmatch",
+      "kind": "point",
+      "description": "Deathmatch spawn point.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [],
+      "inputs": [],
+      "outputs": [],
+      "helpers": [{"kind": "origin"}, {"kind": "angles"}]
+    },
+    {
+      "name": "info_node",
+      "kind": "point",
+      "description": "AI navigation node: a point NPCs can path through.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [],
+      "inputs": [],
+      "outputs": [],
+      "helpers": [{"kind": "origin"}]
+    },
+    {
+      "name": "info_node_hint",
+      "kind": "point",
+      "description": "AI node hint: tells NPCs how to use a nearby node (cover, sniper spot, guard post).",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [
+        {"name": "hint", "type": "string", "description": "Hint type, e.g. Crouch Cover, Guard Position, Sniper, Watch Position (see the FGD HintType list)."},
+        {"name": "nodeid", "type": "int", "default": "0", "description": "Node ID this hint belongs to. 0 = auto-assign at compile."}
+      ],
+      "inputs": [],
+      "outputs": [],
+      "helpers": [{"kind": "origin"}]
+    },
+    {
+      "name": "info_target",
+      "kind": "point",
+      "description": "Named target point: an aim or destination marker other entities can point at.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [],
+      "inputs": [],
+      "outputs": [],
+      "helpers": [{"kind": "origin"}]
+    },
+    {
+      "name": "info_teleport_destination",
+      "kind": "point",
+      "description": "Teleport destination: where a trigger_teleport sends entities.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [],
+      "inputs": [],
+      "outputs": [],
+      "helpers": [{"kind": "origin"}, {"kind": "angles"}]
+    },
+    {
+      "name": "path_track",
+      "kind": "point",
+      "description": "Path node for a func_tracktrain route. Fires OnPass when a train passes it.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [
+        {"name": "target", "type": "target", "description": "Next path_track on the route."},
+        {"name": "speed", "type": "float", "default": "0", "description": "Train speed at this track. 0 = keep current speed."},
+        {"name": "orientationtype", "type": "int", "default": "0", "description": "Train orientation: 0 = no change, 1 = face direction of travel, 2 = face this track's angles."}
+      ],
+      "inputs": [
+        {"name": "ToggleAlternatePath", "argumentType": "void", "description": "Toggle the alternate path."},
+        {"name": "EnableAlternatePath", "argumentType": "void", "description": "Enable the alternate path."},
+        {"name": "DisableAlternatePath", "argumentType": "void", "description": "Disable the alternate path."}
+      ],
+      "outputs": [
+        {"name": "OnPass", "argumentType": "void", "description": "Fired when a train passes this track."}
+      ],
+      "helpers": [{"kind": "origin"}, {"kind": "angles"}]
+    },
+    {
+      "name": "item_healthkit",
+      "kind": "point",
+      "description": "Health kit pickup: restores health on touch.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [],
+      "inputs": [],
+      "outputs": [],
+      "helpers": [{"kind": "origin"}, {"kind": "angles"}]
+    },
+    {
+      "name": "item_healthvial",
+      "kind": "point",
+      "description": "Health vial pickup: restores a small amount of health on touch.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [],
+      "inputs": [],
+      "outputs": [],
+      "helpers": [{"kind": "origin"}, {"kind": "angles"}]
+    },
+    {
+      "name": "item_battery",
+      "kind": "point",
+      "description": "Suit battery pickup: recharges suit power on touch.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [],
+      "inputs": [],
+      "outputs": [],
+      "helpers": [{"kind": "origin"}, {"kind": "angles"}]
+    },
+    {
+      "name": "item_suit",
+      "kind": "point",
+      "description": "HEV suit pickup.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [],
+      "inputs": [],
+      "outputs": [],
+      "helpers": [{"kind": "origin"}, {"kind": "angles"}]
+    },
+    {
+      "name": "item_ammo_pistol",
+      "kind": "point",
+      "description": "Pistol ammo pickup.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [],
+      "inputs": [],
+      "outputs": [],
+      "helpers": [{"kind": "origin"}, {"kind": "angles"}]
+    },
+    {
+      "name": "item_ammo_smg1",
+      "kind": "point",
+      "description": "SMG ammo pickup.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [],
+      "inputs": [],
+      "outputs": [],
+      "helpers": [{"kind": "origin"}, {"kind": "angles"}]
+    },
+    {
+      "name": "item_ammo_ar2",
+      "kind": "point",
+      "description": "Pulse-rifle ammo pickup.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [],
+      "inputs": [],
+      "outputs": [],
+      "helpers": [{"kind": "origin"}, {"kind": "angles"}]
+    },
+    {
+      "name": "item_ammo_357",
+      "kind": "point",
+      "description": "Magnum ammo pickup.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [],
+      "inputs": [],
+      "outputs": [],
+      "helpers": [{"kind": "origin"}, {"kind": "angles"}]
+    },
+    {
+      "name": "item_ammo_crossbow",
+      "kind": "point",
+      "description": "Crossbow bolt pickup.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [],
+      "inputs": [],
+      "outputs": [],
+      "helpers": [{"kind": "origin"}, {"kind": "angles"}]
+    },
+    {
+      "name": "item_box_buckshot",
+      "kind": "point",
+      "description": "Shotgun shell box pickup.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [],
+      "inputs": [],
+      "outputs": [],
+      "helpers": [{"kind": "origin"}, {"kind": "angles"}]
+    },
+    {
+      "name": "item_rpg_round",
+      "kind": "point",
+      "description": "RPG rocket pickup.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [],
+      "inputs": [],
+      "outputs": [],
+      "helpers": [{"kind": "origin"}, {"kind": "angles"}]
+    },
+    {
+      "name": "weapon_crowbar",
+      "kind": "point",
+      "description": "Crowbar weapon pickup.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [],
+      "inputs": [],
+      "outputs": [],
+      "helpers": [{"kind": "origin"}, {"kind": "angles"}]
+    },
+    {
+      "name": "weapon_pistol",
+      "kind": "point",
+      "description": "Pistol weapon pickup.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [],
+      "inputs": [],
+      "outputs": [],
+      "helpers": [{"kind": "origin"}, {"kind": "angles"}]
+    },
+    {
+      "name": "weapon_smg1",
+      "kind": "point",
+      "description": "SMG weapon pickup.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [],
+      "inputs": [],
+      "outputs": [],
+      "helpers": [{"kind": "origin"}, {"kind": "angles"}]
+    },
+    {
+      "name": "weapon_ar2",
+      "kind": "point",
+      "description": "Pulse-rifle weapon pickup.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [],
+      "inputs": [],
+      "outputs": [],
+      "helpers": [{"kind": "origin"}, {"kind": "angles"}]
+    },
+    {
+      "name": "weapon_shotgun",
+      "kind": "point",
+      "description": "Shotgun weapon pickup.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [],
+      "inputs": [],
+      "outputs": [],
+      "helpers": [{"kind": "origin"}, {"kind": "angles"}]
+    },
+    {
+      "name": "weapon_357",
+      "kind": "point",
+      "description": "Magnum weapon pickup.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [],
+      "inputs": [],
+      "outputs": [],
+      "helpers": [{"kind": "origin"}, {"kind": "angles"}]
+    },
+    {
+      "name": "weapon_crossbow",
+      "kind": "point",
+      "description": "Crossbow weapon pickup.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [],
+      "inputs": [],
+      "outputs": [],
+      "helpers": [{"kind": "origin"}, {"kind": "angles"}]
+    },
+    {
+      "name": "weapon_rpg",
+      "kind": "point",
+      "description": "RPG weapon pickup.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [],
+      "inputs": [],
+      "outputs": [],
+      "helpers": [{"kind": "origin"}, {"kind": "angles"}]
+    },
+    {
+      "name": "weapon_frag",
+      "kind": "point",
+      "description": "Frag grenade weapon pickup.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [],
+      "inputs": [],
+      "outputs": [],
+      "helpers": [{"kind": "origin"}, {"kind": "angles"}]
+    },
+    {
+      "name": "weapon_physcannon",
+      "kind": "point",
+      "description": "Gravity gun weapon pickup.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [],
+      "inputs": [],
+      "outputs": [],
+      "helpers": [{"kind": "origin"}, {"kind": "angles"}]
+    },
+    {
+      "name": "weapon_stunstick",
+      "kind": "point",
+      "description": "Stunstick weapon pickup.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [],
+      "inputs": [],
+      "outputs": [],
+      "helpers": [{"kind": "origin"}, {"kind": "angles"}]
+    },
+    {
+      "name": "weapon_slam",
+      "kind": "point",
+      "description": "S.L.A.M. weapon pickup.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [],
+      "inputs": [],
+      "outputs": [],
+      "helpers": [{"kind": "origin"}, {"kind": "angles"}]
+    },
+    {
+      "name": "weapon_bugbait",
+      "kind": "point",
+      "description": "Bugbait weapon pickup.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [],
+      "inputs": [],
+      "outputs": [],
+      "helpers": [{"kind": "origin"}, {"kind": "angles"}]
+    },
+    {
+      "name": "npc_citizen",
+      "kind": "point",
+      "description": "Citizen NPC: a human ally that follows squad orders and takes cover.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [
+        {"name": "squadname", "type": "string", "description": "Squad the NPC belongs to."},
+        {"name": "hintgroup", "type": "string", "description": "Hint group the NPC is limited to."},
+        {"name": "sleepstate", "type": "int", "default": "0", "description": "Sleep state: 0 = none, 1 = waiting for threat, 2 = waiting for PVS, 3 = waiting for input."},
+        {"name": "wakeradius", "type": "float", "default": "0", "description": "Radius in which the NPC wakes. 0 = default."},
+        {"name": "wakesquad", "type": "int", "default": "0", "description": "Wake the whole squad when woken. 0 = no, 1 = yes."},
+        {"name": "physdamagescale", "type": "float", "default": "1", "description": "Scale for physics damage taken."}
+      ],
+      "inputs": [
+        {"name": "Wake", "argumentType": "void", "description": "Wake the NPC."},
+        {"name": "Sleep", "argumentType": "void", "description": "Put the NPC to sleep."},
+        {"name": "SetRelationship", "argumentType": "string", "description": "Set a relationship to another entity."},
+        {"name": "SetSquad", "argumentType": "string", "description": "Set the squad the NPC belongs to."},
+        {"name": "IgnoreDangerSounds", "argumentType": "float", "description": "Ignore danger sounds for this many seconds."}
+      ],
+      "outputs": [
+        {"name": "OnDamaged", "argumentType": "void", "description": "Fired when the NPC takes damage."},
+        {"name": "OnDeath", "argumentType": "void", "description": "Fired when the NPC dies."},
+        {"name": "OnHalfHealth", "argumentType": "void", "description": "Fired when the NPC reaches half health."},
+        {"name": "OnFoundEnemy", "argumentType": "void", "description": "Fired when the NPC finds an enemy."},
+        {"name": "OnLostEnemy", "argumentType": "void", "description": "Fired when the NPC loses its enemy."},
+        {"name": "OnSleep", "argumentType": "void", "description": "Fired when the NPC goes to sleep."},
+        {"name": "OnWake", "argumentType": "void", "description": "Fired when the NPC wakes."}
+      ],
+      "helpers": [{"kind": "origin"}, {"kind": "angles"}]
+    },
+    {
+      "name": "npc_combine_s",
+      "kind": "point",
+      "description": "Combine soldier NPC: an enemy soldier that patrols, takes cover and fights in squads.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [
+        {"name": "squadname", "type": "string", "description": "Squad the NPC belongs to."},
+        {"name": "hintgroup", "type": "string", "description": "Hint group the NPC is limited to."},
+        {"name": "sleepstate", "type": "int", "default": "0", "description": "Sleep state: 0 = none, 1 = waiting for threat, 2 = waiting for PVS, 3 = waiting for input."},
+        {"name": "wakeradius", "type": "float", "default": "0", "description": "Radius in which the NPC wakes. 0 = default."},
+        {"name": "wakesquad", "type": "int", "default": "0", "description": "Wake the whole squad when woken. 0 = no, 1 = yes."},
+        {"name": "physdamagescale", "type": "float", "default": "1", "description": "Scale for physics damage taken."}
+      ],
+      "inputs": [
+        {"name": "Wake", "argumentType": "void", "description": "Wake the NPC."},
+        {"name": "Sleep", "argumentType": "void", "description": "Put the NPC to sleep."},
+        {"name": "SetRelationship", "argumentType": "string", "description": "Set a relationship to another entity."},
+        {"name": "SetSquad", "argumentType": "string", "description": "Set the squad the NPC belongs to."},
+        {"name": "IgnoreDangerSounds", "argumentType": "float", "description": "Ignore danger sounds for this many seconds."}
+      ],
+      "outputs": [
+        {"name": "OnDamaged", "argumentType": "void", "description": "Fired when the NPC takes damage."},
+        {"name": "OnDeath", "argumentType": "void", "description": "Fired when the NPC dies."},
+        {"name": "OnHalfHealth", "argumentType": "void", "description": "Fired when the NPC reaches half health."},
+        {"name": "OnFoundEnemy", "argumentType": "void", "description": "Fired when the NPC finds an enemy."},
+        {"name": "OnLostEnemy", "argumentType": "void", "description": "Fired when the NPC loses its enemy."},
+        {"name": "OnSleep", "argumentType": "void", "description": "Fired when the NPC goes to sleep."},
+        {"name": "OnWake", "argumentType": "void", "description": "Fired when the NPC wakes."}
+      ],
+      "helpers": [{"kind": "origin"}, {"kind": "angles"}]
+    }
+  ]
+}

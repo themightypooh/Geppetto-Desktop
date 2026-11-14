@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text;
 
 namespace Effigy;
@@ -302,6 +304,24 @@ public static class VdmStamp
 /// zoologically exact horn — and the tests assert the structural property (sideways motion,
 /// underside faces, rim/depression), not a likeness.
 /// </summary>
+/// <summary>One library entry: a stamp's name, its search tags, where it came from,
+/// and its thumbnail when one was supplied. Built-ins ship no thumbnail art — a
+/// thumbnail arrives with a registered stamp, not with the library.</summary>
+public sealed class VdmStampInfo
+{
+	public string Name;
+	public string[] Tags = Array.Empty<string>();
+
+	/// <summary>"builtin", "registered" or "shared".</summary>
+	public string Source;
+
+	/// <summary>Thumbnail image path, when one was supplied at registration. Null for built-ins.</summary>
+	public string ThumbnailPath;
+
+	/// <summary>Shared folder the stamp was loaded from, when one applies.</summary>
+	public string Folder;
+}
+
 public static class VdmStampLibrary
 {
 	public static readonly string[] Names = { "ear", "nose", "horn_hook", "scale_overhang", "wound_lip" };
@@ -312,6 +332,9 @@ public static class VdmStampLibrary
 		var key = (name ?? "").Trim().ToLowerInvariant();
 		if ( key.StartsWith( "vdm:" ) )
 			key = key[4..];
+
+		if ( _registered.TryGetValue( key, out var custom ) )
+			return custom;
 
 		return key switch
 		{
@@ -325,6 +348,118 @@ public static class VdmStampLibrary
 	}
 
 	public static bool IsKnown( string name ) => Get( name ) is not null;
+
+	/// <summary>Tags the built-ins carry, for <see cref="Search"/>.</summary>
+	static string[] BuiltinTags( string name ) => name switch
+	{
+		"ear" => new[] { "ear", "face", "head", "detail" },
+		"nose" => new[] { "nose", "face", "head", "detail" },
+		"horn_hook" => new[] { "horn", "hook", "curl", "detail" },
+		"scale_overhang" => new[] { "scale", "overhang", "plate", "reptile", "armour", "armor" },
+		"wound_lip" => new[] { "wound", "lip", "rim", "injury", "scar" },
+		_ => Array.Empty<string>(),
+	};
+
+	static readonly Dictionary<string, VdmField> _registered = new();
+	static readonly Dictionary<string, VdmStampInfo> _registeredInfo = new();
+	static readonly List<string> _sharedFolders = new();
+
+	/// <summary>Shared folders previously added with <see cref="AddSharedFolder"/>.</summary>
+	public static IReadOnlyList<string> SharedFolders => _sharedFolders;
+
+	/// <summary>Library search: stamp names whose name or tags contain the query
+	/// (case-insensitive). An empty query lists everything — built-ins in
+	/// <see cref="Names"/> order, then registered stamps in registration order.</summary>
+	public static IReadOnlyList<string> Search( string query )
+	{
+		var q = (query ?? "").Trim().ToLowerInvariant();
+		var results = new List<string>();
+		void Consider( string name, string[] tags )
+		{
+			if ( q.Length == 0
+				|| name.Contains( q, StringComparison.Ordinal )
+				|| tags.Any( t => t.ToLowerInvariant().Contains( q, StringComparison.Ordinal ) ) )
+				results.Add( name );
+		}
+		foreach ( var name in Names )
+			Consider( name, BuiltinTags( name ) );
+		foreach ( var (name, info) in _registeredInfo )
+			Consider( name, info.Tags );
+		return results;
+	}
+
+	/// <summary>Tags for a stamp, by name (<c>vdm:ear</c> or <c>ear</c>). Empty when unknown.</summary>
+	public static string[] Tags( string name )
+	{
+		var key = (name ?? "").Trim().ToLowerInvariant();
+		if ( key.StartsWith( "vdm:" ) )
+			key = key[4..];
+		if ( _registeredInfo.TryGetValue( key, out var info ) )
+			return info.Tags;
+		return BuiltinTags( key );
+	}
+
+	/// <summary>Library entry for a stamp, or null when unknown.</summary>
+	public static VdmStampInfo Info( string name )
+	{
+		var key = (name ?? "").Trim().ToLowerInvariant();
+		if ( key.StartsWith( "vdm:" ) )
+			key = key[4..];
+		if ( _registeredInfo.TryGetValue( key, out var info ) )
+			return info;
+		if ( Array.IndexOf( Names, key ) < 0 )
+			return null;
+		return new VdmStampInfo { Name = key, Tags = BuiltinTags( key ), Source = "builtin" };
+	}
+
+	/// <summary>Register a stamp of your own: a field built in code or captured with
+	/// <c>add VdmCapture</c>. A registered name shadows nothing — a later
+	/// <see cref="Get"/> prefers it over a built-in of the same name — and
+	/// <see cref="Search"/> finds it by name or tag.</summary>
+	public static void Register( string name, VdmField field, string[] tags = null, string thumbnailPath = null, string folder = null )
+	{
+		var key = (name ?? "").Trim().ToLowerInvariant();
+		if ( key.Length == 0 ) throw new ArgumentException( "A registered stamp needs a name.", nameof( name ) );
+		if ( key.StartsWith( "vdm:" ) )
+			key = key[4..];
+		if ( field is null ) throw new ArgumentNullException( nameof( field ) );
+		_registered[key] = field;
+		_registeredInfo[key] = new VdmStampInfo
+		{
+			Name = key,
+			Tags = tags ?? Array.Empty<string>(),
+			Source = folder is null ? "registered" : "shared",
+			ThumbnailPath = thumbnailPath,
+			Folder = folder,
+		};
+	}
+
+	/// <summary>Add a shared folder of .json/.png fields: every loadable file becomes a
+	/// stamp named after the file, tagged "shared". Files whose stem matches a stamp
+	/// that already exists are skipped, never shadowed, and unreadable files are
+	/// skipped rather than failing the whole folder. Returns the number added.</summary>
+	public static int AddSharedFolder( string path )
+	{
+		if ( string.IsNullOrWhiteSpace( path ) ) throw new ArgumentException( "A shared folder needs a path.", nameof( path ) );
+		if ( !Directory.Exists( path ) ) throw new DirectoryNotFoundException( $"No shared VDM folder at '{path}'." );
+		var added = 0;
+		foreach ( var file in Directory.EnumerateFiles( path, "*.*", SearchOption.TopDirectoryOnly ) )
+		{
+			var ext = Path.GetExtension( file ).ToLowerInvariant();
+			if ( ext != ".json" && ext != ".png" ) continue;
+			var stem = Path.GetFileNameWithoutExtension( file ).ToLowerInvariant();
+			if ( IsKnown( stem ) ) continue;
+			try
+			{
+				Register( stem, VdmField.Load( file ), new[] { "shared" }, null, path );
+				added++;
+			}
+			catch { }
+		}
+		if ( !_sharedFolders.Contains( path ) )
+			_sharedFolders.Add( path );
+		return added;
+	}
 
 	static VdmField Build( Func<float, float, Vec3> at )
 	{

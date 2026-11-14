@@ -410,7 +410,7 @@ public static class Bench
         }
         var made = BuildScript.CreateFeature(key);
         // `facematerial` is both a feature (the wheel's FACE MATERIAL tool) and the bench's slot verb; the wheel means the feature
-        if (made is not null && (!BuildScript.Mutates(key) || key == "facematerial"))
+        if (made is not null && (!IsScriptVerb(key) || key == "facematerial"))
         {
             ev["kind"] = "add";
             ev["verb"] = "add";
@@ -435,6 +435,12 @@ public static class Bench
         fields.Add(new JsonObject { ["key"] = "", ["label"] = "Arguments", ["kind"] = "text", ["value"] = "" });
         return ev;
     }
+
+    // A script verb is a name the script dispatches, not anything Mutates() gates: Mutates is fail-closed for STEP
+    // pacing, so every unknown word (and every feature type such as primitive) counts as mutating there.
+    static bool IsScriptVerb(string key) =>
+        Array.Exists(BuildScript.VerbNames, v => string.Equals(v, key, StringComparison.OrdinalIgnoreCase))
+        || Array.Exists(BuildScript.RigVerbNames, v => string.Equals(v, key, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>What a click on the model gives this tool. The cabinet leaves body mode for face or edge
     /// so the thing under the cursor lights up; a verb takes no geometry.</summary>

@@ -52,6 +52,12 @@ public sealed class SculptFeature : Feature
 	public readonly BoolParam Reproject = new( "Reproject if the cage changes", false );
 
 	/// <summary>
+	/// The highest supported multires level. A host still owns its device-specific face cap;
+	/// six levels lets a moderate quad cage reach roughly one million faces when that cap permits it.
+	/// </summary>
+	public const int MaxMultiresLevels = 6;
+
+	/// <summary>
 	/// How many subdivision levels this sculpt carries above the cage. 0 is the historical
 	/// behaviour: the cage passes through unchanged and a sculpt is built by adding levels
 	/// by hand. A script sets this to build a dense sculpt directly, e.g.
@@ -63,7 +69,7 @@ public sealed class SculptFeature : Feature
 	/// <c>levels=3</c> works exactly as the roadmap's example. If Argon wants 2 as the
 	/// default for new sculpts only, that needs a migration, not a default change.
 	/// </summary>
-	public readonly IntParam Levels = new( "Multires levels", 0, 0, 5 );
+	public readonly IntParam Levels = new( "Multires levels", 0, 0, MaxMultiresLevels );
 
 	/// <summary>
 	/// Restore the cage bounds after the sculpt levels are evaluated. Sculpt levels smooth
@@ -79,6 +85,16 @@ public sealed class SculptFeature : Feature
 
 	MultiresSculpt _sculpt;
 
+	// Non-destructive layers and polygroups on this sculpt (godlike-sculpt-layers-
+	// morph-targets-polygroups). Null until attached: a sculpt without layers behaves
+	// exactly as before — same deltas, same blob, same rebuild. The stack's base is a
+	// snapshot of the top level's layer at attach time; the entries are everything on
+	// top of it, composed onto the output mesh by Execute.
+	SculptLayerStack _layers;
+	PolygroupSet _groups;
+	int _builtLayersRevision = -1;
+	int _builtGroupsRevision = -1;
+
 	// Bytes read from a side-car, waiting for a cage. A blob cannot become a sculpt without one, and
 	// the cage does not exist until the features above this have run, so loading is finished by the
 	// first rebuild rather than at load time.
@@ -86,6 +102,40 @@ public sealed class SculptFeature : Feature
 
 	/// <summary>The levels and their deltas, once a rebuild has given them a cage. Null before that.</summary>
 	public MultiresSculpt Sculpt => _sculpt;
+
+	/// <summary>The layer stack on this sculpt, or null when no layers are attached.</summary>
+	public SculptLayerStack LayerStack => _layers;
+
+	/// <summary>The polygroups on this sculpt, or null when none are attached.</summary>
+	public PolygroupSet Polygroups => _groups;
+
+	/// <summary>
+	/// Attach a layer stack to the current top level, snapshotting its layer as the
+	/// base. Needs a rebuild first — there is no level to attach to until the sculpt
+	/// has a cage. Returns the existing stack when one is already attached.
+	/// </summary>
+	public SculptLayerStack AttachLayerStack()
+	{
+		if ( _sculpt is null )
+			throw new InvalidOperationException( "Rebuild this sculpt first: there is no level to attach layers to yet." );
+
+		return _layers ??= SculptLayerStack.Attach( _sculpt, _sculpt.TopLevel );
+	}
+
+	/// <summary>
+	/// Attach polygroups to the current top-level mesh. Returns the existing set when
+	/// one is already attached.
+	/// </summary>
+	public PolygroupSet AttachPolygroups()
+	{
+		if ( _sculpt is null )
+			throw new InvalidOperationException( "Rebuild this sculpt first: there is no mesh to group yet." );
+
+		return _groups ??= new PolygroupSet( _sculpt.Evaluate( _sculpt.TopLevel ).FaceCount );
+	}
+
+	/// <summary>The mandatory bake warning when layers hold un-baked displacement, or null when there is nothing to lose.</summary>
+	public string LayerTopologyWarning() => _layers?.TopologyChangeWarning();
 
 	/// <summary>
 	/// The sculpt a <c>Sculpt</c> feature attached to each body it rebuilt, for this rebuild
@@ -112,10 +162,18 @@ public sealed class SculptFeature : Feature
 	int _builtRevision = -1;
 
 	/// <summary>True once the levels have been changed since the last rebuild. See Feature.IsStale.</summary>
-	public override bool IsStale => _pending is not null || (_sculpt is not null && ( _sculpt.Revision != _builtRevision || _sculpt.TopLevel < Levels.Clamped ));
+	public override bool IsStale => !Suppressed && ( _pending is not null || (_sculpt is not null && ( _sculpt.Revision != _builtRevision || _sculpt.TopLevel < Levels.Clamped ))
+		|| ( _layers is not null && _layers.Revision != _builtLayersRevision )
+		|| ( _groups is not null && _groups.Revision != _builtGroupsRevision ) );
 
-	/// <summary>This sculpt as bytes, or null if there is nothing to save yet.</summary>
-	public byte[] SaveDeltas() => _sculpt is null ? _pending : SculptBlob.Write( _sculpt );
+	/// <summary>
+	/// This sculpt as bytes, or null if there is nothing to save yet. Layers and
+	/// polygroups ride the blob (format 2) when present; without them the bytes are
+	/// exactly the format-1 blob — a layer-less sculpt saves byte-identical blobs.
+	/// </summary>
+	public byte[] SaveDeltas() => _sculpt is null ? _pending
+		: _layers is null && _groups is null ? SculptBlob.Write( _sculpt )
+		: SculptBlob.Write( _sculpt, _layers, _groups );
 
 	/// <summary>Take bytes from a side-car. They are read at the next rebuild, not now.</summary>
 	public void LoadDeltas( byte[] blob ) => _pending = blob;
@@ -140,10 +198,12 @@ public sealed class SculptFeature : Feature
 			// Kept on failure, never dropped. A cage that stopped matching is usually one edit
 			// upstream from matching again, and throwing the deltas away would make that unrecoverable.
 			MultiresSculpt loaded;
+			SculptLayerStack loadedLayers;
+			PolygroupSet loadedGroups;
 
 			try
 			{
-				loaded = SculptBlob.Read( _pending, body.Mesh );
+				loaded = SculptBlob.Read( _pending, body.Mesh, out loadedLayers, out loadedGroups );
 			}
 			catch ( System.Exception e )
 			{
@@ -155,7 +215,11 @@ public sealed class SculptFeature : Feature
 				return;
 			}
 
+			// Assigned only after a successful read: a blob that fails to parse leaves the
+			// previous sculpt, layers and groups exactly as they were.
 			_sculpt = loaded;
+			_layers = loadedLayers;
+			_groups = loadedGroups;
 			_pending = null;
 		}
 		else if ( _sculpt is null )
@@ -168,9 +232,11 @@ public sealed class SculptFeature : Feature
 			{
 				// The deltas are untouched by this — SetCage is never reached, so undoing the upstream
 				// edit brings the sculpt back exactly.
+				var bake = LayerTopologyWarning();
+
 				Fail(
 					"The cage under this sculpt changed shape",
-					why,
+					why + (bake is null ? "" : " " + bake),
 					"Undo the edit that changed the cage's topology",
 					"Turn on \"Reproject if the cage changes\" to resample the sculpt onto it, losing detail",
 					"Delete this feature to start a new sculpt on the current cage" );
@@ -182,12 +248,22 @@ public sealed class SculptFeature : Feature
 			// out is an approximation of what was there, the original deltas are gone, and undoing
 			// the upstream edit will not bring them back. Saying nothing here would make a lossy
 			// step indistinguishable from a lossless one.
+			var bakeWarning = LayerTopologyWarning();
+
 			Warn(
 				"The sculpt was resampled onto a new cage",
-				$"{why} It was reprojected instead: {report}.",
+				$"{why} It was reprojected instead: {report}." + (bakeWarning is null ? "" : " " + bakeWarning),
 				"Detail finer than the new cage cannot be recovered",
 				"The level structure is gone — everything landed in the top level",
-				"Undo now if this was not the intention; the original deltas are no longer held" );
+				"Undo now if this was not the intention; the original deltas are no longer held",
+				"Bake layers first next time — unbaked layers and polygroups were dropped by the resample" );
+
+			// Layers are deltas on the old cage's vertices and groups are ids on the old top
+			// level's faces; the resampled sculpt has new vertices and faces, so neither can
+			// follow. Dropped rather than silently misapplied — the warning above says why,
+			// and baking first is the remedy.
+			_layers = null;
+			_groups = null;
 		}
 		else
 		{
@@ -203,6 +279,25 @@ public sealed class SculptFeature : Feature
 		var cage = _sculpt.Cage;
 
 		body.Mesh = _sculpt.Evaluate( _sculpt.TopLevel );
+
+		// Compose the non-destructive layers and morph checkpoints onto the evaluated mesh,
+		// before Preserve resizes anything. The layer deltas live in the top level's frame
+		// space; ApplyEntries converts them through the frames onto the output mesh. Morphs
+		// land on the mesh as MeshMorphs, which is how the GLB/FBX/DMX exporters pick them
+		// up — the feature does not export anything itself.
+		if ( _layers is not null )
+		{
+			if ( _layers.Level != _sculpt.TopLevel || _layers.VertexCount != body.Mesh.VertexCount )
+				Fail(
+					"The sculpt layers do not fit this sculpt",
+					$"The layers live on level {_layers.Level} with {_layers.VertexCount} vertices; "
+					+ $"the top level is {_sculpt.TopLevel} with {body.Mesh.VertexCount}.",
+					"Bake the layers, then delete the layer stack and re-attach it" );
+
+			var frames = _sculpt.FramesFor( _sculpt.TopLevel );
+			_layers.ApplyEntries( body.Mesh, frames );
+			_layers.AddMorphsToMesh( body.Mesh, frames );
+		}
 
 		if ( Preserve.Value && Levels.Clamped > 0 )
 		{
@@ -254,6 +349,8 @@ public sealed class SculptFeature : Feature
 
 		// Last, so that a failure above leaves the feature stale and the next rebuild tries again.
 		_builtRevision = _sculpt.Revision;
+		_builtLayersRevision = _layers?.Revision ?? -1;
+		_builtGroupsRevision = _groups?.Revision ?? -1;
 	}
 }
 
@@ -339,6 +436,7 @@ public sealed class MeshEditFeature : Feature
 	}
 
 	PolyMesh _edited;
+	PaintCanvas _bakedNormal, _bakedAo;
 	List<PolyMesh> _pieces = new();
 	long _baseFingerprint;
 	byte[] _pending;
@@ -363,11 +461,47 @@ public sealed class MeshEditFeature : Feature
 
 	public bool HasEdit => _edited is not null || _pending is not null;
 
+	/// <summary>Tangent-space normal map baked onto the edited mesh's UVs (a sculpt baked onto its
+	/// retopo), or null. Saved with the edit and hung on the output body's
+	/// <see cref="PaintCanvas.NormalMap"/> on every rebuild, so it survives rebuilds and reloads.</summary>
+	public PaintCanvas BakedNormal => _bakedNormal;
+
+	/// <summary>Ambient occlusion baked the same way, hung on <see cref="PaintCanvas.AmbientOcclusionMap"/>.</summary>
+	public PaintCanvas BakedAo => _bakedAo;
+
+	public bool HasBake => _bakedNormal is not null || _bakedAo is not null;
+
+	/// <summary>Keep baked maps with the committed edit. They are laid out on the edit's UVs, so a later
+	/// <see cref="Commit"/> that changes the topology drops them. Null for both clears the bake.</summary>
+	public void SetBake( PaintCanvas normal, PaintCanvas ao )
+	{
+		if ( _edited is null && _pending is null )
+			throw new System.InvalidOperationException( "Commit an edit before baking onto it." );
+		_bakedNormal = normal?.Clone();
+		_bakedAo = ao?.Clone();
+		_revision++;
+	}
+
+	/// <summary>Hang the bake on the output mesh. A fresh colour canvas (all clear) carries it when the
+	/// mesh has no paint; paint layers further down composite over it and carry both maps through.</summary>
+	void AttachBake( PolyMesh mesh )
+	{
+		if ( !HasBake )
+			return;
+		var w = (_bakedNormal ?? _bakedAo).Width;
+		var h = (_bakedNormal ?? _bakedAo).Height;
+		mesh.Paint ??= new PaintCanvas( w, h );
+		if ( _bakedNormal is not null )
+			mesh.Paint.NormalMap = _bakedNormal.Clone();
+		if ( _bakedAo is not null )
+			mesh.Paint.AmbientOcclusionMap = _bakedAo.Clone();
+	}
+
 	/// <summary>Bumped by every <see cref="Commit"/>, so the studio rebuilds without a MarkDirty —
 	/// the same trick SculptFeature plays with its revision.</summary>
 	public int Revision => _revision;
 
-	public override bool IsStale => _pending is not null || _revision != _builtRevision;
+	public override bool IsStale => !Suppressed && ( _pending is not null || _revision != _builtRevision );   // suppressed never runs: see PaintFeature.IsStale
 
 	/// <summary>
 	/// Hand the feature an edited mesh. <paramref name="basedOn"/> is the body the session started
@@ -380,7 +514,15 @@ public sealed class MeshEditFeature : Feature
 		if ( basedOn is null )
 			throw new System.ArgumentNullException( nameof( basedOn ) );
 
-		_edited = edited.Clone();
+		// A bake is laid out on the old mesh's UVs: it only survives a commit that keeps the topology.
+		var hadBake = HasBake;
+		if ( HasBake && (_edited is null || MultiresSculpt.TopologyId( _edited ) != MultiresSculpt.TopologyId( edited )) )
+			_bakedNormal = _bakedAo = null;
+		_edited = edited.Clone( null );
+		// Clone( null ) still copies Paint, and a session that started from the output body carries the
+		// bake hung on it by AttachBake. Strip those copies: the bake lives here, not on the mesh.
+		if ( hadBake && _edited.Paint is { } carried )
+			carried.NormalMap = carried.AmbientOcclusionMap = null;
 		if ( seams is not null )
 			_edited.Seams = new HashSet<EdgeKey>( seams );
 		Creases = new Dictionary<EdgeKey, float>();
@@ -390,7 +532,7 @@ public sealed class MeshEditFeature : Feature
 		_pieces = new List<PolyMesh>();
 		if ( pieces is not null )
 			foreach ( var piece in pieces )
-				_pieces.Add( piece.Clone() );
+				_pieces.Add( piece.Clone( null ) );
 		_baseFingerprint = Fingerprint( basedOn );
 		_pending = null;
 		_revision++;
@@ -400,13 +542,14 @@ public sealed class MeshEditFeature : Feature
 	public void Clear()
 	{
 		_edited = null;
+		_bakedNormal = _bakedAo = null;
 		Creases = new Dictionary<EdgeKey, float>();
 		_pieces = new List<PolyMesh>();
 		_pending = null;
 		_revision++;
 	}
 
-	public byte[] SaveMesh() => _edited is null ? _pending : MeshEditBlob.Write( _edited, _baseFingerprint, _pieces, Creases );
+	public byte[] SaveMesh() => _edited is null ? _pending : MeshEditBlob.Write( _edited, _baseFingerprint, _pieces, Creases, _bakedNormal, _bakedAo );
 
 	public void LoadMesh( byte[] blob )
 	{
@@ -429,7 +572,7 @@ public sealed class MeshEditFeature : Feature
 		{
 			try
 			{
-				_edited = MeshEditBlob.Read( _pending, out _baseFingerprint, out var pieces, out var creases );
+				_edited = MeshEditBlob.Read( _pending, out _baseFingerprint, out var pieces, out var creases, out _bakedNormal, out _bakedAo );
 				_pieces = pieces;
 				Creases = creases;
 			}
@@ -443,11 +586,12 @@ public sealed class MeshEditFeature : Feature
 		}
 
 		var body = new Body( ctx.NewBodyId(), Name ?? "Mesh", ApplyModifiers( _edited ?? new PolyMesh(), Creases, ctx.Rig ) );
+		AttachBake( body.Mesh );
 		LastBodyId = body.Id;
 		ctx.Bodies.Add( body );
 
 		for ( var i = 0; i < _pieces.Count; i++ )
-			ctx.Bodies.Add( new Body( ctx.NewBodyId(), $"{body.Name} piece {i + 1}", _pieces[i].Clone() ) );
+			ctx.Bodies.Add( new Body( ctx.NewBodyId(), $"{body.Name} piece {i + 1}", _pieces[i].Clone( null ) ) );
 
 		_builtRevision = _revision;
 	}
@@ -495,14 +639,14 @@ public sealed class MeshEditFeature : Feature
 		}
 
 		var body = targets[0];
-		_lastInput = body.Mesh.Clone();
+		_lastInput = body.Mesh.Clone( null );
 		LastBodyId = body.Id;
 
 		if ( _pending is not null )
 		{
 			try
 			{
-				_edited = MeshEditBlob.Read( _pending, out _baseFingerprint, out var pieces, out var creases );
+				_edited = MeshEditBlob.Read( _pending, out _baseFingerprint, out var pieces, out var creases, out _bakedNormal, out _bakedAo );
 				_pieces = pieces;
 				Creases = creases;
 			}
@@ -549,11 +693,12 @@ public sealed class MeshEditFeature : Feature
 		}
 
 		body.Mesh = ApplyModifiers( _edited, Creases, ctx.Rig );
+		AttachBake( body.Mesh );
 
 		// Separated pieces come out as bodies of their own, named after the one they came from.
 		// Ids come from the context, so they are the same ids on every rebuild.
 		for ( var i = 0; i < _pieces.Count; i++ )
-			ctx.Bodies.Add( new Body( ctx.NewBodyId(), $"{body.Name} piece {i + 1}", _pieces[i].Clone() ) );
+			ctx.Bodies.Add( new Body( ctx.NewBodyId(), $"{body.Name} piece {i + 1}", _pieces[i].Clone( null ) ) );
 
 		_builtRevision = _revision;
 	}

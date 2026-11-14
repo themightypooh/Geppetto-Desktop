@@ -1,0 +1,7 @@
+** Executing...
+** Command: Copy File "map-missing-targets.vmf" to "map-missing-targets.bsp"
+** Parameters: -game "C:\games\source" "map-missing-targets.vmf"
+material "missing/mat_xyz" not found, using default material
+Entity func_button (-32 0 32) has target 'door_01' which does not exist
+**** leaked ****
+Entity info_player_start (0 0 32) leaked!

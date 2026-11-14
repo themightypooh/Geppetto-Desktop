@@ -308,9 +308,52 @@ public sealed class MultiresSculpt
 	}
 
 	/// <summary>
+	/// Write frame-space deltas for a few vertices of one level: the sparse half of an undo step.
+	///
+	/// The full-level equivalents are <see cref="Record"/> (whole mesh in) and <see cref="SetLayer"/>
+	/// (whole layer in). This one writes only <paramref name="deltas"/> — slices of
+	/// <see cref="LayerAt"/>(<paramref name="level"/>).Deltas taken before and after a stroke — so an
+	/// undo entry costs the vertices the stroke touched instead of the level. Bit-exact: values are
+	/// copied, never converted, so undoing every stroke restores the starting blob byte for byte.
+	/// (Positions would not: they round-trip through the frames with a ulp of error, which the
+	/// blob's 16-bit steps then quantize differently.)
+	///
+	/// Like every model change here, this drops the cached surfaces above the level and bumps
+	/// <see cref="Revision"/>. An empty <paramref name="deltas"/> changes nothing and bumps nothing.
+	/// </summary>
+	public void ApplyEdit( int level, IReadOnlyDictionary<int, Vec3> deltas )
+	{
+		Validate( level );
+
+		if ( deltas is null )
+			throw new ArgumentNullException( nameof( deltas ) );
+
+		if ( deltas.Count == 0 )
+			return;
+
+		var layer = _layers[level];
+
+		foreach ( var (vertex, delta) in deltas )
+		{
+			if ( (uint)vertex >= (uint)layer.Count )
+				throw new ArgumentOutOfRangeException( nameof( deltas ),
+					$"Vertex {vertex} does not exist at level {level}, which has {layer.Count} vertices." );
+
+			layer.Deltas[vertex] = delta;
+		}
+
+		Trim( level + 1 );
+		Revision++;
+	}
+
+	/// <summary>
 	/// Swap in a rebuilt cage. Every level re-derives its frames from the new surface and every
 	/// delta rides the edit — the parametric half of the tool staying editable is the entire point
 	/// of storing deltas in a derived frame.
+	///
+	/// A cage whose positions match the current one exactly is a no-op: the rest stack is
+	/// already right for it, so nothing is trimmed and Revision does not move. SculptFeature
+	/// calls this on every rebuild, and most rebuilds do not move the cage.
 	///
 	/// Refuses a cage of different topology rather than misapplying the deltas or silently dropping
 	/// them. Reprojection (step 10) is what will eventually make that case work; until it exists a
@@ -323,6 +366,13 @@ public sealed class MultiresSculpt
 
 		if ( !CanRebase( cage, out var why ) )
 			throw new InvalidOperationException( why );
+
+		// The cage did not move: the rest surfaces are a pure function of the cage
+		// and the layers below, so there is nothing to rebuild. Keeping the cache
+		// here is what stops every upstream CAD edit/undo above a sculpt from paying
+		// the rest rebuild. Revision stays put too, so downstream features see no change.
+		if ( SamePositions( _cage, cage ) )
+			return;
 
 		_cage = cage.Clone();
 		Trim( 0 );
@@ -410,6 +460,21 @@ public sealed class MultiresSculpt
 		for ( var i = 0; i < a.Length; i++ )
 		{
 			if ( a[i] != b[i] )
+				return false;
+		}
+
+		return true;
+	}
+
+	/// <summary>
+	/// Whether two same-topology cages carry the same vertex positions, component for
+	/// component. NaN positions compare unequal, which only costs a rebuild.
+	/// </summary>
+	static bool SamePositions( PolyMesh a, PolyMesh b )
+	{
+		for ( var i = 0; i < a.Positions.Count; i++ )
+		{
+			if ( !a.Positions[i].Equals( b.Positions[i] ) )
 				return false;
 		}
 

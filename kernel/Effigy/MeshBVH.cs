@@ -157,6 +157,75 @@ public sealed class MeshBVH
 	public int FaceCount => _faceCount;
 	public bool IsEmpty => _nodes.Length == 0;
 
+	// The face list the tree was built on, flattened (count, then indices, per face). Only trees made
+	// by BuildOrRefit keep one; it is what proves a later mesh has the same topology.
+	int[] _topology;
+
+	/// <summary>Makes BuildOrRefit always build (the old behaviour), for before/after measurement.</summary>
+	public static bool AlwaysRebuild;
+
+	/// <summary>How many times BuildOrRefit reused this tree instead of building one.</summary>
+	public int Refits { get; private set; }
+
+	/// <summary>
+	/// A tree for <paramref name="mesh"/>: <paramref name="previous"/> refitted when it was built on
+	/// exactly the same faces (every face's vertex indices, in order, are compared, so a refit can't
+	/// keep a tree whose faces mean something else), else a new build. The returned tree is the one
+	/// to pass back next time.
+	/// </summary>
+	public static MeshBVH BuildOrRefit( MeshBVH previous, PolyMesh mesh )
+	{
+		if ( mesh is null )
+			throw new ArgumentNullException( nameof( mesh ) );
+
+		if ( previous is not null && !AlwaysRebuild && previous.SameTopology( mesh ) )
+		{
+			previous.Refit( mesh );
+			previous.Refits++;
+			return previous;
+		}
+
+		var tree = Build( mesh );
+		tree._topology = Topology( mesh );
+		return tree;
+	}
+
+	bool SameTopology( PolyMesh mesh )
+	{
+		var t = _topology;
+		if ( t is null || mesh.FaceCount != _faceCount || Math.Max( mesh.VertexCount, 1 ) != _seen.Length )
+			return false;
+
+		var k = 0;
+		foreach ( var f in mesh.Faces )
+		{
+			var idx = f.Indices;
+			if ( k + 1 + idx.Length > t.Length || t[k++] != idx.Length )
+				return false;
+			for ( var i = 0; i < idx.Length; i++ )
+				if ( t[k++] != idx[i] )
+					return false;
+		}
+
+		return k == t.Length;
+	}
+
+	static int[] Topology( PolyMesh mesh )
+	{
+		var n = 0;
+		foreach ( var f in mesh.Faces )
+			n += 1 + f.Indices.Length;
+		var t = new int[n];
+		var k = 0;
+		foreach ( var f in mesh.Faces )
+		{
+			t[k++] = f.Indices.Length;
+			f.Indices.CopyTo( t, k );
+			k += f.Indices.Length;
+		}
+		return t;
+	}
+
 	public static MeshBVH Build( PolyMesh mesh )
 	{
 		if ( mesh is null )
@@ -420,7 +489,10 @@ public sealed class MeshBVH
 				if ( !MeshRaycast.HitFace( mesh, fi, origin, dir, out var t, out var point ) )
 					continue;
 
-				if ( best is { } held && t >= held.Distance )
+				// Nearest wins; an exact tie goes to the lower face index, which is what the linear
+				// scan in MeshRaycast picks (it walks faces in order and keeps the first). So the
+				// tree's answer is the brute-force answer, not just an equally near one.
+				if ( best is { } held && ( t > held.Distance || t == held.Distance && fi >= held.FaceIndex ) )
 					continue;
 
 				best = new MeshHit( point, fi, mesh.FaceNormal( mesh.Faces[fi] ), t );

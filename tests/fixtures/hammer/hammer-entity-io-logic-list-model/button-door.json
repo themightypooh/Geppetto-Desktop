@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "outputs": [
+    {
+      "source_entity": "button_01",
+      "event": "OnPressed",
+      "target": "door_01",
+      "input": "Open",
+      "parameter": "",
+      "delay": 0.5,
+      "max_fires": -1,
+      "enabled": true
+    }
+  ]
+}

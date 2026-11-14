@@ -351,23 +351,42 @@ public sealed class DocumentSession
 		MaterialDescriptor?[] batchDescriptors = new MaterialDescriptor?[mesh.Batches.Length];
 		for ( int i = 0; i < mesh.Batches.Length; i++ )
 		{
-			var resolved = materialResolver.ResolveSlot( mesh.Batches[i].MaterialSlot, mesh.Batches[i].MaterialName, validateTextures: false );
-			batchDescriptors[i] = resolved.Success ? resolved.Descriptor : null;
+			int sourceSlot = mesh.SourceSlot( mesh.Batches[i].MaterialSlot );
+			var resolved = materialResolver.ResolveSlot( sourceSlot, mesh.Batches[i].MaterialName, validateTextures: false );
+			var descriptor = resolved.Success ? resolved.Descriptor : null;
+			if ( descriptor is not null && SourceKind == DocumentSourceKind.Effigy && Studio is not null
+				&& (!Studio.MaterialBindings.TryGetValue( sourceSlot, out var boundVmat ) || !IsBoundVmat( boundVmat )) )
+				descriptor = descriptor with { DoubleSided = true };
+			batchDescriptors[i] = descriptor;
 		}
 		mesh.ApplyMaterials( materialResolver );
+		if ( SourceKind == DocumentSourceKind.Effigy && Studio is not null )
+			for ( int i = 0; i < mesh.Batches.Length; i++ )
+				if ( i < batchDescriptors.Length && batchDescriptors[i] is { DoubleSided: true } ds && !mesh.Batches[i].DoubleSided )
+					mesh.Batches[i] = new CpuMesh.DrawBatch( mesh.Batches[i], ds, mesh.Batches[i].AlbedoImage,
+						mesh.Batches[i].NormalImage, mesh.Batches[i].RoughnessImage, mesh.Batches[i].MetallicImage,
+						mesh.Batches[i].EmissionImage, mesh.Batches[i].OcclusionImage );
 		// Lane B: live .effigy textures. A painted body carries its composite canvas on
 		// body.Mesh.Paint (every PaintFeature in the stack, already composited by the studio
 		// build); the merged viewport mesh only knows material slots, so the canvas is mapped
 		// by slot, from the visible bodies that own that slot. The canvas is turned into the
 		// same images the .fbx export writes (PaintTextureSet: opaque colour, roughness,
-		// metalness, height-to-normal), in memory — no temp files, no .vmat round trip — and
+		// metalness, height/painted normal combined, emission, opacity-in-albedo-alpha,
+		// baked AO), in memory — no temp files, no .vmat round trip — and
 		// swapped into the batch, whose descriptor factors are set to 1/white: the shader
 		// multiplies factor by texture, and a paint map already holds absolute values, so the
 		// palette grey (0.62) or a look's factors would otherwise darken the paint.
-		// Two bodies sharing one slot share one canvas in the merged mesh; that is a limit of
-		// slot-based materials, not of this swap, and the first painted body wins the slot.
+		// Extraction assigns render-only slots to each painted body; saved material IDs stay intact.
 		if ( SourceKind == DocumentSourceKind.Effigy )
 			ApplyPaintTextures( mesh, batchDescriptors );
+
+        if (Studio is not null)
+            foreach (var fur in Studio.Features.OfType<FurFeature>().Where(f => !f.Suppressed && f.Error is null && f.ResolvedSlot >= 0))
+                foreach (var batch in mesh.Batches)
+                    if (mesh.SourceSlot(batch.MaterialSlot) == fur.ResolvedSlot) mesh.FurSlots[batch.MaterialSlot] = new CpuMesh.FurAppearance(
+                        FurMaterial.ParseHex(fur.Colour.Value, new Vec3(0.54f,0.43f,0.33f)),
+                        FurMaterial.ParseHex(fur.RimColour.Value, new Vec3(0.23f,0.20f,0.18f)),
+                        fur.Density.Clamped, fur.DarkRoots.Clamped, fur.Clump.Clamped);
 
 		MarionettePlayer? player = null;
 		if ( mesh.Rig is { Count: > 0 } )
@@ -461,7 +480,7 @@ public sealed class DocumentSession
 	void ApplyPaintTextures( CpuMesh mesh, MaterialDescriptor?[] batchDescriptors )
 	{
 		if ( Studio is null ) return;
-		var paintBySlot = new Dictionary<int, PaintCanvas>();
+		var paintBySlot = new Dictionary<int, PaintCanvas>(mesh.PaintCanvases);
 		foreach ( var body in Studio.Bodies )
 		{
 			if ( body is null || !body.Visible || body.Mesh is null || body.Mesh.Paint is null ) continue;
@@ -481,35 +500,107 @@ public sealed class DocumentSession
 			// these references. They only have to carry the sampler modes the GL upload reads
 			// (repeat, linear, UV set 0) and the colour-space the batch expects per channel.
 			var descriptor = batchDescriptors[i]!;
-			DecodedImage? color = null, normal = null, rough = null, metal = null;
-			color = new DecodedImage( canvas.Width, canvas.Height, PaintLayers.Opaque( canvas, PaintChannel.Color ) );
+			DecodedImage? color = null, normal = null, rough = null, metal = null, emission = null, occlusion = null;
+			var colorBytes = PaintLayers.Opaque( canvas, PaintChannel.Color );
+			if ( canvas.OpacityMap is not null )
+			{
+				StampOpacity( colorBytes, canvas.Width, canvas.Height, PaintLayers.Opaque( canvas, PaintChannel.Opacity ),
+					canvas.OpacityMap.Width, canvas.OpacityMap.Height );
+				descriptor = descriptor with { AlphaMode = AlphaMode.Blend };
+			}
+			color = PaintImage( canvas.Width, canvas.Height, colorBytes );
 			descriptor = descriptor.WithChannel( MaterialChannel.BaseColor,
 				TextureBinding.ForBaseColor( new AssetReference( DocumentId + ":paint:" + batch.MaterialSlot + ":color", "paint:color" ) ) );
 			descriptor = descriptor with { BaseColorFactor = new Vec4( 1f, 1f, 1f, 1f ) };
-			if ( canvas.HeightMap is not null )
+			// The normal map: the painted Normal channel, the one derived from painted height, or
+			// both combined (whiteout blend) — the same image PaintTextureSet.Images exports, so the
+			// viewport and the export agree. The binding keeps the height path's convention: the
+			// combined map shares it, and the shader's uNormalY reads it from the binding.
+			if ( canvas.HeightMap is not null || canvas.NormalMap is not null )
 			{
-				normal = new DecodedImage( canvas.HeightMap.Width, canvas.HeightMap.Height, PaintTextureSet.HeightToNormal( canvas.HeightMap ) );
+				var fromHeight = canvas.HeightMap is null ? null : PaintTextureSet.HeightToNormal( canvas.HeightMap );
+				var painted = canvas.NormalMap is null ? null : PaintLayers.Opaque( canvas, PaintChannel.Normal );
+				byte[] normalBytes;
+				int nw, nh;
+				if ( painted is null )
+				{
+					normalBytes = fromHeight!;
+					nw = canvas.HeightMap!.Width; nh = canvas.HeightMap.Height;
+				}
+				else if ( fromHeight is null )
+				{
+					normalBytes = painted;
+					nw = canvas.NormalMap.Width; nh = canvas.NormalMap.Height;
+				}
+				else
+				{
+					normalBytes = PaintTextureSet.CombineNormals( fromHeight, canvas.HeightMap.Width, canvas.HeightMap.Height,
+						painted, canvas.NormalMap.Width, canvas.NormalMap.Height );
+					nw = canvas.NormalMap.Width; nh = canvas.NormalMap.Height;
+				}
+				normal = PaintImage( nw, nh, normalBytes );
 				descriptor = descriptor.WithChannel( MaterialChannel.Normal,
 					TextureBinding.ForNormal( new AssetReference( DocumentId + ":paint:" + batch.MaterialSlot + ":normal", "paint:normal" ) ) );
 			}
 			if ( canvas.RoughnessMap is not null )
 			{
-				rough = new DecodedImage( canvas.RoughnessMap.Width, canvas.RoughnessMap.Height, PaintLayers.Opaque( canvas, PaintChannel.Roughness ) );
+				rough = PaintImage( canvas.RoughnessMap.Width, canvas.RoughnessMap.Height, PaintLayers.Opaque( canvas, PaintChannel.Roughness ) );
 				descriptor = descriptor.WithChannel( MaterialChannel.Roughness,
 					TextureBinding.ForData( new AssetReference( DocumentId + ":paint:" + batch.MaterialSlot + ":rough", "paint:rough" ) ) )
 					with { RoughnessFactor = 1f };
 			}
 			if ( canvas.MetalnessMap is not null )
 			{
-				metal = new DecodedImage( canvas.MetalnessMap.Width, canvas.MetalnessMap.Height, PaintLayers.Opaque( canvas, PaintChannel.Metalness ) );
+				metal = PaintImage( canvas.MetalnessMap.Width, canvas.MetalnessMap.Height, PaintLayers.Opaque( canvas, PaintChannel.Metalness ) );
 				descriptor = descriptor.WithChannel( MaterialChannel.Metallic,
 					TextureBinding.ForData( new AssetReference( DocumentId + ":paint:" + batch.MaterialSlot + ":metal", "paint:metal" ) ) )
 					with { MetallicFactor = 1f };
 			}
 
+			// Emission is a grey self-illumination mask (sRGB): the glow is albedo x mask, the way
+			// complex.vfx shades it (PaintTextureSet.Shade). The batch raises a zero emission factor
+			// to 1 when an emission map is present, so the mask shows at full strength.
+			if ( canvas.EmissiveMap is not null )
+			{
+				emission = PaintImage( canvas.EmissiveMap.Width, canvas.EmissiveMap.Height, PaintLayers.Opaque( canvas, PaintChannel.Emissive ) );
+				descriptor = descriptor.WithChannel( MaterialChannel.Emission,
+					TextureBinding.ForEmission( new AssetReference( DocumentId + ":paint:" + batch.MaterialSlot + ":emit", "paint:emit" ) ) );
+			}
+			// Baked ambient occlusion (linear data, grey in RGB): carried through the composite
+			// untouched, never painted. A copy — the snapshot must not alias the live canvas bytes.
+			if ( canvas.AmbientOcclusionMap is not null )
+			{
+				occlusion = PaintImage( canvas.AmbientOcclusionMap.Width, canvas.AmbientOcclusionMap.Height,
+					canvas.AmbientOcclusionMap.Rgba );
+				descriptor = descriptor.WithChannel( MaterialChannel.AmbientOcclusion,
+					TextureBinding.ForData( new AssetReference( DocumentId + ":paint:" + batch.MaterialSlot + ":ao", "paint:ao" ) ) );
+			}
+
 			mesh.Batches[i] = new CpuMesh.DrawBatch( batch, descriptor, color, normal ?? batch.NormalImage,
-				rough ?? batch.RoughnessImage, metal ?? batch.MetallicImage, batch.EmissionImage, batch.OcclusionImage );
+				rough ?? batch.RoughnessImage, metal ?? batch.MetallicImage, emission ?? batch.EmissionImage, occlusion ?? batch.OcclusionImage );
 		}
+	}
+
+	/// <summary>PaintCanvas rasterises UV V=0 at row 0; DecodedImage stores V=1 at row 0 because GL upload flips rows.</summary>
+	static DecodedImage PaintImage( int width, int height, byte[] rgba )
+	{
+		int stride = width * 4;
+		var flipped = new byte[rgba.Length];
+		for ( int row = 0; row < height; row++ )
+			Array.Copy( rgba, row * stride, flipped, (height - 1 - row) * stride, stride );
+		return new DecodedImage( width, height, flipped );
+	}
+
+	/// <summary>Nearest-sampled copy of a grey opacity map (R channel, baked over 1) into an
+	/// albedo image's alpha channel, at the albedo's size.</summary>
+	static void StampOpacity( byte[] albedoRgba, int aw, int ah, byte[] opacity, int ow, int oh )
+	{
+		for ( var y = 0; y < ah; y++ )
+			for ( var x = 0; x < aw; x++ )
+			{
+				var j = (Math.Min( y * oh / ah, oh - 1 ) * ow + Math.Min( x * ow / aw, ow - 1 )) * 4;
+				albedoRgba[(y * aw + x) * 4 + 3] = opacity[j];
+			}
 	}
 
 	/// <summary>Build the clip's reference props. They are scenery, not the character, so a

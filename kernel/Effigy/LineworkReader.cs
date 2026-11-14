@@ -27,6 +27,11 @@ public sealed class LineworkStroke
 	public string Color = "#ecebe6";
 	public float Size;
 	public float Opacity = 1f;
+	// Null inherits the layer's material value; legacy drawings remain flat/non-metallic.
+	public float? Height;
+	public float? Roughness;
+	public float? Metalness;
+	public LineworkMaterialChannels Channels = LineworkMaterialChannels.All;
 	public bool Closed;
 	public List<Vec2> Points = new();
 	public List<float> Pressures = new();
@@ -40,6 +45,11 @@ public sealed class LineworkLayer
 	public string Name = "Layer";
 	public bool Visible = true;
 	public bool Ref;
+	public bool Locked;
+	public float Opacity = 1f;
+	public float Height;
+	public float Roughness = 0.5f;
+	public float Metalness;
 	public List<LineworkStroke> Strokes = new();
 }
 
@@ -50,6 +60,7 @@ public sealed class LineworkDocument
 	public bool SymOn;
 	public float SymX;
 	public List<LineworkLayer> Layers = new();
+	public LineworkMaterialSettings Material = new();
 
 	public int ClosedStrokeCount
 	{
@@ -161,6 +172,8 @@ public static class LineworkReader
 
 	static float Num( JsonElement o, string key, float fallback = 0f ) =>
 		o.TryGetProperty( key, out var v ) && v.ValueKind == JsonValueKind.Number ? v.GetSingle() : fallback;
+	static float? OptionalNum( JsonElement o, string key ) =>
+		o.TryGetProperty( key, out var v ) && v.ValueKind == JsonValueKind.Number ? v.GetSingle() : null;
 
 	/// <summary>Parses .linework JSON text. Never throws on bad input: false + error instead.</summary>
 	public static bool TryParse( string json, out LineworkDocument doc, out string error )
@@ -181,6 +194,11 @@ public static class LineworkReader
 				return false;
 			}
 			doc = new LineworkDocument { Name = Str( root, "name" ) };
+			if ( root.TryGetProperty( "material", out var material ) && material.ValueKind == JsonValueKind.Object )
+			{
+				try { doc.Material = JsonSerializer.Deserialize<LineworkMaterialSettings>( material.GetRawText(), LineworkMaterialSettings.JsonOptions ) ?? new(); }
+				catch ( Exception e ) { error = $"invalid material settings: {e.Message}"; return false; }
+			}
 			if ( root.TryGetProperty( "sym", out var sym ) && sym.ValueKind == JsonValueKind.Object )
 			{
 				doc.SymOn = Flag( sym, "on" );
@@ -195,6 +213,11 @@ public static class LineworkReader
 					Name = Str( lv, "name", "Layer" ),
 					Visible = Flag( lv, "visible", true ),
 					Ref = Flag( lv, "ref" ),
+					Locked = Flag( lv, "locked" ),
+					Opacity = Num( lv, "opacity", 1f ),
+					Height = Num( lv, "height" ),
+					Roughness = Num( lv, "roughness", 0.5f ),
+					Metalness = Num( lv, "metalness" ),
 				};
 				if ( !lv.TryGetProperty( "strokes", out var strokes ) || strokes.ValueKind != JsonValueKind.Array )
 				{
@@ -211,6 +234,10 @@ public static class LineworkReader
 						Color = Str( sv, "color", "#ecebe6" ),
 						Size = Num( sv, "size" ),
 						Opacity = Num( sv, "opacity", 1f ),
+						Height = OptionalNum( sv, "height" ),
+						Roughness = OptionalNum( sv, "roughness" ),
+						Metalness = OptionalNum( sv, "metalness" ),
+						Channels = (LineworkMaterialChannels)(int)Num( sv, "channels", (float)LineworkMaterialChannels.All ),
 						Closed = Flag( sv, "closed" ),
 					};
 					if ( sv.TryGetProperty( "pts", out var pts ) )

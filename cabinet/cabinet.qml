@@ -101,6 +101,18 @@ Window {
     }
     onChatOpenChanged: { if (chatOpen) { host.refreshChat(); root.activePane = root.chatOpenPane > 0 ? root.chatOpenPane : 1; root.chatOpenPane = 0; root.placeChatByWalkie(); } }   // chat auto-opens with one panel selected, pane 1 unless a pane TALK opened it
     Shortcut { sequence: "Ctrl+L"; context: Qt.ApplicationShortcut; onActivated: { root.chatOpen = !root.chatOpen; if (root.chatOpen) claudePanel.focusInput() } }
+    // LV1 2026-11-13: zoom for the pane pace decks (their text included). Ctrl+wheel over a deck,
+    // or Ctrl+= / Ctrl+- / Ctrl+0 anywhere in the chest. Each deck caps it to fit its pane.
+    property real deckZoom: 1.0
+    readonly property var deckZooms: [0.75, 1.0, 1.25, 1.5]
+    function zoomDecks(dir) {
+        if (dir === 0) { deckZoom = 1.0; return }
+        var i = deckZooms.indexOf(deckZoom); if (i < 0) i = 1;
+        deckZoom = deckZooms[Math.max(0, Math.min(deckZooms.length - 1, i + dir))];
+    }
+    Shortcut { sequences: ["Ctrl+=", "Ctrl++"]; context: Qt.ApplicationShortcut; onActivated: root.zoomDecks(1) }
+    Shortcut { sequence: "Ctrl+-"; context: Qt.ApplicationShortcut; onActivated: root.zoomDecks(-1) }
+    Shortcut { sequence: "Ctrl+0"; context: Qt.ApplicationShortcut; onActivated: root.zoomDecks(0) }
     // the run the controls work: the one being watched if it is building, else any that is
     readonly property var liveRun: {
         var any = null;
@@ -1228,37 +1240,20 @@ Window {
         
         // paneClear removed 2026-10-25 at user order: no CLEAR button in viewports.
         ReplayStrip { src: sp.pn; x: 8; y: 28; width: sp.width - 16 }
-        // this pane's run controls, faint until the mouse comes near
-        Flow {
-            id: spKeys
-            x: 8; y: sp.height - height - 8; width: sp.width * 0.62
-            spacing: 4
-            opacity: spHover.hovered ? 1 : 0.5
-            visible: false
-            HoverHandler { id: spHover }
-            Key {
-                label: sp.replaying ? "LIVE" : sp.live ? "LIVE" : "DONE"; lamp: true; lit: sp.live && !sp.replaying && (!sp.r.paused || root.blinkOn)
-                tip: sp.replaying ? "leave the replay: back to the run's newest model" : sp.live ? "showing the run as it builds" : "the run has ended"
-                onClicked: if (sp.replaying) sp.pn.replayLive()
+        StepTag { text: sp.pn.stepChangeText; rev: sp.pn.shownRevision; x: 8; y: sp.replaying ? sp.height - height - 60 : 28; maxWidth: sp.width - 16; z: 7 }
+        // LV1 2026-11-13: this pane's pace deck (PaneDeck.qml) replaces the old hidden key row:
+        // it slides up out of the pane's bottom edge while the pane's run builds
+        Item {
+            anchors.fill: parent; clip: true; z: 6
+            PaneDeck {
+                objectName: "paneDeck" + sp.n
+                x: 8; y: parent.height - height - 8
+                n: sp.n; run: sp.r; revision: sp.pn.shownRevision; replaying: sp.replaying
+                controller: host; art: root.art; mono: root.mono; amber: root.amber; blinkOn: root.blinkOn
+                zoom: root.deckZoom; paneWidth: sp.width; paneHeight: sp.height
+                onZoomStep: function (d) { root.zoomDecks(d) }
+                onTip: function (t) { root.keyTip = t }
             }
-            Key {
-                enabled: sp.live && sp.r.paused; opacity: enabled ? 1 : 0.4
-                label: "STEP"; tip: enabled ? "let the held run make one more change" : "HOLD the run first, then step it one change at a time"
-                onClicked: host.stepRun(sp.r.dir)
-            }
-            Key {
-                enabled: sp.live; opacity: enabled ? 1 : 0.4
-                label: sp.live && sp.r.openState !== "" ? "CLOSE" : "STOP"
-                tip: !sp.live ? "the run has ended" : sp.r.openState !== "" ? "CLOSE: the model is done, end the run and keep it" : "STOP: end this pane's run, keep the model"
-                onClicked: host.stopResearch(sp.r.dir)
-            }
-            Key {
-                visible: !sp.replaying && !!sp.r && sp.r.latestRevision > 1
-                label: "REPLAY"; tip: "play this pane's build back step by step; leave a note on any step"
-                onClicked: sp.pn.replayRun(sp.pn.runDir)
-            }
-            Key { small: true; label: "FIT"; tip: "fit the whole model in this pane. Hold the right mouse button to fly: WASD, Q/E down/up, Shift fast, wheel speed"; onClicked: root.camCmd(sp.n, "frame") }
-            Key { small: true; label: "X"; tip: "empty this pane: the run keeps going, find it under RUNS"; onClicked: sp.pn.clear() }
         }
         ToolWheel {
             id: spWheel
@@ -1281,6 +1276,31 @@ Window {
         Rectangle {                                  // a run dragged over: it lands here
             anchors.fill: parent; color: root.amber; opacity: runDrag.over === sp.n ? 0.18 : 0
         }
+    }
+
+    // 2026-11-14: what the shown step did ("NEW tail · CHANGED head"); the viewport flashes the same parts,
+    // green new / amber changed. Sizes to its words, wraps to 2 lines then elides (tooltip has it all), fades.
+    component StepTag: Item {
+        id: st
+        property string text: ""
+        property real maxWidth: 400
+        width: Math.min(maxWidth, tagWords.implicitWidth + 16); height: tagWords.height + 8
+        opacity: 0; visible: opacity > 0
+        property int rev: 0                      // a new step with the same words still flashes the tag
+        function show() { if (text) { opacity = 1; hold.restart() } else opacity = 0 }
+        onTextChanged: show()
+        onRevChanged: show()
+        Behavior on opacity { NumberAnimation { duration: 500 } }
+        Timer { id: hold; interval: 4500; onTriggered: st.opacity = 0 }
+        Rectangle { anchors.fill: parent; radius: 3; color: "#16191c"; opacity: 0.88; border.width: 1; border.color: st.text.indexOf("added:") === 0 ? "#5fd27a" : "#e8a33d" }
+        Text {
+            id: tagWords
+            x: 8; y: 4; width: st.maxWidth - 16
+            text: st.text; color: "#f4efe2"; font.family: "DejaVu Sans Mono"; font.pixelSize: 12; font.bold: true
+            wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
+        }
+        MouseArea { id: tagMa; anchors.fill: parent; hoverEnabled: true; onContainsMouseChanged: { if (containsMouse) { st.opacity = 1; hold.stop() } else hold.restart() } }
+        C.ToolTip.visible: tagMa.containsMouse && tagWords.truncated; C.ToolTip.text: st.text
     }
 
     // the replay strip over the viewport: plays a run back from the revisions it kept (nothing is recorded),
@@ -1722,7 +1742,10 @@ Window {
                 source: root.art + (k.lit ? "lamp_on.png" : "lamp_off.png"); smooth: false
             }
             Px {
-                x: k.lamp ? 26 : (k.width - 4 - width) / 2; y: 8
+                // 2026-11-14: shrink a long label to fit its key instead of spilling past the edge
+                readonly property real room: k.width - (k.lamp ? 26 : 4) - 6
+                size: Math.max(5, Math.min(8, Math.floor(room / Math.max(1, k.label.length * 1.25))))
+                x: k.lamp ? 26 : (k.width - 4 - width) / 2; y: 8 + (8 - size)
                 text: k.label; color: k.danger ? "#ffb1a2" : k.lit ? root.amber : root.keyText
             }
         }
@@ -2499,7 +2522,11 @@ Window {
             // otherwise it is replayAt, which opens the replay paused on that step.
             function seekIndex(i) { if (!buildSteps.length) return; i = Math.max(0, Math.min(buildSteps.length - 1, i)); var t = replayTarget(); if (!t || !buildDir) return; if (replaying) t.replaySeek(i); else t.replayAt(buildDir, buildSteps[i].rev); }
             Component.onCompleted: { buildDir = paneDir(buildPane); refreshSteps(); }
-            Connections { target: host; function onRunsChanged() { buildPage.refreshSteps(); } }
+            // 2026-11-14: follow the selected pane's run as it changes (a run started after this
+            // page loaded used to leave it on NO RUN forever), and refresh on replay moves too.
+            function follow() { buildDir = paneDir(buildPane); refreshSteps(); }
+            onReplayingChanged: refreshSteps()
+            Connections { target: host; function onRunsChanged() { buildPage.follow(); } function onReplayChanged() { buildPage.refreshSteps(); } }
             // ---- row 1: pane selectors + status LCD
             Repeater { model: 4; Key { objectName: "buildPaneKey" + (index + 1); x: index * (84 + 6); label: "PANE " + (index + 1); lamp: true; lit: buildPage.buildPane === index + 1; onClicked: buildPage.selectPane(index + 1) } }
             Rectangle {
@@ -2514,7 +2541,7 @@ Window {
             // ---- row 2: actions + pace. STEP - is deliberately disabled: history
             // inspection is not yet wired, and it must not rewind the run.
             Key { objectName: "buildPauseKey"; x: 0; y: 44; label: (buildPage.buildRun && buildPage.buildRun.paused) ? "RESUME" : "PAUSE"; lamp: true; lit: !!(buildPage.buildRun && buildPage.buildRun.paused); enabled: !!buildPage.buildDir && !!(buildPage.buildRun && buildPage.buildRun.status === "running"); opacity: enabled ? 1 : 0.45; onClicked: buildPage.doPauseResume() }
-            Key { objectName: "buildStepBackKey"; x: 90; y: 44; label: "STEP -"; enabled: false; opacity: 0.45; tip: "History inspection is not yet wired: this does not rewind the run"; onClicked: {} }
+            Key { objectName: "buildStepBackKey"; x: 90; y: 44; label: "STEP -"; enabled: buildPage.buildSteps.length > 1 && buildPage.buildAt > 0; opacity: enabled ? 1 : 0.45; tip: "Show the previous saved step (replay, paused). Does not rewind the run."; onClicked: buildPage.seekIndex(buildPage.buildAt - 1) }
             Key { objectName: "buildStepKey"; x: 180; y: 44; label: "STEP +"; enabled: !!buildPage.buildDir && !!(buildPage.buildRun && buildPage.buildRun.paused); opacity: enabled ? 1 : 0.45; onClicked: buildPage.doStep() }
             Key { objectName: "buildStopKey"; x: 270; y: 44; label: "STOP"; danger: true; enabled: !!buildPage.buildDir && !!(buildPage.buildRun && buildPage.buildRun.status === "running"); opacity: enabled ? 1 : 0.45; onClicked: buildPage.doStop() }
             Key { objectName: "buildReplayKey"; x: 360; y: 44; label: buildPage.replaying ? "LIVE" : "REPLAY"; lamp: true; lit: buildPage.replaying; enabled: !!buildPage.buildDir && (buildPage.replaying || buildPage.buildSteps.length > 0); opacity: enabled ? 1 : 0.45; onClicked: buildPage.doReplayLive() }
@@ -2529,7 +2556,7 @@ Window {
                 readonly property real reportedPace: paceRun && Number.isFinite(paceRun.pace) ? Math.max(0, Math.min(30, paceRun.pace)) : 0
                 property real shownPace: reportedPace
                 property string pendingDir: ""
-                readonly property string paceText: shownPace < 0.05 ? "Full speed" : shownPace.toFixed(1) + " s/step"
+                readonly property string paceText: shownPace < 0.05 ? "FULL" : shownPace.toFixed(1) + "s"
                 enabled: runDir !== "" && (!paceRun || !paceRun.status || paceRun.status === "running")
                 opacity: enabled ? 1 : 0.5
                 function submit() { flush.stop(); var d = pendingDir; pendingDir = ""; if (d && d === runDir) host.setPace(d, shownPace); }
@@ -2538,20 +2565,22 @@ Window {
                 Rectangle { anchors.fill: parent; anchors.topMargin: 1; anchors.bottomMargin: 1; color: "#0b0c0e"; border.width: 2; border.color: "#3a3d41" }
                 Text { x: 8; y: 10; text: "PACE"; color: "#c2c8ca"; font.family: root.mono; font.pixelSize: 11; font.bold: true }
                 Text { x: 52; y: 11; text: "Slow"; color: "#c2c8ca"; font.family: root.mono; font.pixelSize: 10 }
-                C.Slider { id: paceSlider; objectName: "buildPaceSlider"; x: 92; y: 4; width: parent.width - 92 - 110; height: 28; from: 0; to: 30; stepSize: 0.1; value: 30 - buildPace.shownPace; Accessible.name: "Build step speed"; Accessible.description: "Slow on the left, full speed on the right. Changes only this pane's run."; onMoved: { buildPace.shownPace = Math.round((30 - value) * 10) / 10; buildPace.pendingDir = buildPace.runDir; flush.restart(); } onPressedChanged: if (!pressed && buildPace.pendingDir) buildPace.submit(); C.ToolTip.visible: hovered || pressed; C.ToolTip.delay: 350; C.ToolTip.text: buildPace.paceText + " — this pane only" }
+                C.Slider { id: paceSlider; objectName: "buildPaceSlider"; x: 92; y: 4; width: parent.width - 92 - 110; height: 28; from: 0; to: 30; stepSize: 0.1; value: 30 - buildPace.shownPace; Accessible.name: "Build step speed"; Accessible.description: "Slow on the left, full speed on the right. Changes only this pane's run."; onMoved: { buildPace.shownPace = Math.round((30 - value) * 10) / 10; buildPace.pendingDir = buildPace.runDir; flush.restart(); } onPressedChanged: if (!pressed && buildPace.pendingDir) buildPace.submit(); C.ToolTip.visible: hovered || pressed; C.ToolTip.delay: 350; C.ToolTip.text: (buildPace.shownPace < 0.05 ? "Full speed" : buildPace.shownPace.toFixed(1) + " s per step") + " — this pane only" }
                 Text { x: parent.width - 106; y: 11; text: "Fast"; color: "#c2c8ca"; font.family: root.mono; font.pixelSize: 10 }
-                Px { x: parent.width - 84; y: 8; size: 6; maxWidth: 80; maxLines: 1; text: buildPace.paceText; color: root.amber }
+                Px { anchors.right: parent.right; anchors.rightMargin: 8; y: 8; size: 6; text: buildPace.paceText; color: root.amber }
                 Timer { id: flush; interval: 120; onTriggered: buildPace.submit() }
             }
             // ---- row 3: the build-step / replay ruler, NOT the clip-frame ruler.
             // One mapping, step index <-> x, for ticks, numbers, flag and mouse alike.
             Item {
-                id: buildRule; objectName: "buildRule"; y: 92; width: tlFloor.width; height: 44; activeFocusOnTab: true
+                id: buildRule; objectName: "buildRule"; y: 86; width: tlFloor.width; height: 40; activeFocusOnTab: true
                 readonly property int labelStep: { var e = 1; while (buildPage.buildSteps.length > 1 && e / (buildPage.buildSteps.length - 1) * width < 44) e *= 2; return e; }
                 Keys.onPressed: function (e) { var big = (e.modifiers & Qt.ShiftModifier) ? 10 : 1; if (!buildPage.buildSteps.length) return; if (e.key === Qt.Key_Left) buildPage.seekIndex(buildPage.buildAt - big); else if (e.key === Qt.Key_Right) buildPage.seekIndex(buildPage.buildAt + big); else if (e.key === Qt.Key_Home) buildPage.seekIndex(0); else if (e.key === Qt.Key_End) buildPage.seekIndex(buildPage.buildSteps.length - 1); else return; e.accepted = true; }
                 Image { y: 10; width: parent.width; height: 24; source: root.art + "rule.png"; fillMode: Image.Tile; smooth: false }
+                // steel graduations, so the rule reads as a rule even with only a few saved steps
+                Repeater { model: Math.floor((buildRule.width - 4) / 10) + 1; Rectangle { required property int index; x: 2 + index * 10; y: 10; width: 1; height: index % 5 === 0 ? 4 : 2; color: "#5a6068" } }
                 Rectangle { visible: buildPage.buildSteps.length > 0 && buildPage.buildAt >= 0; y: 4; width: buildPage.stepX(buildPage.buildAt) + 2; height: 4; color: root.amber }
-                Repeater { objectName: "buildTicks"; model: buildPage.buildSteps.length; Rectangle { required property int index; x: buildPage.stepX(index) + 1; y: 10; width: 2; height: index % 10 === 0 || index === buildPage.buildSteps.length - 1 ? 14 : index % 5 === 0 ? 9 : 5; color: "#1d2128" } }
+                Repeater { objectName: "buildTicks"; model: buildPage.buildSteps.length; Rectangle { required property int index; x: buildPage.stepX(index) + 1; y: 10; width: 2; height: buildPage.buildSteps.length <= 24 || index % 10 === 0 || index === buildPage.buildSteps.length - 1 ? 14 : index % 5 === 0 ? 9 : 5; color: "#1d2128" } }
                 Rectangle { visible: buildPage.buildSteps.length > 0; x: buildPage.stepX(buildPage.buildSteps.length - 1) + 1; y: 10; width: 2; height: 14; color: "#1d2128" }
                 Repeater { model: buildPage.buildSteps.length ? Math.floor((buildPage.buildSteps.length - 1) / buildRule.labelStep) + 1 : 0; Px { required property int index; readonly property int stepIndex: index * buildRule.labelStep; x: buildPage.stepX(stepIndex) + 4; visible: x + width <= buildRule.width; y: 22; size: 6; text: buildPage.buildSteps[stepIndex] ? buildPage.buildSteps[stepIndex].rev : ""; color: "#1d2128" } }
                 Px { visible: !buildPage.buildSteps.length; anchors.centerIn: parent; anchors.verticalCenterOffset: 2; text: "NO SAVED STEPS"; color: "#1d2128" }
@@ -2559,7 +2588,10 @@ Window {
                 Rectangle { visible: buildRule.activeFocus; anchors.fill: parent; anchors.topMargin: 8; anchors.bottomMargin: 8; color: "transparent"; border.width: 2; border.color: root.amber; opacity: 0.6 }
                 MouseArea { id: buildScrub; objectName: "buildScrub"; anchors.fill: parent; enabled: buildPage.buildSteps.length > 0; preventStealing: true; cursorShape: Qt.SizeHorCursor; onPressed: function (m) { buildRule.forceActiveFocus(); buildPage.seekIndex(buildPage.stepAt(m.x)); } onPositionChanged: function (m) { if (pressed) buildPage.seekIndex(buildPage.stepAt(m.x)); } onWheel: function (w) { buildPage.seekIndex(buildPage.buildAt + (w.angleDelta.y > 0 ? -1 : 1) * ((w.modifiers & Qt.ShiftModifier) ? 10 : 1)); } }
             }
-            Px { y: 140; size: 6; text: buildPage.replaying ? "REPLAY / SAVED STEP" : "LIVE BUILD · SELECT PANE ABOVE"; color: "#372e22" }
+            Rectangle { objectName: "buildCaption"; y: 128; width: capL.width + 12; height: 14; color: "#efe2c4"; border.width: 1; border.color: "#8a7350"
+                Px { id: capL; x: 6; y: 2; size: 6; text: buildPage.replaying ? "REPLAY · STEP " + (buildPage.buildAt + 1) + " OF " + buildPage.buildSteps.length : "LIVE BUILD · SELECT PANE ABOVE"; color: "#a3341f" } }
+            Rectangle { visible: buildPage.buildSteps.length > 0; anchors.right: parent.right; y: 128; width: capR.width + 12; height: 14; color: "#efe2c4"; border.width: 1; border.color: "#8a7350"
+                Px { id: capR; x: 6; y: 2; size: 6; text: "BUILD STEPS " + buildPage.buildSteps.length + (buildPage.buildRev ? " · REV " + buildPage.buildRev : ""); color: "#372e22" } }
             }
             Item {
             id: timePage
@@ -3207,9 +3239,9 @@ Window {
             Rectangle { anchors.fill: parent; color: "#0b0d10"; radius: 2 }
             Rectangle { x: 2; y: 2; width: parent.width - 4; height: parent.height - 4; color: "#1d2128"; radius: 1 }
             Rectangle { x: 2; y: 2; width: parent.width - 4; height: 2; color: "#3a3f47" }
-            Px { x: 2; y: 24; size: 6; text: "BUILD"; color: tlFloor.page === 0 ? root.amber : "#6b6f75" }
-            Px { x: 2; y: 52; size: 6; text: "CLIP"; color: tlFloor.page === 1 ? root.amber : "#6b6f75" }
-            Px { x: 2; y: 78; size: 6; text: "KEYS"; color: tlFloor.page === 2 ? root.amber : "#6b6f75" }
+            Px { x: 2; y: 24; size: 5; text: "BUILD"; color: tlFloor.page === 0 ? root.amber : "#6b6f75" }
+            Px { x: 2; y: 52; size: 5; text: "CLIP"; color: tlFloor.page === 1 ? root.amber : "#6b6f75" }
+            Px { x: 2; y: 78; size: 5; text: "KEYS"; color: tlFloor.page === 2 ? root.amber : "#6b6f75" }
             Rectangle { x: 48; y: 24; width: 8; height: parent.height - 48; color: "#000000" }
             Item {                                         // the knob: bakelite, slid in its slot
                 objectName: "pageKnob"
@@ -3288,6 +3320,20 @@ Window {
         onWidthChanged: viewSize.restart()
         onHeightChanged: viewSize.restart()
         Timer { id: viewSize; interval: 150; onTriggered: host.setViewSize(view.width, view.height) }
+        StepTag { text: host.stepChangeText; rev: host.shownRevision; x: 8; y: (host.replay && host.replay.dir) ? view.height - height - 60 : 28; maxWidth: view.width - 16; z: 51 }
+        // LV1 2026-11-13: pane 1's pace deck, the same object as panes 2-4 (above the mouse area)
+        Item {
+            anchors.fill: parent; clip: true; z: 50
+            PaneDeck {
+                objectName: "paneDeck1"
+                x: 8; y: parent.height - height - 8
+                n: 1; run: root.p1Run; revision: host.shownRevision; replaying: !!(host.replay && host.replay.dir)
+                controller: host; art: root.art; mono: root.mono; amber: root.amber; blinkOn: root.blinkOn
+                zoom: root.deckZoom; paneWidth: view.width; paneHeight: view.height
+                onZoomStep: function (d) { root.zoomDecks(d) }
+                onTip: function (t) { root.keyTip = t }
+            }
+        }
         MouseArea {
             id: viewMouse
             objectName: "viewMouse"
@@ -3441,7 +3487,7 @@ Window {
                 property var g: host.joinGate ? host.joinGate : {}
                 property string who: g.who ? g.who : "someone"
                 property string subject: g.subject ? g.subject : host.confirmModel
-                property string pane: g.pane ? g.pane : "pane 1"
+                property string pane: g.pane ? (/^[0-9]+$/.test(String(g.pane)) ? "pane " + g.pane : String(g.pane)) : "pane 1"
                 property string preflight: g.firstShape ? ("Preflight passed: first shape " + g.firstShape + " · " + g.lines + " script lines") : "Preflight: see the run script"
                 Rectangle { anchors.fill: parent; color: "#16191c"; border.color: "#d9b13a"; border.width: 3; radius: 0 }
                 MouseArea { anchors.fill: parent; acceptedButtons: Qt.AllButtons; hoverEnabled: true }
@@ -3459,14 +3505,14 @@ Window {
                     Text { width: parent.width; wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter; text: "No answer in 10 minutes = intent dies. Nobody joins, nothing builds."; color: "#ecdcb4"; font.family: "DejaVu Sans Mono"; font.pixelSize: 13 }
                     Item { width: parent.width; height: 8 }
                     Rectangle {
-                        objectName: "modelConfirmYes"; width: parent.width; height: 48; color: "#3fae5a"; border.color: "#1d5c2e"; border.width: 2
+                        id: confirmYesBtn; objectName: "modelConfirmYes"; width: parent.width; height: 48; color: confirmYesMa.containsMouse ? "#5fd27a" : "#3fae5a"; border.color: confirmYesMa.containsMouse ? "#f4efe2" : "#1d5c2e"; border.width: confirmYesMa.containsMouse ? 3 : 2
                         Text { anchors.centerIn: parent; text: "✓  YES — LET THEM MODEL"; color: "#000000"; font.family: "DejaVu Sans Mono"; font.pixelSize: 17; font.bold: true }
-                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: host.confirmModelYes() }
+                        MouseArea { id: confirmYesMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: host.confirmModelYes() }
                     }
                     Rectangle {
-                        objectName: "modelConfirmNo"; width: parent.width; height: 48; color: "#c8452f"; border.color: "#7a2415"; border.width: 2
+                        id: confirmNoBtn; objectName: "modelConfirmNo"; width: parent.width; height: 48; color: confirmNoMa.containsMouse ? "#e8664e" : "#c8452f"; border.color: confirmNoMa.containsMouse ? "#f4efe2" : "#7a2415"; border.width: confirmNoMa.containsMouse ? 3 : 2
                         Text { anchors.centerIn: parent; text: "✕  NO — DON'T LET THEM IN"; color: "#ffffff"; font.family: "DejaVu Sans Mono"; font.pixelSize: 17; font.bold: true }
-                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: host.confirmModelNo() }
+                        MouseArea { id: confirmNoMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: host.confirmModelNo() }
                     }
                 }
             }

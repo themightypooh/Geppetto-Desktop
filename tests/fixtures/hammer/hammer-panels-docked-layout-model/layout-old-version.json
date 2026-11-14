@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 99,
+  "mapId": "test-room",
+  "workspaceId": "default",
+  "activePanelId": "entities",
+  "panels": [
+    { "panelId": "entities", "zone": "Left", "size": 280, "visible": true, "order": 0, "floatX": 0, "floatY": 0, "floatWidth": 480, "floatHeight": 360 }
+  ]
+}

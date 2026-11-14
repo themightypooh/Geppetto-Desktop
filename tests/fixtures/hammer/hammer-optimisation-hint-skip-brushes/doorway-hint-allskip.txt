@@ -1,0 +1,8 @@
+# Same slab as doorway-hint.txt, every face skip: cuts nothing.
+brush doorway-hint-allskip
+face -1 0 0 2 tools/toolsskip
+face 1 0 0 2 tools/toolsskip
+face 0 -1 0 32 tools/toolsskip
+face 0 1 0 32 tools/toolsskip
+face 0 0 -1 0 tools/toolsskip
+face 0 0 1 96 tools/toolsskip

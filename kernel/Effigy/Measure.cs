@@ -142,7 +142,7 @@ public static class ModelMeasure
 						var dist = UVIslands.Distortion( body.Mesh );
 						sb.Append( $", {layout.Count} islands, stretch {dist.Mean:0.00} mean / {dist.Max:0.00} max" );
 					}
-					catch { }
+					catch (System.Exception soft) { Effigy.KernelLog.Soft( "Measure UV islands", soft ); }
 				}
 				if ( paint is not null )
 					sb.Append( $", paint {paint.Width}x{paint.Height}" + ( paintLayers > 0 ? $" ({paintLayers} layer(s))" : "" ) );

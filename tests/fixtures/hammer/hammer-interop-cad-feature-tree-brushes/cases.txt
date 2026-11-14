@@ -1,0 +1,5 @@
+# kind dims... expectedVolume tolerancePercent
+# Rectangles are exact prisms; circles are faceted (sketch tolerance 0.01).
+rect 16 8 4 512 0.01
+rect 10 5 4 200 0.01
+circle 4 2 100.531 1.0

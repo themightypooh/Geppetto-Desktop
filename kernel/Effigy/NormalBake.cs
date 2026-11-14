@@ -1299,7 +1299,96 @@ public static class NormalBake
 	/// degenerate-triangle handling is simplified (such a corner just gets no tangent, and the texel
 	/// falls back to a frame built from the normal).
 	/// </summary>
+	/// <summary>
+	/// Real MikkTSpace (mikktspace.c, zlib), supplied by the host. Input is a plain triangle list, three
+	/// entries per triangle in each array (position, shading normal, UV); output is one tangent per
+	/// entry (xyz unit tangent, w unused here), or null when the host could not run it. When this is
+	/// unset or fails, <see cref="CornerTangents"/> falls back to the in-kernel approximation below.
+	/// </summary>
+	public static Func<Vec3[], Vec3[], Vec2[], Vec4[]> MikkTangents;
+
+	/// <summary>How many tangent builds went through <see cref="MikkTangents"/> (for checks).</summary>
+	public static int MikkRuns;
+
 	static (Vec3[][] Tangents, float[] Signs) CornerTangents( PolyMesh mesh, int[][] cornerNormals, List<Vec3> normals )
+	{
+		if ( MikkTangents is not null )
+		{
+			try
+			{
+				var real = CornerTangentsMikk( mesh, cornerNormals, normals );
+				if ( real.Tangents is not null ) { MikkRuns++; return real; }
+			}
+			catch ( Exception ) { /* fall back to the approximation */ }
+		}
+
+		return CornerTangentsApprox( mesh, cornerNormals, normals );
+	}
+
+	/// <summary>The bake's per-corner frame from <see cref="MikkTangents"/>: the cage is fanned with
+	/// <see cref="FaceTriangles"/> (the same triangles the bake rasterises), MikkTSpace welds identical
+	/// corners itself, and the handedness stays the face's UV-area sign (Mikk's orientation test).</summary>
+	static (Vec3[][] Tangents, float[] Signs) CornerTangentsMikk( PolyMesh mesh, int[][] cornerNormals, List<Vec3> normals )
+	{
+		var pos = new List<Vec3>();
+		var nrm = new List<Vec3>();
+		var uvs = new List<Vec2>();
+		var owner = new List<(int Face, int Corner)>();
+		var signs = new float[mesh.FaceCount];
+
+		for ( var fi = 0; fi < mesh.FaceCount; fi++ )
+		{
+			var face = mesh.Faces[fi];
+
+			if ( face.Count < 3 || face.UVs is null || face.UVs.Length != face.Count )
+				continue;
+
+			var area = 0f;
+
+			for ( var i = 1; i < face.Count - 1; i++ )
+				area += Vec2.Cross( face.UVs[i] - face.UVs[0], face.UVs[i + 1] - face.UVs[0] );
+
+			signs[fi] = area < 0f ? -1f : 1f;
+
+			foreach ( var (ta, tb, tc) in FaceTriangles( mesh, fi ) )
+				foreach ( var c in new[] { ta, tb, tc } )
+				{
+					pos.Add( mesh.Positions[face.Indices[c]] );
+					nrm.Add( normals[cornerNormals[fi][c]] );
+					uvs.Add( face.UVs[c] );
+					owner.Add( (fi, c) );
+				}
+		}
+
+		var tangents = new Vec3[mesh.FaceCount][];
+
+		for ( var fi = 0; fi < mesh.FaceCount; fi++ )
+		{
+			var face = mesh.Faces[fi];
+			if ( face.Count >= 3 && face.UVs is not null && face.UVs.Length == face.Count )
+				tangents[fi] = new Vec3[face.Count];
+		}
+
+		if ( pos.Count == 0 )
+			return (tangents, signs);
+
+		var result = MikkTangents( pos.ToArray(), nrm.ToArray(), uvs.ToArray() );
+
+		if ( result is null || result.Length != pos.Count )
+			return (null, null);
+
+		for ( var i = 0; i < result.Length; i++ )
+		{
+			var (fi, c) = owner[i];
+			var t = new Vec3( result[i].x, result[i].y, result[i].z );
+			if ( t.LengthSquared > 1e-12f && tangents[fi][c].LengthSquared < 1e-12f )
+				tangents[fi][c] = t.Normal;
+		}
+
+		return (tangents, signs);
+	}
+
+	static (Vec3[][] Tangents, float[] Signs) CornerTangentsApprox( PolyMesh mesh, int[][] cornerNormals, List<Vec3> normals )
 	{
 		var tangents = new Vec3[mesh.FaceCount][];
 		var signs = new float[mesh.FaceCount];

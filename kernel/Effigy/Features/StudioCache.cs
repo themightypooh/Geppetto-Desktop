@@ -60,7 +60,7 @@ public static class StudioCache
 	/// fields, which read back as a body holding an EMPTY mesh instead of none — a difference no
 	/// feature can currently produce, which is exactly why it would have gone unnoticed until it
 	/// mattered. There is no 1 left in the wild to be compatible with.</summary>
-	public const int Version = 2;
+	public const int Version = 3;
 
 	public const string Suffix = ".cache";
 
@@ -113,9 +113,13 @@ public static class StudioCache
 	/// working. A loader that reports "loaded" without it is how a cache that quietly stopped
 	/// hitting goes unnoticed for a week.
 	/// </summary>
-	public static PartStudio Load( string documentPath, out string note )
+	public static PartStudio Load( string documentPath, out string note ) => Load( documentPath, out note, keepSnapshots: true );
+
+	/// <summary>The same, for a studio that is only read: no per-feature snapshots (<see cref="PartStudio.KeepSnapshots"/>).</summary>
+	public static PartStudio Load( string documentPath, out string note, bool keepSnapshots )
 	{
 		var studio = StudioDocument.ReadFile( documentPath );
+		studio.KeepSnapshots = keepSnapshots;
 
 		if ( TryRestore( studio, documentPath, out note ) )
 			return studio;
@@ -125,6 +129,78 @@ public static class StudioCache
 
 		note = $"{note}; {saved}";
 		return studio;
+	}
+
+	/// <summary>
+	/// Load a document ON TOP OF the studio that was built from an earlier version of it: the
+	/// features both share from the top (same text, same document settings, same files on disk) are
+	/// kept with their built state, and only the rest are run. For a viewer following a model that
+	/// is built one feature at a time, where every saved step is the last one plus a feature, and a
+	/// fresh <see cref="Load"/> per step re-ran the whole tree (a painted model: ~45 s a step).
+	///
+	/// Hands back <paramref name="previous"/>, changed, when it can carry anything; otherwise a plain
+	/// <see cref="Load"/>. The caller must own <paramref name="previous"/> outright and not read it
+	/// again except through the return value. Stepping BACK is a restore from the snapshot cache.
+	/// </summary>
+	public static PartStudio LoadOnto( PartStudio previous, string previousPath, string documentPath, out string note )
+	{
+		if ( previous is null || !previous.KeepSnapshots || previousPath is null )
+			return Load( documentPath, out note );
+
+		var next = StudioDocument.ReadFile( documentPath );
+
+		if ( Settings( previous ) != Settings( next ) || FileSignature( previous, previousPath ) != FileSignature( next, documentPath ) )
+		{
+			next.KeepSnapshots = true;
+			next.Rebuild();
+			note = "document settings or its files changed: rebuilt from the top";
+			return next;
+		}
+
+		var shared = 0;
+		var limit = Math.Min( previous.Features.Count, next.Features.Count );
+
+		while ( shared < limit && StudioDocument.FeatureText( previous.Features[shared] ) == StudioDocument.FeatureText( next.Features[shared] ) )
+			shared++;
+
+		var features = previous.Features.Take( shared ).Concat( next.Features.Skip( shared ) ).ToList();
+		previous.Features = features;
+		previous.MarkDirty( shared );
+		var report = previous.Rebuild();
+		note = $"carried {report.FeaturesReused} of {previous.EffectiveCount} feature(s), ran {report.FeaturesEvaluated}";
+		return previous;
+	}
+
+	/// <summary>Everything a document says apart from its features.</summary>
+	static string Settings( PartStudio studio )
+	{
+		var text = StudioDocument.Write( studio );
+
+		foreach ( var feature in studio.Features )
+		{
+			var one = StudioDocument.FeatureText( feature );
+			var at = text.IndexOf( one, StringComparison.Ordinal );
+
+			if ( at >= 0 )
+				text = text.Remove( at, one.Length );
+		}
+
+		return text;
+	}
+
+	/// <summary>The files a rebuild reads, by content, in order: a sculpt blob saved beside each
+	/// revision has a new path every time but the same bytes.</summary>
+	static string FileSignature( PartStudio studio, string documentPath )
+	{
+		var sb = new StringBuilder();
+
+		foreach ( var path in ExternalFiles( studio, documentPath ) )
+		{
+			try { sb.Append( Hash( File.Exists( path ) ? Convert.ToBase64String( File.ReadAllBytes( path ) ) : "" ).ToString( "x16" ) ).Append( '|' ); }
+			catch ( IOException ) { sb.Append( "?|" ); }
+		}
+
+		return sb.ToString();
 	}
 
 	/// <summary>
@@ -192,10 +268,18 @@ public static class StudioCache
 			var warnings = ReadNotes( reader );
 			var errors = ReadNotes( reader );
 
-			// Nothing past the last note is read, so trailing bytes are ignored rather than
-			// refused: a later format can append a section and this build still opens the file.
+			// Restore derived appearance state with geometry: the feature text alone does not carry resolved fur slots.
 			studio.AdoptCachedState( bodies, planes );
 			ApplyNotes( studio, warnings, errors );
+            int furCount = reader.ReadInt32();
+            if (furCount < 0 || furCount > studio.Features.Count) throw new IOException("Invalid cached fur state count.");
+            for (int i=0; i<furCount; i++)
+            {
+                string id=reader.ReadString(); int slot=reader.ReadInt32();
+                var fur=studio.Features.OfType<FurFeature>().FirstOrDefault(f=>f.Id==id);
+                if (fur is null) throw new IOException("Cached fur feature is missing.");
+                fur.ResolvedSlot=slot;
+            }
 
 			note = $"restored {bodies.Count} body(ies)";
 			return true;
@@ -262,6 +346,9 @@ public static class StudioCache
 				WritePlanes( writer, studio.Planes );
 				WriteNotes( writer, WarningsFor( studio ) );
 				WriteNotes( writer, ErrorsFor( studio ) );
+                var furFeatures=studio.Features.OfType<FurFeature>().ToArray();
+                writer.Write(furFeatures.Length);
+                foreach (var fur in furFeatures) { writer.Write(fur.Id); writer.Write(fur.ResolvedSlot); }
 			}
 
 			File.Move( temporary, path, overwrite: true );

@@ -77,7 +77,29 @@ public static class CatmullClark
 {
 	/// <summary>Subdivide `levels` times. Level 0 returns a clone, so callers can always treat the
 	/// result as theirs to mutate.</summary>
+	private static readonly Dictionary<(int Mesh, int Levels), PolyMesh> _subdivCache = new();
+	private static readonly object _subdivLock = new();
+
+	public static int CacheCount { get { lock ( _subdivLock ) return _subdivCache.Count; } }
+	public static void ClearCache() { lock ( _subdivLock ) _subdivCache.Clear(); }
+
 	public static PolyMesh Subdivide( PolyMesh mesh, int levels = 1 ) => Subdivide( mesh, levels, null, out _ );
+
+	public static PolyMesh SubdivideCached( PolyMesh mesh, int levels = 1 )
+	{
+		if ( mesh is null ) throw new ArgumentNullException( nameof( mesh ) );
+		var key = ( RuntimeHelpers_GetHash( mesh ), levels );
+		lock ( _subdivLock )
+		{
+			if ( _subdivCache.TryGetValue( key, out var cached ) )
+				return cached.Clone();
+		}
+		var result = Subdivide( mesh, levels );
+		lock ( _subdivLock ) _subdivCache[key] = result.Clone();
+		return result;
+	}
+
+	private static int RuntimeHelpers_GetHash( PolyMesh mesh ) => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode( mesh );
 
 	/// <summary>
 	/// Subdivide with creased edges, Blender's edge crease (Shift+E). A crease's sharpness is how
@@ -91,6 +113,19 @@ public static class CatmullClark
 		if ( levels < 0 )
 			throw new ArgumentOutOfRangeException( nameof( levels ) );
 
+		if ( creases is null )
+		{
+			var key = ( System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode( mesh ), levels );
+			lock ( _subdivLock )
+			{
+				if ( _subdivCache.TryGetValue( key, out var cached ) )
+				{
+					remaining = new Dictionary<EdgeKey, float>();
+					return cached.Clone();
+				}
+			}
+		}
+
 		var current = mesh.Clone();
 		var live = creases is null ? null : new Dictionary<EdgeKey, float>( creases );
 
@@ -102,6 +137,12 @@ public static class CatmullClark
 		}
 
 		remaining = live ?? new Dictionary<EdgeKey, float>();
+
+		if ( creases is null )
+		{
+			var key = ( System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode( mesh ), levels );
+			lock ( _subdivLock ) _subdivCache[key] = current.Clone();
+		}
 		return current;
 	}
 

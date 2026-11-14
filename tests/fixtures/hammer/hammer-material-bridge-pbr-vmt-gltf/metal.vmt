@@ -1,0 +1,9 @@
+"LightmappedGeneric"
+{
+	"$basetexture" "metal/metalwall001a"
+	"$surfaceprop" "metal"
+	"$roughness" "0.350"
+	"$metalness" "1.000"
+	"$bumpmap" "metal/metalwall001a_normal"
+	"$mysteryknob" "7"
+}

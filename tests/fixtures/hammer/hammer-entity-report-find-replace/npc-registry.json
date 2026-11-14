@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "name": "report-npc",
+  "description": "Fixture registry for hammer-entity-report-find-replace only. The core registry (kernel/Effigy/Map/registry/core-source1.json, owned by hammer-entity-registry-fgd-json) has no NPC class, so the report fixture ships its own npc_citizen / npc_combine_s definitions here. Tests load the core registry and merge this file with EntityRegistry.LoadAdditional; this file must NOT be copied into kernel/Effigy/Map/registry (that directory is the registry worker's).",
+  "classes": [
+    {
+      "name": "npc_citizen", "kind": "point",
+      "description": "Citizen NPC (fixture class for the Entity Report tests).",
+      "baseClasses": [ "Targetname" ],
+      "keyvalues": [
+        { "name": "model", "type": "model", "description": "Model file (.mdl)." },
+        { "name": "health", "type": "int", "default": "100", "description": "Health. 0 = unbreakable." },
+        { "name": "squadname", "type": "string", "description": "Squad this NPC belongs to." }
+      ],
+      "inputs": [],
+      "outputs": [],
+      "helpers": [ { "kind": "origin" }, { "kind": "angles" } ]
+    },
+    {
+      "name": "npc_combine_s", "kind": "point",
+      "description": "Combine soldier NPC (fixture class: Find/Replace class-rename target).",
+      "baseClasses": [ "Targetname" ],
+      "keyvalues": [
+        { "name": "model", "type": "model", "description": "Model file (.mdl)." },
+        { "name": "health", "type": "int", "default": "100", "description": "Health. 0 = unbreakable." },
+        { "name": "squadname", "type": "string", "description": "Squad this NPC belongs to." }
+      ],
+      "inputs": [],
+      "outputs": [],
+      "helpers": [ { "kind": "origin" }, { "kind": "angles" } ]
+    }
+  ]
+}

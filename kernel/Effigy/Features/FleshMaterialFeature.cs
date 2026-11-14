@@ -141,10 +141,37 @@ public sealed class FleshMaterialFeature : Feature
 	readonly Dictionary<string, PaintCanvas> _shown = new();
 	readonly Dictionary<string, PaintCanvas> _under = new();
 
+	/// <summary>Every body id any of this feature's caches still holds (the memory test checks it drops the gone ones).</summary>
+	public IReadOnlyCollection<string> CachedBodyIds =>
+		new System.Collections.IDictionary[] { _maps, _recipes, _shown, _under, _vertex, _shownColours, _underColours, _shaderMaps, _shaderRecipes }
+			.SelectMany( c => c.Keys.Cast<string>() ).ToHashSet();
+
+	/// <summary>The most texels one rebuild bakes across all its bodies: 32 bodies at 1024². Each texel keeps
+	/// about 17 bytes here (albedo, roughness, glow, coverage, the shown canvas) and 4 more in every rebuild
+	/// snapshot after this feature, so without a cap "every body" on a patterned model (700 bodies) held 12 GB.</summary>
+	public const long TexelBudget = 32L * 1024 * 1024;
+
+	/// <summary>The resolution each body was baked at last rebuild: <see cref="Resolution"/>, halved until the
+	/// bodies baked fit <see cref="TexelBudget"/>.</summary>
+	public int ResolutionUsed { get; private set; }
+
 	protected override void Execute( FeatureContext ctx )
 	{
 		var targets = RequireBodies( ctx, Bodies );
 		var written = new List<string>();
+
+		var baking = PerVertex.Value ? 0 : targets.Count( b => b.Mesh is { Faces.Count: > 0 } );
+		var size = Resolution.Clamped;
+		while ( size > 64 && (long)size * size * baking > TexelBudget ) size /= 2;
+		ResolutionUsed = size;
+
+		// Bodies that are gone (a pattern count lowered, a part deleted) or no longer picked would keep
+		// their maps for the life of the document.
+		var live = targets.Select( b => b.Id ).ToHashSet();
+		foreach ( var cache in new System.Collections.IDictionary[] { _maps, _recipes, _shown, _under, _vertex, _shownColours, _underColours, _shaderMaps, _shaderRecipes } )
+			foreach ( var id in cache.Keys.Cast<string>().Where( id => !live.Contains( id ) ).ToList() )
+				cache.Remove( id );
+
 		VmatAsset = null;
 		var unwrapped = new List<string>();
 		var unwrappedIds = new List<string>();
@@ -187,11 +214,11 @@ public sealed class FleshMaterialFeature : Feature
 
 			// A recipe over everything the bake reads, so a rebuild for an unrelated feature does not
 			// pay for the bake again.
-			var recipe = $"{PresetName}|{Resolution.Clamped}|{Detail.Clamped}|{Seed.Clamped}|{Seeds.Value}|{Reach.Clamped}|{Front.Clamped}|{VertexHash( mesh )}|{MultiresSculpt.TopologyId( mesh )}|{AtlasId.Of( mesh )}|{PositionHash( mesh )}|{PaintHash( mesh.Paint )}";
+			var recipe = $"{PresetName}|{size}|{Detail.Clamped}|{Seed.Clamped}|{Seeds.Value}|{Reach.Clamped}|{Front.Clamped}|{VertexHash( mesh )}|{MultiresSculpt.TopologyId( mesh )}|{AtlasId.Of( mesh )}|{PositionHash( mesh )}|{PaintHash( mesh.Paint )}";
 
 			if ( !_maps.TryGetValue( body.Id, out var maps ) || !_recipes.TryGetValue( body.Id, out var was ) || was != recipe )
 			{
-				maps = FleshMaterial.Bake( mesh, Stack, Resolution.Clamped, Detail.Clamped, Seed.Clamped, corruption );
+				maps = FleshMaterial.Bake( mesh, Stack, size, Detail.Clamped, Seed.Clamped, corruption );
 				_maps[body.Id] = maps;
 				_recipes[body.Id] = recipe;
 			}
@@ -269,6 +296,12 @@ public sealed class FleshMaterialFeature : Feature
 				$"{string.Join( ", ", perVertex )}: Per vertex puts the material in the vertex colours, which only Effigy's viewport "
 				+ "and a custom shader read. s&box's complex and skin shaders ignore vertex colour, so the game model shows plain material.",
 				"Turn Per vertex off to bake colour and roughness textures (it unwraps the body if it has no UVs)" );
+
+		// Last, so it is the one shown: the maps are coarser than asked and nothing else would say why.
+		if ( size < Resolution.Clamped )
+			Warn( "Baked at a lower resolution",
+				$"{baking} parts at {Resolution.Clamped}² would hold {(long)Resolution.Clamped * Resolution.Clamped * baking * 17 >> 20} MB of maps, so each was baked at {size}².",
+				"Pick fewer parts in On (one Flesh Material per group of parts) to keep the full resolution" );
 	}
 
 	IEnumerable<string> WriteFiles( Body body, FleshMaps maps, string recipe )

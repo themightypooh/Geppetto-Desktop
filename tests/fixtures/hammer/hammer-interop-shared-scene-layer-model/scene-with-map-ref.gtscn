@@ -1,0 +1,5 @@
+gtscn 1
+layer	Map	pooh	mapping
+asset	room01	map	maps/room01.gmap
+node	room01-node	-	room01	Map
+xform	room01-node	0 0 0	0 0 0	1 1 1

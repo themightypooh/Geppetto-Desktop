@@ -1,0 +1,4 @@
+connections
+{
+"OnPressed" "door_01,Open,,0.5,-1"
+}

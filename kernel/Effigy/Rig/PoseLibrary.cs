@@ -150,6 +150,26 @@ public sealed class PoseLibrary
 		return pose.Bones.ToDictionary( kv => kv.Key, kv => kv.Value.ToRigPose(), StringComparer.OrdinalIgnoreCase );
 	}
 
+	/// <summary>Store a copy of a pose under a name, replacing any pose already stored there.</summary>
+	public void Store( string name, IReadOnlyDictionary<string, RigPose> pose ) => SetPose( name, pose );
+
+	/// <summary>Store the timeline's evaluated pose at a frame under a name.</summary>
+	public void StoreFromTimeline( string name, NlaTimeline timeline, float frame )
+	{
+		ArgumentNullException.ThrowIfNull( timeline );
+		SetPose( name, timeline.Evaluate( frame ) );
+	}
+
+	/// <summary>The stored pose, or null when no pose has that name. The returned map is a copy.</summary>
+	public Dictionary<string, RigPose>? Recall( string name ) => GetPose( name );
+
+	/// <summary>
+	/// Blend a recalled pose over an evaluated pose set by weight: bones the pose names move
+	/// toward the pose, bones it does not name stay exactly where they were.
+	/// </summary>
+	public static Dictionary<string, RigPose> Apply( IReadOnlyDictionary<string, RigPose> under, IReadOnlyDictionary<string, RigPose> pose, float weight ) =>
+		Blend( under ?? new Dictionary<string, RigPose>(), pose ?? new Dictionary<string, RigPose>(), weight );
+
 	public bool HasPose( string name ) => name is not null && Poses.ContainsKey( name );
 
 	public bool RemovePose( string name ) => name is not null && Poses.Remove( name );
@@ -256,5 +276,127 @@ public sealed class PoseLibrary
 		}
 		if ( applied > 0 && frame >= clip.FrameCount ) clip.FrameCount = frame + 1;
 		return applied;
+	}
+
+	/// <summary>
+	/// Mirror a pose across the sagittal plane (armature x = 0), Blender pose-mirror
+	/// style: each bone's transform moves to its mirror partner (.L/.R via
+	/// <see cref="Skeleton.FlipSideSuffix"/>), reflected in place — local position x
+	/// negated, rotation (x, -y, -z, w), scale unchanged. Centre bones (no side
+	/// suffix) mirror onto themselves. A bone whose partner has no key mirrors onto
+	/// the partner side only, which IS the mirror image (the unposed side stays at
+	/// bind). Assumes a symmetric rig; on an asymmetric rig the result is the
+	/// mirror of the pose as named, not of the geometry.
+	/// </summary>
+	public static Dictionary<string, RigPose> Mirror( IReadOnlyDictionary<string, RigPose> pose )
+	{
+		ArgumentNullException.ThrowIfNull( pose );
+		var mirrored = new Dictionary<string, RigPose>( StringComparer.OrdinalIgnoreCase );
+		foreach ( var (bone, p) in pose )
+		{
+			if ( string.IsNullOrWhiteSpace( bone ) ) throw new ArgumentException( "pose has a bone with an empty name.", nameof( pose ) );
+			var target = Skeleton.FlipSideSuffix( bone ) ?? bone;
+			mirrored[target] = new RigPose(
+				new Vec3( -p.Position.x, p.Position.y, p.Position.z ),
+				new Quat( p.Rotation.x, -p.Rotation.y, -p.Rotation.z, p.Rotation.w ),
+				p.Scale );
+		}
+		return mirrored;
+	}
+
+	/// <summary>
+	/// Seed poses for a humanoid auto-rig: A-pose (the bind stance — the auto-rig
+	/// stands the arms slightly out, which IS an A-pose), T-pose (arms rotated to
+	/// horizontal about the shoulders) and Attention (arms straight down). T-pose
+	/// and Attention rotate only the upper arms, from the bind, so the chains
+	/// follow rigidly; the rotation is computed in world space (shoulder-to-wrist
+	/// direction onto the lateral/down axis) and converted back to a local
+	/// RigPose, so it works on either naming scheme (citizen arm_upper_L or
+	/// template upperarm_L) and on either lateral axis — the lateral axis is
+	/// measured from the two shoulder heads, not assumed.
+	/// </summary>
+	public static PoseLibrary SeedHumanoid( Skeleton skeleton )
+	{
+		ArgumentNullException.ThrowIfNull( skeleton );
+		var bind = BindPose( skeleton );
+		var lib = new PoseLibrary();
+		lib.SetPose( "A-pose", bind );
+		lib.SetPose( "T-pose", ArmPose( skeleton, bind, ArmTarget.T ) );
+		lib.SetPose( "Attention", ArmPose( skeleton, bind, ArmTarget.Attention ) );
+		return lib;
+	}
+
+	static Dictionary<string, RigPose> BindPose( Skeleton skeleton )
+	{
+		var pose = new Dictionary<string, RigPose>( StringComparer.OrdinalIgnoreCase );
+		foreach ( var bone in skeleton.Bones )
+			pose[bone.Name] = RigPose.FromXform( bone.Local );
+		return pose;
+	}
+
+	enum ArmTarget { T, Attention }
+
+	static Dictionary<string, RigPose> ArmPose( Skeleton skeleton, Dictionary<string, RigPose> bind, ArmTarget target )
+	{
+		var result = new Dictionary<string, RigPose>( bind, StringComparer.OrdinalIgnoreCase );
+		var pelvis = skeleton.IndexOf( "pelvis" );
+		var head = skeleton.IndexOf( "head" );
+		if ( pelvis < 0 ) throw new ArgumentException( "SeedHumanoid needs a humanoid auto-rig (no 'pelvis' bone).", nameof( skeleton ) );
+		var up = new Vec3( 0, 0, 1 );
+		if ( head >= 0 )
+		{
+			var u = skeleton.HeadWorld( head ) - skeleton.HeadWorld( pelvis );
+			if ( u.Length > 1e-6f ) up = u.Normal;
+		}
+		Vec3 lateral = new( 1, 0, 0 );
+		var armL = FindArm( skeleton, "L" );
+		var armR = FindArm( skeleton, "R" );
+		if ( armL >= 0 && armR >= 0 )
+		{
+			var l = skeleton.HeadWorld( armL ) - skeleton.HeadWorld( armR );
+			if ( l.Length > 1e-6f ) lateral = l.Normal;
+		}
+		foreach ( var (arm, side) in new[] { (armL, 1f), (armR, -1f) } )
+		{
+			if ( arm < 0 ) continue;
+			var d = skeleton.BoneDirection( arm );
+			if ( d.Length < 1e-6f ) continue;
+			d = d.Normal;
+			var want = target == ArmTarget.T ? lateral * side : -up;
+			var q = RotationFromTo( d, want );
+			if ( q is null ) continue; // already pointing that way
+			var parent = skeleton.Bones[arm].Parent;
+			var parentWorld = parent < 0 ? Xform.Identity : skeleton.WorldBind( parent );
+			var oldWorld = skeleton.WorldBind( arm );
+			var newWorld = Xform.Translate( oldWorld.Origin ) * q.Value.ToXform( Vec3.Zero ) * Xform.Translate( -oldWorld.Origin ) * oldWorld;
+			var local = parentWorld.Inverse * newWorld;
+			result[skeleton.Bones[arm].Name] = RigPose.FromXform( local );
+		}
+		return result;
+	}
+
+	static int FindArm( Skeleton skeleton, string side )
+	{
+		foreach ( var name in new[] { $"arm_upper_{side}", $"upperarm_{side}" } )
+		{
+			var i = skeleton.IndexOf( name );
+			if ( i >= 0 ) return i;
+		}
+		return -1;
+	}
+
+	/// <summary>Quaternion rotating unit vector <paramref name="from"/> onto <paramref name="to"/>; null when they already agree.</summary>
+	static Quat? RotationFromTo( Vec3 from, Vec3 to )
+	{
+		var dot = Math.Clamp( Vec3.Dot( from, to ), -1f, 1f );
+		if ( dot > 0.999999f ) return null;
+		var axis = Vec3.Cross( from, to );
+		if ( axis.Length < 1e-6f )
+		{
+			// Opposite directions: any perpendicular axis does, at 180 degrees.
+			axis = Vec3.Cross( from, MathF.Abs( from.x ) < 0.9f ? new Vec3( 1, 0, 0 ) : new Vec3( 0, 1, 0 ) );
+			return Quat.FromAxisAngle( axis.Normal, MathF.PI );
+		}
+		return Quat.FromAxisAngle( axis.Normal, MathF.Acos( dot ) );
 	}
 }

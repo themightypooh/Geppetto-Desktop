@@ -1,0 +1,1 @@
+{"layers":[{"color":"#8a5a33","compileVisible":true,"id":"layer-geometry","name":"Geometry","visible":true},{"color":"#2e6fb0","compileVisible":false,"id":"layer-detail","name":"Detail","visible":false}],"visgroups":[{"color":"#e0a030","compileVisible":true,"id":"vis-func-detail","members":["brush-001","brush-002","entity-light-1"],"name":"func_detail","visible":true}]}

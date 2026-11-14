@@ -1,0 +1,21 @@
+{
+  "length": 128,
+  "width": 128,
+  "height": 128,
+  "wallThickness": 8,
+  "expected": {
+    "brushCount": 6,
+    "floorVolume": 165888,
+    "ceilingVolume": 165888,
+    "northWallVolume": 147456,
+    "southWallVolume": 147456,
+    "eastWallVolume": 131072,
+    "westWallVolume": 131072,
+    "totalVolume": 888832,
+    "visibleFaces": 6,
+    "noDrawFaces": 30,
+    "outerMin": [-72, -72, -8],
+    "outerMax": [72, 72, 136],
+    "playerStart": [0, 0, 32]
+  }
+}

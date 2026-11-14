@@ -14,7 +14,9 @@ namespace Effigy;
 /// kernel types — straight strands, gravity + wind displacement per step, rest-length projection
 /// from the pinned root outward, sphere-collider push-out — with no randomness at all, so the
 /// same roots settle to the same strands on every rebuild. Randomness only enters through
-/// <see cref="Scatter"/>, which takes an explicit seed.
+/// <see cref="Scatter"/>, which takes an explicit seed. Exact mesh collision is available
+/// through <see cref="BvhSurfaceCollider"/> (MeshBVH + signed distance); the sphere list
+/// stays the documented approximation for callers that pass no surface.
 /// </summary>
 public static class StrandSolver
 {
@@ -33,7 +35,7 @@ public static class StrandSolver
 	/// moves. Directions are the initial strand direction (unit-length is not required).
 	/// </summary>
 	public static List<List<Vec3>> Settle( IReadOnlyList<Vec3> roots, IReadOnlyList<Vec3> directions,
-		Options o, IReadOnlyList<(Vec3 Centre, float Radius)> colliders = null, SurfaceCollider surface = null, float surfaceRadius = 0f )
+		Options o, IReadOnlyList<(Vec3 Centre, float Radius)> colliders = null, SurfaceCollider surface = null, float surfaceRadius = 0f, BvhSurfaceCollider bvhSurface = null )
 	{
 		if ( roots is null || roots.Count == 0 )
 			throw new ArgumentException( "Strands need at least one root.", nameof( roots ) );
@@ -65,6 +67,11 @@ public static class StrandSolver
 				Project( pts, rest );
 				Collide( pts, colliders );
 				if ( surface is not null && surfaceRadius > 0f ) surface.Collide( pts, surfaceRadius );
+				// Exact MeshBVH collision (spec 2.1 B.2): the margin is the caller's surface
+				// radius when one was given, else the collider's spec skin margin (0.06 in).
+				// Project() below restores the remaining segment length after push-out.
+				if ( bvhSurface is not null && !bvhSurface.IsEmpty )
+					bvhSurface.Collide( pts, surfaceRadius > 0f ? surfaceRadius : bvhSurface.SkinMargin );
 				Project( pts, rest );
 			}
 
@@ -369,6 +376,107 @@ public static class StrandSolver
 		}
 	}
 
+	/// <summary>Exact MeshBVH surface collider (spec 2.1 B.2): the BVH replacement for the
+	/// bounding-sphere approximation in <see cref="Collide"/> and for the uniform-grid
+	/// <see cref="SurfaceCollider"/>. One tree per mesh (head, neck, shoulders).
+	/// Collide queries the nearest surface with a reach that covers any point inside the
+	/// mesh (bounding-box diagonal + margin), so a strand vertex deep inside the head still
+	/// finds its nearest surface; the signed distance to that surface decides whether it is
+	/// pushed out, so a vertex already outside beyond the margin is never moved. Push-out is
+	/// along the interpolated (smooth, area-weighted vertex) normal at the closest point, and
+	/// the caller re-projects the remaining segment length afterwards (see
+	/// <see cref="Settle"/>), exactly as the spec's Collide step requires. The tree is built
+	/// once per groom; a mesh edited after Build needs a fresh collider (same rule as
+	/// <see cref="MeshBVH"/> itself).</summary>
+	public sealed class BvhSurfaceCollider
+	{
+		readonly List<(PolyMesh Mesh, MeshBVH Bvh, Vec3[] Normals, float Reach)> _entries = new();
+
+		/// <summary>Skin margin in inches: strand vertices closer than this to the surface, or
+		/// inside it, are pushed out to exactly this distance. The spec's value is 0.06 in.</summary>
+		public float SkinMargin = 0.06f;
+
+		public int MeshCount => _entries.Count;
+		public bool IsEmpty => _entries.Count == 0;
+
+		public static BvhSurfaceCollider Build( IReadOnlyList<PolyMesh> meshes )
+		{
+			var c = new BvhSurfaceCollider();
+			if ( meshes is null ) return c;
+			foreach ( var mesh in meshes )
+			{
+				if ( mesh is null || mesh.FaceCount == 0 || mesh.VertexCount == 0 ) continue;
+				var min = mesh.Positions[0]; var max = mesh.Positions[0];
+				foreach ( var pt in mesh.Positions )
+				{
+					min = new Vec3( Math.Min( min.x, pt.x ), Math.Min( min.y, pt.y ), Math.Min( min.z, pt.z ) );
+					max = new Vec3( Math.Max( max.x, pt.x ), Math.Max( max.y, pt.y ), Math.Max( max.z, pt.z ) );
+				}
+				var reach = (max - min).Length;
+				c._entries.Add( (mesh, MeshBVH.Build( mesh ), mesh.ComputeVertexNormals(), reach) );
+			}
+			return c;
+		}
+
+		/// <summary>Push strand vertices out of the meshes to <see cref="SkinMargin"/> along the
+		/// interpolated surface normal. Roots (index 0) are never moved. A vertex is only moved
+		/// when its signed distance to the nearest surface is below the margin.</summary>
+		public void Collide( List<Vec3> pts ) => Collide( pts, SkinMargin );
+
+		public void Collide( List<Vec3> pts, float skinMargin )
+		{
+			if ( pts is null || _entries.Count == 0 || skinMargin <= 0f ) return;
+			for ( var i = 1; i < pts.Count; i++ )
+			{
+				foreach ( var (mesh, bvh, normals, reach) in _entries )
+				{
+					var hit = bvh.NearestSurface( mesh, pts[i], reach + skinMargin );
+					if ( hit is not { } h ) continue;
+					var n = InterpolatedNormal( mesh, normals, h );
+					if ( n.LengthSquared < 1e-12f ) continue;
+					n = n.Normal;
+					var signed = Vec3.Dot( pts[i] - h.Point, n );
+					if ( signed < skinMargin ) pts[i] = h.Point + n * skinMargin;
+				}
+			}
+		}
+
+		/// <summary>Smooth normal at the hit point: barycentric interpolation of the hit
+		/// triangle's vertex normals. Falls back to the hit face normal for degenerate
+		/// triangles or faces whose fan triangle cannot be located.</summary>
+		static Vec3 InterpolatedNormal( PolyMesh mesh, Vec3[] normals, MeshHit hit )
+		{
+			if ( hit.FaceIndex < 0 || hit.FaceIndex >= mesh.FaceCount ) return hit.Normal;
+			var face = mesh.Faces[hit.FaceIndex];
+			if ( face.Indices.Length < 3 ) return hit.Normal;
+			// Fan triangles (0, k, k+1), the same fan NearestSurface walks.
+			for ( var k = 1; k + 1 < face.Indices.Length; k++ )
+			{
+				var a = mesh.Positions[face.Indices[0]];
+				var b = mesh.Positions[face.Indices[k]];
+				var c = mesh.Positions[face.Indices[k + 1]];
+				if ( !TryBarycentric( hit.Point, a, b, c, out var w0, out var w1, out var w2 ) ) continue;
+				if ( w0 < -1e-3f || w1 < -1e-3f || w2 < -1e-3f ) continue;
+				var n = normals[face.Indices[0]] * w0 + normals[face.Indices[k]] * w1 + normals[face.Indices[k + 1]] * w2;
+				return n.LengthSquared > 1e-12f ? n : hit.Normal;
+			}
+			return hit.Normal;
+		}
+
+		static bool TryBarycentric( Vec3 p, Vec3 a, Vec3 b, Vec3 c, out float w0, out float w1, out float w2 )
+		{
+			w0 = w1 = w2 = 0f;
+			var v0 = b - a; var v1 = c - a; var v2 = p - a;
+			var d00 = Vec3.Dot( v0, v0 ); var d01 = Vec3.Dot( v0, v1 ); var d11 = Vec3.Dot( v1, v1 );
+			var d20 = Vec3.Dot( v2, v0 ); var d21 = Vec3.Dot( v2, v1 );
+			var denom = d00 * d11 - d01 * d01;
+			if ( MathF.Abs( denom ) < 1e-12f ) return false;
+			w1 = (d11 * d20 - d01 * d21) / denom;
+			w2 = (d00 * d21 - d01 * d20) / denom;
+			w0 = 1f - w1 - w2;
+			return true;
+		}
+	}
 	/// <summary>
 	/// Deterministic area-weighted surface samples on a list of meshes: the same seed gives the
 	/// same roots and normals on every run. A sample is a face centroid nudged out along the

@@ -1,0 +1,9 @@
+# Areaportals for the two-room doorway map (hammer-optimisation-areaportal-occluder).
+#
+# One line per areaportal:
+#   areaportal <name> <centre x y z> <open|closed> <control targetname>
+#
+# The centre resolves to the nearest vis-to-vis BspPortal (the doorway portal is
+# centred on (0, 0, 48)); the control must name an entity in MapEntities — a
+# func_door / logic_* / trigger_* that opens/closes it.
+areaportal door-01 0 0 48 closed door_01

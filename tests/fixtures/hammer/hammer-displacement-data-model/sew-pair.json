@@ -1,0 +1,82 @@
+{
+ "description": "Two coplanar unit-square faces sharing the edge x=1 (power 2 each), material 3. edgeOffsetsA/edgeAlphasA run along face A's edge 1 from (1,0,0) to (1,1,0); edgeOffsetsB/edgeAlphasB run along face B's edge 3 from (1,1,0) to (1,0,0) \u2014 the same physical profile in the opposite direction, so sewing must match them reversed.",
+ "power": 2,
+ "faceA": {
+  "corners": [
+   [
+    0,
+    0,
+    0
+   ],
+   [
+    1,
+    0,
+    0
+   ],
+   [
+    1,
+    1,
+    0
+   ],
+   [
+    0,
+    1,
+    0
+   ]
+  ],
+  "materialId": 3
+ },
+ "faceB": {
+  "corners": [
+   [
+    1,
+    0,
+    0
+   ],
+   [
+    2,
+    0,
+    0
+   ],
+   [
+    2,
+    1,
+    0
+   ],
+   [
+    1,
+    1,
+    0
+   ]
+  ],
+  "materialId": 3
+ },
+ "edgeOffsetsA": [
+  0.0,
+  0.5,
+  1.0,
+  1.5,
+  2.0
+ ],
+ "edgeOffsetsB": [
+  2.0,
+  1.5,
+  1.0,
+  0.5,
+  0.0
+ ],
+ "edgeAlphasA": [
+  0.0,
+  0.25,
+  0.5,
+  0.75,
+  1.0
+ ],
+ "edgeAlphasB": [
+  1.0,
+  0.75,
+  0.5,
+  0.25,
+  0.0
+ ]
+}

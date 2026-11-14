@@ -1,0 +1,23 @@
+versioninfo
+{
+	"editorversion" "400"
+	"mapversion" "1"
+	"formatversion" "100"
+	"prefab" "0"
+}
+world
+{
+	"id" "1"
+	"mapversion" "1"
+	"classname" "worldspawn"
+	solid
+	{
+		"id" "1"
+		side
+		{
+			"id" "100"
+			"plane" "( 0 0 0 ) ( 64 0 0 )"
+			"material" "BRICK/BRICKWALL001A"
+		}
+	}
+}

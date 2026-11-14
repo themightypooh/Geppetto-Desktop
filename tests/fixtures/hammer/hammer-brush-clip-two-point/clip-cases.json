@@ -1,0 +1,64 @@
+{
+  "cases": [
+    {
+      "name": "diagonal-top-cut-box-in-half",
+      "brush": "box64",
+      "a": [0, 0, 0],
+      "b": [64, 64, 0],
+      "axis": "Z",
+      "keepFront": true,
+      "mode": "cut",
+      "expectedOutcome": "Cut",
+      "expectedKeptVolume": 131072,
+      "expectedSecondVolume": null
+    },
+    {
+      "name": "vertical-front-cut-box-in-half",
+      "brush": "box64",
+      "a": [32, 0, 0],
+      "b": [32, 0, 64],
+      "axis": "Y",
+      "keepFront": true,
+      "mode": "cut",
+      "expectedOutcome": "Cut",
+      "expectedKeptVolume": 131072,
+      "expectedSecondVolume": null
+    },
+    {
+      "name": "diagonal-top-split-box-in-two-halves",
+      "brush": "box64",
+      "a": [0, 0, 0],
+      "b": [64, 64, 0],
+      "axis": "Z",
+      "keepFront": true,
+      "mode": "split",
+      "expectedOutcome": "Split",
+      "expectedKeptVolume": 131072,
+      "expectedSecondVolume": 131072
+    },
+    {
+      "name": "vertical-front-cut-wedge",
+      "brush": "wedge",
+      "a": [32, 0, 0],
+      "b": [32, 0, 64],
+      "axis": "Y",
+      "keepFront": true,
+      "mode": "cut",
+      "expectedOutcome": "Cut",
+      "expectedKeptVolume": 98304,
+      "expectedSecondVolume": null
+    },
+    {
+      "name": "plane-outside-box-is-noop",
+      "brush": "box64",
+      "a": [100, 0, 0],
+      "b": [100, 64, 0],
+      "axis": "Z",
+      "keepFront": false,
+      "mode": "cut",
+      "expectedOutcome": "NoOpPlaneOutside",
+      "expectedKeptVolume": null,
+      "expectedSecondVolume": null
+    }
+  ]
+}

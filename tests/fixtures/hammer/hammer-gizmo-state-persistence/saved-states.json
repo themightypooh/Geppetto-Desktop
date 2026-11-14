@@ -1,0 +1,98 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "valid-v1",
+      "document": {
+        "name": "valid-map",
+        "gizmo": {
+          "schemaVersion": 1,
+          "mode": "Rotate",
+          "space": "Local",
+          "lockedAxis": "XY",
+          "pivot": [16, 32, -8],
+          "selectionOrientation": [0, 0.7071067811865476, 0, 0.7071067811865476],
+          "snapEnabled": true,
+          "gridSize": 8,
+          "angleSnapDegrees": 30
+        }
+      },
+      "expected": {
+        "mode": "Rotate",
+        "space": "Local",
+        "lock": "XY",
+        "pivot": [16, 32, -8],
+        "orientation": [0, 0.7071067811865476, 0, 0.7071067811865476],
+        "snapEnabled": true,
+        "gridSize": 8,
+        "angleSnapDegrees": 30,
+        "minWarnings": 0,
+        "warningContains": []
+      }
+    },
+    {
+      "name": "corrupted",
+      "document": {
+        "gizmo": {
+          "mode": "Banana",
+          "gridSize": -4,
+          "pivot": "nope",
+          "angleSnapDegrees": 0,
+          "hyperdrive": true
+        }
+      },
+      "expected": {
+        "mode": "Translate",
+        "space": "Global",
+        "lock": "None",
+        "pivot": [0, 0, 0],
+        "orientation": [0, 0, 0, 1],
+        "snapEnabled": false,
+        "gridSize": 16,
+        "angleSnapDegrees": 15,
+        "minWarnings": 5,
+        "warningContains": ["mode", "gridSize", "pivot", "angleSnapDegrees", "hyperdrive"]
+      }
+    },
+    {
+      "name": "future-version",
+      "document": {
+        "gizmo": {
+          "schemaVersion": 3,
+          "mode": "Scale",
+          "quantumLock": "on"
+        }
+      },
+      "expected": {
+        "mode": "Scale",
+        "space": "Global",
+        "lock": "None",
+        "pivot": [0, 0, 0],
+        "orientation": [0, 0, 0, 1],
+        "snapEnabled": false,
+        "gridSize": 16,
+        "angleSnapDegrees": 15,
+        "minWarnings": 2,
+        "warningContains": ["schema version 3", "quantumLock"]
+      }
+    },
+    {
+      "name": "fresh",
+      "document": {
+        "name": "fresh-map"
+      },
+      "expected": {
+        "mode": "Translate",
+        "space": "Global",
+        "lock": "None",
+        "pivot": [0, 0, 0],
+        "orientation": [0, 0, 0, 1],
+        "snapEnabled": false,
+        "gridSize": 16,
+        "angleSnapDegrees": 15,
+        "minWarnings": 0,
+        "warningContains": []
+      }
+    }
+  ]
+}

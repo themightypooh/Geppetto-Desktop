@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Silk.NET.OpenGL;
 
 namespace Marionette.Desktop;
@@ -49,7 +50,19 @@ public sealed class GlShader : IDisposable
 
 	public void Use() => _gl.UseProgram( Handle );
 
-	public int Uniform( string name ) => _gl.GetUniformLocation( Handle, name );
+	// Uniform locations are cached per program: Silk marshals the name string on every
+	// GetUniformLocation, which allocates on the per-frame path (SetLook alone is 13
+	// lookups per call, 3 calls per frame; the steady-frame check allows 0 B). The cache
+	// lives on the instance and the instance dies with its program, so a recycled
+	// program id can never hit a stale entry.
+	readonly Dictionary<string, int> _uniforms = new();
+
+	public int Uniform( string name )
+	{
+		if ( !_uniforms.TryGetValue( name, out int loc ) )
+			_uniforms[name] = loc = _gl.GetUniformLocation( Handle, name );
+		return loc;
+	}
 
 	public unsafe void SetMatrix( int location, System.Numerics.Matrix4x4 m )
 	{

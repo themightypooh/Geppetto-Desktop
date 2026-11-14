@@ -55,7 +55,7 @@ internal static class ControllerFixTests
 
 			var vmat = File.ReadAllText( Path.Combine( dir, "materials/pad/led.vmat" ) );
 			Check( vmat.Contains( "F_SELF_ILLUM 1" ) && vmat.Contains( "g_flMetalness" ), "vmat: " + vmat );
-			Check( run.Log.Any( l => l.Contains( "slot 1 has a look but no .vmat path" ) ), "pathless look not reported" );
+			Check( run.Log.Any( l => l.Contains( "slot 1 has no explicit .vmat path; using a model-local look sidecar" ) ), "pathless look not reported" );
 			Directory.Delete( dir, true );
 
 			var clay = new Effigy.PartStudio();

@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using Effigy;
 
 namespace Marionette.Desktop;
@@ -865,6 +868,646 @@ public static class RetopoService
 			if ( Math.Acos( cos ) * 180.0 / Math.PI > thresholdDegrees ) hard++;
 		}
 		return hard;
+	}
+
+
+	// OpenVDB voxel remesh for sculpt (Mobile: app/SculptOpenVdb.cs).
+	//
+	// libgmvdb.so (Mobile tools/build-openvdb.sh, shim tools/openvdb/gm_vdb.cpp) turns the body into a
+	// narrow-band level set (meshToLevelSet) and skins it back (volumeToMesh), the way Blender's voxel
+	// remesher does. It plugs into the kernel's RemeshFeature voxel mode through RemeshFeature.VoxelBackend
+	// (see Install), so the step, its undo, save/reopen and the voxel remesh control stay exactly as they
+	// were. If the library is missing (or a call fails) the backend returns null and the kernel's built-in
+	// SurfaceNets path runs instead: a soft fallback, never a crash.
+	//
+	// Off the main thread: Skin runs the native remesh (plus smoothing) on a worker before the step is
+	// added; Stash keeps that finished skin for the rebuild that asks for the same input, so the rebuild
+	// hands it over instead of computing it again.
+	//
+	// Packaging: the Linux x86_64 build lives in packaging/native/linux-x86_64/ (copied verbatim from
+	// Mobile app/addons/openvdb/lib/linux/x86_64/, see packaging/OPENVDB.md); the published bundle
+	// carries it in runtimes/<rid>/native/. Licences: OpenVDB + oneTBB, Apache 2.0 (see
+	// DistributionInventory.GetLicenseAudit).
+	//
+	// HOST WIRING (final integrator, shared entry point — not this file): call OpenVdb.Install() once at
+	// Desktop startup, before the first rebuild, and optionally install a Log sink so fallback notices
+	// reach the Desktop log instead of being silent. Until then VoxelBackend stays null and the built-in
+	// SurfaceNets path runs.
+	public static unsafe class OpenVdb
+	{
+		/// <summary>Which engine the OpenVDB host used on its last call, e.g. "openvdb" or "built-in (library not installed)".
+		/// A voxel run that never reaches the host (no backend installed) leaves this at the previous host call.</summary>
+		public static string LastRoute { get; private set; } = "";
+
+		/// <summary>Where fallback notices go. Null (the default) means silent; the host installs a sink
+		/// that writes to its log. Never throws into the caller.</summary>
+		public static Action<string> Log { get; set; }
+
+		/// <summary>Why the library is not in use (null when it is).</summary>
+		public static string Missing { get; private set; } = "not loaded yet";
+
+		/// <summary>Tests can force the built-in path.</summary>
+		public static bool Disabled;
+
+		/// <summary>Explicit library path, for hosts and tests. When set, it is the only candidate tried;
+		/// setting it resets the loader, so a test can force the missing-library path with a nonexistent
+		/// path. Null means search the standard locations. The GEPPETTO_OPENVDB_LIB environment variable
+		/// is the same override without code.</summary>
+		public static string LibraryPathOverride
+		{
+			get => _libraryPathOverride;
+			set
+			{
+				if ( _libraryPathOverride == value ) return;
+				_libraryPathOverride = value;
+				ResetLoader();
+			}
+		}
+
+		/// <summary>Makes OpenVDB the kernel's voxel engine (the built-in SurfaceNets stays as its fallback).</summary>
+		public static void Install()
+		{
+			if ( Available() ) RemeshFeature.VoxelBackend = Backend;
+		}
+
+		static string _libraryPathOverride;
+		static bool _tried;
+		static IntPtr _lib;
+		static readonly object _loadLock = new();
+		static delegate* unmanaged[Cdecl]<int> _version;
+		static delegate* unmanaged[Cdecl]<IntPtr> _error;
+		static delegate* unmanaged[Cdecl]<float*, int, int*, int, float, float, int*, int*, int*, IntPtr> _remesh;
+		static delegate* unmanaged[Cdecl]<IntPtr, float*, int*, int*, void> _fetch;
+		static delegate* unmanaged[Cdecl]<IntPtr, void> _free;
+
+		static string LibraryFileName() => OperatingSystem.IsWindows() ? "gmvdb.dll"
+			: OperatingSystem.IsMacOS() ? "libgmvdb.dylib"
+			: "libgmvdb.so";
+
+		static string RuntimeId() => ( OperatingSystem.IsWindows() ? "win" : OperatingSystem.IsMacOS() ? "osx" : "linux" )
+			+ "-" + ( RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? "arm64" : "x64" );
+
+		static IEnumerable<string> Candidates()
+		{
+			string file = LibraryFileName();
+
+			// Explicit overrides win outright: one candidate, no searching.
+			string explicitPath = _libraryPathOverride;
+			if ( string.IsNullOrEmpty( explicitPath ) )
+			{
+				try { explicitPath = Environment.GetEnvironmentVariable( "GEPPETTO_OPENVDB_LIB" ); } catch { }
+			}
+			if ( !string.IsNullOrEmpty( explicitPath ) ) { yield return explicitPath; yield break; }
+
+			string appDir = null;
+			try { appDir = AppContext.BaseDirectory; } catch { }
+
+			if ( appDir != null )
+			{
+				// Bundled native layout, the same one DistributionInventory probes:
+				// runtimes/<rid>/native/ next to the published binary.
+				yield return Path.Combine( appDir, "runtimes", RuntimeId(), "native", file );
+				// Next to the binary, the Mobile Linux export layout.
+				yield return Path.Combine( appDir, file );
+			}
+
+			// System search path (a host-installed shim).
+			yield return file;
+		}
+
+		/// <summary>True when libgmvdb loaded. Never throws: a missing, corrupt or wrong-build library
+		/// just means the built-in SurfaceNets runs.</summary>
+		public static bool Available()
+		{
+			lock ( _loadLock )
+			{
+				if ( Disabled ) return false;
+				if ( _tried ) return _lib != IntPtr.Zero;
+				_tried = true;
+				foreach ( var c in Candidates() )
+				{
+					if ( string.IsNullOrEmpty( c ) ) continue;
+					if ( ( c.Contains( '/' ) || c.Contains( '\\' ) ) && !File.Exists( c ) ) continue;
+					IntPtr h;
+					try
+					{
+						if ( !NativeLibrary.TryLoad( c, out h ) ) continue;
+					}
+					catch ( BadImageFormatException ) { continue; }
+					catch ( DllNotFoundException ) { continue; }
+					try
+					{
+						_version = (delegate* unmanaged[Cdecl]<int>)NativeLibrary.GetExport( h, "gm_vdb_version" );
+						_error = (delegate* unmanaged[Cdecl]<IntPtr>)NativeLibrary.GetExport( h, "gm_vdb_error" );
+						_remesh = (delegate* unmanaged[Cdecl]<float*, int, int*, int, float, float, int*, int*, int*, IntPtr>)NativeLibrary.GetExport( h, "gm_vdb_remesh" );
+						_fetch = (delegate* unmanaged[Cdecl]<IntPtr, float*, int*, int*, void>)NativeLibrary.GetExport( h, "gm_vdb_fetch" );
+						_free = (delegate* unmanaged[Cdecl]<IntPtr, void>)NativeLibrary.GetExport( h, "gm_vdb_free" );
+						if ( _version() < 1 ) { NativeLibrary.Free( h ); continue; }
+						_lib = h; Missing = null;
+						return true;
+					}
+					catch ( EntryPointNotFoundException ) { NativeLibrary.Free( h ); }
+				}
+				Missing = "libgmvdb.so not found";
+				return false;
+			}
+		}
+
+		/// <summary>Forget the cached load attempt (and unload the library, if one was loaded) so the next
+		/// Available() tries again from scratch. Host and test hook; never throws.</summary>
+		public static void ResetLoader()
+		{
+			lock ( _loadLock )
+			{
+				if ( _lib != IntPtr.Zero )
+				{
+					try { NativeLibrary.Free( _lib ); } catch { }
+				}
+				_lib = IntPtr.Zero;
+				_version = null;
+				_error = null;
+				_remesh = null;
+				_fetch = null;
+				_free = null;
+				_tried = false;
+				Missing = "not loaded yet";
+			}
+		}
+
+		/// <summary>The native side's last refusal, or null after a good run.</summary>
+		public static string LastError { get; private set; }
+
+		/// <summary>Remesh the union of <paramref name="parts"/> at <paramref name="voxel"/> spacing. N-gons are fanned to
+		/// triangles on the way in; the skin comes back as triangles and quads, with adaptivity 0 favoring quads. Null when
+		/// the library is missing or fails.</summary>
+		public static PolyMesh Remesh( IReadOnlyList<PolyMesh> parts, float voxel, float adaptivity = 0f )
+		{
+			if ( !Available() ) { LastRoute = "built-in (" + ( Disabled ? "disabled" : Missing ?? "not available" ) + ")"; return null; }
+			if ( parts == null || parts.Count == 0 || !( voxel > 0f ) ) return null;
+			int nv = 0, nt = 0;
+			foreach ( var m in parts ) { nv += m.Positions.Count; foreach ( var f in m.Faces ) nt += Math.Max( 0, f.Count - 2 ); }
+			var verts = new float[nv * 3];
+			var tris = new int[nt * 3];
+			int vi = 0, ti = 0, baseV = 0;
+			foreach ( var m in parts )
+			{
+				foreach ( var p in m.Positions ) { verts[vi++] = p.x; verts[vi++] = p.y; verts[vi++] = p.z; }
+				foreach ( var f in m.Faces )
+					for ( int c = 1; c + 1 < f.Count; c++ )
+					{
+						tris[ti++] = baseV + f.Indices[0]; tris[ti++] = baseV + f.Indices[c]; tris[ti++] = baseV + f.Indices[c + 1];
+					}
+				baseV += m.Positions.Count;
+			}
+			int ov, ot, oq;
+			IntPtr h;
+			fixed ( float* pv = verts ) fixed ( int* pt = tris ) h = _remesh( pv, nv, pt, nt, voxel, adaptivity, &ov, &ot, &oq );
+			if ( h == IntPtr.Zero )
+			{
+				LastError = Marshal.PtrToStringAnsi( _error() );
+				LastRoute = "built-in (openvdb refused: " + ( LastError ?? "no reason" ) + ")";
+				try { Log?.Invoke( "[openvdb] fell back to SurfaceNets: " + LastError ); } catch { }
+				return null;
+			}
+			try
+			{
+				var rv = new float[ov * 3]; var rt = new int[ot * 3]; var rq = new int[oq * 4];
+				fixed ( float* a = rv ) fixed ( int* b = rt ) fixed ( int* c = rq ) _fetch( h, a, b, c );
+				var mesh = new PolyMesh();
+				for ( int i = 0; i < ov; i++ ) mesh.AddVertex( new Vec3( rv[i * 3], rv[i * 3 + 1], rv[i * 3 + 2] ) );
+				for ( int i = 0; i < oq; i++ ) mesh.AddFace( new[] { rq[i * 4], rq[i * 4 + 1], rq[i * 4 + 2], rq[i * 4 + 3] } );
+				for ( int i = 0; i < ot; i++ ) mesh.AddFace( new[] { rt[i * 3], rt[i * 3 + 1], rt[i * 3 + 2] } );
+				LastError = null;
+				LastRoute = "openvdb";
+				return mesh;
+			}
+			finally { _free( h ); }
+		}
+
+		// ---------------------------------------------------------------- the kernel hook
+
+		/// <summary>A skin computed ahead of the rebuild (off the main thread), keyed by its input.</summary>
+		static (long Key, PolyMesh Mesh) _ready;
+		static readonly object _gate = new();
+
+		public static long Key( IReadOnlyList<PolyMesh> parts, float voxel, int smooth )
+		{
+			var h = new HashCode();
+			h.Add( voxel ); h.Add( smooth );
+			foreach ( var m in parts )
+			{
+				h.Add( m.Positions.Count ); h.Add( m.FaceCount );
+				double s = 0; foreach ( var p in m.Positions ) s += p.x * 0.37 + p.y * 0.61 + p.z * 0.29;
+				h.Add( Math.Round( s, 3 ) );
+			}
+			return h.ToHashCode();
+		}
+
+		/// <summary>Remesh and smooth: the whole job, safe on a worker (touches only its inputs and a fresh mesh).</summary>
+		public static PolyMesh Skin( IReadOnlyList<PolyMesh> parts, float voxel, int smooth )
+		{
+			var m = Remesh( parts, voxel );
+			if ( m == null || m.FaceCount == 0 ) return null;
+			if ( smooth > 0 ) MeshSmooth.Taubin( m, smooth );
+			return m;
+		}
+
+		/// <summary>Keep a finished skin for the next rebuild that asks for this exact input.</summary>
+		public static void Stash( long key, PolyMesh mesh ) { lock ( _gate ) _ready = ( key, mesh ); }
+
+		static PolyMesh Backend( IReadOnlyList<PolyMesh> parts, float voxel, int smooth )
+		{
+			var key = Key( parts, voxel, smooth );
+			lock ( _gate )
+				if ( _ready.Mesh != null && _ready.Key == key ) { var m = _ready.Mesh; _ready = default; return m; }
+			return Skin( parts, voxel, smooth );   // replays (undo, reopen) compute it here; null falls back to SurfaceNets
+		}
+	}
+
+
+	// Auto retopo (Mobile: app/AutoRetopo.cs, InstantMeshes).
+	//
+	// Instant Meshes (BSD-3-Clause, see packaging/INSTANTMESHES.md) rebuilds a dense sculpt as a
+	// field-aligned, quad-dominant (or all-triangle) mesh near a face target. The solver/extraction core
+	// runs headless in libgminstantmeshes.so (Mobile tools/build-instantmeshes.sh, shim
+	// tools/instantmeshes/gm_instantmeshes.cpp); the Desktop copy of the Linux x86_64 build lives in
+	// packaging/native/linux-x86_64/, and the published bundle carries it in runtimes/<rid>/native/.
+	//
+	// The solve runs on a worker thread with a progress line and a working Cancel (see AutoRetopo);
+	// the result lands as one Mesh edit step ("Auto retopo"), so one Undo takes it back. UVs and skin
+	// weights are not carried over — the bake handoff (AutoRetopo.BakeOnto) re-derives them instead.
+	// If the library is missing the call says so honestly and the voxel / quad remesh still work.
+	public static unsafe class InstantMeshes
+	{
+		/// <summary>Why the library is not in use (null when it is).</summary>
+		public static string LoadError => _loadError;
+
+		/// <summary>Explicit library path, for hosts and tests. When set, it is the only candidate tried;
+		/// setting it resets the loader, so a test can force the missing-library path with a nonexistent
+		/// path. Null means search the standard locations. The GEPPETTO_INSTANTMESHES_LIB environment
+		/// variable is the same override without code.</summary>
+		public static string LibraryPathOverride
+		{
+			get => _libraryPathOverride;
+			set
+			{
+				if ( _libraryPathOverride == value ) return;
+				_libraryPathOverride = value;
+				ResetLoader();
+			}
+		}
+
+		static string _libraryPathOverride;
+		static bool _tried;
+		static IntPtr _lib;
+		static string _loadError;
+		static readonly object _loadLock = new();
+		static delegate* unmanaged[Cdecl]<int> _version;
+		static delegate* unmanaged[Cdecl]<float*, int, uint*, int, int, int, int, int, int*, int*, IntPtr> _remesh;
+		static delegate* unmanaged[Cdecl]<IntPtr, int*, int*, int*, void> _counts;
+		static delegate* unmanaged[Cdecl]<IntPtr, float*, int*, int> _copy;
+		static delegate* unmanaged[Cdecl]<IntPtr, void> _free;
+		static delegate* unmanaged[Cdecl]<IntPtr> _error;
+
+		static string LibraryFileName() => OperatingSystem.IsWindows() ? "gminstantmeshes.dll"
+			: OperatingSystem.IsMacOS() ? "libgminstantmeshes.dylib"
+			: "libgminstantmeshes.so";
+
+		static string RuntimeId() => ( OperatingSystem.IsWindows() ? "win" : OperatingSystem.IsMacOS() ? "osx" : "linux" )
+			+ "-" + ( RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? "arm64" : "x64" );
+
+		static IEnumerable<string> Candidates()
+		{
+			string file = LibraryFileName();
+
+			// Explicit overrides win outright: one candidate, no searching.
+			string explicitPath = _libraryPathOverride;
+			if ( string.IsNullOrEmpty( explicitPath ) )
+			{
+				try { explicitPath = Environment.GetEnvironmentVariable( "GEPPETTO_INSTANTMESHES_LIB" ); } catch { }
+			}
+			if ( !string.IsNullOrEmpty( explicitPath ) ) { yield return explicitPath; yield break; }
+
+			string appDir = null;
+			try { appDir = AppContext.BaseDirectory; } catch { }
+
+			if ( appDir != null )
+			{
+				// Bundled native layout, the same one DistributionInventory probes:
+				// runtimes/<rid>/native/ next to the published binary.
+				yield return Path.Combine( appDir, "runtimes", RuntimeId(), "native", file );
+				// Next to the binary, the Mobile Linux export layout.
+				yield return Path.Combine( appDir, file );
+			}
+
+			// System search path (a host-installed shim).
+			yield return file;
+		}
+
+		/// <summary>True when libgminstantmeshes loaded. Never throws: a missing, corrupt or wrong-build
+		/// library just means auto retopo refuses honestly.</summary>
+		public static bool Available()
+		{
+			lock ( _loadLock )
+			{
+				if ( _tried ) return _lib != IntPtr.Zero;
+				_tried = true;
+				foreach ( var c in Candidates() )
+				{
+					if ( string.IsNullOrEmpty( c ) ) continue;
+					if ( ( c.Contains( '/' ) || c.Contains( '\\' ) ) && !File.Exists( c ) ) continue;
+					IntPtr h;
+					try
+					{
+						if ( !NativeLibrary.TryLoad( c, out h ) ) continue;
+					}
+					catch ( BadImageFormatException ) { continue; }
+					catch ( DllNotFoundException ) { continue; }
+					try
+					{
+						_version = (delegate* unmanaged[Cdecl]<int>)NativeLibrary.GetExport( h, "gm_im_version" );
+						_remesh = (delegate* unmanaged[Cdecl]<float*, int, uint*, int, int, int, int, int, int*, int*, IntPtr>)NativeLibrary.GetExport( h, "gm_im_remesh" );
+						_counts = (delegate* unmanaged[Cdecl]<IntPtr, int*, int*, int*, void>)NativeLibrary.GetExport( h, "gm_im_counts" );
+						_copy = (delegate* unmanaged[Cdecl]<IntPtr, float*, int*, int>)NativeLibrary.GetExport( h, "gm_im_copy" );
+						_free = (delegate* unmanaged[Cdecl]<IntPtr, void>)NativeLibrary.GetExport( h, "gm_im_free" );
+						_error = (delegate* unmanaged[Cdecl]<IntPtr>)NativeLibrary.GetExport( h, "gm_im_error" );
+						if ( _version() < 1 ) { NativeLibrary.Free( h ); continue; }
+						_lib = h;
+						return true;
+					}
+					catch ( EntryPointNotFoundException ) { NativeLibrary.Free( h ); }
+				}
+				_loadError = "auto retopo isn't installed in this build";
+				return false;
+			}
+		}
+
+		/// <summary>Forget the cached load attempt (and unload the library, if one was loaded) so the next
+		/// Available() tries again from scratch. Host and test hook; never throws.</summary>
+		public static void ResetLoader()
+		{
+			lock ( _loadLock )
+			{
+				if ( _lib != IntPtr.Zero )
+				{
+					try { NativeLibrary.Free( _lib ); } catch { }
+				}
+				_lib = IntPtr.Zero;
+				_version = null;
+				_remesh = null;
+				_counts = null;
+				_copy = null;
+				_free = null;
+				_error = null;
+				_tried = false;
+				_loadError = null;
+			}
+		}
+
+		/// <summary>Flat input: 3 floats per vertex, 3 indices per triangle.</summary>
+		public sealed class Input { public float[] Positions; public uint[] Triangles; }
+
+		/// <summary>Fan-triangulates the mesh's faces (any n-gon) into flat arrays.</summary>
+		public static Input From( PolyMesh m )
+		{
+			var p = new float[m.Positions.Count * 3];
+			for ( int i = 0; i < m.Positions.Count; i++ ) { p[i * 3] = m.Positions[i].x; p[i * 3 + 1] = m.Positions[i].y; p[i * 3 + 2] = m.Positions[i].z; }
+			var t = new List<uint>( m.FaceCount * 6 );
+			foreach ( var f in m.Faces )
+				for ( int c = 1; c + 1 < f.Count; c++ ) { t.Add( (uint)f.Indices[0] ); t.Add( (uint)f.Indices[c] ); t.Add( (uint)f.Indices[c + 1] ); }
+			return new Input { Positions = p, Triangles = t.ToArray() };
+		}
+
+		/// <summary>Runs the solver (blocking; call from a worker thread). <paramref name="cancel"/> and
+		/// <paramref name="progress"/> are shared ints the native side polls / writes (0..100).</summary>
+		public static PolyMesh Remesh( Input input, int targetFaces, bool quads, int smooth, int threads, int[] cancel, int[] progress, out string error )
+		{
+			error = null;
+			if ( !Available() ) { error = _loadError; return null; }
+			IntPtr h;
+			fixed ( float* p = input.Positions ) fixed ( uint* t = input.Triangles ) fixed ( int* c = cancel ) fixed ( int* pr = progress )
+				h = _remesh( p, input.Positions.Length / 3, t, input.Triangles.Length / 3, targetFaces, quads ? 1 : 0, smooth, threads, c, pr );
+			if ( h == IntPtr.Zero ) { error = Marshal.PtrToStringUTF8( _error() ) ?? "it couldn't be solved"; return null; }
+			try
+			{
+				int nv, nf, nc;
+				_counts( h, &nv, &nf, &nc );
+				var pos = new float[nv * 3]; var faces = new int[nf * 4];
+				fixed ( float* pp = pos ) fixed ( int* ff = faces ) if ( _copy( h, pp, ff ) == 0 ) { error = "no result"; return null; }
+				var m = new PolyMesh();
+				for ( int i = 0; i < nv; i++ ) m.AddVertex( new Vec3( pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2] ) );
+				for ( int i = 0; i < nf; i++ )
+				{
+					int a = faces[i * 4], b = faces[i * 4 + 1], c2 = faces[i * 4 + 2], d = faces[i * 4 + 3];
+					if ( a == b || b == c2 || a == c2 ) continue;
+					m.AddFace( d >= 0 && d != a && d != b && d != c2 ? new[] { a, b, c2, d } : new[] { a, b, c2 } );
+				}
+				return m;
+			}
+			finally { _free( h ); }
+		}
+	}
+
+	/// <summary>Normal + AO maps baked from the sculpt onto the retopo result's UVs, as paint canvases
+	/// the <see cref="MeshEditFeature.SetBake"/> handoff takes. A null member means that map did not bake.</summary>
+	public sealed class BakedMaps
+	{
+		public PaintCanvas Normal;
+		public PaintCanvas Ao;
+	}
+
+	/// <summary>
+	/// Auto retopo: rebuild the last visible body as clean, flowing faces near a face count, through
+	/// Instant Meshes (see <see cref="InstantMeshes"/>). Ported from Mobile app/AutoRetopo.cs with the
+	/// Godot parts removed: no panels, no busy card, no Main — the host drives Prepare on its own thread,
+	/// Solve (+ BakeOnto) on a worker thread, and Apply back on its own thread, exactly as Mobile's
+	/// busy card does around the same three calls.
+	///
+	/// WHAT IT KEEPS AND LOSES. The result is one Mesh edit step ("Auto retopo"), so one host Undo takes
+	/// it back — Apply adds exactly one feature, and removing it + rebuilding restores the sculpt. UVs and
+	/// skin weights are NOT carried over (the solver makes new vertices); the bake handoff re-derives the
+	/// maps, and a host that needs weights can run <see cref="RetopoService.TransferSkinWeights"/> from the
+	/// source onto the result before Apply. The face count is a target, not a promise: the solver lands
+	/// near it (Mobile's checks allow 0.75x–1.3x), and Apply's message reports the count it actually got
+	/// with the quad share counted from the faces, never a label the mesh does not earn.
+	///
+	/// HOST WIRING (final integrator, shared entry point — not this file): the bot-command / UI host calls
+	/// Prepare, runs Solve + BakeOnto on a worker (Task.Run) with Cancel wired to its cancel control and
+	/// Progress read for its progress line, then Apply on its own thread. Until the library is installed
+	/// Prepare refuses with "Auto retopo isn't in this build." and the voxel / quad remesh still work.
+	/// </summary>
+	public sealed class AutoRetopo
+	{
+		public AutoRetopo( PartStudio studio )
+		{
+			Studio = studio ?? throw new ArgumentNullException( nameof( studio ) );
+		}
+
+		public PartStudio Studio { get; }
+
+		public static readonly int[] FaceChoices = { 1000, 2000, 5000, 10000 };
+		public int TargetFaces = 2000;
+		public bool Quads = true;
+		public int MaxFaces = 60000;
+
+		public string Refusal { get; private set; }
+		public string Message { get; private set; }
+		public MeshEditFeature Last { get; private set; }
+		public double SolveMs { get; private set; }
+
+		/// <summary>Boundary (hole) and non-manifold edge counts of the last solved / applied mesh, from
+		/// MeshValidator.Validate. Instant Meshes does not guarantee a watertight result (see
+		/// packaging/INSTANTMESHES.md): a solved mesh with holes still applies, and Apply() says so in its
+		/// message instead of labelling it clean. Zero before the first solve.</summary>
+		public int LastBoundaryEdges { get; private set; }
+		public int LastNonManifoldEdges { get; private set; }
+
+		void MeasureHoles( PolyMesh m )
+		{
+			var v = MeshValidator.Validate( m );
+			LastBoundaryEdges = v.BoundaryEdges;
+			LastNonManifoldEdges = v.NonManifoldEdges;
+		}
+
+		/// <summary>Bake the sculpt onto the result as normal + AO maps (see BakeOnto) after the solve.
+		/// Saved with the Auto retopo edit (MeshEditFeature.SetBake), so the maps survive rebuilds, undo and reload.</summary>
+		public bool BakeAfter = true;
+		public static readonly int[] BakeSizes = { 256, 512, 1024 };
+		public int BakeSize = 512;
+		public BakedMaps LastBake { get; private set; }
+		public volatile bool Baking;
+
+		public readonly int[] Cancel = new int[1];
+		public readonly int[] Progress = new int[1];
+
+		bool Ok( string m ) { Refusal = null; Message = m; return true; }
+		bool Refuse( string why ) { Refusal = why; Message = null; return false; }
+
+
+		public Body Target => Studio.Bodies.LastOrDefault( b => b.Visible && b.Mesh != null && b.Mesh.FaceCount > 0 );
+
+		public string Preview()
+		{
+			var body = Target;
+			if ( !InstantMeshes.Available() ) return "Auto retopo isn't in this build. Voxel remesh above still works.";
+			if ( body == null ) return "No body yet. Make a body in CAD first.";
+			return $"About {TargetFaces:N0} {( Quads ? "quads" : "triangles" )} (now {body.Mesh.FaceCount:N0} faces)" + ( BakeAfter ? $", then {BakeSize}px normal + AO maps" : "" );
+		}
+
+		/// <summary>Calling thread: checks and snapshots the input. Null result means refused (see Refusal).</summary>
+		public (Body Body, PolyMesh Source, InstantMeshes.Input Input)? Prepare()
+		{
+			if ( !InstantMeshes.Available() ) { Refuse( "Auto retopo isn't in this build." ); return null; }
+			var body = Target;
+			if ( body == null ) { Refuse( "Nothing to retopo: make a body in CAD first." ); return null; }
+			if ( TargetFaces > MaxFaces ) { Refuse( $"{TargetFaces:N0} faces is too heavy (limit {MaxFaces:N0})." ); return null; }
+			var src = body.Mesh.Clone();
+			Cancel[0] = 0; Progress[0] = 0;
+			return ( body, src, InstantMeshes.From( src ) );
+		}
+
+		/// <summary>Worker thread: the solve. Null when it failed or was cancelled (see <paramref name="error"/>).</summary>
+		public PolyMesh Solve( InstantMeshes.Input input, out string error )
+		{
+			LastBoundaryEdges = 0;
+			LastNonManifoldEdges = 0;
+			var sw = Stopwatch.StartNew();
+			int threads = Math.Clamp( Environment.ProcessorCount - 1, 1, 4 );
+			var m = InstantMeshes.Remesh( input, TargetFaces, Quads, 2, threads, Cancel, Progress, out error );
+			SolveMs = sw.Elapsed.TotalMilliseconds;
+			if ( m != null ) MeasureHoles( m );
+			return m;
+		}
+
+		/// <summary>Worker thread: unwraps <paramref name="result"/> and bakes <paramref name="source"/> onto it.
+		/// Never throws: a bake that fails leaves LastBake null and the retopo still applies without maps.</summary>
+		public void BakeOnto( PolyMesh result, PolyMesh source )
+		{
+			LastBake = null;
+			if ( !BakeAfter || result == null || source == null || Cancel[0] != 0 ) return;
+			Baking = true;
+			try
+			{
+				if ( !HasUVs( result ) )
+				{
+					var unwrap = UVUnwrap.Unwrap( result );
+					if ( unwrap.Charts == 0 ) return;
+				}
+				var set = NormalBake.BakeAll( result, source, BakeSize, BakeSize,
+					BakeMaps.Normal | BakeMaps.AmbientOcclusion,
+					new BakeOptions { AoRays = 16 } );
+				LastBake = new BakedMaps { Normal = ToCanvas( set.Normal ), Ao = ToCanvas( set.AmbientOcclusion ) };
+			}
+			catch ( Exception e ) { KernelLog.Soft( "AutoRetopo.BakeOnto", e ); LastBake = null; }
+			finally { Baking = false; }
+		}
+
+		static bool HasUVs( PolyMesh m ) => m.Faces.Any( f => f.UVs.Any( uv => uv.x != 0f || uv.y != 0f ) );
+
+		/// <summary>A baked map as a paint canvas: row 0 is v = 0 on both sides, so the rows copy
+		/// straight — no flip (same as Mobile's SculptBake.Run and PaintBake.FromBaked). A flip here
+		/// would put the maps upside-down against the UVs and light exactly as wrongly as an inverted
+		/// green channel, invisible in a thumbnail. Unfilled texels go transparent. Null in, null out.</summary>
+		static PaintCanvas ToCanvas( BakedMap map )
+		{
+			if ( map is null ) return null;
+			var canvas = new PaintCanvas( map.Width, map.Height );
+			for ( var i = 0; i < map.Width * map.Height; i++ )
+			{
+				var s = i * 3;
+				var d = i * 4;
+				canvas.Rgba[d] = map.Rgb[s];
+				canvas.Rgba[d + 1] = map.Rgb[s + 1];
+				canvas.Rgba[d + 2] = map.Rgb[s + 2];
+				canvas.Rgba[d + 3] = map.Filled[i] ? (byte)255 : (byte)0;
+			}
+			return canvas;
+		}
+
+		/// <summary>Calling thread: the result as one Mesh edit step on the body. Adds exactly one feature
+		/// ("Auto retopo"), so one host Undo — remove that feature and rebuild — restores the sculpt.</summary>
+		public bool Apply( Body body, PolyMesh source, PolyMesh result )
+		{
+			if ( result == null || result.FaceCount == 0 ) return Refuse( "Auto retopo came out empty: pick more faces." );
+			if ( Target?.Id != body.Id || Target.Mesh.FaceCount != source.FaceCount ) return Refuse( "The body changed while auto retopo ran. Nothing was applied." );
+			var f = new MeshEditFeature { Name = "Auto retopo" };
+			f.Bodies.BodyIds.Add( body.Id );
+			f.Commit( result, body.Mesh );
+			if ( LastBake != null ) f.SetBake( LastBake.Normal, LastBake.Ao );
+			int at = Math.Min( Studio.RollbackIndex, Studio.Features.Count );
+			if ( at < Studio.Features.Count ) Studio.Insert( at, f ); else Studio.Add( f );
+			Studio.Rebuild();
+			if ( f.Error != null )
+			{
+				var why = f.Error;
+				Studio.Remove( f );
+				Studio.Rebuild();
+				return Refuse( why );
+			}
+			Last = f;
+			MeasureHoles( result );
+			string bakeNote = LastBake != null ? $" Normal and AO maps baked from the sculpt ({BakeSize}px)." : BakeAfter ? " The bake didn't come out, so there are no maps." : "";
+			string holeNote = LastBoundaryEdges > 0 || LastNonManifoldEdges > 0
+				? $" {LastBoundaryEdges} boundary edges, {LastNonManifoldEdges} non-manifold edges — not watertight."
+				: "";
+			int quads = result.Faces.Count( x => x.Count == 4 );
+			return Ok( Quads
+				? $"Auto retopo: {result.FaceCount:N0} faces ({quads * 100 / Math.Max( 1, result.FaceCount )}% quads).{holeNote}{bakeNote}"
+				: $"Auto retopo: {result.FaceCount:N0} triangles.{holeNote}{bakeNote}" );
+		}
+
+		/// <summary>Whole run on the calling thread (checks only): Prepare, Solve, BakeOnto, Apply.
+		/// A host that wants the solve off its thread calls those four itself, as Mobile's busy card does.</summary>
+		public bool RunBlocking()
+		{
+			var prep = Prepare();
+			if ( prep == null ) return false;
+			var (body, src, input) = prep.Value;
+			var m = Solve( input, out var err );
+			BakeOnto( m, src );
+			if ( m == null ) return Refuse( err == "cancelled" ? "Auto retopo cancelled. Nothing changed." : $"Auto retopo failed: {err}." );
+			return Apply( body, src, m );
+		}
 	}
 
 }

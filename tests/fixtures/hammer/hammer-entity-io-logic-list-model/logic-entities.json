@@ -1,0 +1,241 @@
+{
+  "schemaVersion": 1,
+  "name": "source1-logic",
+  "classes": [
+    {
+      "name": "logic_auto",
+      "kind": "point",
+      "description": "Logic auto: fires outputs on map spawn, new game, load game, or background map load.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [],
+      "inputs": [],
+      "outputs": [
+        {"name": "OnMapSpawn", "argumentType": "void", "description": "Fired when the map spawns."},
+        {"name": "OnNewGame", "argumentType": "void", "description": "Fired on a new game."},
+        {"name": "OnLoadGame", "argumentType": "void", "description": "Fired when a save is loaded."},
+        {"name": "OnBackgroundMap", "argumentType": "void", "description": "Fired when the map loads as a background map."},
+        {"name": "OnMultiNewMap", "argumentType": "void", "description": "Fired on a multiplayer new map."},
+        {"name": "OnMultiNewRound", "argumentType": "void", "description": "Fired on a multiplayer new round."}
+      ],
+      "helpers": [{"kind": "origin"}]
+    },
+    {
+      "name": "logic_relay",
+      "kind": "point",
+      "description": "Logic relay: fires its OnTrigger output when triggered. Used to chain logic together.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [
+        {"name": "StartDisabled", "type": "int", "default": "0", "description": "Start disabled. 0 = off, 1 = on."}
+      ],
+      "inputs": [
+        {"name": "Trigger", "argumentType": "void", "description": "Fire the relay's outputs."},
+        {"name": "Enable", "argumentType": "void", "description": "Enable the relay."},
+        {"name": "Disable", "argumentType": "void", "description": "Disable the relay."},
+        {"name": "Toggle", "argumentType": "void", "description": "Toggle the relay."},
+        {"name": "CancelPending", "argumentType": "void", "description": "Cancel any pending Trigger."}
+      ],
+      "outputs": [
+        {"name": "OnTrigger", "argumentType": "void", "description": "Fired when the relay is triggered."},
+        {"name": "OnSpawn", "argumentType": "void", "description": "Fired when the relay spawns."}
+      ],
+      "helpers": [{"kind": "origin"}]
+    },
+    {
+      "name": "logic_timer",
+      "kind": "point",
+      "description": "Logic timer: fires OnTimer repeatedly at a set interval.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [
+        {"name": "RefireTime", "type": "float", "default": "1", "description": "Seconds between timer fires."},
+        {"name": "StartDisabled", "type": "int", "default": "0", "description": "Start disabled. 0 = off, 1 = on."},
+        {"name": "UseRandomTime", "type": "int", "default": "0", "description": "Use a random interval between LowerRandomBound and UpperRandomBound. 0 = off, 1 = on."},
+        {"name": "LowerRandomBound", "type": "float", "default": "0", "description": "Lower bound for random intervals."},
+        {"name": "UpperRandomBound", "type": "float", "default": "0", "description": "Upper bound for random intervals."}
+      ],
+      "inputs": [
+        {"name": "Enable", "argumentType": "void", "description": "Enable the timer."},
+        {"name": "Disable", "argumentType": "void", "description": "Disable the timer."},
+        {"name": "Toggle", "argumentType": "void", "description": "Toggle the timer."},
+        {"name": "FireTimer", "argumentType": "void", "description": "Fire the timer immediately."},
+        {"name": "RefireTime", "argumentType": "float", "description": "Set the refire interval."}
+      ],
+      "outputs": [
+        {"name": "OnTimer", "argumentType": "void", "description": "Fired every interval."},
+        {"name": "OnTimerHigh", "argumentType": "void", "description": "Fired when the timer goes high."},
+        {"name": "OnTimerLow", "argumentType": "void", "description": "Fired when the timer goes low."}
+      ],
+      "helpers": [{"kind": "origin"}]
+    },
+    {
+      "name": "logic_branch",
+      "kind": "point",
+      "description": "Logic branch: stores a boolean; fires OnTrue or OnFalse when tested.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [
+        {"name": "InitialValue", "type": "int", "default": "0", "description": "Initial boolean value (0 or 1)."}
+      ],
+      "inputs": [
+        {"name": "SetValue", "argumentType": "int", "description": "Set the value."},
+        {"name": "SetValueTest", "argumentType": "int", "description": "Set the value and test it."},
+        {"name": "Toggle", "argumentType": "void", "description": "Toggle the value."},
+        {"name": "ToggleTest", "argumentType": "void", "description": "Toggle the value and test it."}
+      ],
+      "outputs": [
+        {"name": "OnTrue", "argumentType": "void", "description": "Fired when the value tests true."},
+        {"name": "OnFalse", "argumentType": "void", "description": "Fired when the value tests false."}
+      ],
+      "helpers": [{"kind": "origin"}]
+    },
+    {
+      "name": "logic_case",
+      "kind": "point",
+      "description": "Logic case: compares an input value against up to 16 cases and fires the matching OnCase output, or OnDefault.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [
+        {"name": "Case01", "type": "string", "default": "", "description": "Value that fires OnCase01."},
+        {"name": "Case02", "type": "string", "default": "", "description": "Value that fires OnCase02."},
+        {"name": "Case03", "type": "string", "default": "", "description": "Value that fires OnCase03."},
+        {"name": "Case04", "type": "string", "default": "", "description": "Value that fires OnCase04."},
+        {"name": "Case05", "type": "string", "default": "", "description": "Value that fires OnCase05."},
+        {"name": "Case06", "type": "string", "default": "", "description": "Value that fires OnCase06."},
+        {"name": "Case07", "type": "string", "default": "", "description": "Value that fires OnCase07."},
+        {"name": "Case08", "type": "string", "default": "", "description": "Value that fires OnCase08."},
+        {"name": "Case09", "type": "string", "default": "", "description": "Value that fires OnCase09."},
+        {"name": "Case10", "type": "string", "default": "", "description": "Value that fires OnCase10."},
+        {"name": "Case11", "type": "string", "default": "", "description": "Value that fires OnCase11."},
+        {"name": "Case12", "type": "string", "default": "", "description": "Value that fires OnCase12."},
+        {"name": "Case13", "type": "string", "default": "", "description": "Value that fires OnCase13."},
+        {"name": "Case14", "type": "string", "default": "", "description": "Value that fires OnCase14."},
+        {"name": "Case15", "type": "string", "default": "", "description": "Value that fires OnCase15."},
+        {"name": "Case16", "type": "string", "default": "", "description": "Value that fires OnCase16."}
+      ],
+      "inputs": [
+        {"name": "InValue", "argumentType": "string", "description": "Value to compare against the cases."},
+        {"name": "PickRandom", "argumentType": "void", "description": "Fire a random OnCase output."},
+        {"name": "PickRandomShuffle", "argumentType": "void", "description": "Fire a random OnCase output, shuffled."}
+      ],
+      "outputs": [
+        {"name": "OnCase01", "argumentType": "void", "description": "Fired when the input value matches Case01."},
+        {"name": "OnCase02", "argumentType": "void", "description": "Fired when the input value matches Case02."},
+        {"name": "OnCase03", "argumentType": "void", "description": "Fired when the input value matches Case03."},
+        {"name": "OnCase04", "argumentType": "void", "description": "Fired when the input value matches Case04."},
+        {"name": "OnCase05", "argumentType": "void", "description": "Fired when the input value matches Case05."},
+        {"name": "OnCase06", "argumentType": "void", "description": "Fired when the input value matches Case06."},
+        {"name": "OnCase07", "argumentType": "void", "description": "Fired when the input value matches Case07."},
+        {"name": "OnCase08", "argumentType": "void", "description": "Fired when the input value matches Case08."},
+        {"name": "OnCase09", "argumentType": "void", "description": "Fired when the input value matches Case09."},
+        {"name": "OnCase10", "argumentType": "void", "description": "Fired when the input value matches Case10."},
+        {"name": "OnCase11", "argumentType": "void", "description": "Fired when the input value matches Case11."},
+        {"name": "OnCase12", "argumentType": "void", "description": "Fired when the input value matches Case12."},
+        {"name": "OnCase13", "argumentType": "void", "description": "Fired when the input value matches Case13."},
+        {"name": "OnCase14", "argumentType": "void", "description": "Fired when the input value matches Case14."},
+        {"name": "OnCase15", "argumentType": "void", "description": "Fired when the input value matches Case15."},
+        {"name": "OnCase16", "argumentType": "void", "description": "Fired when the input value matches Case16."},
+        {"name": "OnDefault", "argumentType": "void", "description": "Fired when the input value matches no case."}
+      ],
+      "helpers": [{"kind": "origin"}]
+    },
+    {
+      "name": "math_counter",
+      "kind": "point",
+      "description": "Math counter: stores a number; fires OnHitMax and OnHitMin at its limits. Two Add inputs with max 2 model an AND-gate: it fires OnHitMax only after both inputs arrive.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [
+        {"name": "StartValue", "type": "float", "default": "0", "description": "Value the counter starts at."},
+        {"name": "min", "type": "float", "default": "0", "description": "Minimum value; reaching it fires OnHitMin."},
+        {"name": "max", "type": "float", "default": "0", "description": "Maximum value; reaching it fires OnHitMax."},
+        {"name": "StartDisabled", "type": "int", "default": "0", "description": "Start disabled. 0 = off, 1 = on."}
+      ],
+      "inputs": [
+        {"name": "Add", "argumentType": "float", "description": "Add a value to the counter."},
+        {"name": "Subtract", "argumentType": "float", "description": "Subtract a value from the counter."},
+        {"name": "Divide", "argumentType": "float", "description": "Divide the counter by a value."},
+        {"name": "Multiply", "argumentType": "float", "description": "Multiply the counter by a value."},
+        {"name": "SetValue", "argumentType": "float", "description": "Set the counter value."},
+        {"name": "SetHitMax", "argumentType": "float", "description": "Set the maximum value."},
+        {"name": "SetHitMin", "argumentType": "float", "description": "Set the minimum value."},
+        {"name": "SetValueNoFire", "argumentType": "float", "description": "Set the counter value without firing outputs."},
+        {"name": "GetValue", "argumentType": "void", "description": "Fire OutValue with the current value."}
+      ],
+      "outputs": [
+        {"name": "OnHitMax", "argumentType": "void", "description": "Fired when the counter reaches its maximum."},
+        {"name": "OnHitMin", "argumentType": "void", "description": "Fired when the counter reaches its minimum."},
+        {"name": "OnChangedFromMin", "argumentType": "void", "description": "Fired when the counter leaves its minimum."},
+        {"name": "OnChangedFromMax", "argumentType": "void", "description": "Fired when the counter leaves its maximum."},
+        {"name": "OutValue", "argumentType": "float", "description": "Fired with the current value."}
+      ],
+      "helpers": [{"kind": "origin"}]
+    },
+    {
+      "name": "logic_compare",
+      "kind": "point",
+      "description": "Logic compare: compares a value against CompareValue and fires the matching output.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [
+        {"name": "InitialValue", "type": "float", "default": "0", "description": "Value to compare."},
+        {"name": "CompareValue", "type": "float", "default": "0", "description": "Value to compare against."}
+      ],
+      "inputs": [
+        {"name": "SetValue", "argumentType": "float", "description": "Set the value to compare."},
+        {"name": "SetCompareValue", "argumentType": "float", "description": "Set the value to compare against."},
+        {"name": "Compare", "argumentType": "void", "description": "Compare the values and fire the matching output."},
+        {"name": "SetValueNoFire", "argumentType": "float", "description": "Set the value without firing outputs."}
+      ],
+      "outputs": [
+        {"name": "OnEqualTo", "argumentType": "void", "description": "Fired when the value equals CompareValue."},
+        {"name": "OnNotEqualTo", "argumentType": "void", "description": "Fired when the value does not equal CompareValue."},
+        {"name": "OnGreaterThan", "argumentType": "void", "description": "Fired when the value is greater than CompareValue."},
+        {"name": "OnLessThan", "argumentType": "void", "description": "Fired when the value is less than CompareValue."}
+      ],
+      "helpers": [{"kind": "origin"}]
+    },
+    {
+      "name": "env_global",
+      "kind": "point",
+      "description": "Env global: controls a global state flag shared across maps.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [
+        {"name": "GlobalState", "type": "string", "default": "", "description": "Name of the global state flag."},
+        {"name": "InitialState", "type": "int", "default": "0", "description": "Initial state: 0 = off, 1 = on, 2 = dead."}
+      ],
+      "inputs": [
+        {"name": "TurnOn", "argumentType": "void", "description": "Turn the global state on."},
+        {"name": "TurnOff", "argumentType": "void", "description": "Turn the global state off."},
+        {"name": "Toggle", "argumentType": "void", "description": "Toggle the global state."},
+        {"name": "Remove", "argumentType": "void", "description": "Remove the global state."}
+      ],
+      "outputs": [],
+      "helpers": [{"kind": "origin"}]
+    },
+    {
+      "name": "point_template",
+      "kind": "point",
+      "description": "Point template: spawns copies of up to 16 template entities.",
+      "baseClasses": ["Targetname"],
+      "keyvalues": [
+        {"name": "Template01", "type": "string", "default": "", "description": "First template entity to spawn."},
+        {"name": "Template02", "type": "string", "default": "", "description": "Second template entity to spawn."},
+        {"name": "Template03", "type": "string", "default": "", "description": "Third template entity to spawn."},
+        {"name": "Template04", "type": "string", "default": "", "description": "Fourth template entity to spawn."},
+        {"name": "Template05", "type": "string", "default": "", "description": "Fifth template entity to spawn."},
+        {"name": "Template06", "type": "string", "default": "", "description": "Sixth template entity to spawn."},
+        {"name": "Template07", "type": "string", "default": "", "description": "Seventh template entity to spawn."},
+        {"name": "Template08", "type": "string", "default": "", "description": "Eighth template entity to spawn."},
+        {"name": "Template09", "type": "string", "default": "", "description": "Ninth template entity to spawn."},
+        {"name": "Template10", "type": "string", "default": "", "description": "Tenth template entity to spawn."},
+        {"name": "Template11", "type": "string", "default": "", "description": "Eleventh template entity to spawn."},
+        {"name": "Template12", "type": "string", "default": "", "description": "Twelfth template entity to spawn."},
+        {"name": "Template13", "type": "string", "default": "", "description": "Thirteenth template entity to spawn."},
+        {"name": "Template14", "type": "string", "default": "", "description": "Fourteenth template entity to spawn."},
+        {"name": "Template15", "type": "string", "default": "", "description": "Fifteenth template entity to spawn."},
+        {"name": "Template16", "type": "string", "default": "", "description": "Sixteenth template entity to spawn."}
+      ],
+      "inputs": [
+        {"name": "ForceSpawn", "argumentType": "void", "description": "Spawn the template entities."},
+        {"name": "ForceSpawnAtEntityOrigin", "argumentType": "void", "description": "Spawn the template entities at this entity's origin."}
+      ],
+      "outputs": [],
+      "helpers": [{"kind": "origin"}]
+    }
+  ]
+}

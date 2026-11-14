@@ -1,141 +1,131 @@
-#nullable enable
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace Effigy;
 
 /// <summary>
-/// Writes LineworkDocument to .linework JSON format.
-/// Mirror of LineworkReader for saving/exporting linework documents.
+/// Writes Linework 2D drawings (.linework JSON) matching the native Linework schema
+/// (linework/src/model.cpp: docToJson / strokeToJson).
 /// </summary>
 public static class LineworkWriter
 {
-    /// <summary>
-    /// Write a LineworkDocument to a file
-    /// </summary>
-    public static void Write(LineworkDocument doc, string path)
-    {
-        var json = Serialize(doc);
-        File.WriteAllText(path, json, Encoding.UTF8);
-    }
+	public static string ToJson( LineworkDocument doc, string paper = "graphite", string grid = "dots" )
+	{
+		var root = new JsonObject
+		{
+			["app"] = "linework",
+			["v"] = 2,
+			["name"] = string.IsNullOrWhiteSpace( doc.Name ) ? "untitled" : doc.Name,
+			["paper"] = paper,
+			["grid"] = grid,
+			["material"] = JsonSerializer.SerializeToNode( doc.Material, LineworkMaterialSettings.JsonOptions ),
+			["sym"] = new JsonObject
+			{
+				["on"] = doc.SymOn,
+				["x"] = MathF.Round( doc.SymX, 2 )
+			}
+		};
 
-    /// <summary>
-    /// Serialize a LineworkDocument to JSON string
-    /// </summary>
-    public static string Serialize(LineworkDocument doc)
-    {
-        using var stream = new MemoryStream();
-        using var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true });
+		var layersArray = new JsonArray();
+		foreach ( var layer in doc.Layers )
+		{
+			var layerObj = new JsonObject
+			{
+				["id"] = string.IsNullOrWhiteSpace( layer.Id ) ? Guid.NewGuid().ToString( "N" ) : layer.Id,
+				["name"] = string.IsNullOrWhiteSpace( layer.Name ) ? "Layer" : layer.Name,
+				["visible"] = layer.Visible,
+				["locked"] = layer.Locked,
+				["opacity"] = layer.Opacity,
+				["height"] = layer.Height,
+				["roughness"] = layer.Roughness,
+				["metalness"] = layer.Metalness
+			};
 
-        writer.WriteStartObject();
+			if ( layer.Ref )
+				layerObj["ref"] = true;
 
-        // Document name
-        writer.WriteString("name", doc.Name);
+			var strokesArray = new JsonArray();
+			foreach ( var stroke in layer.Strokes )
+			{
+				var strokeObj = new JsonObject
+				{
+					["id"] = string.IsNullOrWhiteSpace( stroke.Id ) ? Guid.NewGuid().ToString( "N" ) : stroke.Id,
+					["tool"] = string.IsNullOrWhiteSpace( stroke.Tool ) ? "pen" : stroke.Tool,
+					["color"] = string.IsNullOrWhiteSpace( stroke.Color ) ? "#ecebe6" : stroke.Color,
+					["size"] = stroke.Size,
+					["opacity"] = stroke.Opacity,
+					["height"] = stroke.Height,
+					["roughness"] = stroke.Roughness,
+					["metalness"] = stroke.Metalness,
+					["channels"] = (int)stroke.Channels
+				};
 
-        // Symmetry
-        writer.WriteStartObject("sym");
-        writer.WriteBoolean("on", doc.SymOn);
-        writer.WriteNumber("x", doc.SymX);
-        writer.WriteEndObject();
+				if ( stroke.Closed )
+					strokeObj["closed"] = true;
 
-        // Layers
-        writer.WriteStartArray("layers");
-        foreach (var layer in doc.Layers)
-        {
-            WriteLayer(writer, layer);
-        }
-        writer.WriteEndArray();
+				var ptsArray = new JsonArray();
+				for ( var i = 0; i < stroke.Points.Count; i++ )
+				{
+					var pt = stroke.Points[i];
+					var p = i < stroke.Pressures.Count ? stroke.Pressures[i] : 1f;
+					ptsArray.Add( (double)MathF.Round( pt.x, 2 ) );
+					ptsArray.Add( (double)MathF.Round( pt.y, 2 ) );
+					ptsArray.Add( (double)MathF.Round( p, 3 ) );
+				}
+				strokeObj["pts"] = ptsArray;
 
-        writer.WriteEndObject();
-        writer.Flush();
+				if ( stroke.Holes.Count > 0 )
+				{
+					var holesArray = new JsonArray();
+					foreach ( var hole in stroke.Holes )
+					{
+						var hPtsArray = new JsonArray();
+						foreach ( var hp in hole )
+						{
+							hPtsArray.Add( (double)MathF.Round( hp.x, 2 ) );
+							hPtsArray.Add( (double)MathF.Round( hp.y, 2 ) );
+							hPtsArray.Add( 1.0 );
+						}
+						holesArray.Add( hPtsArray );
+					}
+					strokeObj["holes"] = holesArray;
+				}
 
-        return Encoding.UTF8.GetString(stream.ToArray());
-    }
+				strokesArray.Add( strokeObj );
+			}
 
-    private static void WriteLayer(Utf8JsonWriter writer, LineworkLayer layer)
-    {
-        writer.WriteStartObject();
+			layerObj["strokes"] = strokesArray;
+			layersArray.Add( layerObj );
+		}
 
-        writer.WriteString("id", layer.Id);
-        writer.WriteString("name", layer.Name);
-        writer.WriteBoolean("visible", layer.Visible);
-        writer.WriteBoolean("ref", layer.Ref);
+		root["layers"] = layersArray;
+		return root.ToJsonString();
+	}
 
-        // Strokes
-        writer.WriteStartArray("strokes");
-        foreach (var stroke in layer.Strokes)
-        {
-            WriteStroke(writer, stroke);
-        }
-        writer.WriteEndArray();
+	public static bool TrySave( LineworkDocument doc, string filePath, out string error )
+	{
+		error = null;
+		try
+		{
+			var dir = Path.GetDirectoryName( filePath );
+			if ( !string.IsNullOrEmpty( dir ) && !Directory.Exists( dir ) )
+				Directory.CreateDirectory( dir );
 
-        writer.WriteEndObject();
-    }
+			var json = ToJson( doc );
+			File.WriteAllText( filePath, json );
+			return true;
+		}
+		catch ( Exception ex )
+		{
+			error = ex.Message;
+			return false;
+		}
+	}
 
-    private static void WriteStroke(Utf8JsonWriter writer, LineworkStroke stroke)
-    {
-        writer.WriteStartObject();
+	public static void Write( LineworkDocument doc, string path ) => File.WriteAllText( path, ToJson( doc ) );
 
-        writer.WriteString("id", stroke.Id);
-        writer.WriteString("tool", stroke.Tool);
-        writer.WriteString("color", stroke.Color);
-        writer.WriteNumber("size", stroke.Size);
-        writer.WriteNumber("opacity", stroke.Opacity);
-        writer.WriteBoolean("closed", stroke.Closed);
-
-        // Points (as x,y,pressure triples)
-        writer.WriteStartArray("pts");
-        for (int i = 0; i < stroke.Points.Count; i++)
-        {
-            var p = stroke.Points[i];
-            float pressure = (i < stroke.Pressures.Count) ? stroke.Pressures[i] : 0.5f;
-            writer.WriteNumberValue(p.x);
-            writer.WriteNumberValue(p.y);
-            writer.WriteNumberValue(pressure);
-        }
-        writer.WriteEndArray();
-
-        // Holes
-        writer.WriteStartArray("holes");
-        foreach (var hole in stroke.Holes)
-        {
-            writer.WriteStartArray();
-            for (int i = 0; i < hole.Count; i++)
-            {
-                var p = hole[i];
-                float pressure = 0.5f; // Holes don't have pressure in current format
-                writer.WriteNumberValue(p.x);
-                writer.WriteNumberValue(p.y);
-                writer.WriteNumberValue(pressure);
-            }
-            writer.WriteEndArray();
-        }
-        writer.WriteEndArray();
-
-        writer.WriteEndObject();
-    }
-
-    /// <summary>
-    /// Create a minimal LineworkDocument from strokes (single layer, default settings)
-    /// </summary>
-    public static LineworkDocument CreateDocument(string name, List<LineworkStroke> strokes)
-    {
-        return new LineworkDocument
-        {
-            Name = name,
-            Layers = new List<LineworkLayer>
-            {
-                new LineworkLayer
-                {
-                    Id = Guid.NewGuid().ToString(),
-                    Name = "Layer 1",
-                    Visible = true,
-                    Strokes = strokes
-                }
-            }
-        };
-    }
+	public static string Serialize( LineworkDocument doc ) => ToJson( doc );
 }

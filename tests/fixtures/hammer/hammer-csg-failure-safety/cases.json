@@ -1,0 +1,116 @@
+{
+  "cases": [
+    {
+      "expectedReason": "csg-no-boolean-provider",
+      "name": "subtract-no-provider",
+      "note": "No boolean provider installed: a named capability error, not a fake uncut mesh, and both brushes untouched.",
+      "op": "subtract",
+      "provider": "none",
+      "target": [
+        4,
+        4,
+        4
+      ],
+      "tool": [
+        2,
+        2,
+        2
+      ],
+      "toolOffset": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "expectedReason": "hollow-too-thick",
+      "name": "hollow-too-thick",
+      "note": "The Reddit case: wall thickness 100 on a 128-cube leaves no inner solid. The hollow must refuse with hollow-too-thick and the 128-cube must survive with its full volume \u2014 never delete the brush it was asked to hollow.",
+      "op": "hollow",
+      "target": [
+        128,
+        128,
+        128
+      ],
+      "thickness": 100
+    },
+    {
+      "expectedReason": "hollow-thickness-not-positive",
+      "name": "hollow-thickness-zero",
+      "note": "Zero wall thickness is not a hollow: named refusal, source brush untouched.",
+      "op": "hollow",
+      "target": [
+        4,
+        4,
+        4
+      ],
+      "thickness": 0
+    },
+    {
+      "expectedReason": "merge-not-convex",
+      "name": "merge-not-convex",
+      "note": "Two 2-cubes offset 1 on X and Y union into an L-shape, which is not convex: the merge is refused and both 2-cubes survive.",
+      "op": "merge",
+      "target": [
+        2,
+        2,
+        2
+      ],
+      "tool": [
+        2,
+        2,
+        2
+      ],
+      "toolOffset": [
+        1,
+        1,
+        0
+      ]
+    },
+    {
+      "expectedReason": "csg-empty-result",
+      "name": "intersect-disjoint",
+      "note": "Tool 10 units away on X: no shared volume, named empty result, both brushes untouched.",
+      "op": "intersect",
+      "target": [
+        4,
+        4,
+        4
+      ],
+      "tool": [
+        2,
+        2,
+        2
+      ],
+      "toolOffset": [
+        10,
+        0,
+        0
+      ]
+    },
+    {
+      "expectedReason": "csg-no-boolean-provider",
+      "name": "intersect-no-provider",
+      "note": "No boolean provider installed: a named capability error, not a fake mesh, and both brushes untouched.",
+      "op": "intersect",
+      "provider": "none",
+      "target": [
+        4,
+        4,
+        4
+      ],
+      "tool": [
+        4,
+        4,
+        4
+      ],
+      "toolOffset": [
+        2,
+        0,
+        0
+      ]
+    }
+  ],
+  "note": "Failure-safety cases for hammer-csg-failure-safety (board hammer-csg-failure-safety). Every case MUST fail with its expectedReason, return no mesh, and leave its inputs byte-identical to snapshots taken before the call. All boxes are axis-aligned and centred on the origin unless toolOffset moves the tool; volumes are in Geppetto Desktop kernel units (inches, Z-up). The mapcsg group (tests/MapCsgTests.cs) recomputes the subtract/merge/hollow cases; the mapcsgintersect group (tests/MapCsgIntersectTests.cs) recomputes the intersect cases. Cases with \"provider\": \"none\" run with MeshBoolean.Provider set to null.",
+  "schema": "hammer-csg-failure/v1"
+}

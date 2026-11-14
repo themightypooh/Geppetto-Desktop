@@ -2030,6 +2030,10 @@ public sealed partial class MeshEditSession
 			m.Faces.Add( new Face( (int[])face.Indices.Clone(), (Vec2[])face.UVs.Clone(), face.Material ) );
 	}
 
+	public bool CanUndo => _preview is not null || _undo.Count > 0;
+
+	public bool CanRedo => _redo.Count > 0;
+
 	public bool Undo()
 	{
 		if ( _preview is not null )
@@ -7864,6 +7868,26 @@ public sealed partial class MeshEditSession
 		SelectionRevision++;
 	}
 
+	/// <summary>Where the faces retopology drew start; -1 when not retopologizing.</summary>
+	public int RetopoFaceStart => _retopoFaceStart;
+
+	/// <summary>
+	/// Carry on retopologizing in a session rebuilt from a saved edit (after an undo): the same
+	/// start lines and surface as before. Refused when the mesh no longer reaches those lines.
+	/// </summary>
+	public bool ResumeRetopo( int vertexStart, int faceStart, PolyMesh target, float offset )
+	{
+		if ( target is null || vertexStart < 0 || faceStart < 0 || vertexStart > Mesh.VertexCount || faceStart > Mesh.FaceCount )
+			return false;
+
+		RetopoStart = vertexStart;
+		_retopoFaceStart = faceStart;
+		SnapTarget = target;
+		SnapOffset = offset;
+		SelectionRevision++;
+		return true;
+	}
+
 	/// <summary>Stop retopologizing without separating anything — what is drawn stays in this body.</summary>
 	public void EndRetopo()
 	{
@@ -9137,7 +9161,7 @@ public sealed partial class MeshEditSession
 	/// job because only the caller knows the rig's naming: on the Citizen that is the L/R pairs, and
 	/// a bone with no partner (a spine, the head) maps to itself.
 	///
-	/// A vertex is matched to the one at its mirrored position within <see cref="MirrorTolerance"/>.
+	/// A vertex is matched across the rig's Y = 0 plane to the one at its mirrored position within <see cref="MirrorTolerance"/>.
 	/// Vertices on the plane keep their own weights, with the bones swapped — a vertex on the
 	/// centre line is weighted to spine bones, which are their own partners, so in practice that
 	/// leaves them alone.
@@ -9180,10 +9204,10 @@ public sealed partial class MeshEditSession
 				var p = Mesh.Positions[v];
 
 				// Only the receiving side is written.
-				if ( p.x * sign >= -MirrorTolerance )
+				if ( p.y * sign >= -MirrorTolerance )
 					continue;
 
-				if ( !byPosition.TryGetValue( Key( new Vec3( -p.x, p.y, p.z ) ), out var source ) || source >= skin.Count )
+				if ( !byPosition.TryGetValue( Key( new Vec3( p.x, -p.y, p.z ) ), out var source ) || source >= skin.Count )
 					continue;
 
 				var from = skin.Vertices[source];

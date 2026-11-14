@@ -38,6 +38,10 @@ public static partial class BuildScript
 	///                               blends the neighbour face normal, reading as a baked fillet along
 	///                               sharp hard-surface edges without a subdivided high source. 0
 	///                               (default) bakes the sculpt normals exactly, so a hard low edge stays hard.
+	///   thickdist=0                 thickness white-point in model units: the grey map reads
+	///                               white at this depth or more (0 = a quarter of the sculpt's
+	///                               diagonal, the baker's default). thickrays=32 sets the inward
+	///                               rays per texel (the baker floors it at 4).
 	///   id=body                     the ID map colours by high body instead of material slot.
 	///   cagegen= / cageauto=        P1: generate a cage per pair with BakeCage.Inflate instead of
 	///                               a hand-built cage body; cagegen=auto estimates each pair's
@@ -307,9 +311,9 @@ public static partial class BuildScript
 			AoDistance = opts.TryGetValue( "aodistance", out var aoDistance ) ? Number( aoDistance ) : 0f,
 			Padding = padding,
 			BevelRadius = round,
-			SixteenBit = bits == 16,
 			ThicknessDistance = thickDist,
 			ThicknessRays = thickRays,
+			SixteenBit = bits == 16,
 		};
 
 		Directory.CreateDirectory( dir );

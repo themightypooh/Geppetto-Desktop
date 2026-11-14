@@ -17,7 +17,15 @@ public readonly record struct LiveMaterial( Vector3 Albedo, float Roughness = .6
 	Vector3 Emission = default, float Alpha = 1f, bool Blend = false, bool DoubleSided = true )
 {
 	public MaterialLobes Lobes { get; init; } = MaterialLobes.None;
-	public LiveLook Look { get; init; }
+	/// <summary>Defaults to <see cref="LiveLook"/>'s constructor defaults (opacity 1, shadow
+	/// tint white). A bare <c>default</c> look has opacity 0, which the lit shader reads as
+	/// fully transparent and discards every fragment of the layer (see the DrawBatch
+	/// constructor's note on uLookOpacity) — a live layer created without an explicit
+	/// look would be invisible in both the depth pre-pass and the lit pass. NOTE: a
+	/// bare <c>new LiveLook()</c> does NOT apply the primary constructor's defaults (a
+	/// record struct's implicit parameterless constructor zero-initialises), so the
+	/// opacity must be passed explicitly here.</summary>
+	public LiveLook Look { get; init; } = new LiveLook( Opacity: 1f );
 	/// <summary>Soft round sprite in albedo alpha and emission (billboards); quads otherwise draw square.</summary>
 	public bool Sprite { get; init; }
 }

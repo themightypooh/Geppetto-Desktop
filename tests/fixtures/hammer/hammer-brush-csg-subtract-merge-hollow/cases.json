@@ -1,0 +1,45 @@
+{
+  "schema": "hammer-csg-acceptance/v1",
+  "note": "Acceptance cases for hammer-brush-csg-subtract-merge-hollow. All boxes are axis-aligned and centred on the origin unless toolOffset moves the tool; volumes are in Geppetto Desktop kernel units (inches, Z-up). The mapcsg test group recomputes every case from this file.",
+  "cases": [
+    {
+      "name": "subtract-nested",
+      "op": "subtract",
+      "target": [4, 4, 4],
+      "tool": [2, 2, 2],
+      "toolOffset": [0, 0, 0],
+      "expectedVolume": 56,
+      "note": "2-cube fully inside a 4-cube: 64 - 8 = 56 (a void inside the solid)."
+    },
+    {
+      "name": "subtract-through",
+      "op": "subtract",
+      "target": [4, 4, 4],
+      "tool": [2, 4, 2],
+      "toolOffset": [1, 0, 0],
+      "expectedVolume": 48,
+      "note": "Cutter spans the full Y width and cuts out the +X side: 64 - 2*4*2 = 48."
+    },
+    {
+      "name": "merge-coplanar",
+      "op": "merge",
+      "target": [2, 2, 2],
+      "tool": [2, 2, 2],
+      "toolOffset": [2, 0, 0],
+      "expectedVolume": 16,
+      "expectedFaces": 6,
+      "convex": true,
+      "note": "Two 2-cubes sharing one face merge into a single 4x2x2 convex brush with 6 faces."
+    },
+    {
+      "name": "hollow-128-t8",
+      "op": "hollow",
+      "target": [128, 128, 128],
+      "thickness": 8,
+      "expectedVolume": 692224,
+      "expectedFaces": 12,
+      "convex": false,
+      "note": "128-cube with 8 walls: outer 128^3 = 2097152 minus inner void 112^3 = 1404928 leaves 692224 of wall. 6 outer + 6 inner faces; a hollow shell is not convex."
+    }
+  ]
+}

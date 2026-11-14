@@ -1,0 +1,14 @@
+{
+  "comment": "hammer-greybox-workflow-defaults fixture: the same sealed room with a spawn but no light entity. The checklist fails only the light check (GREYBOX_NO_LIGHT); seal and spawn pass.",
+  "brushes": [
+    { "id": 1, "min": [0, 0, 0], "max": [512, 512, 16], "isDetail": false, "material": "tools/toolsnodraw" },
+    { "id": 2, "min": [0, 0, 240], "max": [512, 512, 256], "isDetail": false, "material": "tools/toolsnodraw" },
+    { "id": 3, "min": [0, 0, 0], "max": [16, 512, 256], "isDetail": false, "material": "tools/toolsnodraw" },
+    { "id": 4, "min": [496, 0, 0], "max": [512, 512, 256], "isDetail": false, "material": "tools/toolsnodraw" },
+    { "id": 5, "min": [0, 0, 0], "max": [512, 16, 256], "isDetail": false, "material": "tools/toolsnodraw" },
+    { "id": 6, "min": [0, 496, 0], "max": [512, 512, 256], "isDetail": false, "material": "tools/toolsnodraw" }
+  ],
+  "entities": [
+    { "id": 1, "class": "info_player_start", "origin": [256, 256, 64] }
+  ]
+}

@@ -1,0 +1,35 @@
+# build-fixtures.txt — builds the three export fixtures in ONE document.
+# Run with the Desktop script runner (--script) or the bench (--bench),
+# from tests/export-verify/ so relative paths resolve here.
+# Writes: fixtures/all.effigy (prop + painted panel + rigged character).
+# Clips and the morph live in separate scripts (character-clips.txt,
+# morph-smile.txt) because their drivers are separate — see README G2/G4.
+# Units: inches, Z-up. Every line below uses a verb/parameter verified in
+# source (BuildScript.cs, EFFIGY-API.md, or the DNA lane's report).
+
+# --- Fixture 1: furnished-room prop (a table) + axis marker ---
+add Primitive shape=Box width=36 depth=24 height=18 position=0,0,9 materialslot=0 name=TableTop
+add Primitive shape=Box width=2 depth=2 height=18 position=16,10,9 materialslot=0 name=TableLegFL
+add Primitive shape=Box width=2 depth=2 height=18 position=16,-10,9 materialslot=0 name=TableLegFR
+add Primitive shape=Box width=2 depth=2 height=18 position=-16,10,9 materialslot=0 name=TableLegBL
+add Primitive shape=Box width=2 depth=2 height=18 position=-16,-10,9 materialslot=0 name=TableLegBR
+# Marker: 2x2x2 box at +X. If the export/import mirrors X, this box lands at -X.
+add Primitive shape=Box width=2 depth=2 height=2 position=20,0,1 materialslot=0 name=Marker
+material 0 color=#8a6b48 rough=0.8 metal=0
+
+# --- Fixture 2: painted material fixture ---
+add Primitive shape=Box width=24 depth=1 height=24 position=0,0,12 materialslot=1 name=PaintPanel
+material 1 color=#202024 rough=0.6 metal=0 emit=#ff2010
+add Paint bodies=PaintPanel resolution=512 usecolor=on color=0.8,0.2,0.1
+texpaint PaintPanel path=10,20;100,20;200,20 channel=color color=1,0,0 radius=12 strength=1
+texpaint PaintPanel path=10,60;100,60;200,60 channel=color color=0,0.4,1 radius=12 strength=1
+# NOTE: roughness/metallic texpaint channels were NOT verified in this pass
+# (only channel=color appears in the verb usage). Check PaintChannel names
+# in kernel/Effigy/PaintChannel.cs before adding channel=roughness strokes.
+validate all target=game
+
+# --- Fixture 3: rigged character (DNA lane: add Character) ---
+add Character name=Hero preset=citizen_male height=72 muscularity=0.65 age=35
+
+# --- Save ---
+save fixtures/all.effigy strict=1

@@ -1220,7 +1220,11 @@ public sealed class FleshSurface
 			if ( _cache.TryGetValue( key, out var hit ) ) return hit;
 		}
 		var made = make();
-		lock ( _cache ) _cache[key] = made;
+		lock ( _cache )
+		{
+			if ( _cache.TryGetValue( key, out var hit ) ) return hit;
+			_cache[key] = made;
+		}
 		return made;
 	}
 
@@ -1238,7 +1242,19 @@ public sealed class FleshSurface
 	/// <summary>The smooth surface normal at a sample (vertex normals, interpolated across a texel's triangle).</summary>
 	public Vec3 NormalAt( int t )
 	{
-		var n = _normals ??= Mesh.ComputeVertexNormals();
+		var n = _normals;
+		if ( n is null )
+		{
+			lock ( _cache )
+			{
+				n = _normals;
+				if ( n is null )
+				{
+					n = Mesh.ComputeVertexNormals();
+					_normals = n;
+				}
+			}
+		}
 		if ( PerVertex ) return n[t];
 		if ( !Covered[t] ) return new Vec3( 0, 0, 1 );
 		var (a, b, c) = _tris[_tri[t]];
@@ -1261,7 +1277,11 @@ public sealed class FleshSurface
 		{
 			if ( Covered[t] ) o[t] = image.Sample( PositionAt( t ), NormalAt( t ), tile * Detail );
 		} );
-		lock ( _images ) _images[key] = o;
+		lock ( _images )
+		{
+			if ( _images.TryGetValue( key, out var hit ) ) return hit;
+			_images[key] = o;
+		}
 		return o;
 	}
 
@@ -1512,5 +1532,93 @@ public sealed class TriplanarImage
 		var top = At( x0, y0 ) * (1f - tx) + At( x0 + 1, y0 ) * tx;
 		var bottom = At( x0, y0 + 1 ) * (1f - tx) + At( x0 + 1, y0 + 1 ) * tx;
 		return top * (1f - ty) + bottom * ty;
+	}
+}
+
+/// <summary>
+/// SkinGen on the flesh bake path (spec 4.4): turns a <see cref="SkinGenStack"/> evaluation into a
+/// <see cref="FleshStack"/> — chromophore zones as multiply layers over the base colour, freckles as
+/// a darkening multiply layer, scars as a pale low-roughness layer, tattoos as a dermal-teal layer —
+/// so `add SkinDetail` bakes through the same <see cref="FleshMaterial.Bake"/> / BakeVertices route
+/// as every other flesh material, on the body's own UVs or per vertex. The stack is built for one
+/// mesh: its mask signals close over that mesh's evaluated arrays, so do not reuse it on another.
+/// Pore normals are untouched: no layer here writes a normal map, and tattoos only ride albedo.
+/// </summary>
+public static class SkinGenBake
+{
+	/// <summary>The chromophore zone tint factors (1 + strength * (tint - 1)) for multiply layers.</summary>
+	public static Vec3 GoldFactor => new(
+		1f + SkinGenStack.GoldStrength * (SkinGenStack.GoldTint.x - 1f),
+		1f + SkinGenStack.GoldStrength * (SkinGenStack.GoldTint.y - 1f),
+		1f + SkinGenStack.GoldStrength * (SkinGenStack.GoldTint.z - 1f) );
+	public static Vec3 CrimsonFactor => new(
+		1f + SkinGenStack.CrimsonStrength * (SkinGenStack.CrimsonTint.x - 1f),
+		1f + SkinGenStack.CrimsonStrength * (SkinGenStack.CrimsonTint.y - 1f),
+		1f + SkinGenStack.CrimsonStrength * (SkinGenStack.CrimsonTint.z - 1f) );
+	public static Vec3 BlueFactor => new(
+		1f + SkinGenStack.BlueStrength * (SkinGenStack.BlueTint.x - 1f),
+		1f + SkinGenStack.BlueStrength * (SkinGenStack.BlueTint.y - 1f),
+		1f + SkinGenStack.BlueStrength * (SkinGenStack.BlueTint.z - 1f) );
+
+	/// <summary>The SkinGen stack for one mesh: zone tints, freckles, scars and tattoos as layers.</summary>
+	public static FleshStack Stack( SkinGenStack gen, PolyMesh mesh, FaceBounds landmarks, Vec3 baseColour,
+		float baseRoughness = SkinGenStack.CheekRoughness, float[] curvature = null )
+	{
+		if ( gen is null ) throw new ArgumentNullException( nameof( gen ) );
+		if ( mesh is null ) throw new ArgumentNullException( nameof( mesh ) );
+		var result = gen.Evaluate( mesh, landmarks, baseColour, curvature );
+		var stack = new FleshStack
+		{
+			Name = "SkinGen",
+			BaseColour = baseColour,
+			BaseRoughness = baseRoughness,
+			Subsurface = result.Zones.Crimson.Length == 0 ? 0f : Max( result.Zones.Crimson ) * 0.5f,
+		};
+		if ( gen.Zones )
+		{
+			stack.Layers.Add( new FleshLayer { Name = "Chromophore gold", Colour = GoldFactor,
+				Mask = Mask.Signal( new VertexSignal( "skingen:gold", _ => result.Zones.Gold ), 0f, 1f ), Blend = FleshBlend.Multiply } );
+			stack.Layers.Add( new FleshLayer { Name = "Chromophore crimson", Colour = CrimsonFactor,
+				Mask = Mask.Signal( new VertexSignal( "skingen:crimson", _ => result.Zones.Crimson ), 0f, 1f ), Blend = FleshBlend.Multiply } );
+			stack.Layers.Add( new FleshLayer { Name = "Chromophore blue", Colour = BlueFactor,
+				Mask = Mask.Signal( new VertexSignal( "skingen:blue", _ => result.Zones.Blue ), 0f, 1f ), Blend = FleshBlend.Multiply } );
+			stack.Layers.Add( new FleshLayer { Name = "Micro-skin roughness", ColourOff = true,
+				Roughness = SkinGenStack.TZoneRoughness, RoughnessTo = SkinGenStack.CheekRoughness,
+				RampBy = Mask.Signal( new VertexSignal( "skingen:tzone", _ => TZoneWeight( result ) ), 0f, 1f ),
+				Mask = Mask.All } );
+		}
+		if ( gen.Freckles > 0f )
+		{
+			stack.Layers.Add( new FleshLayer { Name = "Freckles", Colour = new Vec3( 0.65f, 0.70f, 0.75f ),
+				Mask = Mask.Signal( new VertexSignal( "skingen:freckle", _ => result.Freckle ), 0f, 1f ), Blend = FleshBlend.Multiply } );
+		}
+		if ( gen.Scars.Count > 0 )
+		{
+			stack.Layers.Add( new FleshLayer { Name = "Scar", Colour = new Vec3( 0.92f, 0.82f, 0.78f ), Roughness = 0.22f,
+				Mask = Mask.Signal( new VertexSignal( "skingen:scar", _ => result.ScarPale ), 0f, 1f ) } );
+		}
+		if ( gen.Tattoos.Count > 0 )
+		{
+			stack.Layers.Add( new FleshLayer { Name = "Tattoo", Colour = result.TattooColour, Opacity = 0.8f,
+				Mask = Mask.Signal( new VertexSignal( "skingen:tattoo", _ => result.Tattoo ), 0f, 1f ) } );
+		}
+		return stack;
+	}
+
+	/// <summary>Bake SkinGen onto the mesh's UVs at size texels square (albedo + roughness + emission).</summary>
+	public static FleshMaps Bake( PolyMesh mesh, SkinGenStack gen, FaceBounds landmarks, int size, Vec3 baseColour, float[] curvature = null ) =>
+		FleshMaterial.Bake( mesh, Stack( gen, mesh, landmarks, baseColour, SkinGenStack.CheekRoughness, curvature ), size, 1f, gen.Seed );
+
+	/// <summary>Bake SkinGen at every vertex (no UVs needed): colour, roughness, glow.</summary>
+	public static FleshVertexMaterial BakeVertices( PolyMesh mesh, SkinGenStack gen, FaceBounds landmarks, Vec3 baseColour, float[] curvature = null ) =>
+		FleshMaterial.BakeVertices( mesh, Stack( gen, mesh, landmarks, baseColour, SkinGenStack.CheekRoughness, curvature ), 1f, gen.Seed );
+
+	static float[] TZoneWeight( SkinGenResult result ) => (float[])result.TZone.Clone();
+
+	static float Max( float[] v )
+	{
+		var m = 0f;
+		foreach ( var x in v ) m = MathF.Max( m, x );
+		return m;
 	}
 }

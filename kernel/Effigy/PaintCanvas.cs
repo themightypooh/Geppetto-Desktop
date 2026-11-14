@@ -53,8 +53,24 @@ public sealed class PaintCanvas
 		copy.RoughnessMap = RoughnessMap?.Clone();
 		copy.MetalnessMap = MetalnessMap?.Clone();
 		copy.HeightMap = HeightMap?.Clone();
+		copy.EmissiveMap = EmissiveMap?.Clone();
+		copy.OpacityMap = OpacityMap?.Clone();
+		copy.NormalMap = NormalMap?.Clone();
+		copy.AmbientOcclusionMap = AmbientOcclusionMap?.Clone();
+		copy.ClipBase = ClipBase;
 		return copy;
 	}
+
+	/// <summary>True when <paramref name="other"/> holds the same texels on every channel. The rebuild's
+	/// snapshots use it to share a canvas no later feature changed instead of copying it again.</summary>
+	public bool SameAs( PaintCanvas other ) =>
+		ReferenceEquals( this, other ) || other is not null && Width == other.Width && Height == other.Height
+			&& Rgba.AsSpan().SequenceEqual( other.Rgba )
+			&& Same( RoughnessMap, other.RoughnessMap ) && Same( MetalnessMap, other.MetalnessMap ) && Same( HeightMap, other.HeightMap )
+			&& Same( EmissiveMap, other.EmissiveMap ) && Same( OpacityMap, other.OpacityMap ) && Same( NormalMap, other.NormalMap )
+			&& Same( AmbientOcclusionMap, other.AmbientOcclusionMap );
+
+	static bool Same( PaintCanvas a, PaintCanvas b ) => a is null ? b is null : a.SameAs( b );
 
 	/// <summary>
 	/// The painted surface channels that travel with this colour canvas, or null where nothing was
@@ -67,7 +83,23 @@ public sealed class PaintCanvas
 	/// where three new mesh fields would be three dozen edits and one forgotten copy away from a
 	/// roughness map that silently vanishes after a merge. See PaintLayers for how they composite.
 	/// </summary>
-	public PaintCanvas RoughnessMap, MetalnessMap, HeightMap;
+	public PaintCanvas RoughnessMap, MetalnessMap, HeightMap, EmissiveMap, OpacityMap, NormalMap;
+
+	/// <summary>
+	/// Ambient occlusion baked from a high-poly source (a sculpt baked onto its retopo), grey in
+	/// R/G/B, coverage in alpha. Baked, never painted: it is not a <see cref="PaintChannel"/>, and
+	/// paint layers carry it through unchanged. Null when nothing was baked.
+	/// </summary>
+	public PaintCanvas AmbientOcclusionMap;
+
+	/// <summary>
+	/// The coverage (0..1 per texel, Width x Height) a clipped paint layer above this canvas is
+	/// confined to: the alpha of the last unclipped layer composited into it, after its opacity and
+	/// mask. A clipped layer passes its base's coverage on, so a run of clipped layers all clip to
+	/// the same base, the way a clipping mask works in any layer painter. Null = nothing to clip to.
+	/// Derived on every rebuild and never saved.
+	/// </summary>
+	public float[] ClipBase;
 
 	/// <summary>The canvas for <paramref name="channel"/>: this one for colour, a companion otherwise,
 	/// null where that channel was never painted. The mask channel never lives on a body.</summary>
@@ -77,6 +109,9 @@ public sealed class PaintCanvas
 		PaintChannel.Roughness => RoughnessMap,
 		PaintChannel.Metalness => MetalnessMap,
 		PaintChannel.Height => HeightMap,
+		PaintChannel.Emissive => EmissiveMap,
+		PaintChannel.Opacity => OpacityMap,
+		PaintChannel.Normal => NormalMap,
 		_ => null,
 	};
 

@@ -539,13 +539,56 @@ def last_open():
         pass
     return None
 
+# LV1 2026-11-13: po's preferred build pace (seconds between model changes). The pane deck's
+# fader writes it; geppetto-live reads it when a build gives no --pace. 3 s by default: a step
+# loads in ~0.23-0.9 s and part_focus glows the touched part, so 3 s leaves ~2 s to see each
+# change land before the next, without a 40-line build dragging past two minutes.
+DEFAULT_PACE = 3.0
+PACE_PREF = os.environ.get("GEPPETTO_PACE_PREF") or os.path.expanduser("~/.config/geppetto/live-pace.json")
+
+
+def preferred_pace(path=None):
+    try:
+        with open(path or PACE_PREF) as f:
+            seconds = float(json.load(f)["seconds"])
+        return seconds if 0 <= seconds <= 30 else DEFAULT_PACE
+    except (OSError, ValueError, KeyError, TypeError):
+        return DEFAULT_PACE
+
+
+def save_preferred_pace(seconds, path=None):
+    path = path or PACE_PREF
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = "%s.%d.tmp" % (path, os.getpid())
+        with open(tmp, "w") as f:
+            json.dump({"seconds": round(float(seconds), 2), "at": time.time()}, f)
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
 class Viewport(QQuickPaintedItem):
     """shows the latest frame from the serve process, 1:1; `pane` 1 is the host's viewer, 2-4 the split panes"""
+
+    # LV1 2026-11-13: a new revision crossfades in instead of popping. The last frame of the
+    # old revision is kept as a ghost and drawn over the new frames with an eased fade-out,
+    # so the changed part grows/fades in while part_focus makes it glow. QPainter only:
+    # the serve process, the frame pipe and load time (~0.23 s) are untouched.
+    FADE_MS = 320
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setOpaquePainting(True)
         self._pane = 1
+        self._seen_rev = None        # the revision the last painted frame belongs to
+        self._armed_from = None      # frame shown when a new revision was announced
+        self._ghost = None           # the old revision's frame, fading out
+        self._fade_t0 = 0.0
+        self._last_img = None
+        self._fade_timer = QTimer(self)
+        self._fade_timer.setInterval(16)
+        self._fade_timer.timeout.connect(self.update)
         HOST.frameReady.connect(self.update)
         for pane in HOST.panes:
             pane.frameReady.connect(self._pane_frame)
@@ -587,7 +630,46 @@ class Viewport(QQuickPaintedItem):
             except Exception:
                 pass
             return
-        p.drawImage(QRect(0, 0, int(self.width()), int(self.height())), img)
+        rect = QRect(0, 0, int(self.width()), int(self.height()))
+        p.drawImage(rect, img)
+        self._crossfade(p, rect, img)
+
+    def _source(self):
+        return HOST if self._pane == 1 else HOST.panes[self._pane - 2]
+
+    def fade_level(self, now=None):
+        """opacity of the old revision's ghost: 1 -> 0, ease-out cubic over FADE_MS; 0 when idle"""
+        if self._ghost is None:
+            return 0.0
+        t = ((now if now is not None else time.monotonic()) - self._fade_t0) * 1000.0 / self.FADE_MS
+        if t >= 1.0:
+            return 0.0
+        return (1.0 - max(0.0, t)) ** 3
+
+    def _crossfade(self, p, rect, img):
+        try:
+            rev = getattr(self._source(), "displayed_revision", 0)
+        except Exception:
+            rev = 0
+        if self._seen_rev is None or rev == 0:
+            self._seen_rev = rev
+        elif rev != self._seen_rev:
+            # announced: fade from the frame on screen now once the first new frame lands
+            self._seen_rev = rev
+            self._armed_from = self._last_img
+        if self._armed_from is not None and img is not self._armed_from:
+            self._ghost, self._armed_from = self._armed_from, None
+            self._fade_t0 = time.monotonic()
+            self._fade_timer.start()
+        level = self.fade_level()
+        if level > 0.0:
+            p.setOpacity(level)
+            p.drawImage(rect, self._ghost)
+            p.setOpacity(1.0)
+        elif self._ghost is not None:
+            self._ghost = None
+            self._fade_timer.stop()
+        self._last_img = img
 
 
 class Host(QObject):
@@ -622,6 +704,7 @@ class Host(QObject):
     replayChanged = Signal()
     noticeChanged = Signal()           # the BYO-AI notice card (ai_notice.py): cost + first-send disclosure gate
     shownOpChanged = Signal()
+    stepChangeChanged = Signal()
     benchChanged = Signal()
     refsChanged = Signal()             # the reference pictures standing behind the model
     faceChanged = Signal()             # the Face Poser panel: which pane it poses and that pane's flex sliders
@@ -766,6 +849,8 @@ class Host(QObject):
         self._muse_pending_lock = threading.Lock()
         self._muse_current_turn = ""  # turn_id of the live _other turn, set only by the seat-system callback
         self._muse_current_session = ""  # session_id reported by that seat (NOT _other_session)
+        self._stop_pending = {}   # run dir -> monotonic deadline: STOP sent pause, record lands in scanRuns
+        self._stopped_runs = {}   # run dir -> stopped-step record: chat RESUME / STEER <notes> targets
         self._muse_pending_fields = {}
         self._claude_research_prompt = False
         self.otherChunk.connect(self._other_chunk)
@@ -897,6 +982,8 @@ class Host(QObject):
     # the viewport, whether it follows a run, a replay or your bench
     shownOp = Property(str, lambda self: live_runs.revision_op(self.watching, self.displayed_revision)
                        if self.watching and self.displayed_revision else "", notify=shownOpChanged)
+    stepChangeText = Property(str, lambda self: getattr(self, "stepChange", ""), notify=stepChangeChanged)   # "NEW tail · CHANGED head"
+    shownRevision = Property(int, lambda self: self.displayed_revision, notify=shownOpChanged)   # LV1: pane 1's deck blooms on it
     bench = Property("QVariantMap", lambda self: self._bench, notify=benchChanged)
     researchModels = Property("QVariantList", lambda self: [m for m in self._chat_models if m.get("research", True)], notify=chatChanged)
     # s&box-style sub-selection in the viewport: the latest @selection event, the pick mode and its prompt line
@@ -1634,6 +1721,10 @@ class Host(QObject):
             elif kind == "ai-preview":
                 self.displayed_revision = ev.get("revision", 0)
                 self.shownOpChanged.emit()
+                # what this step did to the model, in plain words (the viewport flashes the same parts:
+                # green = new, amber = changed)
+                self.stepChange = paneslib.step_change_words(ev)
+                self.stepChangeChanged.emit()
                 part_focus.follow(self, self.watching, self.displayed_revision, self._replay)   # the part this step touched glows
                 if self._replay:
                     self._replay = dict(self._replay, shown=self.displayed_revision)
@@ -2473,6 +2564,7 @@ class Host(QObject):
             self.runsChanged.emit()
         if self.auto_pending or self.waiting:
             QTimer.singleShot(0, self.autoFollow)
+        self._finalize_pending_stops()
         self.tidy_panes()
         self.auto_shrink()
 
@@ -2746,13 +2838,13 @@ class Host(QObject):
     #   gate-place IID RUN -> "ok"|"no reservation" (RUN must be the run lane A
     #     registered for this intent's token; anything else is refused, and the
     #     launcher cancels its run on a non-ok reply)
-    GATE_PLACE_TIMEOUT_S = 30.0    # gate-place -> .live/latest.json must appear
+    GATE_PLACE_TIMEOUT_S = 120.0   # gate-place -> .live/latest.json must appear (heavy docs load ~45 s, 2026-11-14)
     # Contract v1 §8: register -> first frame deadline is 30 s (registry).
     # The 5 s figure is the fixture acceptance target only: at 5 s past
     # showRunIn the host shows a visible "still starting" state, but does
     # NOT fail or kill -- killing a legitimate real build at 5 s would be
     # a worse failure than reporting a slow fixture.
-    GATE_FIRST_FRAME_TIMEOUT_S = 30.0  # register -> first frame, registry deadline
+    GATE_FIRST_FRAME_TIMEOUT_S = 120.0  # register -> first frame, registry deadline
     GATE_FIRST_FRAME_SLOW_S = 5.0      # showRunIn -> visible slow-start state (no kill)
 
     def _gate_pane_content_occupied(self, n):
@@ -2914,7 +3006,7 @@ class Host(QObject):
             registered_at = _f(tok.get("registered_at"))
             start_timeout = getattr(gate_registry, "START_TIMEOUT_S", 600)
             register_timeout = getattr(gate_registry, "REGISTER_TIMEOUT_S", 10)
-            first_frame_timeout = getattr(gate_registry, "FIRST_FRAME_TIMEOUT_S", 30)
+            first_frame_timeout = getattr(gate_registry, "FIRST_FRAME_TIMEOUT_S", 120)
             reason = ""
             if run and tok.get("pid") is not None and not st.get("first_frame_at"):
                 try:
@@ -3055,8 +3147,7 @@ class Host(QObject):
             if not past_deadline:
                 if now - entry["shown_at"] > self.GATE_FIRST_FRAME_SLOW_S                         and not entry.get("slow_noted"):
                     entry["slow_noted"] = True
-                    self.set_status("gate %s: pane %d still starting -- first frame slower "
-                                    "than the 5s fixture target" % (iid, n))
+                    self.set_status("pane %d: still loading the model -- big painted models take up to a minute" % n)
                 continue
             self._gate_fail(iid, "pane %d: no first frame by the registry deadline -- only this run stopped" % n)
             self._gate_shown.pop(run, None)
@@ -3135,7 +3226,7 @@ class Host(QObject):
                 registered_at = tok.get("registered_at") if isinstance(tok, dict) else None
             except Exception:
                 registered_at = None
-            timeout = getattr(gate_registry, "FIRST_FRAME_TIMEOUT_S", 30)
+            timeout = getattr(gate_registry, "FIRST_FRAME_TIMEOUT_S", 120)
             deadline = (registered_at + timeout) if registered_at else (time.time() + timeout)
             self._gate_placements.pop(run, None)
             self._gate_shown[run] = {"iid": iid, "pane": n, "shown_at": now,
@@ -3540,6 +3631,107 @@ class Host(QObject):
         if session:
             claude_gate.set_gate(session, "stopped", "run " + os.path.basename(d))
 
+    def stopRunAtStep(self, d):
+        """STOP button (2026-10-30): halt this live run at its current step boundary,
+        then write its stopped-step record (the resume point). An open/held/checkpoint
+        run is already between steps, so its record is written at once; a building run
+        gets a pause command and scanRuns finalizes the record when the hold lands
+        (or after 30 s, best-effort). The run stays held -- nothing auto-resumes."""
+        try:
+            state = read_state(d)
+        except Exception:
+            return
+        if state.get("state") in live_runs.OPEN:
+            try:
+                self._note_stopped(d, live_runs.finish_stopped_step(d))
+            except Exception:
+                pass
+            return
+        try:
+            live_runs.send_command(d, "pause")
+        except (OSError, ValueError):
+            return
+        self._stop_pending[d] = time.monotonic() + 30.0
+        self._stopped_runs.pop(d, None)
+        try:
+            self.claude._add("note", "STOPPING %s after its current step..." % os.path.basename(d.rstrip("/")))
+            self.claudeChanged.emit()
+        except Exception:
+            pass
+
+    def _note_stopped(self, d, done):
+        self._stopped_runs[d] = done["record"]
+        name = os.path.basename(d.rstrip("/"))
+        op = done.get("op") or ""
+        suffix = " (%s)" % op if op else ""
+        if done.get("halted"):
+            line = "STOPPED %s at step %d%s. Reply RESUME to continue, or STEER <notes> to queue steering." % (
+                name, done["revision"], suffix)
+        else:
+            line = "STOPPED %s (still finishing its step; record at step %d%s). Reply RESUME to continue, or STEER <notes> to queue steering." % (
+                name, done["revision"], suffix)
+        try:
+            self.claude._add("note", line)
+            self.claudeChanged.emit()
+        except Exception:
+            pass
+
+    def _finalize_pending_stops(self):
+        """scanRuns tick: a STOP-sent pause that has landed (or timed out) gets its
+        stopped-step record now, when the revision at the halt is known."""
+        now = time.monotonic()
+        for d, deadline in list(self._stop_pending.items()):
+            try:
+                st = read_state(d)
+            except Exception:
+                st = {}
+            if (live_runs.control_state(st).get("paused")
+                    or st.get("state") in live_runs.OPEN
+                    or now >= deadline):
+                del self._stop_pending[d]
+                try:
+                    self._note_stopped(d, live_runs.finish_stopped_step(d))
+                except Exception:
+                    pass
+
+    def _stopped_chat_command(self, text):
+        """RESUME / STEER <notes> in chat while a stopped-step record is pending.
+        Returns True when the message was handled (never sent to any provider)."""
+        if not self._stopped_runs:
+            return False
+        kind, arg = live_runs.parse_stopped_command(text)
+        if kind == "resume":
+            resumed = []
+            for d in list(self._stopped_runs):
+                try:
+                    self.resumeRun(d)  # the same run continues: no new intent while open (gate contract)
+                    resumed.append(os.path.basename(d.rstrip("/")))
+                    del self._stopped_runs[d]
+                except Exception:
+                    pass
+            try:
+                self.claude._add("note", "RESUMED %s from the stopped step." % (", ".join(resumed) or "the run"))
+                self.claudeChanged.emit()
+            except Exception:
+                pass
+            return True
+        if kind == "steer":
+            queued = []
+            for d in list(self._stopped_runs):
+                try:
+                    live_runs.send_command(d, "instruct", text="STEER after stop: " + arg[:1800])
+                    queued.append(os.path.basename(d.rstrip("/")))
+                except (OSError, ValueError):
+                    pass
+            try:
+                self.claude._add("note", "Steering queued on %s -- reply RESUME to continue from the stopped step." % (
+                    ", ".join(queued) or "the run"))
+                self.claudeChanged.emit()
+            except Exception:
+                pass
+            return True
+        return False
+
     def live_command(self, d, command, done, **fields):
         if d not in self.jobs and not run_is_live(d, read_state(d)):
             self.set_status("run is not active")
@@ -3565,6 +3757,8 @@ class Host(QObject):
     @Slot(str)
     def resumeRun(self, d):
         """BUILD drawer: resume a held run, only on an explicit user action."""
+        self._stopped_runs.pop(d, None)
+        self._stop_pending.pop(d, None)
         self.live_command(d, "resume", "resumed")
 
     @Slot(str, result="QVariantList")
@@ -3584,8 +3778,16 @@ class Host(QObject):
 
     @Slot(str, float)
     def setPace(self, d, seconds):
-        """Set the viewport's exact step delay through the existing run protocol."""
-        self.live_command(d, "pace", "build pace: " + ("full speed" if seconds == 0 else "%gs between operations" % seconds), seconds=seconds)
+        """Set the viewport's exact step delay through the existing run protocol.
+        LV1: the choice is also po's preferred pace for the next builds (geppetto-live reads it)."""
+        seconds = max(0.0, min(30.0, float(seconds)))
+        save_preferred_pace(seconds)
+        self.preferredPaceChanged.emit()
+        if d:
+            self.live_command(d, "pace", "build pace: " + ("full speed" if seconds == 0 else "%gs between operations" % seconds), seconds=seconds)
+
+    preferredPaceChanged = Signal()
+    preferredPace = Property(float, lambda self: preferred_pace(), notify=preferredPaceChanged)
 
     @Slot(str, str)
     def sendDirection(self, d, text):
@@ -4006,6 +4208,15 @@ class Host(QObject):
                     except Exception:
                         pass
             elif getattr(self, "_confirm_turn", "").startswith("gate-"):
+                # 2026-11-14: answered on the desktop card (B), not here. Watch that
+                # launch like one we dispatched, so a failure after yes is still shown.
+                _gone = self._confirm_turn
+                try:
+                    if _gone not in self._gate_dispatched and \
+                            (_gate.intent_status(_gone) or {}).get("status") in ("yes", "launched"):
+                        self._gate_note_dispatched(_gone)
+                except Exception:
+                    pass
                 self._confirm_model = ""
                 self._confirm_turn = ""
                 self.confirmModelChanged.emit()
@@ -4080,6 +4291,8 @@ class Host(QObject):
     def claudeSend(self, text):
         if not (text or "").strip():
             return False
+        if self._stopped_chat_command(text):
+            return True
         if self._provider_auth is not None:
             self.set_status("Finish provider sign-in in the terminal before sending.")
             return False
@@ -4535,9 +4748,16 @@ class Host(QObject):
                 continue
             if state.get("state") in live_runs.OPEN or run_is_live(d, state):
                 try:
-                    self.stopResearch(d)
+                    self.stopRunAtStep(d)
                 except Exception:
                     pass
+                # the Claude session that started this run stops too (claude_gate.py, its hook)
+                session = claude_gate.session_for_run(d)
+                if session:
+                    try:
+                        claude_gate.set_gate(session, "stopped", "run " + os.path.basename(d))
+                    except Exception:
+                        pass
                 stopped = True
         if stopped:
             # Tighten 2026-10-25: a stop ends in READY, not in a stuck

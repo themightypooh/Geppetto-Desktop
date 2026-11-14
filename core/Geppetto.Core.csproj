@@ -1,4 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <!-- Kernel parity provenance (2026-11-13, define-shared-kernel-provenance-and-parity-merge-contract):
+       Desktop core/ is canonical for itself and consumes the kernel only via
+       the ProjectReference below. Inventory: handoffs/kernel-parity-inventory.json.
+       Policy: handoffs/kernel-parity-contract.md. -->
   <PropertyGroup>
     <OutputType>Library</OutputType>
     <TargetFramework>net8.0</TargetFramework>

@@ -24,6 +24,10 @@ public sealed class RigIk
 	/// <summary>Which way the middle joint bends, in model space. Two-bone chains only.</summary>
 	public Vec3 Pole = new( 0, 0, 1 );
 
+	/// <summary>An optional bone whose model-space head is the pole target. An empty value keeps
+	/// using <see cref="Pole"/> as a fixed direction, which is how older rigs behave.</summary>
+	public string PoleBone = "";
+
 	public float Weight = 1f;
 
 	/// <summary>Passes of the longer-chain solve. Two-bone and one-bone chains are exact and ignore it.</summary>
@@ -60,20 +64,43 @@ public sealed class RigIk
 
 	/// <summary>This chain as <see cref="ReadRig"/> reads it: the .ctrlrig IkConstraints entry shape,
 	/// so the rig block and the export speak the same format.</summary>
-	public System.Text.Json.Nodes.JsonObject ToJson() => new()
+	public System.Text.Json.Nodes.JsonObject ToJson()
 	{
-		["Name"] = Name,
-		["TargetBone"] = EndBone,
-		["ChainLength"] = ChainLength,
-		["Weight"] = Weight,
-		["Iterations"] = Iterations,
-		["Enabled"] = Enabled,
-		["Live"] = Live,
-		["GoalRotation"] = GoalRotation,
-		["Solver"] = Fabrik ? "Fabrik" : Spline ? "Spline" : "CCD",
-		["PoleDirection"] = FormattableString.Invariant( $"{Pole.x},{Pole.y},{Pole.z}" ),
-		["MaxStretch"] = MaxStretch,
-	};
+		var json = new System.Text.Json.Nodes.JsonObject
+		{
+			["Name"] = Name,
+			["TargetBone"] = EndBone,
+			["ChainLength"] = ChainLength,
+			["Weight"] = Weight,
+			["Iterations"] = Iterations,
+			["Enabled"] = Enabled,
+			["Live"] = Live,
+			["GoalRotation"] = GoalRotation,
+			["Solver"] = Fabrik ? "Fabrik" : Spline ? "Spline" : "CCD",
+			["PoleDirection"] = FormattableString.Invariant( $"{Pole.x},{Pole.y},{Pole.z}" ),
+			["MaxStretch"] = MaxStretch,
+		};
+
+		if ( !string.IsNullOrWhiteSpace( PoleBone ) )
+			json["PoleBone"] = PoleBone;
+
+		return json;
+	}
+
+	/// <summary>The current bend direction. A named pole follows the selected bone's head, while
+	/// an absent, deleted, or coincident pole safely falls back to the saved direction.</summary>
+	public Vec3 PoleFor( Skeleton skeleton, IReadOnlyList<Xform> world, Vec3 root )
+	{
+		var bone = string.IsNullOrWhiteSpace( PoleBone ) || skeleton is null ? -1 : skeleton.IndexOf( PoleBone );
+		if ( bone >= 0 && world is not null && bone < world.Count )
+		{
+			var offset = world[bone].Origin - root;
+			if ( offset.Length > 1e-5f )
+				return offset;
+		}
+
+		return Pole;
+	}
 
 	/// <summary>A copy with its weight multiplied by <paramref name="by"/> - a clip's keyed IK weight
 	/// (<see cref="RigAnimFile.IkWeightAt"/>) on top of the constraint's own.</summary>
@@ -100,6 +127,7 @@ public sealed class RigIk
 				Name = Str( e, "Name" ) ?? "IK",
 				EndBone = Str( e, "TargetBone" ) ?? "",
 				ChainLength = Int( e, "ChainLength" ) ?? 2,
+				PoleBone = Str( e, "PoleBone" ) ?? "",
 				Weight = Num( e, "Weight" ) ?? 1f,
 				Iterations = Int( e, "Iterations" ) ?? 10,
 				Enabled = Bool( e, "Enabled" ) ?? true,
@@ -208,6 +236,7 @@ public static class ChainIk
 		var target = goal.Position;
 		var w = chain.Select( b => world[b] ).ToArray();
 		var n = chain.Length - 1;
+		var pole = ik.PoleFor( skeleton, world, w[0].Origin );
 
 		// A stretched chain is one the goal is at or past the end of, so its answer is a straight
 		// line - which FABRIK lays exactly and CCD only creeps toward. Either solver gets it.
@@ -219,7 +248,7 @@ public static class ChainIk
 			var b = w[1].Origin;
 			var c = w[2].Origin;
 
-			if ( !TwoBoneIk.TrySolve( a, b, c, target, ik.Pole, 0f, out var s ) )
+			if ( !TwoBoneIk.TrySolve( a, b, c, target, pole, 0f, out var s ) )
 				return null;
 
 			w[0] = TwoBoneIk.About( a, s.UpperDelta ) * w[0];
@@ -228,7 +257,7 @@ public static class ChainIk
 		}
 		else if ( n >= 3 && ik.Spline && !stretched )
 		{
-			Spline( w, target, ik.Pole, Math.Max( ik.Iterations, 1 ) );
+			Spline( w, target, pole, Math.Max( ik.Iterations, 1 ) );
 
 			// The end only moves; its carried rotation is put back (the goal's, below, if asked).
 			w[n] = Xform.Translate( w[n].Origin - world[end].Origin ) * world[end];

@@ -108,6 +108,12 @@ public static class DualQuaternionSkinning
 			}
 
 			// Blend, flipping antipodal dual quaternions so the blend takes the short path.
+			// The flip needs an epsilon: at exactly 180° the two quaternions are
+			// perpendicular (dot ~ 0), and float noise decides the sign — MathF.Sin(pi)
+			// is -8.7e-8, not 0, so a 180° X rotation comes out of FromXform with
+			// w = -4.4e-8 and a bare "< 0" test flips it onto the wrong branch
+			// (the shoulder then blends to -90° instead of +90°). Genuine antipodal
+			// pairs sit far below -1e-6; noise sits at ~1e-7, so only flip past it.
 			Quat accR = default, accD = default;
 			var first = true;
 			Quat firstR = default;
@@ -116,7 +122,7 @@ public static class DualQuaternionSkinning
 				if ( bw.Bone < 0 || bw.Bone >= n || bw.Weight <= 0f ) continue;
 				var d = dq[bw.Bone];
 				if ( first ) { firstR = d.Real; first = false; }
-				else if ( d.Real.x * firstR.x + d.Real.y * firstR.y + d.Real.z * firstR.z + d.Real.w * firstR.w < 0f )
+				else if ( d.Real.x * firstR.x + d.Real.y * firstR.y + d.Real.z * firstR.z + d.Real.w * firstR.w < -1e-6f )
 					d = new DualQuat( new Quat( -d.Real.x, -d.Real.y, -d.Real.z, -d.Real.w ),
 						new Quat( -d.Dual.x, -d.Dual.y, -d.Dual.z, -d.Dual.w ) );
 				accR = new Quat( accR.x + d.Real.x * bw.Weight, accR.y + d.Real.y * bw.Weight, accR.z + d.Real.z * bw.Weight, accR.w + d.Real.w * bw.Weight );

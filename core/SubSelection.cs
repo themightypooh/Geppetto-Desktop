@@ -950,7 +950,11 @@ public sealed class SelectionLayer : LiveLayer
 
 	static Vector3 Nudge( in LiveView view, Vector3 p ) => p + Vector3.Normalize( view.Eye - p ) * Vector3.Distance( view.Eye, p ) * .002f;
 
-	void Line( LiveBuilder b, in LiveView view, Vector3 p0, Vector3 p1, float scale )
+	void Line( LiveBuilder b, in LiveView view, Vector3 p0, Vector3 p1, float scale ) => Stroke( b, view, p0, p1, LineWidth * scale );
+
+	/// <summary>One stroked segment as a camera-facing strip, <paramref name="width"/> a fraction of the eye distance.
+	/// The step highlight's outline draws through this too, so it is the selection's own line.</summary>
+	internal static void Stroke( LiveBuilder b, in LiveView view, Vector3 p0, Vector3 p1, float width )
 	{
 		p0 = Nudge( view, p0 ); p1 = Nudge( view, p1 );
 		var mid = ( p0 + p1 ) * .5f;
@@ -958,7 +962,7 @@ public sealed class SelectionLayer : LiveLayer
 		if ( dir.LengthSquared() < 1e-12f ) return;
 		var toEye = view.Eye - mid;
 		var side = LiveBuilder.SafeNormalize( Vector3.Cross( dir, toEye ), view.Right );
-		float w0 = Vector3.Distance( view.Eye, p0 ) * LineWidth * scale * .5f, w1 = Vector3.Distance( view.Eye, p1 ) * LineWidth * scale * .5f;
+		float w0 = Vector3.Distance( view.Eye, p0 ) * width * .5f, w1 = Vector3.Distance( view.Eye, p1 ) * width * .5f;
 		var n = LiveBuilder.SafeNormalize( toEye, -view.Forward );
 		b.Quad( p0 - side * w0, p1 - side * w1, p1 + side * w1, p0 + side * w0, n );
 	}

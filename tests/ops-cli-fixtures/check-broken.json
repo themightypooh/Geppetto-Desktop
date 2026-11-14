@@ -1,0 +1,137 @@
+{
+  "command": "check",
+  "model": "<WORKDIR>/broken.effigy",
+  "kind": "effigy",
+  "bodies": 1,
+  "issues": [],
+  "topology": {
+    "blocked": true,
+    "bodies": [
+      {
+        "name": "Broken",
+        "vertices": 4,
+        "faces": 4,
+        "triangles": 4,
+        "quads": 0,
+        "ngons": 0,
+        "boundaryEdges": 3,
+        "holes": 2,
+        "closedLoops": 0,
+        "openChains": 2,
+        "nonManifoldEdges": 2,
+        "nonManifoldVertices": 0,
+        "degenerateFaces": 1,
+        "zeroAreaFaces": 0,
+        "duplicateFaces": 1,
+        "flippedFaces": 0,
+        "looseVertices": 0,
+        "shells": 1,
+        "euler": 2,
+        "quadPercent": 0,
+        "isClosed": false,
+        "isManifold": false,
+        "isOutward": true,
+        "hardFails": [
+          "non-manifold edges: 2",
+          "degenerate faces: 1",
+          "duplicate faces: 1"
+        ],
+        "warnings": [
+          "holes: 2 boundary loop(s), 3 boundary edges",
+          "faces without UVs: 4",
+          "quad share 0% below 85%"
+        ],
+        "blocksExport": true,
+        "isClean": false,
+        "summary": "Broken: BLOCKED \u2014 Broken: 4v 4f (4t 0q 0n), holes 2 (3 boundary edges), non-manifold edges 2, non-manifold verts 0, degenerate 1, zero-area 0, duplicate 1, flipped 0, loose verts 0, shells 1, euler 2, quad 0%; BLOCK: non-manifold edges: 2, degenerate faces: 1, duplicate faces: 1; warn: holes: 2 boundary loop(s), 3 boundary edges, faces without UVs: 4, quad share 0% below 85%"
+      }
+    ]
+  },
+  "export": [
+    {
+      "format": "obj",
+      "canExport": true,
+      "errorMessage": null,
+      "preservesGeometry": true,
+      "preservesRig": false,
+      "preservesSkinning": false,
+      "preservesMorphs": false,
+      "preservesAnimation": false,
+      "preservesTangents": false,
+      "preservesTextures": true,
+      "unitsAndAxes": "Wavefront OBJ: inches, Z-up, UV V-flipped (origin bottom-left)",
+      "preserved": [
+        "Polygonal mesh geometry (vertices, normals, UV coordinates, faces)",
+        "Material library assignments and MTL descriptor"
+      ],
+      "lost": [],
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "format": "glb",
+      "canExport": true,
+      "errorMessage": null,
+      "preservesGeometry": true,
+      "preservesRig": false,
+      "preservesSkinning": false,
+      "preservesMorphs": false,
+      "preservesAnimation": false,
+      "preservesTangents": true,
+      "preservesTextures": true,
+      "unitsAndAxes": "glTF 2.0: metres, Y-up (kernel inches \u00D7 0.0254; Z-up \u2192 Y-up)",
+      "preserved": [
+        "Polygonal mesh geometry (vertices, corner normals, computed tangents, UV coordinates, faces)",
+        "Body and material names",
+        "Vertex colours, when present",
+        "PBR textures embedded as PNG when one can be produced (paint canvases; descriptor bindings resolving to PNG files)"
+      ],
+      "lost": [],
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "format": "effigy",
+      "canExport": true,
+      "errorMessage": null,
+      "preservesGeometry": true,
+      "preservesRig": false,
+      "preservesSkinning": false,
+      "preservesMorphs": false,
+      "preservesAnimation": false,
+      "preservesTangents": false,
+      "preservesTextures": true,
+      "unitsAndAxes": "Effigy: inches, Z-up",
+      "preserved": [
+        "PartStudio feature tree, parameters, and expressions",
+        "Polygonal geometry and body structure",
+        "Material slot assignments and UV scales"
+      ],
+      "lost": [],
+      "warnings": [],
+      "errors": []
+    },
+    {
+      "format": "riganim",
+      "canExport": false,
+      "errorMessage": "Cannot export as .riganim: session contains no animation clip.",
+      "preservesGeometry": false,
+      "preservesRig": false,
+      "preservesSkinning": false,
+      "preservesMorphs": false,
+      "preservesAnimation": false,
+      "preservesTangents": false,
+      "preservesTextures": false,
+      "unitsAndAxes": "RigAnim: frame rate, local bone transforms",
+      "preserved": [],
+      "lost": [
+        "Mesh geometry, bodies, materials, and textures (RigAnim carries skeletal animation only, not 3D meshes)"
+      ],
+      "warnings": [],
+      "errors": [
+        "Cannot export as .riganim: session contains no animation clip."
+      ]
+    }
+  ],
+  "status": "failed"
+}

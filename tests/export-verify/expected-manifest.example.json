@@ -1,0 +1,128 @@
+{
+  "_notes": [
+    "COPY this file and fill in the values the fixture build actually produced.",
+    "All lengths are metres, glTF space (Y-up). Source inches x 0.0254, and",
+    "glTF x = source x, glTF y = source z, glTF z = -source y.",
+    "Prop + marker bounds below are exact for fixtures/build-fixtures.txt.",
+    "Character bounds, image sizes and the morph target name are FILL-IN: run",
+    "the fixture build, read the exported GLB (or the build log), and paste",
+    "the real numbers before the integrator run. Do not guess them.",
+    "Normal / emissive-texture / occlusion verification is DEFERRED (see",
+    "README G4/G5): the fixtures as scripted produce no normal, emissive-",
+    "texture or occlusion images. Add a baked-map fixture, point the material",
+    "slots at the bake output, and flip those flags to true with real sizes.",
+    "Material names ('TableTop', 'PaintPanel') and the 'Hero' mesh name are also FILL-IN: they depend on how ExportService names slots/bodies. Take them from the first exported GLB (verify-glb.py prints the node list on failure).",
+    "One export carries ONE clip: ExportService passes only the session clip to GlbExport.WriteAnimated. Second export: same document with the idle clip attached (session Clip swapped) -> hero-idle.glb, validated against a copy of this manifest with animations=[{idle, 1.0s}]. Multi-clip in a single GLB is the export-rigs lane's follow-up, not this harness."
+  ],
+  "toleranceMetres": 0.001,
+  "nodes": [
+    "TableTop",
+    "TableLegFL",
+    "TableLegFR",
+    "TableLegBL",
+    "TableLegBR",
+    "Marker",
+    "PaintPanel",
+    "Hero"
+  ],
+  "meshes": [
+    {
+      "name": "TableTop",
+      "aabbMinMetres": [
+        -0.4572,
+        0.0,
+        -0.3048
+      ],
+      "aabbMaxMetres": [
+        0.4572,
+        0.4572,
+        0.3048
+      ]
+    },
+    {
+      "name": "Marker",
+      "aabbMinMetres": [
+        0.4826,
+        0.0,
+        -0.0254
+      ],
+      "aabbMaxMetres": [
+        0.5334,
+        0.0508,
+        0.0254
+      ]
+    },
+    {
+      "name": "PaintPanel",
+      "aabbMinMetres": [
+        -0.3048,
+        0.0,
+        -0.0127
+      ],
+      "aabbMaxMetres": [
+        0.3048,
+        0.6096,
+        0.0127
+      ]
+    },
+    {
+      "name": "Hero",
+      "aabbMinMetres": [
+        0,
+        0,
+        0
+      ],
+      "aabbMaxMetres": [
+        0,
+        1.8288,
+        0
+      ]
+    }
+  ],
+  "skins": {
+    "count": 1,
+    "minJoints": 90
+  },
+  "animations": [
+    {
+      "name": "walk",
+      "durationSec": 2.0,
+      "startSec": 0
+    }
+  ],
+  "morphs": [
+    {
+      "mesh": "Hero",
+      "targets": 1,
+      "targetNames": [
+        "smile"
+      ]
+    }
+  ],
+  "materials": [
+    {
+      "name": "TableTop",
+      "textures": {
+        "baseColor": false,
+        "normal": false,
+        "emissive": false,
+        "occlusion": false
+      }
+    },
+    {
+      "name": "PaintPanel",
+      "textures": {
+        "baseColor": true,
+        "normal": false,
+        "emissive": false,
+        "occlusion": false
+      },
+      "emissiveFactor": [
+        1.0,
+        0.125,
+        0.063
+      ]
+    }
+  ],
+  "imageCount": 1
+}

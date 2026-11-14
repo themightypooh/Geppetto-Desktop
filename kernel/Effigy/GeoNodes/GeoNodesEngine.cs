@@ -277,6 +277,7 @@ public sealed class GeoMesh
 
 	EdgeKey[] _edges;
 	Vec3[] _faceNormals, _pointNormals;
+	private readonly object _normalsLock = new();
 	int[] _faceIslands, _pointIslands;
 
 	/// <summary>Every undirected edge, sorted by (A, B) - the edge domain's element order.</summary>
@@ -294,7 +295,18 @@ public sealed class GeoMesh
 		}
 	}
 
-	public Vec3[] FaceNormals => _faceNormals ??= Poly.Faces.Select( f => Poly.FaceNormal( f ) ).ToArray();
+	public Vec3[] FaceNormals
+	{
+		get
+		{
+			if ( _faceNormals is not null ) return _faceNormals;
+			lock ( _normalsLock )
+			{
+				_faceNormals ??= Poly.Faces.Select( f => Poly.FaceNormal( f ) ).ToArray();
+				return _faceNormals;
+			}
+		}
+	}
 
 	/// <summary>Custom normals (the "normal" point attribute) when set, otherwise computed vertex normals.</summary>
 	public Vec3[] PointNormals

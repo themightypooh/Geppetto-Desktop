@@ -1,0 +1,3 @@
+exported: <WORKDIR>/model.obj
+  <WORKDIR>/model.mtl
+  <WORKDIR>/model.obj

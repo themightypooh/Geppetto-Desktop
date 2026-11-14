@@ -1,0 +1,12 @@
+# morph-smile.txt — UNVERIFIED morph step, kept separate so a failure here
+# cannot block the main fixture build. Run AFTER build-fixtures.txt, on a
+# copy of fixtures/all.effigy (bench --doc), and only call it done when the
+# exported GLB carries a morph target with NON-ZERO deltas (see README G4).
+# Route (from source, not from a run): ShapeKey feature + inkey=.
+#   ShapeKey params: keyname, bodies, drivenbybone, reads, axis, rest, target.
+#   inkey=<name> adds a feature into that shape key (ShapeKeyEdit.AddToKey).
+# Integrator: run `describe ShapeKey` first, then check the GLB. If the
+# target is empty, the morph-authoring route needs a worker — do not fake it.
+add ShapeKey keyname=smile bodies=Hero
+add Primitive shape=Box width=6 depth=4 height=2 position=0,8,58 inkey=smile name=SmileDelta
+save fixtures/all-smile.effigy strict=1

@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Real kernel files (verbatim, by path — no copies). NOT included:
+         (a) the broken sibling MapBrushPrimitives.cs, which references a
+         MapFace type that does not exist (see the in-tree build failure);
+         (b) PaintCanvas.cs / Rig/MorphDriver.cs / Rig/SkinWeights.cs, which
+         pull in the rig and paint subsystems — PolyMesh.cs only holds them as
+         fields, so they are stubbed in KernelStubs.cs instead. -->
+    <Compile Include="/home/poo/Desktop/geppetto-desktop/kernel/Effigy/Vec.cs" />
+    <Compile Include="/home/poo/Desktop/geppetto-desktop/kernel/Effigy/Xform.cs" />
+    <Compile Include="/home/poo/Desktop/geppetto-desktop/kernel/Effigy/ConvexHull.cs" />
+    <Compile Include="/home/poo/Desktop/geppetto-desktop/kernel/Effigy/PolyMesh.cs" />
+    <Compile Include="/home/poo/Desktop/geppetto-desktop/kernel/Effigy/FeatureAttribute.cs" />
+    <Compile Include="/home/poo/Desktop/geppetto-desktop/kernel/Effigy/Map/MapBrush.cs" />
+    <Compile Include="/home/poo/Desktop/geppetto-desktop/kernel/Effigy/Map/FaceMaterial.cs" />
+    <Compile Include="/home/poo/Desktop/geppetto-desktop/kernel/Effigy/Map/ToolTexture.cs" />
+    <Compile Include="/home/poo/Desktop/geppetto-desktop/kernel/Effigy/Map/BspBuilder.cs" />
+    <Compile Include="/home/poo/Desktop/geppetto-desktop/kernel/Effigy/Map/PortalGraph.cs" />
+    <!-- Real files under test. -->
+    <Compile Include="/home/poo/Desktop/geppetto-desktop/kernel/Effigy/Map/HintSkip.cs" />
+    <Compile Include="/home/poo/Desktop/geppetto-desktop/tests/HintSkipTests.cs" />
+    <!-- Harness-only stubs (KernelStubs.cs, TestStubs.cs, VertexFacesStub.cs) + runner. -->
+    <Compile Include="KernelStubs.cs" />
+    <Compile Include="TestStubs.cs" />
+    <Compile Include="VertexFacesStub.cs" />
+    <Compile Include="Program.cs" />
+  </ItemGroup>
+</Project>

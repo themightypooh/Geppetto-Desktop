@@ -62,7 +62,9 @@ AUDIT = os.path.join(CONFIRM_DIR, "audit.log.jsonl")
 TIMEOUT_S = 600  # 10 minutes, per proposal
 START_TIMEOUT_S = 600  # an old yes must not launch a new run hours later
 REGISTER_TIMEOUT_S = 10  # claim START -> register, else failed (not WAIT forever)
-FIRST_FRAME_TIMEOUT_S = 30  # register -> first frame, else failed (see protocol §8)
+FIRST_FRAME_TIMEOUT_S = 120  # register -> first frame, else failed (see protocol §8).
+# 2026-11-14: was 30. A painted doc (squirrel v7) takes ~45 s to rebuild before the run
+# publishes anything, so every heavy-model run blew this and was failed while building fine.
 TERMINAL_STATES = frozenset(("placed", "cancelled", "expired", "failed", "closed"))
 ACTIVE_STATES = frozenset(("pending", "yes", "launched"))
 _ID_RE = re.compile(r"^gate-[0-9]+-[0-9a-f]{8}$")
@@ -1047,22 +1049,25 @@ def _verify_token(iid, script_path, worker="", session=""):
                          "script_hash": tok["script_hash"]})
     return True, ""
 
-def write_stopped_step(run_dir, revision, script_path, notes=""):
-    """Stopped-step record: the resume point after stop / hold / close."""
+def write_stopped_step(run_dir, revision, script_path, notes="", snapshot=""):
+    """Stopped-step record: the resume point after stop / hold / close.
+    `snapshot` may name the kept .effigy of the stopped revision directly;
+    when empty, the newest .effigy under the run dir is used (best-effort)."""
     _ensure()
-    snap = ""
-    try:
-        # Best-effort: newest .effigy under the run dir is the saved snapshot.
-        cands = []
-        for root, _dirs, files in os.walk(run_dir):
-            for fn in files:
-                if fn.endswith(".effigy"):
-                    p = os.path.join(root, fn)
-                    cands.append((os.path.getmtime(p), p))
-        if cands:
-            snap = sorted(cands)[-1][1]
-    except OSError:
-        pass
+    snap = snapshot or ""
+    if not snap:
+        try:
+            # Best-effort: newest .effigy under the run dir is the saved snapshot.
+            cands = []
+            for root, _dirs, files in os.walk(run_dir):
+                for fn in files:
+                    if fn.endswith(".effigy"):
+                        p = os.path.join(root, fn)
+                        cands.append((os.path.getmtime(p), p))
+            if cands:
+                snap = sorted(cands)[-1][1]
+        except OSError:
+            pass
     rec = {"run_dir": run_dir, "revision": revision, "script": script_path,
            "snapshot": snap, "notes": notes, "at": time.time()}
     name = re.sub(r"[^A-Za-z0-9_.-]+", "_", os.path.basename(run_dir.rstrip("/"))) or "run"

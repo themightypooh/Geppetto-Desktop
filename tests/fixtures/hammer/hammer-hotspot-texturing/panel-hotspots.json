@@ -1,0 +1,9 @@
+{
+  "comment": "hammer-hotspot-texturing fixture: hotspots for panel/panel001. Rect entries omit 'material' on purpose: it defaults from the set's material (HotspotSet.FromJson). panel_a and panel_b are both 1:1 with equal area, so a square face matches panel_a on the deterministic name-order tie-break. panel_strip is 4:1.",
+  "material": "panel/panel001",
+  "hotspots": [
+    { "name": "panel_a", "rect": [0, 0, 0.5, 0.5] },
+    { "name": "panel_b", "rect": [0.5, 0, 1, 0.5] },
+    { "name": "panel_strip", "rect": [0, 0.5, 1, 0.75] }
+  ]
+}

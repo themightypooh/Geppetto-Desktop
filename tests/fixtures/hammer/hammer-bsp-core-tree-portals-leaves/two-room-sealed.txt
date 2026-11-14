@@ -1,0 +1,77 @@
+brush floor-a
+plane -1 0 0 272
+plane 1 0 0 0
+plane 0 -1 0 144
+plane 0 1 0 144
+plane 0 0 -1 16
+plane 0 0 1 0
+brush floor-b
+plane -1 0 0 0
+plane 1 0 0 272
+plane 0 -1 0 144
+plane 0 1 0 144
+plane 0 0 -1 16
+plane 0 0 1 0
+brush ceiling-a
+plane -1 0 0 272
+plane 1 0 0 0
+plane 0 -1 0 144
+plane 0 1 0 144
+plane 0 0 -1 -128
+plane 0 0 1 144
+brush ceiling-b
+plane -1 0 0 0
+plane 1 0 0 272
+plane 0 -1 0 144
+plane 0 1 0 144
+plane 0 0 -1 -128
+plane 0 0 1 144
+brush wall-a-x-neg
+plane -1 0 0 272
+plane 1 0 0 -256
+plane 0 -1 0 144
+plane 0 1 0 144
+plane 0 0 -1 0
+plane 0 0 1 128
+brush wall-b-x-pos
+plane -1 0 0 -256
+plane 1 0 0 272
+plane 0 -1 0 144
+plane 0 1 0 144
+plane 0 0 -1 0
+plane 0 0 1 128
+brush wall-a-y-neg
+plane -1 0 0 256
+plane 1 0 0 0
+plane 0 -1 0 144
+plane 0 1 0 -128
+plane 0 0 -1 0
+plane 0 0 1 128
+brush wall-b-y-neg
+plane -1 0 0 0
+plane 1 0 0 256
+plane 0 -1 0 144
+plane 0 1 0 -128
+plane 0 0 -1 0
+plane 0 0 1 128
+brush wall-a-y-pos
+plane -1 0 0 256
+plane 1 0 0 0
+plane 0 -1 0 -128
+plane 0 1 0 144
+plane 0 0 -1 0
+plane 0 0 1 128
+brush wall-b-y-pos
+plane -1 0 0 0
+plane 1 0 0 256
+plane 0 -1 0 -128
+plane 0 1 0 144
+plane 0 0 -1 0
+plane 0 0 1 128
+brush shared-wall
+plane -1 0 0 8
+plane 1 0 0 8
+plane 0 -1 0 144
+plane 0 1 0 144
+plane 0 0 -1 0
+plane 0 0 1 128

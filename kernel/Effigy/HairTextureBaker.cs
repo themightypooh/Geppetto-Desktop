@@ -11,10 +11,16 @@ namespace Effigy;
 /// A card variant is a horizontal band of the sheet; inside a band, near-vertical
 /// micro-fibers run root (band top) to tip (band bottom), with per-fiber waviness,
 /// thickness and brightness variation, so a flat card reads as many hairs rather
-/// than one ribbon. One deterministic pass draws all five maps together, so the
+/// than one ribbon. One deterministic pass draws all seven maps together, so the
 /// maps agree pixel for pixel.
 ///
 /// Maps (all Size x Size, prefix + suffix):
+/// - _depth.png: normalized strand Z-height within the clump (0 = back of clump, 1 = front),
+///   one deterministic depth per fiber (hash-based, so the existing maps are byte-identical
+///   to before this map was added). Gaps read 0. For parallax / depth-offset shadows.
+/// - _root2tip.png: exact arc-length parameter t in [0, 1] (0 at the band top = root, 1 at
+///   the band bottom = tip), the same value the _id_ao map already carries in B, as its own
+///   map so the hair shader can sample an ombre gradient directly. Gaps read 0.
 /// - _color.png: root colour -&gt; tip colour per fiber, with per-fiber brightness variation.
 /// - _alpha.png: fiber coverage as luminance (255 = fiber, 0 = gap). Stored as
 ///   luminance rather than a PNG alpha channel on purpose: the kernel's Raster PNG
@@ -67,6 +73,8 @@ public static class HairTextureBaker
 		var normal = new Raster( size, size, Rgb( new Vec3( 0.5f, 0.5f, 1f ) ) );
 		var rough = new Raster( size, size, Rgb( new Vec3( o.RoughBase, o.RoughBase, o.RoughBase ) ) );
 		var idAo = new Raster( size, size, Rgb( new Vec3( 0f, 1f, 0f ) ) );
+		var depth = new Raster( size, size, 0x000000 );
+		var root2tip = new Raster( size, size, 0x000000 );
 
 		var rng = new Random( o.Seed );
 		var variants = o.Variants.Count == 0 ? new List<Variant> { new() { Name = "Hair" } } : o.Variants;
@@ -89,6 +97,9 @@ public static class HairTextureBaker
 				var bright = 0.75f + (float)rng.NextDouble() * 0.5f;
 				var roughVar = ((float)rng.NextDouble() * 2f - 1f) * 0.15f;
 				var idHash = (f * 2654435761u % 256) / 255f;
+				// Depth within the clump, 0 = back, 1 = front. Hash-based like idHash, so
+				// adding this map consumes no RNG and leaves the five existing maps unchanged.
+				var depth0 = (f * 2654435761u % 1000) / 1000f;
 				var thick = Math.Max( 1, (int)MathF.Round( variant.Thickness * 2f ) );
 
 				for ( var y = y0; y < y1; y++ )
@@ -115,13 +126,15 @@ public static class HairTextureBaker
 							Math.Clamp( 0.5f + slope * 0.25f, 0f, 1f ), 0.5f, 0.9f ) ), a );
 						rough.Plot( px, y, Rgb( new Vec3( roughV, roughV, roughV ) ), a );
 						idAo.Plot( px, y, Rgb( new Vec3( idHash, 0.35f + 0.65f * t, t ) ), a );
+						depth.Plot( px, y, Rgb( new Vec3( depth0, depth0, depth0 ) ), a );
+						root2tip.Plot( px, y, Rgb( new Vec3( t, t, t ) ), a );
 					}
 				}
 			}
 		}
 
 		var files = new List<string>();
-		var names = new[] { ("_color", color), ("_alpha", alpha), ("_normal", normal), ("_rough", rough), ("_id_ao", idAo) };
+		var names = new[] { ("_color", color), ("_alpha", alpha), ("_normal", normal), ("_rough", rough), ("_id_ao", idAo), ("_depth", depth), ("_root2tip", root2tip) };
 
 		foreach ( var (suffix, raster) in names )
 		{

@@ -353,6 +353,9 @@ class GateLauncherTests(unittest.TestCase):
         try:
             r = self._gate("register", "--id", self._intent, "--run", str(fake_run), "--pid", str(sleeper.pid))
             self.assertEqual(r.returncode, 0, r.stderr)
+            # Registered pid has since died: the token-pid fallback must not attach.
+            sleeper.kill()
+            sleeper.wait(timeout=5)
             env = self._env()
             start = time.monotonic()
             worker = self._run([self.launcher, str(self.script), "-", self.outdir,
@@ -360,7 +363,7 @@ class GateLauncherTests(unittest.TestCase):
                                 "--gate-worker", "laneB-fixture", "--gate-session", "laneB-session"], env, timeout=15)
             self.assertLess(time.monotonic() - start, 12)
             self.assertNotEqual(worker.returncode, 0)
-            self.assertIn("no live run directory or pid", worker.stderr)
+            self.assertRegex(worker.stderr, r"no live run directory or pid|pid is dead")
         finally:
             sleeper.kill()
             sleeper.wait(timeout=5)

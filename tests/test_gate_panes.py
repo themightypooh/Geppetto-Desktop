@@ -302,7 +302,7 @@ class GatePanesTests(unittest.TestCase):
         self.assertIn(run, self.host._gate_placements)
         self.assertEqual(self.host._gate_slots.get("g1"), 2)
         # Past the ready deadline with still no live file: failure, slot freed.
-        self.host._gate_placements[run]["placed_at"] = time.monotonic() - 31
+        self.host._gate_placements[run]["placed_at"] = time.monotonic() - 121
         self.host._gate_place_ready()
         self.assertNotIn(run, self.host._gate_placements)
         self.assertNotIn("g1", self.host._gate_slots)
@@ -437,7 +437,7 @@ class GatePanesTests(unittest.TestCase):
             close_mock.assert_not_called()
         self.assertIn(run, self.host._gate_shown)
         self.assertNotIn("g1", self.host._gate_failures)
-        self.assertTrue(any("still starting" in s for s in self.statuses))
+        self.assertTrue(any("still loading" in s for s in self.statuses))
 
     def test_gate_place_dead_pid_refused(self):
         self.reset_gate()
@@ -615,7 +615,7 @@ class GatePanesTests(unittest.TestCase):
         run = self.run_dir("lw-stuck-run")
         self._dispatch("lw6", 2)
         st = {"status": "launched", "first_frame_at": None,
-              "token": {"run": run, "pid": os.getpid(), "registered_at": time.time() - 40}}
+              "token": {"run": run, "pid": os.getpid(), "registered_at": time.time() - 130}}
         with patch.object(gate, "intent_status", return_value=st), \
                 patch.object(gate, "_pid_alive", return_value=True):
             self.host._gate_launch_watch()

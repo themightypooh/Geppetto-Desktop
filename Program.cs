@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Diagnostics;
 using System.Numerics;
 using Silk.NET.Input;
@@ -31,10 +32,16 @@ public static class Program
 	{
 		try
 		{
+			SoftFail.HookKernel();
+			MikkTangents.Install();
 			if ( raw.Length == 2 && raw[0] == "--ai-worker" ) return AiToolWorker.Run( raw[1] );
-			if ( raw.Length > 0 && raw[0] == "--ai" ) return AiCli.Run( raw[1..] );
-			if ( raw.Length > 0 && raw[0] == "--script" ) return ScriptLive.Run( raw[1..] );
+			if ( raw.Length > 0 && raw[0] == "--ai" ) return GatedAi( raw[1..] );
+			if ( raw.Length > 0 && raw[0] == "--script" ) return GatedScript( "--script", raw[1..], ScriptLive.Run );
 			if ( raw.Length > 0 && raw[0] == "--bench" ) return Bench.Run( raw[1..] );
+			if ( raw.Length > 0 && raw[0] == "--mcp" ) return GatedMcp( raw[1..] );
+			if ( raw.Length > 0 && raw[0] == "ops" ) return raw.Length > 1 && raw[1] == "script"
+				? GatedScript( "ops script", raw[2..], rest => OpsCli.Run( new[] { "script" }.Concat( rest ).ToArray() ) )
+				: OpsCli.Run( raw[1..] );
 			return Run( DesktopOptions.Parse( raw ) );
 		}
 		catch ( Exception ex )
@@ -42,6 +49,67 @@ public static class Program
 			Console.Error.WriteLine( "error: " + ex.Message );
 			return 1;
 		}
+	}
+
+	// LV1 (grok-bot, 2026-11-13): the approval gate at the process boundary. See GateCheck.cs.
+	// Exit code 3 means "refused by the gate" so wrappers can tell it from a build error.
+	static int Refused( GateRefusedException ex )
+	{
+		Console.Error.WriteLine( ex.Message );
+		return 3;
+	}
+
+	static readonly string[] ScriptValueFlags = { "--pace", "--idle", "--doc", "--run", "--out" };
+
+	static int GatedScript( string surface, string[] args, Func<string[], int> run )
+	{
+		try
+		{
+			var (rest, token, sandbox) = GateCheck.Strip( args );
+			string? script = null;
+			for ( int i = 0; i < rest.Length; i++ )
+			{
+				if ( ScriptValueFlags.Contains( rest[i] ) ) { i++; continue; }
+				if ( !rest[i].StartsWith( "--", StringComparison.Ordinal ) ) { script = rest[i]; break; }
+			}
+			bool help = rest.Length == 0 || rest.Contains( "--help" ) || rest.Contains( "-h" );
+			if ( !help && script is not null )
+				GateCheck.Require( surface, GateCheck.Option( rest, "--run" ), script, token, sandbox );
+			return run( rest );
+		}
+		catch ( GateRefusedException ex ) { return Refused( ex ); }
+	}
+
+	static int GatedAi( string[] args )
+	{
+		try
+		{
+			var (rest, token, sandbox) = GateCheck.Strip( args );
+			if ( rest.Length > 0 && rest[0] == "judge" ) return AiCli.Run( rest );
+			var options = AiOptions.Parse( rest );
+			// research reads and writes notes only; create and chat build a model.
+			if ( !options.Help && options.Command is "create" or "chat" && !options.Research )
+				GateCheck.Require( "--ai " + options.Command, options.Output, null, token, sandbox );
+			return AiCli.Run( rest );
+		}
+		catch ( GateRefusedException ex ) { return Refused( ex ); }
+	}
+
+	static int GatedMcp( string[] args )
+	{
+		try
+		{
+			var (rest, _, sandbox) = GateCheck.Strip( args );
+			bool help = rest.Length > 0 && ( rest[0] == "--help" || rest[0] == "-h" );
+			// MCP modelling tools build in-process with nothing on screen and no single run
+			// directory to bind an approval to, so the stdio server is test-only.
+			if ( !help && !sandbox )
+				throw new GateRefusedException(
+					"GATE REFUSED (--mcp): the MCP server models out of sight, so it only starts with " + GateCheck.SandboxFlag +
+					" (tests). Agents build through `geppetto-live request build.txt --subject \"...\"`." );
+			return Mcp.McpServer.Run( rest );
+		}
+		catch ( GateRefusedException ex ) { return Refused( ex ); }
 	}
 
 	static int Run( DesktopOptions arguments )
@@ -54,6 +122,7 @@ public static class Program
 		// --empty serve needs no model file at all: skip the model-exists check below,
 		// which would otherwise demand the default FBX just to throw it away in ServeMode.
 		if ( arguments.Empty && arguments.Serve ) return ServeMode.Run( arguments );
+		if ( arguments.Empty && arguments.Headless ) throw new ArgumentException( "--empty is only supported with --serve." );
 		if ( !System.IO.File.Exists( modelPath ) ) throw new System.IO.FileNotFoundException( "Model file not found.", modelPath );
 		if ( clipPath is not null && !System.IO.File.Exists( clipPath ) ) throw new System.IO.FileNotFoundException( "Clip file not found.", clipPath );
 		if ( !modelPath.EndsWith( ".fbx", StringComparison.OrdinalIgnoreCase ) && !modelPath.EndsWith( ".effigy", StringComparison.OrdinalIgnoreCase ) )

@@ -1,0 +1,352 @@
+[
+  {
+    "id": "map.tool.select",
+    "name": "Select Tool",
+    "category": "Tool",
+    "description": "Select and move objects and brushes in the 2D and 3D views.",
+    "default": "Shift+S"
+  },
+  {
+    "id": "map.tool.block",
+    "name": "Block Tool",
+    "category": "Tool",
+    "description": "Create convex block brushes by dragging a box in a 2D view. Hammer default Shift+B.",
+    "default": "Shift+B"
+  },
+  {
+    "id": "map.tool.clip",
+    "name": "Clip Tool",
+    "category": "Tool",
+    "description": "Cut brushes with a 2-point clip line. Hammer default Shift+X.",
+    "default": "Shift+X"
+  },
+  {
+    "id": "map.tool.vertex",
+    "name": "Vertex Edit Tool",
+    "category": "Tool",
+    "description": "Move brush vertices and edges directly. Hammer default Shift+V.",
+    "default": "Shift+V"
+  },
+  {
+    "id": "map.tool.face",
+    "name": "Face Edit Tool",
+    "category": "Tool",
+    "description": "Edit per-face materials and UVs. Hammer default Shift+A.",
+    "default": "Shift+A"
+  },
+  {
+    "id": "map.tool.entity",
+    "name": "Entity Tool",
+    "category": "Tool",
+    "description": "Place point and brush entities. Hammer default Shift+E.",
+    "default": "Shift+E"
+  },
+  {
+    "id": "map.tool.camera",
+    "name": "Camera Tool",
+    "category": "Tool",
+    "description": "Position the 3D camera from a 2D view.",
+    "default": "Shift+C"
+  },
+  {
+    "id": "map.tool.displacement",
+    "name": "Displacement Tool",
+    "category": "Tool",
+    "description": "Select displacement surfaces for sculpting.",
+    "default": "Shift+D"
+  },
+  {
+    "id": "map.brush.create",
+    "name": "Create Brush",
+    "category": "Brush",
+    "description": "Create the brush drawn with the Block tool.",
+    "default": "Ctrl+Enter"
+  },
+  {
+    "id": "map.brush.clip",
+    "name": "Clip Selected Brush",
+    "category": "Brush",
+    "description": "Perform the clip drawn with the Clip tool.",
+    "default": "Enter"
+  },
+  {
+    "id": "map.brush.subtract",
+    "name": "CSG Subtract",
+    "category": "Brush",
+    "description": "Subtract the selected tool brush from the target brush.",
+    "default": "Ctrl+Alt+S"
+  },
+  {
+    "id": "map.brush.merge",
+    "name": "CSG Merge",
+    "category": "Brush",
+    "description": "Merge two touching convex brushes into one.",
+    "default": "Ctrl+Alt+M"
+  },
+  {
+    "id": "map.brush.hollow",
+    "name": "CSG Hollow",
+    "category": "Brush",
+    "description": "Hollow a solid brush into walls of a given thickness.",
+    "default": "Ctrl+Alt+H"
+  },
+  {
+    "id": "map.brush.transform",
+    "name": "Transform Selection",
+    "category": "Brush",
+    "description": "Move, rotate or scale the selected brushes on the grid.",
+    "default": "Ctrl+T"
+  },
+  {
+    "id": "map.brush.snap",
+    "name": "Snap Selection to Grid",
+    "category": "Brush",
+    "description": "Snap every vertex of the selection to the grid.",
+    "default": "Ctrl+Shift+G"
+  },
+  {
+    "id": "map.brush.primitive.next",
+    "name": "Next Primitive Shape",
+    "category": "Brush",
+    "description": "Cycle the Block tool primitive: box, wedge, cylinder, sphere, arch.",
+    "default": "Alt+B"
+  },
+  {
+    "id": "map.displacement.create",
+    "name": "Create Displacement",
+    "category": "Displacement",
+    "description": "Turn the selected quad faces into a displacement surface.",
+    "default": "Ctrl+Shift+D"
+  },
+  {
+    "id": "map.displacement.sculpt.raise",
+    "name": "Sculpt: Raise",
+    "category": "Displacement",
+    "description": "Raise displacement vertices under the sculpt brush.",
+    "default": "Alt+R"
+  },
+  {
+    "id": "map.displacement.sculpt.lower",
+    "name": "Sculpt: Lower",
+    "category": "Displacement",
+    "description": "Lower displacement vertices under the sculpt brush.",
+    "default": "Alt+L"
+  },
+  {
+    "id": "map.displacement.sculpt.smooth",
+    "name": "Sculpt: Smooth",
+    "category": "Displacement",
+    "description": "Smooth displacement vertices under the sculpt brush.",
+    "default": "Alt+M"
+  },
+  {
+    "id": "map.displacement.sculpt.flatten",
+    "name": "Sculpt: Flatten",
+    "category": "Displacement",
+    "description": "Flatten displacement vertices under the sculpt brush.",
+    "default": "Alt+F"
+  },
+  {
+    "id": "map.displacement.sew",
+    "name": "Sew Displacements",
+    "category": "Displacement",
+    "description": "Stitch the edges of neighbouring displacements together.",
+    "default": "Alt+W"
+  },
+  {
+    "id": "map.face.material.apply",
+    "name": "Apply Material to Face",
+    "category": "Face",
+    "description": "Apply the current material to the selected faces.",
+    "default": "Alt+A"
+  },
+  {
+    "id": "map.face.uv.fit",
+    "name": "Fit UVs to Face",
+    "category": "Face",
+    "description": "Fit the face texture UVs to the face bounds (0..1).",
+    "default": "Ctrl+Shift+F"
+  },
+  {
+    "id": "map.face.uv.align",
+    "name": "Align UVs",
+    "category": "Face",
+    "description": "Align the face UVs to the world axes.",
+    "default": "Ctrl+Alt+F"
+  },
+  {
+    "id": "map.face.nodraw",
+    "name": "Toggle Nodraw",
+    "category": "Face",
+    "description": "Toggle the nodraw tool material on the selected faces.",
+    "default": "Ctrl+Shift+N"
+  },
+  {
+    "id": "map.entity.place",
+    "name": "Place Entity",
+    "category": "Entity",
+    "description": "Place the selected entity class at the cursor.",
+    "default": "Ctrl+Shift+E"
+  },
+  {
+    "id": "map.entity.edit",
+    "name": "Edit Entity Properties",
+    "category": "Entity",
+    "description": "Edit the selected entity's keyvalues.",
+    "default": "Alt+E"
+  },
+  {
+    "id": "map.entity.io.add",
+    "name": "Add Entity I/O",
+    "category": "Entity",
+    "description": "Add an output (When -> Target -> Input) to the selected entity.",
+    "default": "Ctrl+Shift+I"
+  },
+  {
+    "id": "map.entity.tie",
+    "name": "Tie Brushes to Entity",
+    "category": "Entity",
+    "description": "Tie the selected brushes to a brush entity.",
+    "default": "Ctrl+Shift+T"
+  },
+  {
+    "id": "map.entity.untie",
+    "name": "Untie from Entity",
+    "category": "Entity",
+    "description": "Untie the selected brush entity back into world brushes.",
+    "default": "Ctrl+Shift+U"
+  },
+  {
+    "id": "map.group.create",
+    "name": "Group Selection",
+    "category": "Group",
+    "description": "Group the selected objects.",
+    "default": "Ctrl+G"
+  },
+  {
+    "id": "map.group.ungroup",
+    "name": "Ungroup Selection",
+    "category": "Group",
+    "description": "Ungroup the selected groups.",
+    "default": "Ctrl+U"
+  },
+  {
+    "id": "map.visgroup.toggle",
+    "name": "Toggle Visgroup",
+    "category": "Group",
+    "description": "Toggle the visibility of the selected objects' visgroup.",
+    "default": "Ctrl+Shift+V"
+  },
+  {
+    "id": "map.file.import.vmf",
+    "name": "Import VMF",
+    "category": "File",
+    "description": "Import a Valve VMF map file.",
+    "default": "Ctrl+Alt+O"
+  },
+  {
+    "id": "map.file.import.map",
+    "name": "Import Valve .map",
+    "category": "File",
+    "description": "Import a Valve 220 .map file.",
+    "default": "Alt+O"
+  },
+  {
+    "id": "map.file.export.vmf",
+    "name": "Export VMF",
+    "category": "File",
+    "description": "Export the map as a Valve VMF file.",
+    "default": "Ctrl+Alt+V"
+  },
+  {
+    "id": "map.file.export.map",
+    "name": "Export Valve .map",
+    "category": "File",
+    "description": "Export the map as a Valve 220 .map file.",
+    "default": "Ctrl+Alt+P"
+  },
+  {
+    "id": "map.file.export.obj",
+    "name": "Export OBJ/GLB",
+    "category": "File",
+    "description": "Export the baked map as OBJ/GLB.",
+    "default": "Ctrl+Alt+G"
+  },
+  {
+    "id": "map.compile.quick",
+    "name": "Quick Compile",
+    "category": "Compile",
+    "description": "Fast BSP-only compile for iteration.",
+    "default": "F9"
+  },
+  {
+    "id": "map.compile.preview",
+    "name": "Preview Compile",
+    "category": "Compile",
+    "description": "Compile with visibility and preview lighting.",
+    "default": "Shift+F9"
+  },
+  {
+    "id": "map.compile.final",
+    "name": "Final Compile",
+    "category": "Compile",
+    "description": "Full compile: BSP, visibility and final lighting.",
+    "default": "Ctrl+F9"
+  },
+  {
+    "id": "map.compile.quickplay",
+    "name": "Quick Play",
+    "category": "Compile",
+    "description": "BSP-only bake, then play from the player start.",
+    "default": "F10"
+  },
+  {
+    "id": "map.validate.run",
+    "name": "Check for Problems",
+    "category": "Validate",
+    "description": "Run the full map validation pass (leaks, invalid brushes, missing targets).",
+    "default": "Alt+P"
+  },
+  {
+    "id": "map.validate.issues.list",
+    "name": "List Issues",
+    "category": "Validate",
+    "description": "List every open validation issue.",
+    "default": "Alt+Shift+P"
+  },
+  {
+    "id": "map.validate.leak.find",
+    "name": "Find Leak",
+    "category": "Validate",
+    "description": "Flood-fill from the outside and report the leak path.",
+    "default": "Ctrl+Shift+L"
+  },
+  {
+    "id": "map.bake.lightmap",
+    "name": "Bake Lightmap",
+    "category": "Bake",
+    "description": "Bake static lightmaps for the map.",
+    "default": "Ctrl+Alt+B"
+  },
+  {
+    "id": "map.bake.navmesh",
+    "name": "Generate Navmesh",
+    "category": "Bake",
+    "description": "Generate the AI navigation mesh.",
+    "default": "Alt+N"
+  },
+  {
+    "id": "map.bake.cubemap",
+    "name": "Build Cubemaps",
+    "category": "Bake",
+    "description": "Capture and build environment cubemaps.",
+    "default": "Alt+C"
+  },
+  {
+    "id": "map.bake.skybox",
+    "name": "Apply Skybox",
+    "category": "Bake",
+    "description": "Apply the 2D/3D skybox to the map.",
+    "default": "Alt+K"
+  }
+]

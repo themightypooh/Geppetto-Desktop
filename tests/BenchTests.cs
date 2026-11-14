@@ -80,6 +80,46 @@ internal static class BenchTests
 			Check( Takes( "edit:bevel" ).SequenceEqual( new[] { "body" } ), "bevel: " + string.Join( ",", Takes( "edit:bevel" ) ) );
 		} );
 
+		registry.Add( "bench", "carried viewport model equals a cold rebuild, forward and back", () =>
+		{
+			// a run of several steps, then walk it forward, scrub to the start, jump, and walk back
+			var run = NewDir( "carry" );
+			var live = new AiLiveRun( new AiSuiteTools( run ) );
+			var studio = new Effigy.PartStudio();
+			var paths = new List<string>();
+			string[] lines = { "add Primitive name=A", "add Primitive name=B", "add Primitive name=C", "add Primitive name=D", "add Primitive name=E" };
+			for ( int i = 0; i < lines.Length; i++ )
+			{
+				Check( Effigy.BuildScript.Run( studio, lines[i] ).Ok, "run step " + i );
+				live.Commit( studio, $"line {i + 1}: {lines[i]}" );
+				paths.Add( live.CurrentPath! );
+			}
+			string Fingerprint( Effigy.PartStudio s )
+			{
+				var sb = new System.Text.StringBuilder();
+				foreach ( var b in s.Bodies )
+				{
+					sb.Append( b.Id ).Append( '|' ).Append( b.Name ).Append( '|' ).Append( b.Visible ).Append( '|' ).Append( b.FeatureId ).Append( '|' );
+					foreach ( var p in b.Mesh.Positions ) sb.Append( p.x.ToString( "R" ) ).Append( ',' ).Append( p.y.ToString( "R" ) ).Append( ',' ).Append( p.z.ToString( "R" ) ).Append( ';' );
+					foreach ( var f in b.Mesh.Faces ) sb.Append( string.Join( ",", f.Indices ) ).Append( '#' ).Append( f.Material ).Append( ';' );
+					sb.Append( '\n' );
+				}
+				return Convert.ToHexString( SHA256.HashData( System.Text.Encoding.UTF8.GetBytes( sb.ToString() ) ) );
+			}
+			var order = new[] { 0, 1, 2, 3, 4, 0, 4, 2, 1, 3, 3, 0 };
+			Effigy.PartStudio? carried = null; string? carriedPath = null;
+			foreach ( int i in order )
+			{
+				var cold = Effigy.StudioCache.Load( paths[i], out _ );
+				Effigy.PartStudio next;
+				if ( carried is null ) next = Effigy.StudioCache.Load( paths[i], out _ );
+				else next = Effigy.StudioCache.LoadOnto( carried, carriedPath!, paths[i], out _ );
+				carried = next; carriedPath = paths[i];
+				Check( next.Bodies.Count == i + 1, $"step {i + 1}: carried has {next.Bodies.Count} bodies" );
+				Check( Fingerprint( next ) == Fingerprint( cold ), $"step {i + 1}: carried model differs from cold rebuild (visiting order {string.Join( ",", order )})" );
+			}
+		} );
+
 		registry.Add( "bench", "editing a scrubbed run step leaves the run byte-identical", () =>
 		{
 			// a run with two revisions, as an AI run leaves it

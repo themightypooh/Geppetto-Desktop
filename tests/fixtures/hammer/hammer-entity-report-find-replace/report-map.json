@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "name": "report-map",
+  "description": "Entity Report fixture (hammer-entity-report-find-replace): 5 npc_citizen entities plus a player start, a light, a spotlight aimed at the door, a func_button whose OnPressed opens the door, the func_door itself, and a logic_relay that also opens the door. Brush numbers are compiler (VMF) brush ids; 1-2 are worldspawn brushes.",
+  "worldBrushes": [1, 2],
+  "entities": [
+    { "id": 1, "classname": "npc_citizen", "keyvalues": { "targetname": "npc_01", "squadname": "alpha", "health": "100", "model": "models/humans/group01/male_01.mdl" } },
+    { "id": 2, "classname": "npc_citizen", "keyvalues": { "targetname": "npc_02", "squadname": "alpha", "health": "100", "model": "models/humans/group01/male_02.mdl" } },
+    { "id": 3, "classname": "npc_citizen", "keyvalues": { "targetname": "npc_03", "squadname": "alpha", "health": "75", "model": "models/humans/group01/female_01.mdl" } },
+    { "id": 4, "classname": "npc_citizen", "keyvalues": { "targetname": "npc_04", "squadname": "beta", "health": "100", "model": "models/humans/group01/male_03.mdl" } },
+    { "id": 5, "classname": "npc_citizen", "keyvalues": { "targetname": "npc_05", "squadname": "beta", "health": "50", "model": "models/humans/group01/female_02.mdl" } },
+    { "id": 6, "classname": "info_player_start", "keyvalues": { "targetname": "player_start", "angles": "0 90 0" } },
+    { "id": 7, "classname": "light", "keyvalues": { "targetname": "light_01", "_light": "255 240 200" } },
+    { "id": 8, "classname": "func_button", "keyvalues": { "targetname": "button_01", "speed": "5", "wait": "1" }, "brushes": [103], "outputs": [ { "event": "OnPressed", "target": "door_01", "input": "Open", "delay": 0.5, "times": -1 } ] },
+    { "id": 9, "classname": "func_door", "keyvalues": { "targetname": "door_01", "speed": "100", "wait": "4" }, "brushes": [101, 102], "outputs": [ { "event": "OnFullyOpen", "target": "relay_01", "input": "Trigger", "delay": 0, "times": -1 } ] },
+    { "id": 10, "classname": "logic_relay", "keyvalues": { "targetname": "relay_01", "StartDisabled": "0" }, "outputs": [ { "event": "OnTrigger", "target": "door_01", "input": "Open", "delay": 0, "times": -1 } ] },
+    { "id": 11, "classname": "light_spot", "keyvalues": { "targetname": "spot_01", "target": "door_01", "_light": "255 255 255", "_cone": "45" } }
+  ]
+}

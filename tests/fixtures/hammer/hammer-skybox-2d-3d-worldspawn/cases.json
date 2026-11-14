@@ -1,0 +1,18 @@
+{
+  "skyName": "sky_day01_01",
+  "chapter": "CHAPTER 1: FIRST LIGHT",
+  "title": "First Light",
+  "detailVbsp": "detail.vbsp",
+  "detailMaterial": "detail/detailsprites",
+  "fogStart": 128,
+  "fogEnd": 8192,
+  "fogColor": [180, 200, 255],
+  "fogMaxDensity": 0.8,
+  "fogEnabled": true,
+  "cameraOrigin": [512, 512, 512],
+  "cameraScale": 16,
+  "sectionBrushes": 1,
+  "sectionFaces": 6,
+  "bakeBoundsMin": [512, 512, 512],
+  "bakeBoundsMax": [3072, 3072, 3072]
+}

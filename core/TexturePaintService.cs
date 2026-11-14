@@ -11,7 +11,7 @@ namespace Marionette.Desktop;
 /// file started as (old TexturePaintTests depend on its exact blend). The <see cref="TextureBrush"/>
 /// / <see cref="Session"/> API paints a kernel <see cref="Effigy.PaintCanvas"/> — the same canvas
 /// type <see cref="DocumentSession"/> reads when it swaps live paint textures into a snapshot —
-/// on any surface channel (colour, roughness, metalness, height).
+/// on any surface channel (colour, roughness, metalness, height, emissive, opacity, normal).
 ///
 /// HOW THIS FITS THE LIVE-PAINT SWAP (read, do not re-implement). DocumentSession.BuildSnapshot
 /// maps each visible body's <c>body.Mesh.Paint</c> canvas by material slot and turns it into the
@@ -134,6 +134,12 @@ public static class TexturePaintService
 				return canvas.MetalnessMap ??= new Effigy.PaintCanvas( canvas.Width, canvas.Height );
 			case Effigy.PaintChannel.Height:
 				return canvas.HeightMap ??= new Effigy.PaintCanvas( canvas.Width, canvas.Height );
+			case Effigy.PaintChannel.Emissive:
+				return canvas.EmissiveMap ??= new Effigy.PaintCanvas( canvas.Width, canvas.Height );
+			case Effigy.PaintChannel.Opacity:
+				return canvas.OpacityMap ??= new Effigy.PaintCanvas( canvas.Width, canvas.Height );
+			case Effigy.PaintChannel.Normal:
+				return canvas.NormalMap ??= new Effigy.PaintCanvas( canvas.Width, canvas.Height );
 			default:
 				throw new ArgumentException( $"Channel {channel} is not a paintable surface channel.", nameof( channel ) );
 		}
@@ -197,6 +203,67 @@ public static class TexturePaintService
 				Spacing = brush.Spacing, Channel = brush.Channel,
 			};
 			DabOnCanvas( canvas, dab );
+			dabs++;
+		}
+		return dabs;
+	}
+
+
+	/// <summary>
+	/// One dab of a PBR material: the same gesture stamps EVERY channel the material
+	/// uses (colour, roughness, metalness, height) from one brush position, one value
+	/// per channel — the service-level twin of PaintSession's material stroke. A channel
+	/// the material does not use is left exactly as it is, so "Rust" over gold keeps the
+	/// gold's height when rust has no height of its own. Returns the texels touched
+	/// across all channels. Erase clears every channel the material uses.
+	/// </summary>
+	public static int DabMaterialOnCanvas( Effigy.PaintCanvas canvas, TextureBrush brush, Effigy.PaintPbrMaterial material )
+	{
+		if ( canvas is null ) throw new ArgumentNullException( nameof( canvas ) );
+		if ( brush is null ) throw new ArgumentNullException( nameof( brush ) );
+		if ( material is null ) throw new ArgumentNullException( nameof( material ) );
+		if ( brush.Radius <= 0 ) throw new ArgumentException( "radius must be positive" );
+
+		var touched = 0;
+		foreach ( var channel in material.Channels() )
+		{
+			var (r, g, b) = material.ValueFor( channel );
+			var dab = new TextureBrush
+			{
+				X = brush.X, Y = brush.Y, Radius = brush.Radius, Strength = brush.Strength,
+				R = (byte)Math.Round( Math.Clamp( r, 0f, 1f ) * 255f ),
+				G = (byte)Math.Round( Math.Clamp( g, 0f, 1f ) * 255f ),
+				B = (byte)Math.Round( Math.Clamp( b, 0f, 1f ) * 255f ),
+				Erase = brush.Erase, Falloff = brush.Falloff, Spacing = brush.Spacing, Channel = channel,
+			};
+			touched += DabOnCanvas( canvas, dab );
+		}
+		return touched;
+	}
+
+	/// <summary>
+	/// A material stroke from (x0, y0) to (x1, y1): a DabMaterialOnCanvas at
+	/// Spacing intervals so a fast drag is a continuous line. Returns the number of dabs.
+	/// </summary>
+	public static int StrokeMaterialOnCanvas( Effigy.PaintCanvas canvas, TextureBrush brush, Effigy.PaintPbrMaterial material, float x0, float y0, float x1, float y1 )
+	{
+		if ( canvas is null ) throw new ArgumentNullException( nameof( canvas ) );
+		if ( brush is null ) throw new ArgumentNullException( nameof( brush ) );
+		if ( material is null ) throw new ArgumentNullException( nameof( material ) );
+		float dx = x1 - x0, dy = y1 - y0;
+		float dist = MathF.Sqrt( dx * dx + dy * dy );
+		float step = Math.Max( 1f, brush.Radius * Math.Max( 0.05f, brush.Spacing ) );
+		int steps = Math.Max( 1, ( int ) MathF.Ceiling( dist / step ) );
+		int dabs = 0;
+		for ( int i = 0; i <= steps; i++ )
+		{
+			float t = steps == 0 ? 0f : ( float ) i / steps;
+			var dab = new TextureBrush
+			{
+				X = x0 + dx * t, Y = y0 + dy * t, Radius = brush.Radius, Strength = brush.Strength,
+				Erase = brush.Erase, Falloff = brush.Falloff, Spacing = brush.Spacing,
+			};
+			DabMaterialOnCanvas( canvas, dab, material );
 			dabs++;
 		}
 		return dabs;

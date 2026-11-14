@@ -64,23 +64,29 @@ public static class MeshNormals
 		}
 
 		// Corner angles, for Angle and FaceWeighted modes: the angle between the two
-		// edges of the face meeting at each corner.
-		var cornerAngles = new float[faceCount][];
+		// edges of the face meeting at each corner. Area mode never uses them, so the
+		// whole pass (a float[] alloc plus two normalisations and an Acos per corner)
+		// is skipped there - the array stays null and the fetch below is gated too.
+		var useAngles = mode != NormalWeightMode.Area;
+		var cornerAngles = useAngles ? new float[faceCount][] : null;
 
-		for ( var fi = 0; fi < faceCount; fi++ )
+		if ( cornerAngles != null )
 		{
-			var f = mesh.Faces[fi];
-			var angles = new float[f.Count];
-			cornerAngles[fi] = angles;
-
-			for ( var i = 0; i < f.Count; i++ )
+			for ( var fi = 0; fi < faceCount; fi++ )
 			{
-				var prev = mesh.Positions[f.Indices[(i + f.Count - 1) % f.Count]];
-				var cur = mesh.Positions[f.Indices[i]];
-				var next = mesh.Positions[f.Indices[(i + 1) % f.Count]];
-				var e0 = (prev - cur).Normal;
-				var e1 = (next - cur).Normal;
-				angles[i] = MathF.Acos( Math.Clamp( Vec3.Dot( e0, e1 ), -1f, 1f ) );
+				var f = mesh.Faces[fi];
+				var angles = new float[f.Count];
+				cornerAngles[fi] = angles;
+
+				for ( var i = 0; i < f.Count; i++ )
+				{
+					var prev = mesh.Positions[f.Indices[(i + f.Count - 1) % f.Count]];
+					var cur = mesh.Positions[f.Indices[i]];
+					var next = mesh.Positions[f.Indices[(i + 1) % f.Count]];
+					var e0 = (prev - cur).Normal;
+					var e1 = (next - cur).Normal;
+					angles[i] = MathF.Acos( Math.Clamp( Vec3.Dot( e0, e1 ), -1f, 1f ) );
+				}
 			}
 		}
 
@@ -145,15 +151,19 @@ public static class MeshNormals
 					if ( other != fi && SharesSharpEdge( mesh.Faces[fi], mesh.Faces[other], vertex, sharp ) )
 						continue;
 
+					// Area mode never uses the angle: skip the scan that fetches it.
 					var angle = 0f;
-					var of = mesh.Faces[other];
-
-					for ( var ci = 0; ci < of.Count; ci++ )
+					if ( useAngles )
 					{
-						if ( of.Indices[ci] == vertex )
+						var of = mesh.Faces[other];
+
+						for ( var ci = 0; ci < of.Count; ci++ )
 						{
-							angle = cornerAngles[other][ci];
-							break;
+							if ( of.Indices[ci] == vertex )
+							{
+								angle = cornerAngles[other][ci];
+								break;
+							}
 						}
 					}
 

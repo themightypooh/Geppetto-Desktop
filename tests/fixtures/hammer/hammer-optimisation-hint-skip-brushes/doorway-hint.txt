@@ -1,0 +1,9 @@
+# Hint slab across the doorway throat of two-room-doorway.txt:
+# x in [-2, 2], y in [-32, 32], z in [0, 96]. The +X face (x = 2) is hint.
+brush doorway-hint
+face -1 0 0 2 tools/toolsskip
+face 1 0 0 2 tools/toolshint
+face 0 -1 0 32 tools/toolsskip
+face 0 1 0 32 tools/toolsskip
+face 0 0 -1 0 tools/toolsskip
+face 0 0 1 96 tools/toolsskip

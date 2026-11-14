@@ -2,7 +2,17 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
+using System;
+using System.Collections.Generic;
+
 namespace Effigy;
+
+public static class DmxMorphCache
+{
+	public static Dictionary<string, object> Cache = new Dictionary<string, object>();
+	public static int Limit = 64;
+	public static void Clear() => Cache.Clear();
+}
 
 /// <summary>
 /// Shape keys (<see cref="PolyMesh.Morphs"/>) in a model DMX: delta states on the DmeMesh and a

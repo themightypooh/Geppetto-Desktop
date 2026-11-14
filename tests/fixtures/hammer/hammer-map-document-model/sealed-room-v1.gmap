@@ -1,0 +1,100 @@
+gmap 1
+docid a1b2c3d4
+name sealed-room
+rollback 2147483647
+op add-layer layer-walls
+	name Walls
+	colour #808080
+	visible 1
+	compilevisible 1
+endop
+op add-visgroup vis-all
+	name All
+	colour #4040FF
+	visible 1
+	compilevisible 1
+endop
+op add-brush brush-floor
+	name Floor
+	layer -
+	visgroups -
+	face -1 0 0 0 concrete/floor 0 0 1 1 0 16 0
+	face 1 0 0 512 concrete/floor 0 0 1 1 0 16 0
+	face 0 -1 0 0 concrete/floor 0 0 1 1 0 16 0
+	face 0 1 0 512 concrete/floor 0 0 1 1 0 16 0
+	face 0 0 -1 0 concrete/floor 0 0 1 1 0 16 0
+	face 0 0 1 16 concrete/floor 0 0 1 1 0 16 0
+endop
+op add-brush brush-ceiling
+	name Ceiling
+	layer -
+	visgroups -
+	face -1 0 0 0 concrete/ceiling 0 0 1 1 0 16 0
+	face 1 0 0 512 concrete/ceiling 0 0 1 1 0 16 0
+	face 0 -1 0 0 concrete/ceiling 0 0 1 1 0 16 0
+	face 0 1 0 512 concrete/ceiling 0 0 1 1 0 16 0
+	face 0 0 -1 -240 concrete/ceiling 0 0 1 1 0 16 0
+	face 0 0 1 256 concrete/ceiling 0 0 1 1 0 16 0
+endop
+op add-brush brush-wall-x0
+	name Wall -X
+	layer layer-walls
+	visgroups vis-all
+	face -1 0 0 0 concrete/wall 0 0 1 1 0 16 0
+	face 1 0 0 16 concrete/wall 0 0 1 1 0 16 0
+	face 0 -1 0 0 concrete/wall 0 0 1 1 0 16 0
+	face 0 1 0 512 concrete/wall 0 0 1 1 0 16 0
+	face 0 0 -1 0 concrete/wall 0 0 1 1 0 16 0
+	face 0 0 1 256 concrete/wall 0 0 1 1 0 16 0
+endop
+op add-brush brush-wall-x1
+	name Wall +X
+	layer layer-walls
+	visgroups vis-all
+	face -1 0 0 -496 concrete/wall 0 0 1 1 0 16 0
+	face 1 0 0 512 concrete/wall 0 0 1 1 0 16 0
+	face 0 -1 0 0 concrete/wall 0 0 1 1 0 16 0
+	face 0 1 0 512 concrete/wall 0 0 1 1 0 16 0
+	face 0 0 -1 0 concrete/wall 0 0 1 1 0 16 0
+	face 0 0 1 256 concrete/wall 0 0 1 1 0 16 0
+endop
+op add-brush brush-wall-y0
+	name Wall -Y
+	layer layer-walls
+	visgroups vis-all
+	face -1 0 0 0 concrete/wall 0 0 1 1 0 16 0
+	face 1 0 0 512 concrete/wall 0 0 1 1 0 16 0
+	face 0 -1 0 0 concrete/wall 0 0 1 1 0 16 0
+	face 0 1 0 16 concrete/wall 0 0 1 1 0 16 0
+	face 0 0 -1 0 concrete/wall 0 0 1 1 0 16 0
+	face 0 0 1 256 concrete/wall 0 0 1 1 0 16 0
+endop
+op add-brush brush-wall-y1
+	name Wall +Y
+	layer layer-walls
+	visgroups vis-all
+	face -1 0 0 0 concrete/wall 0 0 1 1 0 16 0
+	face 1 0 0 512 concrete/wall 0 0 1 1 0 16 0
+	face 0 -1 0 -496 concrete/wall 0 0 1 1 0 16 0
+	face 0 1 0 512 concrete/wall 0 0 1 1 0 16 0
+	face 0 0 -1 0 concrete/wall 0 0 1 1 0 16 0
+	face 0 0 1 256 concrete/wall 0 0 1 1 0 16 0
+endop
+op add-entity ent-spawn
+	class info_player_start
+	origin 256 256 32
+	angles 0 90 0
+	layer -
+	visgroups -
+	key targetname spawn1
+endop
+op add-entity ent-light
+	class light
+	origin 256 256 200
+	angles 0 0 0
+	layer -
+	visgroups -
+	key _light 255 240 200
+	key targetname main light
+endop
+op set-compile 0 16 sky_day01_01

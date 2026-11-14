@@ -1,0 +1,7 @@
+# The box squashed flat: top and bottom are both z = 0. Invalid: ZeroVolume.
+face -1 0 0 1 brick/brickwall 0 0 1 1 0 16 0
+face 1 0 0 1 brick/brickwall 0 0 1 1 0 16 0
+face 0 -1 0 1.5 brick/brickwall 0 0 1 1 0 16 0
+face 0 1 0 1.5 brick/brickwall 0 0 1 1 0 16 0
+face 0 0 -1 0 brick/brickwall 0 0 1 1 0 16 0
+face 0 0 1 0 brick/brickwall 0 0 1 1 0 16 0

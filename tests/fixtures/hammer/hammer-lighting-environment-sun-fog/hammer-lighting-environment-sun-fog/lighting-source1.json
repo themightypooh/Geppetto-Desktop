@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 1,
+  "name": "source1-lighting",
+  "description": "Source-1 lighting entity set for Geppetto Desktop (hammer-lighting-environment-sun-fog): the six lighting classes core-source1.json does not ship — light_environment, env_sun, light_dynamic, env_fog_controller, shadow_control, env_tonemap_controller. light and light_spot already ship in source1-core. Every class implicitly accepts the base keyvalues classname (string), targetname (string), parentname (target), angles (angle) and spawnflags (int); they are not repeated per class.",
+  "classes": [
+    {
+      "name": "light_environment",
+      "kind": "point",
+      "description": "Sun light: direct sunlight (_light) plus ambient (_ambient). Position does not matter; angles point at the sun (pitch positive-down, elevation is -pitch). Pair with an env_sun for the visible sun sprite. Only the first one in a map is used.",
+      "baseClasses": [ "Targetname" ],
+      "keyvalues": [
+        { "name": "_light", "type": "colour", "default": "255 255 255 200", "description": "Sun direct colour (R G B, 0-255) and brightness (4th component, default 200)." },
+        { "name": "_ambient", "type": "colour", "default": "0 0 0", "description": "Ambient colour (R G B, 0-255) and brightness (4th component). Black = no ambient term." },
+        { "name": "pitch", "type": "int", "default": "-45", "description": "Sun pitch in degrees (negative = sun above the horizon, shining down). Non-zero overrides the pitch in angles." }
+      ],
+      "spawnflags": [],
+      "inputs": [],
+      "outputs": [],
+      "helpers": [ { "kind": "origin" }, { "kind": "angles" }, { "key": "_light", "kind": "colour" } ]
+    },
+    {
+      "name": "env_sun",
+      "kind": "point",
+      "description": "Visible sun sprite in the sky. Angles point at the sun (same convention as light_environment); pair with a light_environment for the actual sun light.",
+      "baseClasses": [ "Targetname" ],
+      "keyvalues": [
+        { "name": "rendercolor", "type": "colour", "default": "255 255 255", "description": "Sun sprite colour (R G B, 0-255)." },
+        { "name": "size", "type": "int", "default": "16", "description": "Sun sprite size." },
+        { "name": "overlaycolor", "type": "colour", "default": "255 255 255", "description": "Sun glow overlay colour (R G B, 0-255)." },
+        { "name": "overlaysize", "type": "int", "default": "64", "description": "Sun glow overlay size." }
+      ],
+      "spawnflags": [],
+      "inputs": [],
+      "outputs": [],
+      "helpers": [ { "kind": "origin" }, { "kind": "angles" }, { "key": "rendercolor", "kind": "colour" } ]
+    },
+    {
+      "name": "light_dynamic",
+      "kind": "point",
+      "description": "Realtime (dynamic) point light. Never baked: it reaches the live preview only, and is excluded from the native bake light list.",
+      "baseClasses": [ "Targetname", "Parentname" ],
+      "keyvalues": [
+        { "name": "_light", "type": "colour", "default": "255 255 255 200", "description": "Light colour (R G B, 0-255) and brightness (4th component, default 200)." },
+        { "name": "_distance", "type": "float", "default": "0", "description": "Maximum distance the light reaches. 0 = infinite." },
+        { "name": "style", "type": "int", "default": "0", "description": "Light style (0 = normal, 1-63 = flicker patterns). Non-zero styles are not baked." }
+      ],
+      "spawnflags": [],
+      "inputs": [
+        { "name": "TurnOn", "argumentType": "void", "description": "Turn the light on." },
+        { "name": "TurnOff", "argumentType": "void", "description": "Turn the light off." },
+        { "name": "Toggle", "argumentType": "void", "description": "Toggle the light." }
+      ],
+      "outputs": [],
+      "helpers": [ { "kind": "origin" }, { "key": "_light", "kind": "colour" } ]
+    },
+    {
+      "name": "env_fog_controller",
+      "kind": "point",
+      "description": "Distance fog controller: linear fog between fogstart and fogend, capped at fogmaxdensity. First controller in a map wins.",
+      "baseClasses": [ "Targetname" ],
+      "keyvalues": [
+        { "name": "fogcolor", "type": "colour", "default": "255 255 255", "description": "Fog colour (R G B, 0-255)." },
+        { "name": "fogcolor2", "type": "colour", "default": "255 255 255", "description": "Secondary fog colour (R G B, 0-255). No Geppetto consumer reads it yet." },
+        { "name": "fogstart", "type": "float", "default": "0", "description": "Near distance where fog starts. 0 = unset." },
+        { "name": "fogend", "type": "float", "default": "0", "description": "Far distance where fog is opaque. 0 = unset." },
+        { "name": "fogmaxdensity", "type": "float", "default": "1", "description": "Maximum fog density, 0..1." },
+        { "name": "farz", "type": "float", "default": "-1", "description": "Far Z clip distance. -1 = unset. No Geppetto consumer reads it yet." },
+        { "name": "fogenable", "type": "int", "default": "1", "choices": [ "0", "1" ], "description": "Fog enabled (1) or disabled (0)." }
+      ],
+      "spawnflags": [],
+      "inputs": [
+        { "name": "TurnOn", "argumentType": "void", "description": "Enable the fog." },
+        { "name": "TurnOff", "argumentType": "void", "description": "Disable the fog." }
+      ],
+      "outputs": [],
+      "helpers": [ { "kind": "origin" }, { "key": "fogcolor", "kind": "colour" } ]
+    },
+    {
+      "name": "shadow_control",
+      "kind": "point",
+      "description": "Shadow controller: shadow colour and maximum shadow distance. First controller in a map wins.",
+      "baseClasses": [ "Targetname" ],
+      "keyvalues": [
+        { "name": "color", "type": "colour", "default": "0 0 0", "description": "Shadow colour (R G B, 0-255)." },
+        { "name": "distance", "type": "float", "default": "0", "description": "Maximum shadow distance. 0 = no limit." },
+        { "name": "disableallshadows", "type": "int", "default": "0", "choices": [ "0", "1" ], "description": "Disable all shadows (1) or not (0). Needs a bake flag the runner does not take yet." }
+      ],
+      "spawnflags": [],
+      "inputs": [],
+      "outputs": [],
+      "helpers": [ { "kind": "origin" }, { "key": "color", "kind": "colour" } ]
+    },
+    {
+      "name": "env_tonemap_controller",
+      "kind": "point",
+      "description": "HDR tonemap / auto-exposure controller. Render-time only: it never feeds the lightmap bake. First controller in a map wins.",
+      "baseClasses": [ "Targetname" ],
+      "keyvalues": [
+        { "name": "bloom_scale", "type": "float", "default": "1", "description": "HDR bloom scale." },
+        { "name": "autoexposure_min", "type": "float", "default": "0.5", "description": "Minimum auto-exposure." },
+        { "name": "autoexposure_max", "type": "float", "default": "2", "description": "Maximum auto-exposure." },
+        { "name": "tonemap_rate", "type": "float", "default": "1", "description": "Tonemap adaptation rate." },
+        { "name": "tonemap_percent_bright_pixels", "type": "float", "default": "2", "description": "Percent of bright pixels driving exposure, 0..100." },
+        { "name": "tonemap_min_avglum", "type": "float", "default": "3", "description": "Minimum average luminance." },
+        { "name": "tonemap_percent_target", "type": "float", "default": "60", "description": "Target percent for exposure, 0..100." }
+      ],
+      "spawnflags": [],
+      "inputs": [
+        { "name": "SetBloomScale", "argumentType": "float", "description": "Set the HDR bloom scale." },
+        { "name": "SetAutoExposureMin", "argumentType": "float", "description": "Set the minimum auto-exposure." },
+        { "name": "SetAutoExposureMax", "argumentType": "float", "description": "Set the maximum auto-exposure." }
+      ],
+      "outputs": [],
+      "helpers": [ { "kind": "origin" } ]
+    }
+  ]
+}

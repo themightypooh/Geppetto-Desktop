@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "name": "prop-placement-test",
+  "description": "Minimal registry for PropPlacementTests: the prop classes the seating tests place, plus the player start. Same shape as kernel/Effigy/Map/registry/core-source1.json, cut down so this group is hermetic (it does not depend on the registry ticket's files).",
+  "classes": [
+    {
+      "name": "info_player_start",
+      "kind": "point",
+      "description": "Player spawn point.",
+      "baseClasses": ["Targetname"],
+      "helpers": [{ "kind": "origin" }, { "kind": "angles" }],
+      "keyvalues": [],
+      "inputs": [],
+      "outputs": []
+    },
+    {
+      "name": "prop_static",
+      "kind": "point",
+      "description": "Static prop baked into the map. No physics, no animation.",
+      "baseClasses": ["Targetname"],
+      "helpers": [{ "kind": "origin" }, { "kind": "angles" }],
+      "keyvalues": [
+        { "name": "model", "type": "model", "description": "Model file (.mdl)." },
+        { "name": "skin", "type": "int", "default": "0", "description": "Skin number." },
+        { "name": "solid", "type": "int", "default": "6", "choices": ["0", "2", "6"], "description": "Collision: 0 = none, 2 = bounding box, 6 = VPhysics." }
+      ],
+      "inputs": [],
+      "outputs": []
+    },
+    {
+      "name": "prop_dynamic",
+      "kind": "point",
+      "description": "Dynamic prop with animation support.",
+      "baseClasses": ["Targetname"],
+      "helpers": [{ "kind": "origin" }, { "kind": "angles" }],
+      "keyvalues": [
+        { "name": "model", "type": "model", "description": "Model file (.mdl)." }
+      ],
+      "inputs": [],
+      "outputs": []
+    }
+  ]
+}

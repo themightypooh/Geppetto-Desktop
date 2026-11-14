@@ -1,0 +1,3 @@
+placeholder .mdl for hammer-model-particle-sound-registries tests.
+Only existence is ever checked (registry validation + placement);
+the bytes are never parsed as a model. Do not use as a real model.

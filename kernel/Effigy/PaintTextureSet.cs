@@ -41,6 +41,10 @@ public static class PaintTextureSet
 	/// <summary>
 	/// Every image the paint on <paramref name="paint"/> exports as, in channel order. Colour is
 	/// always present when there is paint at all; the others only when painted.
+	///
+	/// Colour spaces: colour and emit are sRGB; rough, metal, normal, ao and opacity are linear
+	/// data. The normal map is tangent-space in s&amp;box DirectX green (painted Normal and
+	/// height-derived combined); glTF export flips its G channel to OpenGL green.
 	/// </summary>
 	public static List<Image> Images( PaintCanvas paint, float bumpStrength = DefaultBumpStrength )
 	{
@@ -57,13 +61,55 @@ public static class PaintTextureSet
 		if ( paint.MetalnessMap is { } metal )
 			images.Add( new Image { Suffix = "metal", Rgba = PaintLayers.Opaque( paint, PaintChannel.Metalness ), Width = metal.Width, Height = metal.Height } );
 
-		if ( paint.HeightMap is { } height )
-			images.Add( new Image { Suffix = "normal", Rgba = HeightToNormal( height, bumpStrength ), Width = height.Width, Height = height.Height } );
+		// The normal map: the one derived from painted height, the painted Normal channel, or both combined
+		// (whiteout blend, so painted detail rides on the height's bumps rather than replacing them).
+		var fromHeight = paint.HeightMap is { } height ? HeightToNormal( height, bumpStrength ) : null;
+		var painted = paint.NormalMap is { } normalMap ? PaintLayers.Opaque( paint, PaintChannel.Normal ) : null;
+		if ( fromHeight is not null || painted is not null )
+		{
+			var src = painted is not null ? paint.NormalMap : paint.HeightMap;
+			var rgba = painted is null ? fromHeight
+				: fromHeight is null ? painted
+				: CombineNormals( fromHeight, paint.HeightMap.Width, paint.HeightMap.Height, painted, src.Width, src.Height );
+			images.Add( new Image { Suffix = "normal", Rgba = rgba, Width = src.Width, Height = src.Height } );
+		}
 
 		if ( paint.HeightMap is { } heightAo )
 			images.Add( new Image { Suffix = "ao", Rgba = HeightToAo( heightAo ), Width = heightAo.Width, Height = heightAo.Height } );
 
+		// Emissive is a grey self-illumination mask (0 dark, 1 glows at the albedo), baked over 0;
+		// opacity is grey (1 solid, 0 see-through), baked over 1. Both only when painted.
+		if ( paint.EmissiveMap is { } emit )
+			images.Add( new Image { Suffix = "emit", Rgba = PaintLayers.Opaque( paint, PaintChannel.Emissive ), Width = emit.Width, Height = emit.Height } );
+
+		if ( paint.OpacityMap is { } opacity )
+			images.Add( new Image { Suffix = "opacity", Rgba = PaintLayers.Opaque( paint, PaintChannel.Opacity ), Width = opacity.Width, Height = opacity.Height } );
+
 		return images;
+	}
+
+	/// <summary>
+	/// Two tangent-space normal maps (RGBA bytes) as one, at <paramref name="detail"/>'s size: the whiteout blend,
+	/// normalize(a.xy + b.xy, a.z * b.z), with <paramref name="baseMap"/> sampled nearest. Flat over flat stays flat.
+	/// </summary>
+	public static byte[] CombineNormals( byte[] baseMap, int bw, int bh, byte[] detail, int dw, int dh )
+	{
+		var o = new byte[dw * dh * 4];
+		for ( var y = 0; y < dh; y++ )
+			for ( var x = 0; x < dw; x++ )
+			{
+				var i = (y * dw + x) * 4;
+				var j = (Math.Min( y * bh / dh, bh - 1 ) * bw + Math.Min( x * bw / dw, bw - 1 )) * 4;
+				float U( byte v ) => v / 255f * 2f - 1f;
+				var nx = U( baseMap[j] ) + U( detail[i] );
+				var ny = U( baseMap[j + 1] ) + U( detail[i + 1] );
+				var nz = U( baseMap[j + 2] ) * U( detail[i + 2] );
+				var len = MathF.Sqrt( nx * nx + ny * ny + nz * nz );
+				if ( len < 1e-6f ) { nx = 0; ny = 0; nz = 1; len = 1; }
+				byte E( float v ) => (byte)Math.Clamp( MathF.Round( (v / len * 0.5f + 0.5f) * 255f ), 0f, 255f );
+				o[i] = E( nx ); o[i + 1] = E( ny ); o[i + 2] = E( nz ); o[i + 3] = 255;
+			}
+		return o;
 	}
 
 	/// <summary>
@@ -171,6 +217,12 @@ public static class PaintTextureSet
 		if ( images.ContainsKey( "metal" ) )
 			sb.Append( "\tF_METALNESS_TEXTURE 1\n" );
 
+		if ( images.ContainsKey( "emit" ) )
+			sb.Append( "\tF_SELF_ILLUM 1\n" );
+
+		if ( images.ContainsKey( "opacity" ) )
+			sb.Append( "\tF_TRANSLUCENT 1\n" );
+
 		sb.Append( "\n\t//---- Color ----\n" );
 		sb.Append( "\tg_flModelTintAmount \"1.000\"\n" );
 		sb.Append( "\tg_vColorTint \"[1.000000 1.000000 1.000000 0.000000]\"\n" );
@@ -195,6 +247,23 @@ public static class PaintTextureSet
 
 		sb.Append( "\n\t//---- Roughness ----\n" );
 		sb.Append( $"\tTextureRoughness \"{(images.TryGetValue( "rough", out var rough ) ? rough : "materials/default/default_rough.tga")}\"\n" );
+
+		if ( images.TryGetValue( "emit", out var emit ) )
+		{
+			sb.Append( "\n\t//---- Self Illum ----\n" );
+			sb.Append( "\tg_flSelfIllumAlbedoFactor \"1.000\"\n" );
+			sb.Append( "\tg_flSelfIllumBrightness \"1.000\"\n" );
+			sb.Append( "\tg_flSelfIllumScale \"1.000\"\n" );
+			sb.Append( "\tg_vSelfIllumTint \"[1.000000 1.000000 1.000000 0.000000]\"\n" );
+			sb.Append( $"\tTextureSelfIllumMask \"{emit}\"\n" );
+		}
+
+		if ( images.TryGetValue( "opacity", out var opacity ) )
+		{
+			sb.Append( "\n\t//---- Translucent ----\n" );
+			sb.Append( "\tg_flOpacityScale \"1.000\"\n" );
+			sb.Append( $"\tTextureTranslucency \"{opacity}\"\n" );
+		}
 
 		sb.Append( "\n\t//---- Texture Coordinates ----\n" );
 		sb.Append( "\tg_nScaleTexCoordUByModelScaleAxis \"0\"\n" );
@@ -262,6 +331,7 @@ public static class PaintTextureSet
 			{
 				case PaintChannel.Roughness: holder.RoughnessMap = resized; break;
 				case PaintChannel.Metalness: holder.MetalnessMap = resized; break;
+				case PaintChannel.Emissive: holder.EmissiveMap = resized; break;
 				default: return PaintLayers.Opaque( resized, PaintChannel.Color );
 			}
 
@@ -271,8 +341,27 @@ public static class PaintTextureSet
 		var height = paint.HeightMap is null ? null
 			: paint.HeightMap.Width == size ? paint.HeightMap : PaintLayers.Resample( paint.HeightMap, size, size );
 
+		// The preview glows the way complex.vfx does: emission = albedo x the self-illumination mask.
+		byte[] emission = null;
+
+		if ( paint.EmissiveMap is not null && At( paint.EmissiveMap, PaintChannel.Emissive ) is { } emitMask )
+		{
+			var albedo = PaintLayers.Opaque( paint, PaintChannel.Color );
+			emission = new byte[albedo.Length];
+
+			for ( var i = 0; i < albedo.Length; i += 4 )
+			{
+				var k = emitMask[i] / 255f;
+				emission[i] = (byte)MathF.Round( albedo[i] * k );
+				emission[i + 1] = (byte)MathF.Round( albedo[i + 1] * k );
+				emission[i + 2] = (byte)MathF.Round( albedo[i + 2] * k );
+				emission[i + 3] = 255;
+			}
+		}
+
 		return new Effigy.Render.ShadeMaterial
 		{
+			EmissionMap = emission,
 			MapSize = size,
 			AlbedoMap = PaintLayers.Opaque( paint, PaintChannel.Color ),
 			Roughness = PaintChannels.Base( PaintChannel.Roughness ),

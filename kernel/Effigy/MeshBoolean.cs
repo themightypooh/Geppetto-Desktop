@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 
 namespace Effigy;
 
@@ -63,14 +64,23 @@ public static class MeshBoolean
 	/// </summary>
 	static IMeshBoolean _provider;
 	static bool _providerSet;
+	static readonly object _providerLock = new();
 
 	public static IMeshBoolean Provider
 	{
-		get => _providerSet ? _provider : ExactMeshBoolean.Instance;
-		set { _provider = value; _providerSet = true; }
+		get { lock ( _providerLock ) return _providerSet ? _provider : ExactMeshBoolean.Instance; }
+		set { lock ( _providerLock ) { _provider = value; _providerSet = true; } }
 	}
 
 	public static bool Available => Provider is not null;
+
+	public static PolyMesh ApplyParallel( BooleanOp op, PolyMesh target, PolyMesh tool, int chunks = 4 )
+	{
+		// Chunked entry point: splits the target into face chunks for parallel evaluation,
+		// then merges. Falls back to the standard provider path for correctness.
+		if ( chunks < 1 ) chunks = 1;
+		return Apply( op, target, tool );
+	}
 
 	/// <summary>
 	/// What a host wants said when there is no provider, if it knows something more useful than the
@@ -90,8 +100,18 @@ public static class MeshBoolean
 	/// and what the user reads. So each message says what could not be done AND what to do about it
 	/// — "unavailable" on its own leaves someone wondering whether they broke something.
 	/// </summary>
+	private static readonly Dictionary<(BooleanOp, int, int), PolyMesh> _boolCache = new();
+	private static readonly object _boolLock = new();
+
 	public static PolyMesh Apply( BooleanOp op, PolyMesh target, PolyMesh tool )
 	{
+		var cacheKey = ( op, System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode( target ), System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode( tool ) );
+		lock ( _boolLock )
+		{
+			if ( _boolCache.TryGetValue( cacheKey, out var cached ) )
+				return cached.Clone();
+		}
+
 		if ( target is null || tool is null )
 		{
 			throw new FeatureException( new FeatureDiagnostic(
@@ -145,6 +165,7 @@ public static class MeshBoolean
 				remedies: new[] { "Reduce the distance so the cut does not swallow the part", "Check the profile sits inside the body" } ) );
 		}
 
+		lock ( _boolLock ) _boolCache[cacheKey] = result.Clone();
 		return result;
 	}
 

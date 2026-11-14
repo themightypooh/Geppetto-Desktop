@@ -697,12 +697,12 @@ public static class RigTemplates
 		var pri = wrist;
 
 		for ( var i = 1; i <= 4; i++ )
-			pri = Add( $"feather_pri_{i}", pri, new Vec3( -2f * (i - 1) * s, (20f + 4f * (i - 1)) * s, 22f * s ), new Vec3( -2f * i * s, (20f + 4f * i) * s, 22f * s ) );
+			pri = Add( $"feather_pri_{i}_L", pri, new Vec3( -2f * (i - 1) * s, (20f + 4f * (i - 1)) * s, 22f * s ), new Vec3( -2f * i * s, (20f + 4f * i) * s, 22f * s ) );
 
 		var sec = elbow;
 
 		for ( var i = 1; i <= 3; i++ )
-			sec = Add( $"feather_sec_{i}", sec, new Vec3( -2f * (i - 1) * s, (14f + 4f * (i - 1)) * s, (24f - i) * s ), new Vec3( -2f * i * s, (14f + 4f * i) * s, (24f - i) * s ) );
+			sec = Add( $"feather_sec_{i}_L", sec, new Vec3( -2f * (i - 1) * s, (14f + 4f * (i - 1)) * s, (24f - i) * s ), new Vec3( -2f * i * s, (14f + 4f * i) * s, (24f - i) * s ) );
 
 		var tail0 = Add( "tail_0", pelvis, new Vec3( -2f * s, 0, 18f * s ), new Vec3( -6f * s, 0, 18f * s ) );
 		var tail1 = Add( "tail_1", tail0, new Vec3( -6f * s, 0, 18f * s ), new Vec3( -10f * s, 0, 18f * s ) );

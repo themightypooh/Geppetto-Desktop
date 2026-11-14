@@ -12,7 +12,7 @@ namespace Effigy;
 /// </summary>
 public sealed class PaintLayerMaps
 {
-	public PaintCanvas Color, Roughness, Metalness, Height;
+	public PaintCanvas Color, Roughness, Metalness, Height, Emissive, Opacity, Normal;
 
 	/// <summary>The painted layer mask (black hides, white shows; coverage in alpha), or null when
 	/// nobody painted on the mask.</summary>
@@ -27,6 +27,9 @@ public sealed class PaintLayerMaps
 		PaintChannel.Roughness => Roughness,
 		PaintChannel.Metalness => Metalness,
 		PaintChannel.Height => Height,
+		PaintChannel.Emissive => Emissive,
+		PaintChannel.Opacity => Opacity,
+		PaintChannel.Normal => Normal,
 		PaintChannel.Mask => MaskPaint,
 		_ => null,
 	};
@@ -39,12 +42,16 @@ public sealed class PaintLayerMaps
 			case PaintChannel.Roughness: Roughness = canvas; break;
 			case PaintChannel.Metalness: Metalness = canvas; break;
 			case PaintChannel.Height: Height = canvas; break;
+			case PaintChannel.Emissive: Emissive = canvas; break;
+			case PaintChannel.Opacity: Opacity = canvas; break;
+			case PaintChannel.Normal: Normal = canvas; break;
 			case PaintChannel.Mask: MaskPaint = canvas; break;
 		}
 	}
 
 	/// <summary>Whether any surface channel carries content. A layer with only a mask adds nothing.</summary>
-	public bool HasSurface => Color is not null || Roughness is not null || Metalness is not null || Height is not null;
+	public bool HasSurface => Color is not null || Roughness is not null || Metalness is not null || Height is not null
+		|| Emissive is not null || Opacity is not null || Normal is not null;
 }
 
 /// <summary>
@@ -76,8 +83,24 @@ public static class PaintLayers
 		// Overlay is HardLight with the layers swapped: the BACKDROP decides multiply or screen.
 		PaintBlendMode.Overlay => cb <= 0.5f ? cs * 2f * cb : Screen( cs, 2f * cb - 1f ),
 		PaintBlendMode.Add => MathF.Min( 1f, cb + cs ),
+		PaintBlendMode.Darken => MathF.Min( cb, cs ),
+		PaintBlendMode.Lighten => MathF.Max( cb, cs ),
+		PaintBlendMode.Difference => MathF.Abs( cb - cs ),
+		PaintBlendMode.Exclusion => cb + cs - 2f * cb * cs,
+		PaintBlendMode.HardLight => cs <= 0.5f ? cb * 2f * cs : Screen( cb, 2f * cs - 1f ),
+		PaintBlendMode.SoftLight => SoftLight( cb, cs ),
+		PaintBlendMode.ColorDodge => cb <= 0f ? 0f : cs >= 1f ? 1f : MathF.Min( 1f, cb / (1f - cs) ),
+		PaintBlendMode.ColorBurn => cb >= 1f ? 1f : cs <= 0f ? 0f : 1f - MathF.Min( 1f, (1f - cb) / cs ),
 		_ => cs,
 	};
+
+	// W3C Compositing Level 1 §10 soft-light.
+	static float SoftLight( float cb, float cs )
+	{
+		if ( cs <= 0.5f ) return cb - (1f - 2f * cs) * cb * (1f - cb);
+		var d = cb <= 0.25f ? ((16f * cb - 12f) * cb + 4f) * cb : MathF.Sqrt( cb );
+		return cb + (2f * cs - 1f) * (d - cb);
+	}
 
 	static float Screen( float a, float b ) => a + b - a * b;
 
@@ -174,9 +197,82 @@ public static class PaintLayers
 		colour.RoughnessMap = Composite( below?.RoughnessMap, layer.Roughness, mode, opacity, mask );
 		colour.MetalnessMap = Composite( below?.MetalnessMap, layer.Metalness, mode, opacity, mask );
 		colour.HeightMap = Composite( below?.HeightMap, layer.Height, mode, opacity, mask );
+		colour.EmissiveMap = Composite( below?.EmissiveMap, layer.Emissive, mode, opacity, mask );
+		colour.OpacityMap = Composite( below?.OpacityMap, layer.Opacity, mode, opacity, mask );
+		colour.NormalMap = Composite( below?.NormalMap, layer.Normal, mode, opacity, mask );
+		colour.AmbientOcclusionMap = below?.AmbientOcclusionMap;
 
 		return colour;
 	}
+
+	/// <summary>
+	/// A whole <see cref="PaintLayer"/> over a body's paint, honouring its per-channel
+	/// opacity and blend overrides and its group children — the stack's one compositing
+	/// path. A group composites its children bottom to top first, applies the group's
+	/// own blend, opacity and mask to that result, then its own maps (if any) over it.
+	/// Returns the backdrop itself when the layer (and its children) have no surface
+	/// content. The flat per-channel <see cref="CompositeSet"/> is unchanged for the
+	/// feature tree, which carries a single blend and opacity per layer.
+	/// </summary>
+	public static PaintCanvas CompositeLayer( PaintCanvas below, PaintLayer layer )
+	{
+		if ( layer is null || !layer.Enabled )
+			return below;
+
+		var result = below;
+
+		if ( layer.Children is not null )
+		{
+			PaintCanvas children = null;
+			foreach ( var child in layer.Children )
+				children = CompositeLayer( children, child );
+
+			if ( children is not null )
+				result = CompositeMaps( result, ToMaps( children ), layer );
+		}
+
+		if ( layer.Maps is null || !layer.Maps.HasSurface )
+			return result;
+
+		return CompositeMaps( result, layer.Maps, layer );
+	}
+
+	/// <summary>A layer's maps over a backdrop, with that layer's per-channel opacity
+	/// and blend — the one compositing path for a layer's own maps and for a group's
+	/// children result (wrapped by <see cref="ToMaps"/>).</summary>
+	static PaintCanvas CompositeMaps( PaintCanvas below, PaintLayerMaps maps, PaintLayer layer )
+	{
+		var colour = maps.Color is not null
+			? Composite( below, maps.Color, layer.BlendFor( PaintChannel.Color ), layer.OpacityFor( PaintChannel.Color ), layer.Mask )
+			: below is null
+				? new PaintCanvas( maps.Size, maps.Size )
+				: Strip( below );
+
+		colour.RoughnessMap = Composite( below?.RoughnessMap, maps.Roughness, layer.BlendFor( PaintChannel.Roughness ), layer.OpacityFor( PaintChannel.Roughness ), layer.Mask );
+		colour.MetalnessMap = Composite( below?.MetalnessMap, maps.Metalness, layer.BlendFor( PaintChannel.Metalness ), layer.OpacityFor( PaintChannel.Metalness ), layer.Mask );
+		colour.HeightMap = Composite( below?.HeightMap, maps.Height, layer.BlendFor( PaintChannel.Height ), layer.OpacityFor( PaintChannel.Height ), layer.Mask );
+		colour.EmissiveMap = Composite( below?.EmissiveMap, maps.Emissive, layer.BlendFor( PaintChannel.Emissive ), layer.OpacityFor( PaintChannel.Emissive ), layer.Mask );
+		colour.OpacityMap = Composite( below?.OpacityMap, maps.Opacity, layer.BlendFor( PaintChannel.Opacity ), layer.OpacityFor( PaintChannel.Opacity ), layer.Mask );
+		colour.NormalMap = Composite( below?.NormalMap, maps.Normal, layer.BlendFor( PaintChannel.Normal ), layer.OpacityFor( PaintChannel.Normal ), layer.Mask );
+		colour.AmbientOcclusionMap = below?.AmbientOcclusionMap;
+
+		return colour;
+	}
+
+	/// <summary>A composited canvas back as layer maps, so a group's children result can be
+	/// composited over what is below the group under the group's own blend, opacity and mask.
+	/// The baked AO is composite-level, not a layer channel, so it rides on the colour canvas.</summary>
+	static PaintLayerMaps ToMaps( PaintCanvas canvas ) => new()
+	{
+		Size = canvas.Width,
+		Color = canvas,
+		Roughness = canvas.RoughnessMap,
+		Metalness = canvas.MetalnessMap,
+		Height = canvas.HeightMap,
+		Emissive = canvas.EmissiveMap,
+		Opacity = canvas.OpacityMap,
+		Normal = canvas.NormalMap,
+	};
 
 	/// <summary>A copy of a colour canvas without its companions, so the result's companions can be
 	/// set without reaching back into the backdrop's.</summary>
@@ -443,6 +539,8 @@ public static class PaintLayers
 
 		if ( channel == PaintChannel.Color )
 			canvas.BakeOpaque( opaque, PaintMaterial.DefaultBaseR, PaintMaterial.DefaultBaseG, PaintMaterial.DefaultBaseB );
+		else if ( channel == PaintChannel.Normal )
+			canvas.BakeOpaque( opaque, PaintChannels.FlatNormalR, PaintChannels.FlatNormalG, PaintChannels.FlatNormalB );
 		else
 			canvas.BakeOpaque( opaque, b, b, b );
 
@@ -476,6 +574,55 @@ public sealed class PaintLayer
 		Name = name; Maps = maps; Blend = blend; Opacity = opacity; Mask = mask;
 	}
 
+	/// <summary>Per-channel opacity, as a multiplier on the layer's master <see cref="Opacity"/>
+	/// (default 1): a layer at 0.5 with a colour-channel opacity of 0.5 paints colour at 0.25.
+	/// Null or absent means the master opacity rules that channel.</summary>
+	public Dictionary<PaintChannel, float> ChannelOpacity;
+
+	/// <summary>Per-channel blend mode, replacing the layer's <see cref="Blend"/> for that
+	/// channel only. Null or absent means the layer blend rules that channel.</summary>
+	public Dictionary<PaintChannel, PaintBlendMode> ChannelBlend;
+
+	/// <summary>Child layers, for a group: null is a plain layer. A group composites its
+	/// children bottom to top first, then its own maps (if any) over the result, all under
+	/// the group's blend, opacity and mask.</summary>
+	public List<PaintLayer> Children;
+
+	/// <summary>True when this layer is a group (has children), whether or not it also
+	/// carries its own maps.</summary>
+	public bool IsGroup => Children is not null;
+
+	/// <summary>The opacity this channel paints at: the master opacity times the
+	/// channel's multiplier, clamped to 0..1.</summary>
+	public float OpacityFor( PaintChannel channel ) =>
+		ChannelOpacity is not null && ChannelOpacity.TryGetValue( channel, out var o )
+			? Math.Clamp( Opacity * o, 0f, 1f ) : Opacity;
+
+	/// <summary>The blend mode this channel paints with: the channel's override, or
+	/// the layer's blend when there is none.</summary>
+	public PaintBlendMode BlendFor( PaintChannel channel ) =>
+		ChannelBlend is not null && ChannelBlend.TryGetValue( channel, out var m ) ? m : Blend;
+
+	/// <summary>Set one channel's opacity multiplier (0..1, clamped).</summary>
+	public void SetChannelOpacity( PaintChannel channel, float opacity )
+	{
+		ChannelOpacity ??= new Dictionary<PaintChannel, float>();
+		ChannelOpacity[channel] = Math.Clamp( opacity, 0f, 1f );
+	}
+
+	/// <summary>Set one channel's blend mode.</summary>
+	public void SetChannelBlend( PaintChannel channel, PaintBlendMode blend )
+	{
+		ChannelBlend ??= new Dictionary<PaintChannel, PaintBlendMode>();
+		ChannelBlend[channel] = blend;
+	}
+
+	/// <summary>A group layer: children composite bottom to top under the group's own
+	/// blend, opacity and mask.</summary>
+	public static PaintLayer Group( string name, List<PaintLayer> children,
+		PaintBlendMode blend = PaintBlendMode.Normal, float opacity = 1f, float[] mask = null ) =>
+		new( name, null, blend, opacity, mask ) { Children = children };
+
 	/// <summary>A solid-colour layer: every texel covered with one colour, for stacking tests and
 	/// for generated fills. Scalar channels can be added afterwards with <see cref="SetChannel"/>.</summary>
 	public static PaintLayer Solid( string name, int size, byte r, byte g, byte b, float[] mask = null,
@@ -496,10 +643,12 @@ public sealed class PaintLayer
 /// later layer composites over everything below it, exactly as PaintFeatures stack in tree order.
 ///
 /// <c>Composite(below)</c> walks the enabled layers in order through
-/// <see cref="PaintLayers.CompositeSet"/>, so a stack and a feature tree with the same layers,
+/// <see cref="PaintLayers.CompositeLayer"/>, so a stack and a feature tree with the same layers,
 /// blends, opacities and masks produce the same canvas. Disabled layers and layers with no
-/// surface content are skipped (CompositeSet already hands a content-free layer's backdrop back).
-/// The stack never mutates its layers' maps: CompositeSet returns a new canvas per layer.
+/// surface content are skipped (CompositeLayer already hands a content-free layer's backdrop back).
+/// Groups composite their children first (see <see cref="PaintLayer.Children"/>); each channel
+/// can carry its own opacity and blend (see <see cref="PaintLayer.OpacityFor"/>).
+/// The stack never mutates its layers' maps: CompositeLayer returns a new canvas per layer.
 /// </summary>
 public sealed class PaintLayerStack
 {
@@ -509,11 +658,17 @@ public sealed class PaintLayerStack
 
 	public PaintLayer this[int index] => Layers[index];
 
-	public void Add( PaintLayer layer ) => Layers.Add( layer );
+	/// <summary>Structure revision: bumped by every Add/Insert/RemoveAt and every Move that
+	/// actually reorders, so a cached composite can tell a reorder happened without
+	/// hashing the stack. Layer content edits (a stroke, a per-channel override) do
+	/// not move it — those are the layer's own revision.</summary>
+	public int Revision { get; private set; }
 
-	public void Insert( int index, PaintLayer layer ) => Layers.Insert( Math.Clamp( index, 0, Layers.Count ), layer );
+	public void Add( PaintLayer layer ) { Layers.Add( layer ); Revision++; }
 
-	public void RemoveAt( int index ) => Layers.RemoveAt( index );
+	public void Insert( int index, PaintLayer layer ) { Layers.Insert( Math.Clamp( index, 0, Layers.Count ), layer ); Revision++; }
+
+	public void RemoveAt( int index ) { Layers.RemoveAt( index ); Revision++; }
 
 	/// <summary>Move the layer at <paramref name="from"/> to <paramref name="to"/> (both clamped),
 	/// so reordering a stack is one call, not a remove-and-reinsert that can drop the layer.</summary>
@@ -526,6 +681,7 @@ public sealed class PaintLayerStack
 		var layer = Layers[from];
 		Layers.RemoveAt( from );
 		Layers.Insert( to, layer );
+		Revision++;
 	}
 
 	/// <summary>Composite the whole stack over <paramref name="below"/> (null for a bare surface),
@@ -534,13 +690,110 @@ public sealed class PaintLayerStack
 	{
 		var result = below;
 		foreach ( var layer in Layers )
-		{
-			if ( !layer.Enabled || layer.Maps is null ) continue;
-			result = PaintLayers.CompositeSet( result, layer.Maps, layer.Blend, layer.Opacity, layer.Mask );
-		}
+			result = PaintLayers.CompositeLayer( result, layer );
 		return result;
 	}
 
 	/// <summary>Composite the whole stack over a bare surface.</summary>
 	public PaintCanvas Composite() => Composite( null );
+}
+
+/// <summary>
+/// A layer's colour adjustment: hue / saturation / brightness, then levels (input black and white
+/// points with a midtone gamma). Applied to the layer's own colour before it meets the layers
+/// below, so it is non-destructive: the strokes stay as painted and the adjustment can be undone
+/// or changed at any time. Alpha (coverage) is never touched.
+/// </summary>
+public readonly record struct PaintAdjust( float Hue = 0f, float Saturation = 1f, float Brightness = 1f,
+	float Black = 0f, float White = 1f, float Gamma = 1f )
+{
+	public static readonly PaintAdjust Identity = new( 0f );
+
+	public bool IsIdentity => MathF.Abs( Hue ) < 1e-4f && MathF.Abs( Saturation - 1f ) < 1e-4f && MathF.Abs( Brightness - 1f ) < 1e-4f
+		&& Black <= 1e-4f && White >= 1f - 1e-4f && MathF.Abs( Gamma - 1f ) < 1e-4f;
+
+	/// <summary>One straight sRGB texel through the adjustment.</summary>
+	public (byte R, byte G, byte B) Apply( byte r, byte g, byte b )
+	{
+		if ( IsIdentity )
+			return (r, g, b);
+
+		float rf = r / 255f, gf = g / 255f, bf = b / 255f;
+		var max = MathF.Max( rf, MathF.Max( gf, bf ) );
+		var min = MathF.Min( rf, MathF.Min( gf, bf ) );
+		var v = max;
+		var d = max - min;
+		var s = max <= 0f ? 0f : d / max;
+		var h = 0f;
+
+		if ( d > 0f )
+		{
+			if ( max == rf ) h = (gf - bf) / d;
+			else if ( max == gf ) h = 2f + (bf - rf) / d;
+			else h = 4f + (rf - gf) / d;
+			h *= 60f;
+		}
+
+		h = ((h + Hue) % 360f + 360f) % 360f;
+		s = Math.Clamp( s * Saturation, 0f, 1f );
+		v = Math.Clamp( v * Brightness, 0f, 1f );
+
+		// HSV back to RGB
+		var c = v * s;
+		var x = c * (1f - MathF.Abs( (h / 60f) % 2f - 1f ));
+		var m = v - c;
+		(rf, gf, bf) = (int)(h / 60f) switch
+		{
+			0 => (c, x, 0f),
+			1 => (x, c, 0f),
+			2 => (0f, c, x),
+			3 => (0f, x, c),
+			4 => (x, 0f, c),
+			_ => (c, 0f, x),
+		};
+
+		return (Level( rf + m ), Level( gf + m ), Level( bf + m ));
+	}
+
+	byte Level( float v )
+	{
+		var span = MathF.Max( 1e-4f, White - Black );
+		var t = Math.Clamp( (v - Black) / span, 0f, 1f );
+		t = MathF.Pow( t, 1f / MathF.Max( 0.01f, Gamma ) );
+		return (byte)Math.Clamp( MathF.Round( t * 255f ), 0f, 255f );
+	}
+
+	/// <summary>A new canvas with every texel's colour adjusted (alpha copied). Identity or null hands the input back.</summary>
+	public PaintCanvas Apply( PaintCanvas canvas )
+	{
+		if ( canvas is null || IsIdentity )
+			return canvas;
+
+		var result = new PaintCanvas( canvas.Width, canvas.Height );
+		var s = canvas.Rgba;
+		var d = result.Rgba;
+
+		for ( var i = 0; i < s.Length; i += 4 )
+		{
+			d[i + 3] = s[i + 3];
+			if ( s[i + 3] == 0 ) continue;
+			(d[i], d[i + 1], d[i + 2]) = Apply( s[i], s[i + 1], s[i + 2] );
+		}
+
+		return result;
+	}
+
+	/// <summary>The layer's maps with only the colour adjusted; the scalar channels and mask are shared.</summary>
+	public PaintLayerMaps Apply( PaintLayerMaps maps )
+	{
+		if ( maps?.Color is null || IsIdentity )
+			return maps;
+
+		return new PaintLayerMaps
+		{
+			Color = Apply( maps.Color ), Roughness = maps.Roughness, Metalness = maps.Metalness, Height = maps.Height,
+			Emissive = maps.Emissive, Opacity = maps.Opacity, Normal = maps.Normal,
+			MaskPaint = maps.MaskPaint, Size = maps.Size,
+		};
+	}
 }

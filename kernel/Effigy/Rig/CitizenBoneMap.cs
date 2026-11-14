@@ -252,4 +252,43 @@ public static class CitizenBoneMap
 
 		return map;
 	}
+
+	/// <summary>
+	/// The AutoRigger humanoid template, as (bone, parent) pairs in SOURCE
+	/// (Unreal-style) spelling, parents before children. Resolve each name with
+	/// <see cref="UnrealStyle"/> to get the citizen name AutoRigger places.
+	///
+	/// The set is the template's list — spine, neck, head, upper/lower arms,
+	/// hands, thighs, shins, feet — plus pelvis and clavicles to hang them from,
+	/// and the ball of the foot to end the leg. No fingers: a bounds-placed
+	/// template has no finger landmarks to measure, and inventing them would be
+	/// decoration. A missing entry in <see cref="UnrealStyle"/> is AutoRigger's
+	/// cue to fail loudly rather than place a bone under the wrong name.
+	/// </summary>
+	public static IReadOnlyList<(string Bone, string Parent)> HumanoidTemplateBones() => new (string, string)[]
+	{
+		("pelvis", ""),
+		("spine_01", "pelvis"),
+		("spine_02", "spine_01"),
+		("spine_03", "spine_02"),
+		("neck", "spine_03"),
+		("head", "neck"),
+		("clavicle_L", "spine_03"),
+		("upperarm_L", "clavicle_L"),
+		("forearm_L", "upperarm_L"),
+		("hand_L", "forearm_L"),
+		("thigh_L", "pelvis"),
+		("calf_L", "thigh_L"),
+		("foot_L", "calf_L"),
+		("ball_L", "foot_L"),
+		("clavicle_R", "spine_03"),
+		("upperarm_R", "clavicle_R"),
+		("forearm_R", "upperarm_R"),
+		("hand_R", "forearm_R"),
+		("thigh_R", "pelvis"),
+		("calf_R", "thigh_R"),
+		("foot_R", "calf_R"),
+		("ball_R", "foot_R"),
+	};
+
 }

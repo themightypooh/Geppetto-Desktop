@@ -1,0 +1,7 @@
+{
+  "map": "bad-target-room",
+  "note": "Sealed room plus trigger_multiple (entity 102) with target 'missing_door', which no entity has as targetname. Exactly one MissingTarget.",
+  "expected": [
+    { "kind": "MissingTarget", "severity": "Error", "brushId": -1, "entityId": 102 }
+  ]
+}

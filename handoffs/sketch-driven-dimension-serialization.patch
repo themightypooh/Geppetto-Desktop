@@ -1,0 +1,27 @@
+--- a/kernel/Effigy/Features/StudioDocument.cs
++++ b/kernel/Effigy/Features/StudioDocument.cs
+@@ -745,7 +745,8 @@
+ 				.Append( c.PointC ).Append( ' ' ).Append( c.PointD ).Append( ' ' )
+ 				.Append( Num( c.Value ) ).Append( ' ' )
+ 				.Append( string.IsNullOrEmpty( c.CurveId ) ? "-" : c.CurveId ).Append( ' ' )
+-				.Append( Num( c.ValueY ) ).Append( '\n' );
++				.Append( Num( c.ValueY ) ).Append( ' ' )
++				.Append( c.Driven ? 1 : 0 ).Append( '\n' );
+ 		}
+ 
+ 		sb.Append( "\tendsketch\n" );
+@@ -1871,7 +1872,13 @@
+ 						// Appended after the CurveId rather than beside Value, so every index before it
+ 						// keeps its meaning and a document written before Fixed existed still reads.
+ 						// Absent means zero, which is what those documents meant.
+-						ValueY = parts.Length > 7 ? ParseFloat( parts[7] ) : 0f
++						ValueY = parts.Length > 7 ? ParseFloat( parts[7] ) : 0f,
++
++						// Appended after ValueY the same way: a driven dimension is a report, not a
++						// rule, and it must survive save/reopen or a reloaded sketch quietly starts
++						// driving a dimension the user marked reference-only. Absent means not driven,
++						// which is what every document written before Driven existed meant.
++						Driven = parts.Length > 8 && ParseInt( parts[8], 0 ) != 0
+ 					};
+ 
+ 					sketch.Constraints.Add( constraint );

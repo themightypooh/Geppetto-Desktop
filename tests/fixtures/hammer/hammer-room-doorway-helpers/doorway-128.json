@@ -1,0 +1,18 @@
+{
+  "length": 128,
+  "width": 128,
+  "height": 128,
+  "wallThickness": 8,
+  "wall": "North",
+  "openingWidth": 48,
+  "openingHeight": 96,
+  "offsetAlongWall": 0,
+  "expected": {
+    "northWallVolumeAfterCut": 110592,
+    "openingCenter": [0, 68, 48],
+    "openingU0": -24,
+    "openingU1": 24,
+    "openingV0": 0,
+    "openingV1": 96
+  }
+}

@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Globalization;
 using System.Text;
 
@@ -248,4 +250,436 @@ public static class SkinMaterial
 
 	static string Vector( Vec3 v, float w ) => string.Format( CultureInfo.InvariantCulture,
 		"[{0:0.000000} {1:0.000000} {2:0.000000} {3:0.000000}]", v.x, v.y, v.z, w );
+}
+
+/// <summary>
+/// One scar / slash: a segment across the skin with a raised keloid ridge (Height +0.02 in, pale,
+/// Rough 0.22) or a recessed trench, plus optional cross-stitch suture threads. Spec 4.4.
+/// Parses the script form "x,y,z..x,y,z" (start..end); keloid=0 makes a trench.
+/// </summary>
+public sealed class SkinScar
+{
+	public Vec3 Start;
+	public Vec3 End;
+	public float Width = 0.06f;
+	public bool Keloid = true;
+	public bool Stitches = true;
+
+	/// <summary>Raised pale keloid ridge (+0.02 in) or recessed wound trench (-0.01 in), spec 4.4.</summary>
+	public const float KeloidHeight = 0.02f;
+	public const float TrenchDepth = -0.01f;
+
+	public float Height => Keloid ? KeloidHeight : TrenchDepth;
+
+	/// <summary>Height at a surface point: a Gaussian ridge/trench across the scar segment.</summary>
+	public float HeightAt( Vec3 p )
+	{
+		var d = DistanceToSegment( p, Start, End );
+		var w = MathF.Max( Width, 1e-4f );
+		return Height * MathF.Exp( -(d * d) / (w * w) );
+	}
+
+	/// <summary>How pale the scar reads at a surface point, 0..1 (a keloid is pale; a trench is not).</summary>
+	public float PaleAt( Vec3 p )
+	{
+		if ( !Keloid ) return 0f;
+		var d = DistanceToSegment( p, Start, End );
+		var w = MathF.Max( Width, 1e-4f );
+		return 0.6f * MathF.Exp( -(d * d) / (w * w) );
+	}
+
+	/// <summary>Cross-stitch suture threads: short segments crossing the scar every two widths.</summary>
+	public List<(Vec3 A, Vec3 B)> StitchPoints()
+	{
+		var threads = new List<(Vec3, Vec3)>();
+		if ( !Stitches ) return threads;
+		var dir = End - Start;
+		var len = dir.Length;
+		if ( len < 1e-6f ) return threads;
+		dir /= len;
+		var perp = Vec3.Cross( dir, new Vec3( 0, 0, 1 ) );
+		if ( perp.LengthSquared < 1e-6f ) perp = Vec3.Cross( dir, new Vec3( 1, 0, 0 ) );
+		perp = perp.Normal * Width * 1.5f;
+		var step = MathF.Max( Width * 2f, 0.05f );
+		for ( var s = step; s < len; s += step )
+		{
+			var c = Start + dir * s;
+			threads.Add( (c - perp, c + perp) );
+		}
+		return threads;
+	}
+
+	public static SkinScar Parse( string s )
+	{
+		if ( string.IsNullOrWhiteSpace( s ) ) return null;
+		var parts = s.Split( "..", StringSplitOptions.RemoveEmptyEntries );
+		if ( parts.Length != 2 ) return null;
+		if ( !TryVec( parts[0], out var a ) || !TryVec( parts[1], out var b ) ) return null;
+		return new SkinScar { Start = a, End = b };
+	}
+
+	static bool TryVec( string s, out Vec3 v )
+	{
+		v = Vec3.Zero;
+		var p = s.Split( ',', StringSplitOptions.RemoveEmptyEntries );
+		if ( p.Length != 3 ) return false;
+		if ( !float.TryParse( p[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var x ) ) return false;
+		if ( !float.TryParse( p[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var y ) ) return false;
+		if ( !float.TryParse( p[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var z ) ) return false;
+		v = new Vec3( x, y, z );
+		return true;
+	}
+
+	internal static float DistanceToSegment( Vec3 p, Vec3 a, Vec3 b )
+	{
+		var ab = b - a;
+		var len2 = ab.LengthSquared;
+		var t = len2 < 1e-12f ? 0f : Math.Clamp( Vec3.Dot( p - a, ab ) / len2, 0f, 1f );
+		return (p - (a + ab * t)).Length;
+	}
+}
+
+/// <summary>
+/// One sub-dermal tattoo: ink under the skin, so it desaturates and shifts toward dermal blue-teal
+/// (#1d3442) with blurred edges (spec 4.4: 0.8 px blur), and it only ever touches albedo/roughness —
+/// the pore normals stay on top, because a tattoo has no normal output anywhere in SkinGen.
+/// </summary>
+public sealed class SkinTattoo
+{
+	public Vec3 Centre;
+	public float Radius = 1f;
+	public Vec3 Ink = new( 0.1f, 0.15f, 0.2f );
+
+	/// <summary>Edge softness as a fraction of the radius (dermis scattering above the ink).</summary>
+	public float Blur = 0.15f;
+
+	/// <summary>Dermal blue-teal shift, spec 4.4.</summary>
+	public static readonly Vec3 DermalTeal = new( 0.114f, 0.204f, 0.259f );
+
+	/// <summary>Ink mix at a surface point, 0 outside to 1 inside, softened over Blur at the edge.</summary>
+	public float MixAt( Vec3 p )
+	{
+		var d = (p - Centre).Length;
+		var edge = Math.Clamp( Blur, 0.02f, 0.9f ) * Radius;
+		var inner = MathF.Max( Radius - edge, 0f );
+		if ( d <= inner ) return 1f;
+		if ( d >= Radius ) return 0f;
+		var t = (d - inner) / MathF.Max( Radius - inner, 1e-6f );
+		return 1f - t * t * (3f - 2f * t);
+	}
+
+	/// <summary>The ink colour as the skin shows it: desaturated toward dermal blue-teal.</summary>
+	public Vec3 ShownInk => Vec3.Lerp( Ink, DermalTeal, 0.65f );
+}
+
+/// <summary>One freckle / sun spot: a melanin dot on the surface, from Poisson-clustered placement.</summary>
+public sealed class SkinSpot
+{
+	public Vec3 Centre;
+	public float Radius;
+	public float Strength = 1f;
+}
+
+/// <summary>Per-vertex chromophore zone weights, 0..1. Gold + Crimson + Blue sum to at most 1; Lip is separate.</summary>
+public sealed class SkinGenZones
+{
+	public float[] Gold;
+	public float[] Crimson;
+	public float[] Blue;
+	public float[] Lip;
+}
+
+/// <summary>
+/// Everything SkinGen evaluates for one mesh, per vertex: tinted colour, micro-skin roughness and
+/// second-lobe ratio, freckle darkness, scar height/paleness, tattoo ink mix and colour, and the
+/// vellus sheen strength. No normal output exists here on purpose: overlays never touch the pore
+/// normals (spec 4.4: a tattoo sits under the pore normals).
+/// </summary>
+public sealed class SkinGenResult
+{
+	public SkinGenZones Zones;
+	public Vec3[] Colour;
+	public float[] Roughness;
+	public float[] SecondLobe;
+	/// <summary>T-zone weight (forehead + nose bridge), 0..1: tight pores + oil sheen live here.</summary>
+	public float[] TZone;
+	public float[] Freckle;
+	public float[] ScarHeight;
+	public float[] ScarPale;
+	public float[] Tattoo;
+	public Vec3 TattooColour;
+	public float[] Sheen;
+	public float SheenRoughness = SkinGenStack.VellusSheenRoughness;
+	public float SheenTint = SkinGenStack.VellusSheenTint;
+	public List<SkinSpot> FreckleSpots = new();
+	public List<(Vec3 A, Vec3 B)> Stitches = new();
+}
+
+/// <summary>
+/// SkinGen (spec 4.4): the CC4 SkinGen layer for Effigy skin. A facial 3-zone chromophore map
+/// (forehead gold, cheek/nose crimson, jaw/orbit cool blue) from height + landmark masks, anatomical
+/// micro-skin normal/roughness zones (T-zone tight pores + oil sheen, cheek pores along Langer lines,
+/// lip vermilion grooves), and the `add SkinDetail` overlays — freckles/sun spots, scars/slashes/
+/// stitches, sub-dermal tattoos, vellus peach fuzz.
+///
+/// This is evaluation only: it produces per-vertex values and FleshStack layers (see SkinGenBake in
+/// FleshMaterial.cs). The `add SkinDetail` feature itself is a thin Feature over Evaluate, owned by
+/// the coordinator — it is a new Feature file, not an edit to a shared entry point.
+/// </summary>
+public sealed class SkinGenStack
+{
+	/// <summary>Zone tints, spec 4.4: forehead gold #e8c888, cheek/nose crimson #d64545, jaw/orbit blue #5a687a.</summary>
+	public static readonly Vec3 GoldTint = new( 0.910f, 0.784f, 0.533f );
+	public static readonly Vec3 CrimsonTint = new( 0.839f, 0.271f, 0.271f );
+	public static readonly Vec3 BlueTint = new( 0.353f, 0.408f, 0.478f );
+
+	/// <summary>Zone strengths, spec 4.4: gold +4%, crimson +8%, blue +5%.</summary>
+	public const float GoldStrength = 0.04f;
+	public const float CrimsonStrength = 0.08f;
+	public const float BlueStrength = 0.05f;
+
+	/// <summary>Micro-skin roughness, spec 4.4: T-zone 0.28, cheek 0.42, lip vermilion 0.24.</summary>
+	public const float TZoneRoughness = 0.28f;
+	public const float CheekRoughness = 0.42f;
+	public const float LipRoughness = 0.24f;
+
+	/// <summary>T-zone sebaceous oil sheen, spec 4.4.</summary>
+	public const float TZoneSecondLobe = 0.04f;
+	public const float DrySecondLobe = 0.008f;
+
+	/// <summary>Vellus peach fuzz sheen, spec 4.4.</summary>
+	public const float VellusSheen = 0.22f;
+	public const float VellusSheenRoughness = 0.65f;
+	public const float VellusSheenTint = 0.15f;
+
+	/// <summary>Stubble stipple strength is 0..1; the stipple itself is a pore-scale darkening.</summary>
+	public bool Zones = true;
+	public float Freckles;
+	public float Stubble;
+	public float Vellus;
+	public int Seed = 1;
+	public List<SkinScar> Scars = new();
+	public List<SkinTattoo> Tattoos = new();
+
+	public static SkinGenStack Default() => new() { Zones = true };
+
+	/// <summary>
+	/// The three chromophore zones plus the lip mask, per vertex, from head height and landmark
+	/// distance. FaceRig frame (Y up, +Z forward): eyes sit at ~72% of head height, nose ~55%,
+	/// mouth ~30%, jaw ~15% (FaceBounds.FromHeadBounds). An optional per-vertex curvature array
+	/// (FleshSurface convexity, + on ridges) mildly deepens gold on convex forehead and blue in
+	/// creases; null skips the term entirely.
+	/// </summary>
+	public SkinGenZones ZoneWeights( PolyMesh mesh, FaceBounds landmarks, float[] curvature = null )
+	{
+		if ( mesh is null ) throw new ArgumentNullException( nameof( mesh ) );
+		var n = mesh.VertexCount;
+		var zones = new SkinGenZones { Gold = new float[n], Crimson = new float[n], Blue = new float[n], Lip = new float[n] };
+		if ( n == 0 ) return zones;
+		var (min, max) = ModelMeasure.Bounds( mesh );
+		var headH = MathF.Max( max.y - min.y, 1e-6f );
+		var headW = MathF.Max( max.x - min.x, 1e-6f );
+		var midEye = (landmarks.LeftEye + landmarks.RightEye) * 0.5f;
+		var noseBridgeTop = midEye;
+		var cheekL = new Vec3( landmarks.NoseTip.x - 0.14f * headW, landmarks.NoseTip.y + 0.06f * headH, landmarks.NoseTip.z );
+		var cheekR = new Vec3( landmarks.NoseTip.x + 0.14f * headW, landmarks.NoseTip.y + 0.06f * headH, landmarks.NoseTip.z );
+		for ( var i = 0; i < n; i++ )
+		{
+			var p = mesh.Positions[i];
+			var yN = (p.y - min.y) / headH;
+			var gold = Smooth( 0.60f, 0.72f, yN );
+			gold = MathF.Max( gold, 1f - Smooth( 0f, 0.10f * headH, SkinScar.DistanceToSegment( p, landmarks.NoseTip, noseBridgeTop ) ) );
+			var crimson = 1f - Smooth( 0f, 0.14f * headW, MathF.Min( (p - landmarks.NoseTip).Length,
+				MathF.Min( (p - cheekL).Length, (p - cheekR).Length ) ) );
+			var blue = Smooth( 0.24f, 0.14f, yN );
+			blue = MathF.Max( blue, (1f - Smooth( 0f, 0.05f * headH, SkinScar.DistanceToSegment( p,
+				new Vec3( landmarks.LeftEye.x, landmarks.LeftEye.y - 0.04f * headH, landmarks.LeftEye.z ),
+				new Vec3( landmarks.RightEye.x, landmarks.RightEye.y - 0.04f * headH, landmarks.RightEye.z ) ) )) * 0.7f );
+			if ( curvature is not null && i < curvature.Length )
+			{
+				var c = Math.Clamp( curvature[i] * headH * 0.5f, -1f, 1f );
+				gold = Math.Clamp( gold * (1f + 0.15f * c), 0f, 1f );
+				blue = Math.Clamp( blue * (1f - 0.15f * c), 0f, 1f );
+			}
+			var sum = gold + crimson + blue;
+			if ( sum > 1f ) { gold /= sum; crimson /= sum; blue /= sum; }
+			zones.Gold[i] = gold;
+			zones.Crimson[i] = crimson;
+			zones.Blue[i] = blue;
+			var lipD = SkinScar.DistanceToSegment( p, landmarks.MouthLeft, landmarks.MouthRight );
+			zones.Lip[i] = 1f - Smooth( 0f, 0.035f * headH, lipD );
+		}
+		return zones;
+	}
+
+	/// <summary>
+	/// Full per-vertex SkinGen evaluation: zone tints over the base colour, micro-skin roughness and
+	/// second lobe, freckles, scars, tattoos and vellus sheen. A flat base colour in gives zoned skin
+	/// out; zones=false skips the chromophore tints but still applies overlays.
+	/// </summary>
+	public SkinGenResult Evaluate( PolyMesh mesh, FaceBounds landmarks, Vec3 baseColour, float[] curvature = null )
+	{
+		if ( mesh is null ) throw new ArgumentNullException( nameof( mesh ) );
+		var n = mesh.VertexCount;
+		var zones = Zones ? ZoneWeights( mesh, landmarks, curvature ) : new SkinGenZones
+			{ Gold = new float[n], Crimson = new float[n], Blue = new float[n], Lip = new float[n] };
+		var spots = Freckles > 0f ? FreckleSpots( mesh, landmarks, Freckles, Seed ) : new List<SkinSpot>();
+		var result = new SkinGenResult
+		{
+			Zones = zones,
+			Colour = new Vec3[n],
+			Roughness = new float[n],
+			SecondLobe = new float[n],
+			TZone = new float[n],
+			Freckle = new float[n],
+			ScarHeight = new float[n],
+			ScarPale = new float[n],
+			Tattoo = new float[n],
+			Sheen = new float[n],
+			FreckleSpots = spots,
+		};
+		var (min, max) = ModelMeasure.Bounds( mesh );
+		var headH = MathF.Max( max.y - min.y, 1e-6f );
+		foreach ( var scar in Scars ) result.Stitches.AddRange( scar.StitchPoints() );
+		for ( var i = 0; i < n; i++ )
+		{
+			var p = mesh.Positions[i];
+			var g = zones.Gold[i];
+			var c = zones.Crimson[i];
+			var b = zones.Blue[i];
+			var lip = zones.Lip[i];
+			var tint = new Vec3(
+				1f + GoldStrength * g * (GoldTint.x - 1f) + CrimsonStrength * c * (CrimsonTint.x - 1f) + BlueStrength * b * (BlueTint.x - 1f),
+				1f + GoldStrength * g * (GoldTint.y - 1f) + CrimsonStrength * c * (CrimsonTint.y - 1f) + BlueStrength * b * (BlueTint.y - 1f),
+				1f + GoldStrength * g * (GoldTint.z - 1f) + CrimsonStrength * c * (CrimsonTint.z - 1f) + BlueStrength * b * (BlueTint.z - 1f) );
+			var col = new Vec3( baseColour.x * tint.x, baseColour.y * tint.y, baseColour.z * tint.z );
+			var tzone = MathF.Max( g * Smooth( 0.60f, 0.72f, (p.y - min.y) / headH ),
+				1f - Smooth( 0f, 0.10f * headH, SkinScar.DistanceToSegment( p, landmarks.NoseTip, (landmarks.LeftEye + landmarks.RightEye) * 0.5f ) ) );
+			var rough = CheekRoughness + (TZoneRoughness - CheekRoughness) * tzone + (LipRoughness - CheekRoughness) * lip;
+			var lobe = DrySecondLobe + (TZoneSecondLobe - DrySecondLobe) * tzone;
+			var freckle = 0f;
+			foreach ( var spot in spots )
+			{
+				var d = (p - spot.Centre).Length;
+				if ( d > spot.Radius * 3f ) continue;
+				freckle += spot.Strength * MathF.Exp( -(d * d) / (spot.Radius * spot.Radius) );
+			}
+			freckle = Math.Clamp( freckle, 0f, 1f );
+			col = new Vec3( col.x * (1f - 0.35f * freckle), col.y * (1f - 0.30f * freckle), col.z * (1f - 0.25f * freckle) );
+			var scarH = 0f;
+			var pale = 0f;
+			foreach ( var scar in Scars )
+			{
+				scarH += scar.HeightAt( p );
+				pale = MathF.Max( pale, scar.PaleAt( p ) );
+			}
+			col = Vec3.Lerp( col, new Vec3( 0.92f, 0.82f, 0.78f ), pale );
+			if ( scarH != 0f ) rough = Math.Clamp( rough + (0.22f - rough) * Math.Clamp( MathF.Abs( scarH ) / SkinScar.KeloidHeight, 0f, 1f ), 0f, 1f );
+			var tattoo = 0f;
+			var ink = Vec3.Zero;
+			foreach ( var tat in Tattoos )
+			{
+				var m = tat.MixAt( p );
+				if ( m <= 0f ) continue;
+				tattoo = MathF.Max( tattoo, m );
+				ink = tat.ShownInk;
+			}
+			if ( tattoo > 0f ) col = Vec3.Lerp( col, ink, tattoo * 0.8f );
+			var sheen = Vellus * VellusSheen * (c + 0.5f * g);
+			var stubbleDark = Stubble * b * 0.12f;
+			col = new Vec3( col.x * (1f - stubbleDark), col.y * (1f - stubbleDark), col.z * (1f - stubbleDark) );
+			result.Colour[i] = col;
+			result.TZone[i] = Math.Clamp( tzone, 0f, 1f );
+			result.Roughness[i] = Math.Clamp( rough, 0f, 1f );
+			result.SecondLobe[i] = lobe;
+			result.Freckle[i] = freckle;
+			result.ScarHeight[i] = scarH;
+			result.ScarPale[i] = pale;
+			result.Tattoo[i] = tattoo;
+			result.Sheen[i] = Math.Clamp( sheen, 0f, 1f );
+		}
+		result.TattooColour = Tattoos.Count > 0 ? Tattoos[0].ShownInk : Vec3.Zero;
+		return result;
+	}
+
+	/// <summary>
+	/// Poisson-clustered freckle / sun-spot placement: cluster centres on the nose bridge, the malar
+	/// cheeks and (when the mesh runs below the jaw) the shoulders, with spots scattered around each
+	/// centre. Deterministic for a seed. Density 0..1 scales the spot count; the count is capped so a
+	/// dense body does not drown the bake.
+	/// </summary>
+	public List<SkinSpot> FreckleSpots( PolyMesh mesh, FaceBounds landmarks, float density, int seed )
+	{
+		var spots = new List<SkinSpot>();
+		if ( mesh is null || density <= 0f ) return spots;
+		var (min, max) = ModelMeasure.Bounds( mesh );
+		var headH = MathF.Max( max.y - min.y, 1e-6f );
+		var headW = MathF.Max( max.x - min.x, 1e-6f );
+		var midEye = (landmarks.LeftEye + landmarks.RightEye) * 0.5f;
+		var anchors = new List<Vec3>();
+		for ( var k = 0; k < 3; k++ ) anchors.Add( Vec3.Lerp( landmarks.NoseTip, midEye, k / 2f ) );
+		anchors.Add( new Vec3( landmarks.NoseTip.x - 0.14f * headW, landmarks.NoseTip.y + 0.05f * headH, landmarks.NoseTip.z ) );
+		anchors.Add( new Vec3( landmarks.NoseTip.x + 0.14f * headW, landmarks.NoseTip.y + 0.05f * headH, landmarks.NoseTip.z ) );
+		if ( min.y < landmarks.Jaw.y - 0.05f * headH )
+		{
+			anchors.Add( new Vec3( landmarks.Jaw.x - 0.30f * headW, landmarks.Jaw.y - 0.08f * headH, landmarks.Jaw.z ) );
+			anchors.Add( new Vec3( landmarks.Jaw.x + 0.30f * headW, landmarks.Jaw.y - 0.08f * headH, landmarks.Jaw.z ) );
+		}
+		var rng = new Random( seed );
+		var total = Math.Min( (int)(density * 220f), 600 );
+		var perAnchor = Math.Max( 1, total / Math.Max( anchors.Count, 1 ) );
+		foreach ( var anchor in anchors )
+		{
+			var count = perAnchor / 2 + rng.Next( perAnchor );
+			for ( var s = 0; s < count && spots.Count < 600; s++ )
+			{
+				var jx = (float)(rng.NextDouble() + rng.NextDouble() + rng.NextDouble() - 1.5) * 0.10f * headW;
+				var jy = (float)(rng.NextDouble() + rng.NextDouble() + rng.NextDouble() - 1.5) * 0.10f * headH;
+				spots.Add( new SkinSpot
+				{
+					Centre = new Vec3( anchor.x + jx, anchor.y + jy, anchor.z ),
+					Radius = (0.010f + (float)rng.NextDouble() * 0.020f) * headH,
+					Strength = 0.5f + (float)rng.NextDouble() * 0.5f,
+				} );
+			}
+		}
+		return spots;
+	}
+
+	/// <summary>
+	/// Displace the mesh along its vertex normals by the scar heights (keloid up, trench down), so a
+	/// scar reads as a raised ridge in the geometry, not just in the albedo. Mutates the mesh once —
+	/// call before baking, the way a sculpt op would. Returns how many vertices moved.
+	/// </summary>
+	public int DisplaceScars( PolyMesh mesh )
+	{
+		if ( mesh is null ) throw new ArgumentNullException( nameof( mesh ) );
+		if ( Scars.Count == 0 ) return 0;
+		var normals = SurfaceDetail.VertexNormals( mesh );
+		var moved = 0;
+		for ( var i = 0; i < mesh.VertexCount; i++ )
+		{
+			var h = 0f;
+			foreach ( var scar in Scars ) h += scar.HeightAt( mesh.Positions[i] );
+			if ( MathF.Abs( h ) < 1e-6f ) continue;
+			mesh.Positions[i] = mesh.Positions[i] + normals[i] * h;
+			moved++;
+		}
+		if ( moved > 0 ) mesh.InvalidateVertexCache();
+		return moved;
+	}
+
+	/// <summary>Write one vertex's micro-skin numbers into a skin.shader Params (roughness + oil sheen).</summary>
+	public static void ApplyMicroSkin( SkinMaterial.Params p, float roughness, float secondLobe )
+	{
+		if ( p is null ) return;
+		p.ConstantRoughness = Math.Clamp( roughness, 0f, 1f );
+		p.SecondLobeRatio = Math.Clamp( secondLobe, 0f, 1f );
+	}
+
+	static float Smooth( float a, float b, float x )
+	{
+		if ( a < b ) { var t = Math.Clamp( (x - a) / MathF.Max( b - a, 1e-6f ), 0f, 1f ); return t * t * (3f - 2f * t); }
+		var t2 = Math.Clamp( (x - b) / MathF.Max( a - b, 1e-6f ), 0f, 1f ); return 1f - t2 * t2 * (3f - 2f * t2);
+	}
 }

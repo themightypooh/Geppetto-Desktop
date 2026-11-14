@@ -427,7 +427,7 @@ internal static class MorphEvaluationTests
 
 			var morphs = new RetainedMeshMorphs( 1, new[]
 			{
-				new MorphTarget( "stretch", new[] { new Vec3( 0, 2, 0 ) } )
+				new Marionette.Desktop.MorphTarget( "stretch", new[] { new Vec3( 0, 2, 0 ) } )
 			} );
 
 			var weights = new Dictionary<string, float> { ["stretch"] = 1.0f };

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Effigy.Assembly;
 
 namespace Effigy;
 
@@ -64,11 +65,61 @@ public sealed class RefStep
 
 public sealed class PartStudio
 {
+	/// <summary>Selected automatic bind mode in the Rig workspace. Empty means the legacy default.</summary>
+	public string RigBindMethod = "";
+	/// <summary>Scale applied to the default bone envelopes when binding.</summary>
+	public float RigEnvelopeScale = 1f;
+	/// <summary>Per-bone rig flags keyed by bone name: comma-separated tokens such as "connected",
+	/// "lockloc:xz", "noinheritrot", "rotmode:quat". The host reads and writes the tokens; Effigy only round-trips them.</summary>
+	public Dictionary<string, string> RigBoneFlags = new( StringComparer.OrdinalIgnoreCase );
+	/// <summary>
+	/// Editor-owned rig state which travels with the document: collections, display looks and saved
+	/// pose snapshots. The kernel keeps it opaque so hosts can add workspace conveniences without
+	/// teaching the modelling model about each one; StudioDocument preserves it inside the rig block.
+	/// </summary>
+	public string RigWorkspaceJson = "";
+
 	public List<Feature> Features = new();
+
+	/// <summary>Occurrence-based assembly data, independent of the ordered Part Studio feature history.</summary>
+	public AssemblyDocument Assembly = new();
+	/// <summary>Assembly mates stored in <see cref="Assembly"/>: the face mates (fixed joint
+	/// plus a faceMate record) and axis/concentric mates (hinge joint plus an axisMate record)
+	/// Mobile writes. This is the assembly-document mate record, not the tree feature: the
+	/// legacy centroid <c>AssemblyMateFeature</c> ("Mate") moves bodies during rebuild, while
+	/// these records constrain occurrences. A mate this build cannot implement never appears
+	/// here — it appears in <see cref="MateRefusals"/> instead, so nothing is silently dropped.</summary>
+	public IReadOnlyList<AssemblyMate> Mates
+	{
+		get
+		{
+			if (Assembly == null) return Array.Empty<AssemblyMate>();
+			Assembly.TryReadMates(out var mates, out _);
+			return mates;
+		}
+	}
+
+	/// <summary>One refusal per mate payload in <see cref="Assembly"/> this build cannot
+	/// implement (unknown mate kind, version, alignment, or a mesh-only axis source), naming
+	/// the variant. A document with any refusal here must be refused, not opened as if the
+	/// mate were not there. The joint carrying the refused mate stays in the document with
+	/// its payload intact, so it still saves back unchanged.</summary>
+	public IReadOnlyList<AssemblyValidationIssue> MateRefusals
+	{
+		get
+		{
+			if (Assembly == null) return Array.Empty<AssemblyValidationIssue>();
+			Assembly.TryReadMates(out _, out var refusals);
+			return refusals;
+		}
+	}
+
 
 	/// <summary>How many features to evaluate. int.MaxValue means all of them; anything less is
 	/// the rollback bar sitting above feature RollbackIndex.</summary>
 	public int RollbackIndex = int.MaxValue;
+
+	public bool KeepSnapshots = true;
 
 	/// <summary>
 	/// What each material slot is called, for the slots someone has bothered to name.
@@ -92,6 +143,10 @@ public sealed class PartStudio
 	/// rule, and cleared by the same drop that retires a name.
 	/// </summary>
 	public Dictionary<int, Vec2> MaterialScales = new();
+
+	/// <summary>Hand-authored UV island transforms, keyed by stable body id and island topology.
+	/// Reapplied after feature rebuilds and written with the document.</summary>
+	public List<ManualUVIslandEdit> ManualUVEdits = new();
 
 	/// <summary>
 	/// What each slot looks like, for the slots somebody gave a look (`material 2 preset=pcb_green`):
@@ -384,6 +439,8 @@ public sealed class PartStudio
 	// _cache[i] is the state AFTER feature i ran.
 	readonly List<Snapshot> _cache = new();
 	int _dirtyFrom;
+	string _manualUVCacheFingerprint = "";
+	Dictionary<string, int> _manualUVCacheIndexByBody = new();
 
 	public PartStudio()
 	{
@@ -415,6 +472,8 @@ public sealed class PartStudio
 
 		_cache.Clear();
 		_dirtyFrom = Features.Count;
+		_manualUVCacheFingerprint = "";
+		_manualUVCacheIndexByBody.Clear();
 	}
 
 	// --- editing ---------------------------------------------------------------------------
@@ -540,6 +599,12 @@ public sealed class PartStudio
 	{
 		var report = new RebuildReport();
 		var count = EffectiveCount;
+		var manualUVFingerprint = ManualUVIslandEdit.Fingerprint( ManualUVEdits );
+		if ( manualUVFingerprint != _manualUVCacheFingerprint )
+		{
+			MarkAllDirty();
+			_manualUVCacheIndexByBody.Clear();
+		}
 
 		// Variables first, and not lazily inside a parameter read: a feature's value must not
 		// depend on when it happened to be asked, and a cycle has to fail before any geometry
@@ -572,6 +637,15 @@ public sealed class PartStudio
 			report.FeaturesReused = reusableUpTo;
 		}
 
+		var manualUVAppliedToCache = new HashSet<string>();
+		var manualUVCacheIndexByBody = new Dictionary<string, int>();
+		foreach ( var (bodyId, index) in _manualUVCacheIndexByBody )
+			if ( reusableUpTo > index && ctx.Bodies.Any( b => b.Id == bodyId ) )
+			{
+				manualUVAppliedToCache.Add( bodyId );
+				manualUVCacheIndexByBody[bodyId] = index;
+			}
+
 		// Keep body ids climbing past anything already present, so a rebuild starting mid-tree
 		// does not reissue an id a cached body already holds.
 		ctx.SeedIdCounter( HighestBodyNumber( ctx.Bodies ) + 1 );
@@ -596,6 +670,18 @@ public sealed class PartStudio
 		for ( var i = reusableUpTo; i < count; i++ )
 		{
 			var feature = Features[i];
+			if ( feature is UVProjectFeature uvProject )
+				foreach ( var body in ctx.Bodies.Where( uvProject.Bodies.Matches ) )
+				{
+					manualUVAppliedToCache.Remove( body.Id );
+					manualUVCacheIndexByBody.Remove( body.Id );
+				}
+			if ( feature is PaintFeature )
+			{
+				ManualUVIslandEdit.Apply( ctx.Bodies, ManualUVEdits, manualUVAppliedToCache );
+				foreach ( var bodyId in manualUVAppliedToCache )
+					if ( !manualUVCacheIndexByBody.ContainsKey( bodyId ) ) manualUVCacheIndexByBody[bodyId] = i;
+			}
 
 			// Bodies added by this feature inherit its visibility. Doing it here rather than in
 			// every feature's Execute means a new feature type gets it for free and cannot forget.
@@ -624,7 +710,8 @@ public sealed class PartStudio
 			if ( feature.Warning is not null )
 				report.Warnings.Add( (feature.Id, feature.Warning) );
 
-			_cache.Add( Snapshot.Of( ctx ) );
+			if ( KeepSnapshots )
+				_cache.Add( Snapshot.Of( ctx ) );
 		}
 
 		// A Shape Key with no End Shape Key below it leaves its bodies shaped and its key unfinished.
@@ -662,6 +749,9 @@ public sealed class PartStudio
 		// because the cache holds clones taken inside the loop and ctx.Bodies was cloned back out of
 		// it — what this touches is never what the next rebuild reads.
 		MaterialScale.Apply( this );
+		ManualUVIslandEdit.Apply( Bodies, ManualUVEdits, manualUVAppliedToCache );
+		_manualUVCacheIndexByBody = manualUVCacheIndexByBody;
+		_manualUVCacheFingerprint = manualUVFingerprint;
 
 		_dirtyFrom = count;
 

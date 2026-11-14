@@ -16,6 +16,8 @@ namespace Effigy;
 ///   rig                       (list the rig)
 ///   rig clear
 ///   rig human|citizen|biped|quadruped [height=] [heads=] [style=] [legs=] [scale=] [fingers=1] [twist=0] [replace=1]
+///   rig auto [Body] [replace=1]   (measure the body and build its rig: the humanoid
+///                                   template when its proportions fit, else the 2-bone bounds rig)
 ///   rig from=rigging_cables.json [right=cable3,cable4] [counts=cable0:12] [replace=1|merge=1]
 ///   bind Body[,Body]|all [method=smooth|envelope|rigid|heat] [falloff=2] [smooth=3] [twist=1] [max=4]
 ///   skin [Name] [radii="spine_1 4; arm_* 1.5; * 1"] [levels=2]
@@ -294,6 +296,25 @@ public static partial class BuildScript
 			rig.Bones.Clear();
 			studio.BodyBoneMap.Clear();
 			r.Log.Add( "rig cleared" );
+			return AfterRig( studio, r );
+		}
+
+		// `rig auto`: measure a body and build its rig — the humanoid template when
+		// its proportions fit, else the 2-bone bounds rig. The existing-bones guard
+		// below does not apply here: TryRigStudio makes the same replace decision
+		// itself, with the same message, so an existing rig is refused honestly
+		// unless replace=1.
+		if ( args[0].Equals( "auto", StringComparison.OrdinalIgnoreCase ) )
+		{
+			var autoOpts = Pairs( args.Skip( 1 ) );
+			var bodyName = autoOpts.GetValueOrDefault( "body", "" );
+			if ( string.IsNullOrWhiteSpace( bodyName ) )
+				bodyName = args.Skip( 1 ).FirstOrDefault( a => !a.Contains( '=' ) ) ?? "";
+			var autoReplace = Truthy( autoOpts.GetValueOrDefault( "replace", "0" ) );
+			if ( !AutoRigger.TryRigStudio( studio, bodyName, autoReplace, out var autoRig, out var autoWhy ) )
+				return Fail( r, $"rig auto: {autoWhy}" );
+			r.Log.Add( $"rig auto: {autoRig.Summary}. " +
+				"Weights are a runtime binding — follow with `bind all` for weights that survive a rebuild." );
 			return AfterRig( studio, r );
 		}
 

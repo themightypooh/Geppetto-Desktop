@@ -1,0 +1,139 @@
+{
+  "brushes": [
+    {
+      "id": "floor",
+      "min": [
+        -144,
+        -144,
+        -16
+      ],
+      "max": [
+        144,
+        144,
+        0
+      ],
+      "detail": false,
+      "material": "concrete"
+    },
+    {
+      "id": "ceiling",
+      "min": [
+        -144,
+        -144,
+        128
+      ],
+      "max": [
+        144,
+        144,
+        144
+      ],
+      "detail": false,
+      "material": "concrete"
+    },
+    {
+      "id": "wall-west",
+      "min": [
+        -144,
+        -144,
+        0
+      ],
+      "max": [
+        -128,
+        144,
+        128
+      ],
+      "detail": false,
+      "material": "concrete"
+    },
+    {
+      "id": "wall-east",
+      "min": [
+        128,
+        -144,
+        0
+      ],
+      "max": [
+        144,
+        144,
+        128
+      ],
+      "detail": false,
+      "material": "concrete"
+    },
+    {
+      "id": "wall-south",
+      "min": [
+        -128,
+        -144,
+        0
+      ],
+      "max": [
+        128,
+        -128,
+        128
+      ],
+      "detail": false,
+      "material": "concrete"
+    },
+    {
+      "id": "wall-north",
+      "min": [
+        -128,
+        128,
+        0
+      ],
+      "max": [
+        128,
+        144,
+        128
+      ],
+      "detail": false,
+      "material": "concrete"
+    },
+    {
+      "id": "wall-2m",
+      "min": [
+        -8,
+        -128,
+        0
+      ],
+      "max": [
+        8,
+        128,
+        79
+      ],
+      "detail": false,
+      "material": "concrete"
+    }
+  ],
+  "entities": [
+    {
+      "class": "info_player_start",
+      "origin": [
+        -64,
+        0,
+        0
+      ],
+      "yaw": 0
+    },
+    {
+      "class": "info_node",
+      "origin": [
+        -64,
+        0,
+        0
+      ],
+      "yaw": 0
+    },
+    {
+      "class": "info_node",
+      "origin": [
+        64,
+        0,
+        0
+      ],
+      "yaw": 0
+    }
+  ],
+  "displacements": []
+}

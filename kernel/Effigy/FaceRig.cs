@@ -160,6 +160,601 @@ public sealed class FaceRig
 	/// <summary>Every key the full rig expects, for a sculpting checklist.</summary>
 	public IEnumerable<string> ExpectedKeys() => Controllers.SelectMany( c => c.Keys() ).Distinct();
 
+
+	// ---------------------------------------------------------------- automatic FACS morph synthesis (spec 4.5)
+
+	/// <summary>Options for <see cref="SynthesizeFacsMorphs"/>: which morph families to generate.</summary>
+	public sealed class SynthesizeOptions
+	{
+		public bool Arkit52 = true;
+		public bool Visemes = true;
+		public bool FleshyLids = true;
+		public bool LipZip = true;
+	}
+
+	/// <summary>Lid follow as a fraction of eye pitch (spec 4.5: 35%).</summary>
+	public const float LidFollowPitchFraction = 0.35f;
+
+	/// <summary>How far the cornea bulges past the eyeball sphere (spec 4.5: 0.04 in). Lids ride this proud.</summary>
+	public const float CornealBulge = 0.04f;
+
+	/// <summary>The 52 ARKit blendshape names, in ARKit order.</summary>
+	public static readonly string[] ArkitMorphNames =
+	{
+		"browDownLeft", "browDownRight", "browInnerUp", "browOuterUpLeft", "browOuterUpRight",
+		"cheekPuff", "cheekSquintLeft", "cheekSquintRight",
+		"eyeBlinkLeft", "eyeBlinkRight", "eyeLookDownLeft", "eyeLookDownRight",
+		"eyeLookInLeft", "eyeLookInRight", "eyeLookOutLeft", "eyeLookOutRight",
+		"eyeLookUpLeft", "eyeLookUpRight", "eyeSquintLeft", "eyeSquintRight", "eyeWideLeft", "eyeWideRight",
+		"jawForward", "jawLeft", "jawOpen", "jawRight",
+		"mouthClose", "mouthDimpleLeft", "mouthDimpleRight", "mouthFrownLeft", "mouthFrownRight",
+		"mouthFunnel", "mouthLeft", "mouthLowerDownLeft", "mouthLowerDownRight",
+		"mouthPressLeft", "mouthPressRight", "mouthPucker", "mouthRight",
+		"mouthRollLower", "mouthRollUpper", "mouthShrugLower", "mouthShrugUpper",
+		"mouthSmileLeft", "mouthSmileRight", "mouthStretchLeft", "mouthStretchRight",
+		"mouthUpperUpLeft", "mouthUpperUpRight", "noseSneerLeft", "noseSneerRight", "tongueOut",
+	};
+
+	/// <summary>
+	/// Generate ready-to-use <see cref="MeshMorph"/> deltas for a head: the 32 flex controllers'
+	/// keys (40 morphs, stereo split), the 52 ARKit morphs and the 15 viseme presets, plus the
+	/// spec-named aliases (blink_L, eye_wide_L, squint_L, brow_inner_up_L, brow_outer_up_L,
+	/// brow_down_L, smile_L, frown_L, upper_lip_raiser_L, nose_sneer_L, cheek_puff_L and their _R
+	/// twins — same real deltas as lid_raiser_L, lid_tightener_L, inner_raiser_L, outer_raiser_L,
+	/// lowerer_L, corner_puller_L, corner_depressor_L, upper_raiser_L, wrinkler, cheek_puffer_L).
+	/// Morphs are installed on <paramref name="headMesh"/>.Morphs (same name replaced) and returned.
+	/// Lids slide along the spherical eyeball surface, never in a straight line, so they cannot clip
+	/// the cornea; brow morphs are strain-compatible with <see cref="WrinkleMaps.VertexValues"/>.
+	/// </summary>
+	public static IReadOnlyList<MeshMorph> SynthesizeFacsMorphs( PolyMesh headMesh, FaceBounds landmarks ) =>
+		SynthesizeFacsMorphs( headMesh, landmarks, new SynthesizeOptions() );
+
+	public static IReadOnlyList<MeshMorph> SynthesizeFacsMorphs( PolyMesh headMesh, FaceBounds landmarks, SynthesizeOptions options )
+	{
+		if ( headMesh is null ) throw new ArgumentNullException( nameof( headMesh ) );
+		if ( options is null ) throw new ArgumentNullException( nameof( options ) );
+		if ( headMesh.VertexCount == 0 ) return Array.Empty<MeshMorph>();
+		var (min, max) = ModelMeasure.Bounds( headMesh );
+		var headH = MathF.Max( max.y - min.y, 1e-6f );
+		var headW = MathF.Max( max.x - min.x, 1e-6f );
+		var flex = new Dictionary<string, Vec3[]>();
+		foreach ( var key in Default().Controllers.SelectMany( c => c.Keys() ).Distinct() )
+		{
+			if ( key == "lip_zip" ) continue;
+			if ( !RegionPresent( key, landmarks ) ) continue;
+			flex[key] = FlexDelta( key, headMesh, landmarks, headH, headW );
+		}
+		var made = new List<MeshMorph>();
+		foreach ( var (name, deltas) in flex ) made.Add( new MeshMorph { Name = name, Deltas = deltas } );
+		foreach ( var (alias, source) in AliasMap() )
+		{
+			if ( !flex.TryGetValue( source, out var d ) ) continue;
+			if ( flex.ContainsKey( alias ) ) continue;
+			made.Add( new MeshMorph { Name = alias, Deltas = d } );
+			flex[alias] = d;
+		}
+		if ( options.Arkit52 )
+		{
+			foreach ( var name in ArkitMorphNames )
+			{
+				if ( flex.ContainsKey( name ) ) continue;
+				if ( ArkitDelta( name, headMesh, landmarks, headH, headW, flex ) is { } d )
+					made.Add( new MeshMorph { Name = name, Deltas = d } );
+			}
+		}
+		if ( options.Visemes && landmarks.HasMouth )
+		{
+			var rig = Default();
+			foreach ( var (preset, settings) in rig.Presets.Where( p => p.Key.StartsWith( "viseme_" ) ) )
+			{
+				var weights = rig.Evaluate( settings );
+				var d = new Vec3[headMesh.VertexCount];
+				foreach ( var (key, w) in weights )
+				{
+					if ( MathF.Abs( w ) < 1e-4f || !flex.TryGetValue( key, out var fd ) ) continue;
+					for ( var i = 0; i < d.Length; i++ ) d[i] += fd[i] * w;
+				}
+				made.Add( new MeshMorph { Name = preset, Deltas = d } );
+			}
+		}
+		if ( options.LipZip && landmarks.HasMouth && flex.TryGetValue( "jaw_drop", out var jaw ) )
+		{
+			var part = flex.TryGetValue( "part", out var pd ) ? pd : new Vec3[headMesh.VertexCount];
+			var d = new Vec3[headMesh.VertexCount];
+			var halfMouth = MathF.Max( (landmarks.MouthRight.x - landmarks.MouthLeft.x) * 0.5f, 1e-6f );
+			for ( var i = 0; i < d.Length; i++ )
+			{
+				var p = headMesh.Positions[i];
+				if ( DistToSegment( p, landmarks.MouthLeft, landmarks.MouthRight ) > 0.045f * headH ) continue;
+				var seal = Math.Clamp( MathF.Abs( p.x - landmarks.MouthCenter.x ) / halfMouth, 0f, 1f );
+				d[i] = (jaw[i] + part[i]) * -seal;
+			}
+			made.Add( new MeshMorph { Name = "lip_zip", Deltas = d } );
+		}
+		if ( options.FleshyLids && landmarks.HasEyes )
+		{
+			foreach ( var m in FleshyEyeTrackDeltas( headMesh, landmarks, 0f, 0f ) ) made.Add( m );
+		}
+		FacsMorphInstall.Install( headMesh, made );
+		return made;
+	}
+
+	/// <summary>
+	/// The fleshy eye-tracking driver (spec 4.5): for an eye rotation of <paramref name="pitch"/>
+	/// (radians, positive = gaze up) and <paramref name="yaw"/> (positive = gaze to the head's right),
+	/// the lids follow 35% of the pitch along the eyeball sphere and ride 0.04 in proud of the corneal
+	/// bulge. Returns lid_follow_L / lid_follow_R morphs for that pose; pitch = yaw = 0 gives the
+	/// rest-pose (zero-delta) drivers SynthesizeFacsMorphs installs. FacePoserService calls this per
+	/// frame and blends the two morphs by the live eye rotation — it is the kernel side of
+	/// FacePoserService.ApplyFleshyEyeTrack, which lives in the desktop app, not the kernel.
+	/// </summary>
+	public static IReadOnlyList<MeshMorph> FleshyEyeTrackDeltas( PolyMesh headMesh, FaceBounds landmarks, float pitch, float yaw )
+	{
+		if ( headMesh is null ) throw new ArgumentNullException( nameof( headMesh ) );
+		var (min, max) = ModelMeasure.Bounds( headMesh );
+		var headH = MathF.Max( max.y - min.y, 1e-6f );
+		var headW = MathF.Max( max.x - min.x, 1e-6f );
+		var follow = LidFollowPitchFraction * pitch;
+		var bulge = CornealBulge * Math.Clamp( MathF.Abs( pitch ) / 0.6f, 0f, 1f );
+		var o = new List<MeshMorph>();
+		foreach ( var left in new[] { true, false } )
+		{
+			var d = new Vec3[headMesh.VertexCount];
+			EyeSphere( landmarks, headH, left, out var centre, out var radius );
+			var (inner, outer) = EyeCorners( landmarks, headW, left );
+			var lidLine = left ? landmarks.LeftEye : landmarks.RightEye;
+			for ( var i = 0; i < d.Length; i++ )
+			{
+				var p = headMesh.Positions[i];
+				var w = Capsule( p, inner, outer, 0.045f * headH );
+				if ( w <= 0f ) continue;
+				var upper = p.y >= lidLine.y ? 1f : 0.35f;
+				var rotated = RotatePoint( p, centre, new Vec3( 1, 0, 0 ), -follow * upper );
+				var radial = rotated - centre;
+				var len = radial.Length;
+				if ( len < radius + bulge && len > 1e-6f ) rotated = centre + radial / len * (radius + bulge);
+				var shift = new Vec3( yaw * radius * 0.2f * w, 0, 0 );
+				d[i] = (rotated - p) * w + shift;
+			}
+			o.Add( new MeshMorph { Name = left ? "lid_follow_L" : "lid_follow_R", Deltas = d } );
+		}
+		return o;
+	}
+
+	/// <summary>
+	/// Brow wrinkle coupling (spec 4.5): the forehead/glabella compression a brow morph produces,
+	/// as per-vertex strain values from <see cref="WrinkleMaps.VertexValues"/> — the same values the
+	/// wrinkle baker turns into squish maps. Call after generating a brow morph.
+	/// </summary>
+	public static float[] WrinkleStrain( PolyMesh mesh, MeshMorph morph ) => WrinkleMaps.VertexValues( mesh, morph );
+
+	static bool RegionPresent( string key, FaceBounds landmarks )
+	{
+		if ( key.StartsWith( "blink" ) || key.StartsWith( "lid_" ) || key.StartsWith( "half_closed" )
+			|| key.StartsWith( "inner_raiser" ) || key.StartsWith( "outer_raiser" ) || key.StartsWith( "lowerer" ) )
+			return landmarks.HasEyes;
+		if ( key.StartsWith( "cheek_raiser" ) || key.StartsWith( "wrinkler" ) || key.StartsWith( "dilator" ) || key.StartsWith( "cheek_puffer" ) )
+			return landmarks.HasNose || landmarks.HasEyes;
+		if ( key.StartsWith( "jaw_" ) || key.StartsWith( "mouth_" ) )
+			return landmarks.HasJaw || landmarks.HasMouth;
+		return landmarks.HasMouth;
+	}
+
+	static IEnumerable<(string Alias, string Source)> AliasMap()
+	{
+		yield return ("blink_L", "blink");
+		yield return ("blink_R", "blink");
+		yield return ("eye_wide_L", "lid_raiser_L");
+		yield return ("eye_wide_R", "lid_raiser_R");
+		yield return ("squint_L", "lid_tightener_L");
+		yield return ("squint_R", "lid_tightener_R");
+		yield return ("brow_inner_up_L", "inner_raiser_L");
+		yield return ("brow_inner_up_R", "inner_raiser_R");
+		yield return ("brow_outer_up_L", "outer_raiser_L");
+		yield return ("brow_outer_up_R", "outer_raiser_R");
+		yield return ("brow_down_L", "lowerer_L");
+		yield return ("brow_down_R", "lowerer_R");
+		yield return ("smile_L", "corner_puller_L");
+		yield return ("smile_R", "corner_puller_R");
+		yield return ("frown_L", "corner_depressor_L");
+		yield return ("frown_R", "corner_depressor_R");
+		yield return ("upper_lip_raiser_L", "upper_raiser_L");
+		yield return ("upper_lip_raiser_R", "upper_raiser_R");
+		yield return ("nose_sneer_L", "wrinkler");
+		yield return ("nose_sneer_R", "wrinkler");
+		yield return ("cheek_puff_L", "cheek_puffer_L");
+		yield return ("cheek_puff_R", "cheek_puffer_R");
+	}
+
+
+	// ---------------------------------------------------------------- synthesis helpers (spec 4.5)
+
+	static float Smooth01( float a, float b, float x )
+	{
+		if ( a < b ) { var t = Math.Clamp( (x - a) / MathF.Max( b - a, 1e-6f ), 0f, 1f ); return t * t * (3f - 2f * t); }
+		var t2 = Math.Clamp( (x - b) / MathF.Max( a - b, 1e-6f ), 0f, 1f ); return 1f - t2 * t2 * (3f - 2f * t2);
+	}
+
+	static float DistToSegment( Vec3 p, Vec3 a, Vec3 b )
+	{
+		var ab = b - a;
+		var len2 = ab.LengthSquared;
+		var t = len2 < 1e-12f ? 0f : Math.Clamp( Vec3.Dot( p - a, ab ) / len2, 0f, 1f );
+		return (p - (a + ab * t)).Length;
+	}
+
+	/// <summary>Smooth anatomical falloff capsule: 1 on the segment, 0 at radius, smooth between.</summary>
+	static float Capsule( Vec3 p, Vec3 a, Vec3 b, float radius ) => 1f - Smooth01( 0f, MathF.Max( radius, 1e-6f ), DistToSegment( p, a, b ) );
+
+	static Vec3 RotatePoint( Vec3 p, Vec3 pivot, Vec3 axis, float angle )
+	{
+		var k = axis.Normal;
+		var v = p - pivot;
+		var cos = MathF.Cos( angle );
+		var sin = MathF.Sin( angle );
+		return pivot + v * cos + Vec3.Cross( k, v ) * sin + k * Vec3.Dot( k, v ) * (1f - cos);
+	}
+
+	static void TranslateCapsule( Vec3[] d, PolyMesh mesh, Vec3 a, Vec3 b, float radius, Vec3 dir, float amp )
+	{
+		for ( var i = 0; i < d.Length; i++ )
+		{
+			var w = Capsule( mesh.Positions[i], a, b, radius );
+			if ( w > 0f ) d[i] += dir * (amp * w);
+		}
+	}
+
+	static void TranslatePoint( Vec3[] d, PolyMesh mesh, Vec3 centre, float radius, Vec3 dir, float amp )
+	{
+		for ( var i = 0; i < d.Length; i++ )
+		{
+			var w = 1f - Smooth01( 0f, MathF.Max( radius, 1e-6f ), (mesh.Positions[i] - centre).Length );
+			if ( w > 0f ) d[i] += dir * (amp * w);
+		}
+	}
+
+	/// <summary>Rotate the lower face around the jaw pivot (chin drops down-and-back for angle > 0).</summary>
+	static void JawRotate( Vec3[] d, PolyMesh mesh, FaceBounds landmarks, float headH, float angle )
+	{
+		var pivot = landmarks.Jaw;
+		var mouthY = landmarks.MouthCenter.y;
+		for ( var i = 0; i < d.Length; i++ )
+		{
+			var p = mesh.Positions[i];
+			if ( p.y >= mouthY ) continue;
+			var w = Smooth01( mouthY, mouthY - 0.06f * headH, p.y );
+			if ( w <= 0f ) continue;
+			d[i] += (RotatePoint( p, pivot, new Vec3( 1, 0, 0 ), angle ) - p) * w;
+		}
+	}
+
+	static void EyeSphere( FaceBounds landmarks, float headH, bool left, out Vec3 centre, out float radius )
+	{
+		radius = Math.Clamp( 0.05f * headH, 0.3f, 0.6f );
+		var eye = left ? landmarks.LeftEye : landmarks.RightEye;
+		centre = eye - new Vec3( 0, 0, radius * 0.55f );
+	}
+
+	static (Vec3 Inner, Vec3 Outer) EyeCorners( FaceBounds landmarks, float headW, bool left )
+	{
+		var eye = left ? landmarks.LeftEye : landmarks.RightEye;
+		var towardCentre = left ? 1f : -1f;
+		return (eye + new Vec3( towardCentre * 0.055f * headW, 0, 0 ), eye - new Vec3( towardCentre * 0.055f * headW, 0, 0 ));
+	}
+
+	static (Vec3 Inner, Vec3 Outer) BrowPoints( FaceBounds landmarks, float headH, float headW, bool left )
+	{
+		var eye = left ? landmarks.LeftEye : landmarks.RightEye;
+		var towardCentre = left ? 1f : -1f;
+		return (
+			eye + new Vec3( towardCentre * 0.08f * headW, 0.085f * headH, 0 ),
+			eye + new Vec3( -towardCentre * 0.16f * headW, 0.07f * headH, 0 ) );
+	}
+
+	/// <summary>
+	/// Slide the lids along the eyeball sphere: upper lid rotates by <paramref name="upperAngle"/>
+	/// (positive closes it, sliding down the front of the sphere), lower lid by
+	/// <paramref name="lowerAngle"/> (negative raises it). Vertices stay on the sphere, pushed out to
+	/// radius + <see cref="CornealBulge"/> when they would ride inside it — so a blink can never clip
+	/// the cornea. Angles in radians; a full blink is about +1.1 / -0.65.
+	/// </summary>
+	static Vec3[] LidDelta( PolyMesh mesh, FaceBounds landmarks, float headH, float headW, bool left, float upperAngle, float lowerAngle )
+	{
+		var d = new Vec3[mesh.VertexCount];
+		EyeSphere( landmarks, headH, left, out var centre, out var radius );
+		var (inner, outer) = EyeCorners( landmarks, headW, left );
+		var eye = left ? landmarks.LeftEye : landmarks.RightEye;
+		for ( var i = 0; i < d.Length; i++ )
+		{
+			var p = mesh.Positions[i];
+			var w = Capsule( p, inner, outer, 0.045f * headH );
+			if ( w <= 0f ) continue;
+			var angle = p.y >= eye.y ? upperAngle : lowerAngle;
+			var rotated = RotatePoint( p, centre, new Vec3( 1, 0, 0 ), angle );
+			var radial = rotated - centre;
+			var len = radial.Length;
+			if ( len < radius + CornealBulge && len > 1e-6f ) rotated = centre + radial / len * (radius + CornealBulge);
+			d[i] = (rotated - p) * w;
+		}
+		return d;
+	}
+
+	static Vec3[] Add( Vec3[] a, Vec3[] b )
+	{
+		var o = new Vec3[a.Length];
+		for ( var i = 0; i < o.Length; i++ ) o[i] = a[i] + b[i];
+		return o;
+	}
+
+	static Vec3[] Scale( Vec3[] a, float k )
+	{
+		var o = new Vec3[a.Length];
+		for ( var i = 0; i < o.Length; i++ ) o[i] = a[i] * k;
+		return o;
+	}
+
+	static Vec3[] SplitSide( Vec3[] a, PolyMesh mesh, float centreX, float headW, bool left )
+	{
+		var o = new Vec3[a.Length];
+		for ( var i = 0; i < o.Length; i++ )
+		{
+			var p = mesh.Positions[i];
+			var w = left
+				? Math.Clamp( (centreX + 0.04f * headW - p.x) / (0.08f * headW), 0f, 1f )
+				: Math.Clamp( (p.x - centreX + 0.04f * headW) / (0.08f * headW), 0f, 1f );
+			o[i] = a[i] * w;
+		}
+		return o;
+	}
+
+	static bool IsLeft( string key ) => key.EndsWith( "_L", StringComparison.Ordinal );
+
+	static Vec3[] FlexDelta( string key, PolyMesh mesh, FaceBounds landmarks, float headH, float headW )
+	{
+		var left = IsLeft( key );
+		var eye = left ? landmarks.LeftEye : landmarks.RightEye;
+		var towardCentre = left ? 1f : -1f;
+		var (browInner, browOuter) = BrowPoints( landmarks, headH, headW, left );
+		var mouthL = landmarks.MouthLeft;
+		var mouthR = landmarks.MouthRight;
+		var mouthC = landmarks.MouthCenter;
+		var upperLip = new Vec3( mouthC.x, mouthC.y + 0.015f * headH, mouthC.z );
+		var lowerLip = new Vec3( mouthC.x, mouthC.y - 0.015f * headH, mouthC.z );
+		var up = new Vec3( 0, 1, -0.15f ).Normal;
+		var down = new Vec3( 0, -1, 0.1f ).Normal;
+		Vec3[] d;
+		switch ( key )
+		{
+			case "blink": return Add( LidDelta( mesh, landmarks, headH, headW, true, 1.1f, -0.65f ), LidDelta( mesh, landmarks, headH, headW, false, 1.1f, -0.65f ) );
+			case "lid_closer_L": case "lid_closer_R": return LidDelta( mesh, landmarks, headH, headW, left, 0.95f, 0f );
+			case "lid_raiser_L": case "lid_raiser_R": return LidDelta( mesh, landmarks, headH, headW, left, -0.4f, 0.12f );
+			case "lid_tightener_L": case "lid_tightener_R":
+				d = LidDelta( mesh, landmarks, headH, headW, left, 0.3f, -0.45f );
+				TranslatePoint( d, mesh, new Vec3( eye.x, eye.y - 0.05f * headH, eye.z ), 0.09f * headH, up, 0.010f * headH );
+				return d;
+			case "lid_droop_L": case "lid_droop_R": return LidDelta( mesh, landmarks, headH, headW, left, 0.3f, 0f );
+			case "half_closed": return Add( LidDelta( mesh, landmarks, headH, headW, true, 0.55f, -0.3f ), LidDelta( mesh, landmarks, headH, headW, false, 0.55f, -0.3f ) );
+			case "inner_raiser_L": case "inner_raiser_R":
+				d = new Vec3[mesh.VertexCount];
+				TranslatePoint( d, mesh, browInner, 0.05f * headH, up, 0.020f * headH );
+				return d;
+			case "outer_raiser_L": case "outer_raiser_R":
+				d = new Vec3[mesh.VertexCount];
+				TranslatePoint( d, mesh, browOuter, 0.05f * headH, up, 0.016f * headH );
+				return d;
+			case "lowerer_L": case "lowerer_R":
+				d = new Vec3[mesh.VertexCount];
+				TranslateCapsule( d, mesh, browInner, browOuter, 0.05f * headH, (down + new Vec3( towardCentre * 0.5f, 0, 0 )).Normal, 0.018f * headH );
+				return d;
+			case "cheek_raiser_L": case "cheek_raiser_R":
+				d = new Vec3[mesh.VertexCount];
+				TranslateCapsule( d, mesh, new Vec3( eye.x, eye.y - 0.06f * headH, eye.z ), new Vec3( eye.x, eye.y - 0.12f * headH, eye.z ), 0.08f * headH, up, 0.014f * headH );
+				return d;
+			case "wrinkler":
+				d = new Vec3[mesh.VertexCount];
+				TranslateCapsule( d, mesh, landmarks.NoseTip, (landmarks.LeftEye + landmarks.RightEye) * 0.5f, 0.06f * headH, up, 0.010f * headH );
+				return d;
+			case "dilator":
+				d = new Vec3[mesh.VertexCount];
+				TranslatePoint( d, mesh, landmarks.NoseTip + new Vec3( -0.03f * headW, 0, 0 ), 0.04f * headH, new Vec3( -1, 0, 0 ), 0.008f * headH );
+				TranslatePoint( d, mesh, landmarks.NoseTip + new Vec3( 0.03f * headW, 0, 0 ), 0.04f * headH, new Vec3( 1, 0, 0 ), 0.008f * headH );
+				return d;
+			case "cheek_puffer_L": case "cheek_puffer_R":
+				d = new Vec3[mesh.VertexCount];
+				TranslatePoint( d, mesh, new Vec3( eye.x, eye.y - 0.14f * headH, eye.z ), 0.10f * headH, new Vec3( towardCentre * -0.7f, 0, 0.7f ).Normal, 0.016f * headH );
+				return d;
+			case "upper_raiser_L": case "upper_raiser_R":
+				d = new Vec3[mesh.VertexCount];
+				TranslateCapsule( d, mesh, mouthL, mouthR, 0.04f * headH, up, 0.014f * headH );
+				return SplitSide( d, mesh, mouthC.x, headW, left );
+			case "corner_puller_L": case "corner_puller_R":
+				d = new Vec3[mesh.VertexCount];
+				TranslatePoint( d, mesh, left ? mouthL : mouthR, 0.05f * headH, new Vec3( towardCentre * -0.3f, 0.8f, -0.5f ).Normal, 0.030f * headH );
+				return d;
+			case "smile":
+				d = FlexDelta( "corner_puller_L", mesh, landmarks, headH, headW );
+				d = Add( d, FlexDelta( "corner_puller_R", mesh, landmarks, headH, headW ) );
+				TranslateCapsule( d, mesh, mouthL, mouthR, 0.04f * headH, up, 0.008f * headH );
+				TranslateCapsule( d, mesh, mouthL, mouthR, 0.04f * headH, down, 0.008f * headH );
+				return d;
+			case "corner_depressor_L": case "corner_depressor_R":
+				d = new Vec3[mesh.VertexCount];
+				TranslatePoint( d, mesh, left ? mouthL : mouthR, 0.05f * headH, down, 0.024f * headH );
+				return d;
+			case "dimpler_L": case "dimpler_R":
+				d = new Vec3[mesh.VertexCount];
+				TranslatePoint( d, mesh, left ? mouthL : mouthR, 0.04f * headH, new Vec3( towardCentre * 0.9f, 0.3f, 0 ).Normal, 0.014f * headH );
+				return d;
+			case "stretcher_L": case "stretcher_R":
+				d = new Vec3[mesh.VertexCount];
+				TranslatePoint( d, mesh, left ? mouthL : mouthR, 0.05f * headH, new Vec3( towardCentre * -1f, 0, 0 ), 0.020f * headH );
+				return d;
+			case "part":
+				d = new Vec3[mesh.VertexCount];
+				TranslateCapsule( d, mesh, mouthL, mouthR, 0.03f * headH, up, 0.012f * headH );
+				TranslateCapsule( d, mesh, mouthL, mouthR, 0.03f * headH, down, 0.012f * headH );
+				return d;
+			case "puckerer":
+				d = new Vec3[mesh.VertexCount];
+				TranslateCapsule( d, mesh, mouthL, mouthR, 0.04f * headH, new Vec3( 0, -0.3f, 0.9f ).Normal, 0.014f * headH );
+				TranslateCapsule( d, mesh, mouthL, mouthR, 0.04f * headH, new Vec3( 0, 0.3f, 0.9f ).Normal, 0.014f * headH );
+				return d;
+			case "funneler":
+				d = new Vec3[mesh.VertexCount];
+				TranslateCapsule( d, mesh, mouthL, mouthR, 0.04f * headH, new Vec3( 0, 0, 1 ), 0.020f * headH );
+				return d;
+			case "bite":
+				d = new Vec3[mesh.VertexCount];
+				TranslatePoint( d, mesh, lowerLip, 0.04f * headH, new Vec3( 0, 0.5f, -0.8f ).Normal, 0.012f * headH );
+				return d;
+			case "presser":
+				d = new Vec3[mesh.VertexCount];
+				TranslateCapsule( d, mesh, mouthL, mouthR, 0.03f * headH, down, 0.010f * headH );
+				TranslateCapsule( d, mesh, mouthL, mouthR, 0.03f * headH, up, 0.010f * headH );
+				return d;
+			case "tightener":
+				d = new Vec3[mesh.VertexCount];
+				TranslateCapsule( d, mesh, mouthL, mouthR, 0.03f * headH, down, 0.006f * headH );
+				TranslateCapsule( d, mesh, mouthL, mouthR, 0.03f * headH, up, 0.006f * headH );
+				return d;
+			case "lower_lip":
+				d = new Vec3[mesh.VertexCount];
+				TranslatePoint( d, mesh, lowerLip, 0.04f * headH, down, 0.014f * headH );
+				return d;
+			case "chin_raiser":
+				d = new Vec3[mesh.VertexCount];
+				TranslatePoint( d, mesh, landmarks.Jaw, 0.06f * headH, up, 0.016f * headH );
+				return d;
+			case "mouth_left":
+				d = new Vec3[mesh.VertexCount];
+				TranslateCapsule( d, mesh, mouthL, mouthR, 0.05f * headH, new Vec3( -1, 0, 0 ), 0.020f * headH );
+				return d;
+			case "mouth_right":
+				d = new Vec3[mesh.VertexCount];
+				TranslateCapsule( d, mesh, mouthL, mouthR, 0.05f * headH, new Vec3( 1, 0, 0 ), 0.020f * headH );
+				return d;
+			case "jaw_drop":
+				d = new Vec3[mesh.VertexCount];
+				JawRotate( d, mesh, landmarks, headH, 0.35f );
+				return d;
+			case "mouth_drop":
+				d = new Vec3[mesh.VertexCount];
+				JawRotate( d, mesh, landmarks, headH, 0.5f );
+				TranslateCapsule( d, mesh, mouthL, mouthR, 0.03f * headH, up, 0.008f * headH );
+				TranslateCapsule( d, mesh, mouthL, mouthR, 0.03f * headH, down, 0.008f * headH );
+				return d;
+			case "jaw_clencher":
+				d = new Vec3[mesh.VertexCount];
+				TranslateCapsule( d, mesh, landmarks.Jaw, mouthC, 0.08f * headH, up, 0.010f * headH );
+				return d;
+			case "jaw_left":
+				d = new Vec3[mesh.VertexCount];
+				TranslateCapsule( d, mesh, landmarks.Jaw, mouthC, 0.12f * headH, new Vec3( -1, 0, 0 ), 0.020f * headH );
+				return d;
+			case "jaw_right":
+				d = new Vec3[mesh.VertexCount];
+				TranslateCapsule( d, mesh, landmarks.Jaw, mouthC, 0.12f * headH, new Vec3( 1, 0, 0 ), 0.020f * headH );
+				return d;
+			default:
+				return new Vec3[mesh.VertexCount];
+		}
+	}
+
+	/// <summary>One ARKit morph from the flex deltas, or a direct capsule rule where no flex maps.</summary>
+	static Vec3[] ArkitDelta( string name, PolyMesh mesh, FaceBounds landmarks, float headH, float headW, Dictionary<string, Vec3[]> flex )
+	{
+		Vec3[] Get( string k ) => flex.TryGetValue( k, out var v ) ? v : new Vec3[mesh.VertexCount];
+		Vec3[] Avg( string a, string b ) => Scale( Add( Get( a ), Get( b ) ), 0.5f );
+		var mouthC = landmarks.MouthCenter;
+		var eyeL = landmarks.LeftEye;
+		var eyeR = landmarks.RightEye;
+		Vec3[] d;
+		switch ( name )
+		{
+			case "browDownLeft": return Get( "lowerer_L" );
+			case "browDownRight": return Get( "lowerer_R" );
+			case "browInnerUp": return Avg( "inner_raiser_L", "inner_raiser_R" );
+			case "browOuterUpLeft": return Get( "outer_raiser_L" );
+			case "browOuterUpRight": return Get( "outer_raiser_R" );
+			case "cheekPuff": return Avg( "cheek_puffer_L", "cheek_puffer_R" );
+			case "cheekSquintLeft": return Get( "cheek_raiser_L" );
+			case "cheekSquintRight": return Get( "cheek_raiser_R" );
+			case "eyeBlinkLeft": return Get( "blink_L" );
+			case "eyeBlinkRight": return Get( "blink_R" );
+			case "eyeLookDownLeft": case "eyeLookDownRight":
+			case "eyeLookUpLeft": case "eyeLookUpRight":
+			case "eyeLookInLeft": case "eyeLookInRight":
+			case "eyeLookOutLeft": case "eyeLookOutRight":
+			{
+				var left = name.EndsWith( "Left", StringComparison.Ordinal );
+				var eye = left ? eyeL : eyeR;
+				var towardCentre = left ? 1f : -1f;
+				var dir = name.Contains( "Down" ) ? new Vec3( 0, -1, 0 )
+					: name.Contains( "Up" ) ? new Vec3( 0, 1, 0 )
+					: name.Contains( "In" ) ? new Vec3( towardCentre, 0, 0 )
+					: new Vec3( -towardCentre, 0, 0 );
+				d = new Vec3[mesh.VertexCount];
+				TranslatePoint( d, mesh, eye, 0.06f * headH, dir, 0.006f * headH );
+				return d;
+			}
+			case "eyeSquintLeft": return Get( "lid_tightener_L" );
+			case "eyeSquintRight": return Get( "lid_tightener_R" );
+			case "eyeWideLeft": return Get( "lid_raiser_L" );
+			case "eyeWideRight": return Get( "lid_raiser_R" );
+			case "jawForward":
+				d = new Vec3[mesh.VertexCount];
+				TranslateCapsule( d, mesh, landmarks.Jaw, mouthC, 0.12f * headH, new Vec3( 0, 0, 1 ), 0.020f * headH );
+				return d;
+			case "jawLeft": return Get( "jaw_left" );
+			case "jawOpen": return Get( "jaw_drop" );
+			case "jawRight": return Get( "jaw_right" );
+			case "mouthClose": return Get( "presser" );
+			case "mouthDimpleLeft": return Get( "dimpler_L" );
+			case "mouthDimpleRight": return Get( "dimpler_R" );
+			case "mouthFrownLeft": return Get( "corner_depressor_L" );
+			case "mouthFrownRight": return Get( "corner_depressor_R" );
+			case "mouthFunnel": return Get( "funneler" );
+			case "mouthLeft": return Get( "mouth_left" );
+			case "mouthRight": return Get( "mouth_right" );
+			case "mouthLowerDownLeft": return SplitSide( Get( "lower_lip" ), mesh, mouthC.x, headW, true );
+			case "mouthLowerDownRight": return SplitSide( Get( "lower_lip" ), mesh, mouthC.x, headW, false );
+			case "mouthPressLeft": return SplitSide( Get( "presser" ), mesh, mouthC.x, headW, true );
+			case "mouthPressRight": return SplitSide( Get( "presser" ), mesh, mouthC.x, headW, false );
+			case "mouthPucker": return Get( "puckerer" );
+			case "mouthRollLower":
+				d = new Vec3[mesh.VertexCount];
+				TranslatePoint( d, mesh, new Vec3( mouthC.x, mouthC.y - 0.015f * headH, mouthC.z ), 0.04f * headH, new Vec3( 0, -0.2f, -0.9f ).Normal, 0.008f * headH );
+				return d;
+			case "mouthRollUpper":
+				d = new Vec3[mesh.VertexCount];
+				TranslatePoint( d, mesh, new Vec3( mouthC.x, mouthC.y + 0.015f * headH, mouthC.z ), 0.04f * headH, new Vec3( 0, 0.2f, -0.9f ).Normal, 0.008f * headH );
+				return d;
+			case "mouthShrugLower":
+				d = new Vec3[mesh.VertexCount];
+				TranslatePoint( d, mesh, new Vec3( mouthC.x, mouthC.y - 0.015f * headH, mouthC.z ), 0.04f * headH, new Vec3( 0, 1, 0 ), 0.008f * headH );
+				return d;
+			case "mouthShrugUpper":
+				d = new Vec3[mesh.VertexCount];
+				TranslatePoint( d, mesh, new Vec3( mouthC.x, mouthC.y + 0.015f * headH, mouthC.z ), 0.04f * headH, new Vec3( 0, -1, 0 ), 0.008f * headH );
+				return d;
+			case "mouthSmileLeft": return Get( "corner_puller_L" );
+			case "mouthSmileRight": return Get( "corner_puller_R" );
+			case "mouthStretchLeft": return Get( "stretcher_L" );
+			case "mouthStretchRight": return Get( "stretcher_R" );
+			case "mouthUpperUpLeft": return Get( "upper_raiser_L" );
+			case "mouthUpperUpRight": return Get( "upper_raiser_R" );
+			case "noseSneerLeft": return SplitSide( Get( "wrinkler" ), mesh, mouthC.x, headW, true );
+			case "noseSneerRight": return SplitSide( Get( "wrinkler" ), mesh, mouthC.x, headW, false );
+			case "tongueOut":
+				// No tongue mesh on a bare head: the visible proxy is the lower lip + chin pushed
+				// forward and down. The dental MouthMaker tongue carries the real tongue-out.
+				d = new Vec3[mesh.VertexCount];
+				TranslatePoint( d, mesh, new Vec3( mouthC.x, mouthC.y - 0.015f * headH, mouthC.z ), 0.06f * headH, new Vec3( 0, -0.3f, 0.9f ).Normal, 0.018f * headH );
+				return d;
+			default: return null;
+		}
+	}
+
 	// ---------------------------------------------------------------- sidecar
 
 	public static string SidecarPath( string model ) =>
@@ -268,6 +863,7 @@ public sealed class FaceRig
 				C( "Mouth", "tightener", "Thins and tightens the lips (AU 23): anger.", stereo: false ),
 				C( "Mouth", "lower_lip", "Rolls the lower lip down (AU 16): f, v, disgust.", stereo: false ),
 				C( "Mouth", "chin_raiser", "Pushes the chin and lower lip up (AU 17): pout, doubt.", stereo: false ),
+				C( "Mouth", "lip_zip", "Keeps the lips sealed from the corners inward as the jaw opens; peels open centre-to-corners (sticky lips).", stereo: false ),
 				B( "Mouth", "mouth_sideways", "mouth_left", "mouth_right", "Shifts the whole mouth to the character's left (−) or right (+)." ),
 				C( "Jaw", "jaw_drop", "Opens the jaw (AU 26/27): talking, shock.", stereo: false ),
 				C( "Jaw", "mouth_drop", "Stretches the mouth open past the jaw drop (AU 27): a yell, aa." ),

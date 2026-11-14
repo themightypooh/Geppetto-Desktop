@@ -467,6 +467,8 @@ public static class SkeletonCage
 					fan[t[(at + 1) % 3]] = (t[(at + 2) % 3], f);
 				}
 
+				if ( fan.Count == 0 )
+					continue;
 				var ring = new List<int>();
 				var start = fan.Keys.First();
 				var x1 = start;

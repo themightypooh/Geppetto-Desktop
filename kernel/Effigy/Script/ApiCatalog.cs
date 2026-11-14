@@ -35,6 +35,66 @@ public static class ApiCatalog
 
 	public static IReadOnlyList<string> RigVerbNames() => BuildScript.RigVerbNames;
 
+	/// <summary>
+	/// Map verbs (hammer-ai-aisuitetools-apicatalog-map). The canonical list
+	/// lives in BuildScript.Map.cs (hammer-ai-buildscript-verbs-map, worker
+	/// 64): one verb per native map capability, each calling the kernel API
+	/// in <see cref="MapVerbBacking"/>, each returning a named result or a
+	/// named error, never a silent no-op. This catalog only wires it through,
+	/// exactly like <see cref="VerbNames"/> / <see cref="RigVerbNames"/>; it
+	/// never invents a verb. Verb set, from the filed spec: brush
+	/// create/edit/clip/vertex, displacement create/sculpt, per-face
+	/// material/UV, entity place/edit + I/O add, grouping/visgroups, VMF/.map
+	/// import/export, native compile (Quick/Preview/Final), validation/Issue
+	/// list, lightmap bake, navmesh, skybox/cubemap. Seam contract:
+	/// tests/fixtures/hammer/hammer-ai-aisuitetools-apicatalog-map/SEAM.md.
+	/// </summary>
+	public static IReadOnlyList<string> MapVerbNames() => BuildScript.MapVerbNames;
+
+	/// <summary>The kernel API each map verb calls (primary backing type, full name).</summary>
+	static readonly IReadOnlyDictionary<string, string> MapVerbBackingTable = new Dictionary<string, string>( StringComparer.Ordinal )
+	{
+		// Brush create/edit/clip/vertex. Edit is MapTransform (move/rotate/
+		// scale/snap); MapBrush is the brush model it operates on.
+		["map_brush_create"] = "Effigy.Map.MapBrushPrimitives",
+		["map_brush_edit"] = "Effigy.MapTransform",
+		["map_brush_clip"] = "Effigy.MapClip",
+		["map_brush_vertex"] = "Effigy.MapVertexEdit",
+		// Displacement create/sculpt.
+		["map_displacement_create"] = "Effigy.Map.Displacement",
+		["map_displacement_sculpt"] = "Effigy.Map.DisplacementSculpt",
+		// Per-face material / UV.
+		["map_face_material"] = "Effigy.FaceMaterial",
+		["map_face_uv"] = "Effigy.FaceUv",
+		// Entity place / edit / I-O add.
+		["map_entity_place"] = "Effigy.MapEntities",
+		["map_entity_edit"] = "Effigy.MapEntities",
+		["map_entity_io_add"] = "Effigy.EntityIoList", // No bare EntityIo type; EntityIoList.Add is the I-O add API.
+		// Grouping / visgroups.
+		["map_group"] = "Effigy.Map.LinkedGroupSet", // No bare LinkedGroups type; LinkedGroupSet is the group store.
+		["map_visgroup"] = "Effigy.Map.VmfVisGroup",
+		// VMF / .map import / export (format=vmf|map; Map220Io is the .map side).
+		["map_import"] = "Effigy.Map.VmfIo",
+		["map_export"] = "Effigy.Map.VmfIo",
+		// Native compile (preset=quick|preview|final), validation, lightmap bake.
+		["map_compile"] = "Effigy.CompileRunner",
+		["map_validate"] = "Effigy.MapCheck",
+		["map_lightmap_bake"] = "Effigy.MapBakeExport",
+		// Honest gaps, not phantoms: no navmesh builder type exists in the
+		// kernel yet — PlaytestLoop.PreLaunchValidation is the contract that
+		// reports NAVMESH_MISSING ("no navmesh type has landed yet"), so the
+		// verb returns that named capability error instead of fake success.
+		// map_skybox covers cubemap too (cubemap=true); no cubemap builder
+		// type exists at all, so that half returns a named capability error
+		// until one lands. See SEAM.md.
+		["map_navmesh"] = "Effigy.Map.PlaytestLoop",
+		["map_skybox"] = "Effigy.Map.SkyboxPreview",
+	};
+	public static IReadOnlyDictionary<string, string> MapVerbBacking() => MapVerbBackingTable;
+
+	/// <summary>True when the named kernel type exists in this build (phantom-op check).</summary>
+	public static bool BackingTypeExists( string fullName ) => typeof( ApiCatalog ).Assembly.GetType( fullName, throwOnError: false ) is not null;
+
 	public static IReadOnlyList<string> PartNames() => PartLibrary.Names.ToList();
 
 	public static IReadOnlyList<string> BrushKinds() => Enum.GetNames( typeof( BrushKind ) ).ToList();
@@ -84,6 +144,21 @@ public static class ApiCatalog
 		sb.AppendLine();
 		foreach ( var verb in RigVerbNames() )
 			sb.AppendLine( $"- `{verb}`" );
+		sb.AppendLine();
+		sb.AppendLine( "## Map verbs" );
+		sb.AppendLine();
+		sb.AppendLine( "Native Hammer-style map operations, one verb per capability. " );
+		sb.AppendLine( "Each verb calls the kernel API in parentheses and returns a named " );
+		sb.AppendLine( "result or a named error, never a silent no-op. A verb whose backing " );
+		sb.AppendLine( "is a named capability error (navmesh; the cubemap half of map_skybox) " );
+		sb.AppendLine( "says so when called instead of faking success. The list is generated " );
+		sb.AppendLine( "from BuildScript.MapVerbNames, not hand-written." );
+		sb.AppendLine();
+		foreach ( var verb in MapVerbNames() )
+		{
+			var backing = MapVerbBacking().TryGetValue( verb, out var b ) ? b : "(no backing registered — phantom op, see aisuitetoolsmap tests)";
+			sb.AppendLine( $"- `{verb}` ({backing})" );
+		}
 		sb.AppendLine();
 		sb.AppendLine( "## Part library" );
 		sb.AppendLine();
@@ -142,6 +217,8 @@ public static class ApiCatalog
 		sb.AppendLine( "  `section`, `flex`, `clearance`, `match`, `remedy`, `remedy all`" );
 		sb.AppendLine( "- Export: `export …`, `export_cloth …`, `spritesheet …`, `attachment`, " );
 		sb.AppendLine( "  `hitbox`, `bodygroup`, `ragdoll`, `lod_chain`" );
+		sb.AppendLine( "- Maps: `map_brush_create …`, `map_entity_place …`, `map_validate`, " );
+		sb.AppendLine( "  `map_compile preset=quick` — full verb list under Map verbs above." );
 		return sb.ToString();
 	}
 
@@ -152,6 +229,8 @@ public static class ApiCatalog
 			["features"] = FeatureNames(),
 			["verbs"] = VerbNames(),
 			["rigVerbs"] = RigVerbNames(),
+			["mapVerbs"] = MapVerbNames(),
+			["mapVerbBacking"] = MapVerbBacking(),
 			["parts"] = PartNames(),
 			["brushKinds"] = BrushKinds(),
 			["slotLookPresets"] = SlotLookPresets(),
@@ -194,6 +273,8 @@ public static class ApiCatalog
 			if ( !Mentions( name ) ) missing.Add( "feature " + name );
 		foreach ( var verb in VerbNames() )
 			if ( !Mentions( verb ) ) missing.Add( "verb " + verb );
+		foreach ( var verb in MapVerbNames() )
+			if ( !Mentions( verb ) ) missing.Add( "map verb " + verb );
 		foreach ( var preset in SlotLookPresets() )
 			if ( !Mentions( preset ) ) missing.Add( "SlotLook preset " + preset );
 		foreach ( var template in RigTemplates() )

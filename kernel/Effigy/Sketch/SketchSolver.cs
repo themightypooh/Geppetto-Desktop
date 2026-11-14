@@ -33,6 +33,22 @@ public sealed class SolveResult
 	/// Harmless when consistent, and the reason a solve can be redundant and still converge; the
 	/// diagnosis a user wants when adding one more dimension does nothing.</summary>
 	public int RedundantConstraints;
+
+	/// <summary>Blue/black/red in one word: under-defined, fully defined, over-defined, or
+	/// conflicting. Computed from Converged, DegreesOfFreedom and RedundantConstraints, so it
+	/// can never disagree with them.</summary>
+	public SketchStatus Status;
+
+	/// <summary>Indices into <see cref="Sketch.Constraints"/> whose rule is still violated after
+	/// the solve — the diagnosis a conflicting sketch needs, naming the rules that disagree
+	/// instead of only reporting that something does.</summary>
+	public List<int> ViolatedConstraints = new();
+
+	/// <summary>Indices into <see cref="Sketch.Constraints"/> that repeat something already
+	/// implied: removing one leaves the rank — and the degrees of freedom — unchanged. The
+	/// arc-implicit rules are structural, not stored, so they are counted in
+	/// <see cref="RedundantConstraints"/> but never named here.</summary>
+	public List<int> RedundantConstraintIndices = new();
 }
 
 /// <summary>
@@ -84,14 +100,48 @@ public static class SketchSolver
 		var result = new SolveResult { Converged = true };
 
 		if ( sketch is null || sketch.Points.Count == 0 )
+		{
+			result.Status = SketchStatus.FullyDefined;
 			return result;
+		}
 
 		var constraints = new List<IConstraint>( sketch.Constraints.Count );
 
-		foreach ( var stored in sketch.Constraints )
+		// Which stored rule each built constraint came from, or -1 for the arc-implicit ones
+		// below. The diagnosis names stored rules, so the solver has to remember the mapping
+		// instead of letting the built list forget it.
+		var storedIndex = new List<int>( sketch.Constraints.Count );
+
+		// The pin IS a Fixed on the pinned point, so a user Fixed on that same point must not
+		// also be built: its Jacobian rows are all zero (the point has no free columns) and the
+		// diagnosis would count those two dead rows as redundancy, calling a perfectly defined
+		// sketch over-defined. The first such Fixed is absorbed into the pin instead — the pin is
+		// moved to the Fixed's target, so the rule's intent is honoured by the frame itself. A
+		// second Fixed on the pin is NOT absorbed: it is built, its rows stay zero, and if its
+		// target disagrees with the first it shows up as a violation, which is the conflict it is.
+		var pinAbsorbedFixed = false;
+
+		for ( var i = 0; i < sketch.Constraints.Count; i++ )
 		{
+			var stored = sketch.Constraints[i];
+
+			// A driven dimension reports, it does not drive: it moves no points, removes no
+			// freedom, and can never conflict. It is measured after the solve, not solved.
+			if ( stored.Driven )
+				continue;
+
+			if ( !pinAbsorbedFixed && stored.Kind == SketchConstraintKind.Fixed && stored.PointA == pinnedPoint )
+			{
+				sketch.Points[pinnedPoint] = new Vec2( stored.Value, stored.ValueY );
+				pinAbsorbedFixed = true;
+				continue;
+			}
+
 			if ( stored.Build( sketch ) is { } c )
+			{
 				constraints.Add( c );
+				storedIndex.Add( i );
+			}
 		}
 
 		// IMPLICIT, AND NOT OPTIONAL. An arc is a centre and two endpoints, and its radius is read
@@ -110,14 +160,37 @@ public static class SketchSolver
 		foreach ( var curve in sketch.Curves.OfType<SketchArc>() )
 		{
 			if ( curve.Center != curve.Start && curve.Center != curve.End )
+			{
 				constraints.Add( new EqualLengthConstraint( curve.Center, curve.Start, curve.Center, curve.End ) );
+				storedIndex.Add( -1 );
+			}
 		}
 
 		// Only the STORED constraints decide whether there is anything to do. A sketch with arcs and
 		// no constraints is one nobody has asked anything of, and solving it would move points that
 		// were placed deliberately.
-		if ( sketch.Constraints.Count == 0 || constraints.Count == 0 )
+		if ( sketch.Constraints.Count == 0 )
+		{
+			// No rules at all: every point but the pin is free, which the old code reported as
+			// 0 freedoms. Say the honest number instead.
+			result.DegreesOfFreedom = Math.Max( 0, ( sketch.Points.Count - 1 ) * 2 );
+			result.Status = result.DegreesOfFreedom == 0 ? SketchStatus.FullyDefined : SketchStatus.UnderDefined;
 			return result;
+		}
+
+		// Row offset of each built constraint in the residual vector, so the diagnosis can drop
+		// one rule's rows and ask whether the rank changed.
+		var rowStarts = new int[constraints.Count];
+
+		{
+			var at = 0;
+
+			for ( var i = 0; i < constraints.Count; i++ )
+			{
+				rowStarts[i] = at;
+				at += constraints[i].ResidualCount;
+			}
+		}
 
 		var nPts = sketch.Points.Count;
 
@@ -132,7 +205,10 @@ public static class SketchSolver
 		var n = free * 2;
 
 		if ( n == 0 )
+		{
+			result.Status = SketchStatus.FullyDefined;
 			return result;
+		}
 
 		var points = new Vec2[nPts];
 
@@ -199,7 +275,7 @@ public static class SketchSolver
 
 			if ( result.Residual < Tolerance )
 			{
-				Finish( sketch, points, J, rows, n, result, converged: true );
+				Finish( sketch, points, J, rows, n, result, converged: true, constraints, storedIndex, rowStarts );
 				return result;
 			}
 
@@ -243,7 +319,7 @@ public static class SketchSolver
 
 				if ( lambda >= LambdaMax )
 				{
-					Finish( sketch, points, J, rows, n, result, result.Residual < FloatFloor );
+					Finish( sketch, points, J, rows, n, result, result.Residual < FloatFloor, constraints, storedIndex, rowStarts );
 					return result;
 				}
 
@@ -286,17 +362,18 @@ public static class SketchSolver
 
 			if ( lambda >= LambdaMax )
 			{
-				Finish( sketch, points, J, rows, n, result, result.Residual < FloatFloor );
+				Finish( sketch, points, J, rows, n, result, result.Residual < FloatFloor, constraints, storedIndex, rowStarts );
 				return result;
 			}
 		}
 
-		Finish( sketch, points, J, rows, n, result, result.Residual < FloatFloor );
+		Finish( sketch, points, J, rows, n, result, result.Residual < FloatFloor, constraints, storedIndex, rowStarts );
 		return result;
 	}
 
 	/// <summary>Write the solved positions back and fill in the diagnosis.</summary>
-	static void Finish( Sketch sketch, Vec2[] points, double[] J, int rows, int n, SolveResult result, bool converged )
+	static void Finish( Sketch sketch, Vec2[] points, double[] J, int rows, int n, SolveResult result, bool converged,
+		List<IConstraint> driving, List<int> drivingStored, int[] rowStarts )
 	{
 		for ( var i = 0; i < points.Length; i++ )
 			sketch.Points[i] = points[i];
@@ -306,6 +383,70 @@ public static class SketchSolver
 		var rank = Rank( J, rows, n );
 		result.DegreesOfFreedom = n - rank;
 		result.RedundantConstraints = rows - rank;
+
+		// Which stored rules are still violated, and which repeat something already implied.
+		// Both are measured at the final positions, not from the last iteration's J: a rule
+		// that only looks violated because the solver stopped early would be a false accusation.
+		var widest = 0;
+
+		foreach ( var c in driving )
+			widest = Math.Max( widest, c.ResidualCount );
+
+		var rowBuf = new ConstraintResult[Math.Max( widest, 1 )];
+
+		for ( var i = 0; i < driving.Count; i++ )
+		{
+			var stored = drivingStored[i];
+
+			if ( stored < 0 )
+				continue;
+
+			var needed = driving[i].ResidualCount;
+			driving[i].Evaluate( points, rowBuf.AsSpan( 0, needed ) );
+
+			var worst = 0.0;
+
+			for ( var r = 0; r < needed; r++ )
+				worst = Math.Max( worst, Math.Abs( rowBuf[r].Residual ) );
+
+			// A residual past the float floor is a rule the solve could not satisfy, not
+			// rounding: the solver's own convergence test is 1e-6 and the floor is 1e-4.
+			if ( worst > FloatFloor )
+				result.ViolatedConstraints.Add( stored );
+
+			// Redundant when the other rules already imply this one: its rows leave the rank.
+			// A rule the solve could not satisfy is excluded on purpose: it is fighting the
+			// others, not implied by them, and naming it redundant as well as violated would
+			// say two contradictory things about the same rule.
+			if ( worst <= FloatFloor && needed > 0 && RankWithoutRows( J, rows, n, rowStarts[i], needed ) == rank )
+				result.RedundantConstraintIndices.Add( stored );
+		}
+
+		result.Status = !converged ? SketchStatus.Conflicting
+			: result.RedundantConstraints > 0 ? SketchStatus.OverDefined
+			: result.DegreesOfFreedom == 0 ? SketchStatus.FullyDefined
+			: SketchStatus.UnderDefined;
+	}
+
+	/// <summary>Rank of J with one constraint's rows removed, for the redundancy test.</summary>
+	static int RankWithoutRows( double[] J, int rows, int n, int skipStart, int skipCount )
+	{
+		if ( rows - skipCount <= 0 )
+			return 0;
+
+		var kept = new double[( rows - skipCount ) * n];
+		var at = 0;
+
+		for ( var r = 0; r < rows; r++ )
+		{
+			if ( r >= skipStart && r < skipStart + skipCount )
+				continue;
+
+			Array.Copy( J, r * n, kept, at * n, n );
+			at++;
+		}
+
+		return Rank( kept, rows - skipCount, n );
 	}
 
 	/// <summary>

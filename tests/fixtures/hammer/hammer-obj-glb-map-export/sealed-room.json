@@ -1,0 +1,83 @@
+{
+  "name": "sealed-room",
+  "notes": "256x256x128 sealed room: 6 box brushes (floor, ceiling, 4 walls), each with ONE textured inner face and nodraw on the other five; one power-2 displacement dome on the floor. Mirrors MapBakeExportTests.BuildSealedRoom exactly.",
+  "brushes": [
+    {
+      "name": "floor",
+      "faces": [
+        { "normal": [-1, 0, 0], "distance": 128, "faceMaterial": { "material": "tools/toolsnodraw" } },
+        { "normal": [1, 0, 0], "distance": 128, "faceMaterial": { "material": "tools/toolsnodraw" } },
+        { "normal": [0, -1, 0], "distance": 128, "faceMaterial": { "material": "tools/toolsnodraw" } },
+        { "normal": [0, 1, 0], "distance": 128, "faceMaterial": { "material": "tools/toolsnodraw" } },
+        { "normal": [0, 0, -1], "distance": 16, "faceMaterial": { "material": "tools/toolsnodraw" } },
+        { "normal": [0, 0, 1], "distance": 0, "faceMaterial": { "material": "concrete/floor001" } }
+      ]
+    },
+    {
+      "name": "ceiling",
+      "faces": [
+        { "normal": [-1, 0, 0], "distance": 128, "faceMaterial": { "material": "tools/toolsnodraw" } },
+        { "normal": [1, 0, 0], "distance": 128, "faceMaterial": { "material": "tools/toolsnodraw" } },
+        { "normal": [0, -1, 0], "distance": 128, "faceMaterial": { "material": "tools/toolsnodraw" } },
+        { "normal": [0, 1, 0], "distance": 128, "faceMaterial": { "material": "tools/toolsnodraw" } },
+        { "normal": [0, 0, -1], "distance": -128, "faceMaterial": { "material": "plaster/ceiling001" } },
+        { "normal": [0, 0, 1], "distance": 144, "faceMaterial": { "material": "tools/toolsnodraw" } }
+      ]
+    },
+    {
+      "name": "wall-north",
+      "faces": [
+        { "normal": [-1, 0, 0], "distance": 128, "faceMaterial": { "material": "tools/toolsnodraw" } },
+        { "normal": [1, 0, 0], "distance": 128, "faceMaterial": { "material": "tools/toolsnodraw" } },
+        { "normal": [0, -1, 0], "distance": -112, "faceMaterial": { "material": "brick/brickwall001" } },
+        { "normal": [0, 1, 0], "distance": 128, "faceMaterial": { "material": "tools/toolsnodraw" } },
+        { "normal": [0, 0, -1], "distance": 0, "faceMaterial": { "material": "tools/toolsnodraw" } },
+        { "normal": [0, 0, 1], "distance": 128, "faceMaterial": { "material": "tools/toolsnodraw" } }
+      ]
+    },
+    {
+      "name": "wall-south",
+      "faces": [
+        { "normal": [-1, 0, 0], "distance": 128, "faceMaterial": { "material": "tools/toolsnodraw" } },
+        { "normal": [1, 0, 0], "distance": 128, "faceMaterial": { "material": "tools/toolsnodraw" } },
+        { "normal": [0, -1, 0], "distance": 128, "faceMaterial": { "material": "tools/toolsnodraw" } },
+        { "normal": [0, 1, 0], "distance": -112, "faceMaterial": { "material": "brick/brickwall001" } },
+        { "normal": [0, 0, -1], "distance": 0, "faceMaterial": { "material": "tools/toolsnodraw" } },
+        { "normal": [0, 0, 1], "distance": 128, "faceMaterial": { "material": "tools/toolsnodraw" } }
+      ]
+    },
+    {
+      "name": "wall-west",
+      "faces": [
+        { "normal": [-1, 0, 0], "distance": 128, "faceMaterial": { "material": "tools/toolsnodraw" } },
+        { "normal": [1, 0, 0], "distance": -112, "faceMaterial": { "material": "brick/brickwall001" } },
+        { "normal": [0, -1, 0], "distance": 128, "faceMaterial": { "material": "tools/toolsnodraw" } },
+        { "normal": [0, 1, 0], "distance": 128, "faceMaterial": { "material": "tools/toolsnodraw" } },
+        { "normal": [0, 0, -1], "distance": 0, "faceMaterial": { "material": "tools/toolsnodraw" } },
+        { "normal": [0, 0, 1], "distance": 128, "faceMaterial": { "material": "tools/toolsnodraw" } }
+      ]
+    },
+    {
+      "name": "wall-east",
+      "faces": [
+        { "normal": [-1, 0, 0], "distance": -112, "faceMaterial": { "material": "brick/brickwall001" } },
+        { "normal": [1, 0, 0], "distance": 128, "faceMaterial": { "material": "tools/toolsnodraw" } },
+        { "normal": [0, -1, 0], "distance": 128, "faceMaterial": { "material": "tools/toolsnodraw" } },
+        { "normal": [0, 1, 0], "distance": 128, "faceMaterial": { "material": "tools/toolsnodraw" } },
+        { "normal": [0, 0, -1], "distance": 0, "faceMaterial": { "material": "tools/toolsnodraw" } },
+        { "normal": [0, 0, 1], "distance": 128, "faceMaterial": { "material": "tools/toolsnodraw" } }
+      ]
+    }
+  ],
+  "displacements": [
+    {
+      "name": "floor-patch",
+      "corners": [[-64, -64, 1], [64, -64, 1], [64, 64, 1], [-64, 64, 1]],
+      "power": 2,
+      "offsets": [0, 0, 0, 0, 0, 0, 1, 2, 1, 0, 0, 2, 4, 2, 0, 0, 1, 2, 1, 0, 0, 0, 0, 0, 0],
+      "alphas": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "materialA": { "material": "nature/grass001" },
+      "materialB": { "material": "nature/dirt001" }
+    }
+  ]
+}

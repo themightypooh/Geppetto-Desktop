@@ -1,0 +1,7 @@
+{
+  "map": "leak-room",
+  "note": "Same room, +X wall split into two brushes leaving a 1-unit gap at y in [-0.5, 0.5]. Exactly one Leak (Error), no UnsealedMap.",
+  "expected": [
+    { "kind": "Leak", "severity": "Error", "brushId": -1, "entityId": -1 }
+  ]
+}

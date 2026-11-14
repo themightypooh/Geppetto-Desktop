@@ -134,4 +134,22 @@ public static class AnimCallers
 
 	public static int OptI( Dictionary<string, string> opts, string key, int fallback )
 		=> opts.TryGetValue( key, out var v ) && int.TryParse( v, out var i ) ? i : fallback;
+
+	/// <summary>
+	/// Bake an NLA timeline into a plain clip: the kernel's NlaTimeline.Bake
+	/// does the work (base + strips, fades, loop, masks); this is the
+	/// bot-command entry point for it, the same way BuildGaitClip and
+	/// BuildBlendClip are the entries for the gait and blend builders. The
+	/// timeline's actions are never rewritten - the bake samples them.
+	/// There is no session strip store on Desktop yet, so the caller builds
+	/// the NlaTimeline (base + strips) and hands it here; strip management
+	/// itself is a follow-up.
+	/// </summary>
+	public static RigAnimFile BuildNlaClip( NlaTimeline timeline, int startFrame, int endFrame )
+	{
+		if ( timeline is null ) throw new ArgumentNullException( nameof( timeline ) );
+		if ( endFrame < startFrame ) throw new ArgumentException( "NLA bake needs endFrame at or after startFrame." );
+		return timeline.Bake( startFrame, endFrame );
+	}
+
 }

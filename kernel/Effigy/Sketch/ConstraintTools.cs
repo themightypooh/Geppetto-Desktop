@@ -101,7 +101,7 @@ public sealed class ConstraintMarker
 }
 
 /// <summary>What happened when a constraint was applied.</summary>
-public sealed class ApplyResult
+public sealed class ConstraintApplyResult
 {
 	/// <summary>It went on and the sketch still solves.</summary>
 	public bool Applied;
@@ -432,13 +432,13 @@ public static class ConstraintTools
 	/// the user just selected, so the sketch resolves around their attention rather than around
 	/// point 0, which is wherever they happened to click first.
 	/// </summary>
-	public static ApplyResult ApplyAndSolve( Sketch sketch, ConstraintOffer offer, int pinnedPoint = 0 )
+	public static ConstraintApplyResult ApplyAndSolve( Sketch sketch, ConstraintOffer offer, int pinnedPoint = 0 )
 	{
 		if ( sketch is null || offer?.Constraint is null )
-			return new ApplyResult { Message = "Nothing to apply." };
+			return new ConstraintApplyResult { Message = "Nothing to apply." };
 
 		if ( Has( sketch, offer.Constraint ) )
-			return new ApplyResult { Message = $"The sketch already says {offer.Label.ToLowerInvariant()}." };
+			return new ConstraintApplyResult { Message = $"The sketch already says {offer.Label.ToLowerInvariant()}." };
 
 		var before = new List<Vec2>( sketch.Points );
 
@@ -449,14 +449,14 @@ public static class ConstraintTools
 		var solve = SketchSolver.Solve( sketch, pinnedPoint );
 
 		if ( solve.Converged )
-			return new ApplyResult { Applied = true, Solve = solve };
+			return new ConstraintApplyResult { Applied = true, Solve = solve };
 
 		sketch.Constraints.Remove( offer.Constraint );
 
 		for ( var i = 0; i < sketch.Points.Count && i < before.Count; i++ )
 			sketch.Points[i] = before[i];
 
-		return new ApplyResult
+		return new ConstraintApplyResult
 		{
 			Solve = solve,
 			Message = $"{offer.Label} could not be satisfied — it contradicts something already on the sketch.",
@@ -549,6 +549,104 @@ public static class ConstraintTools
 
 		return false;
 	}
+
+	/// <summary>
+	/// Auto-inference, headless: read what the geometry already says and write it down as rules.
+	///
+	/// A line drawn near-horizontal gets a Horizontal, near-vertical a Vertical, and two curve
+	/// ends sitting on the same spot get a Coincident — the same rules the editor's snap
+	/// inference adds while drawing, available to a script, an import, or a test without a
+	/// viewport.
+	///
+	/// ONLY RULES THE GEOMETRY ALREADY SATISFIES, within tolerance. An inference that moved
+	/// points would be a solve in disguise, and a solve that fights the drawing is how sketches
+	/// acquire conflicts nobody asked for. A rule is added only when its residual is already
+	/// inside the tolerance, so inferring can never break a sketch that solved, and a second
+	/// pass adds nothing (see <see cref="Has"/>).
+	///
+	/// Construction geometry is skipped: a construction line is a ruler, not a part, and
+	/// inferring rules onto it would pin the sketch to its own scaffolding. Equal length,
+	/// parallel and tangent are deliberately NOT inferred — two lines the same length by
+	/// accident is not intent, and a wrong guess there is worse than no guess.
+	/// </summary>
+	public static List<SketchConstraint> InferConstraints( Sketch sketch, double angleToleranceDegrees = 1.0, double coincidentTolerance = 1e-4 )
+	{
+		var added = new List<SketchConstraint>();
+
+		if ( sketch is null )
+			return added;
+
+		var slope = Math.Tan( angleToleranceDegrees * Math.PI / 180.0 );
+
+		bool TryAdd( SketchConstraint candidate )
+		{
+			if ( Has( sketch, candidate ) )
+				return false;
+
+			sketch.Constraints.Add( candidate );
+			added.Add( candidate );
+			return true;
+		}
+
+		// Near-axis lines: horizontal or vertical, whichever the line is closer to.
+		foreach ( var line in sketch.Curves.OfType<SketchLine>() )
+		{
+			if ( line.Construction )
+				continue;
+
+			if ( !ValidPoint( sketch, line.Start ) || !ValidPoint( sketch, line.End ) )
+				continue;
+
+			var a = sketch.Points[line.Start];
+			var b = sketch.Points[line.End];
+			var dx = (double)b.x - a.x;
+			var dy = (double)b.y - a.y;
+
+			if ( Math.Sqrt( dx * dx + dy * dy ) < coincidentTolerance )
+				continue;
+
+			if ( Math.Abs( dy ) <= Math.Abs( dx ) * slope )
+				TryAdd( new SketchConstraint( SketchConstraintKind.Horizontal, line.Start, line.End ) );
+			else if ( Math.Abs( dx ) <= Math.Abs( dy ) * slope )
+				TryAdd( new SketchConstraint( SketchConstraintKind.Vertical, line.Start, line.End ) );
+		}
+
+		// Ends that coincide: two curves drawn to the same spot are one joint, not two points
+		// that happen to agree. Only distinct indices — a polygon already shares its corners.
+		var ends = new List<int>();
+
+		foreach ( var curve in sketch.Curves )
+		{
+			if ( curve.Construction )
+				continue;
+
+			foreach ( var point in curve.PointRefs )
+			{
+				if ( ValidPoint( sketch, point ) && !ends.Contains( point ) )
+					ends.Add( point );
+			}
+		}
+
+		for ( var i = 0; i < ends.Count; i++ )
+		{
+			for ( var j = i + 1; j < ends.Count; j++ )
+			{
+				var a = sketch.Points[ends[i]];
+				var b = sketch.Points[ends[j]];
+				var dx = (double)a.x - b.x;
+				var dy = (double)a.y - b.y;
+
+				if ( Math.Sqrt( dx * dx + dy * dy ) > coincidentTolerance )
+					continue;
+
+				TryAdd( new SketchConstraint( SketchConstraintKind.Coincident, ends[i], ends[j] ) );
+			}
+		}
+
+		return added;
+	}
+
+	static bool ValidPoint( Sketch sketch, int point ) => point >= 0 && point < sketch.Points.Count;
 
 
 	// --- marks on the sketch -----------------------------------------------------------------

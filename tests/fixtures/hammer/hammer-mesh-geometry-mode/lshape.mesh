@@ -1,0 +1,23 @@
+# L-prism, footprint (0,0) (4,0) (4,2) (2,2) (2,4) (0,4), z 0..2. Footprint area 12, volume 24.
+# Concave: the reflex corners (2,2,0) and (2,2,2) are not hull vertices.
+# Exact convex split: x<=2 box (2x4x2 = 16) + x>=2 box (2x2x2 = 8).
+v 0 0 0
+v 4 0 0
+v 4 2 0
+v 2 2 0
+v 2 4 0
+v 0 4 0
+v 0 0 2
+v 4 0 2
+v 4 2 2
+v 2 2 2
+v 2 4 2
+v 0 4 2
+f 0 5 4 3 2 1
+f 6 7 8 9 10 11
+f 0 1 7 6
+f 1 2 8 7
+f 2 3 9 8
+f 3 4 10 9
+f 4 5 11 10
+f 5 0 6 11

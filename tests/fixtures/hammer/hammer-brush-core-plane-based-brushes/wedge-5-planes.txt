@@ -1,0 +1,8 @@
+# Triangular prism: triangle (-1,0), (1,0), (0,2) in XZ, extruded y in [-1, 1].
+# Slant normals are (-2,0,1)/sqrt(5) and (2,0,1)/sqrt(5), distance 2/sqrt(5).
+# Valid: volume 4, centroid (0, 0, 2/3).
+face 0 0 -1 0 brick/brickwall 0 0 1 1 0 16 0
+face -0.8944272 0 0.4472136 0.8944272 brick/brickwall 0 0 1 1 0 16 0
+face 0.8944272 0 0.4472136 0.8944272 brick/brickwall 0 0 1 1 0 16 0
+face 0 -1 0 1 brick/brickwall 0 0 1 1 0 16 0
+face 0 1 0 1 brick/brickwall 0 0 1 1 0 16 0

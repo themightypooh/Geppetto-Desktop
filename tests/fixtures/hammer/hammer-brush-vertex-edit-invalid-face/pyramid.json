@@ -1,0 +1,1 @@
+{"expected":{"invalid_faces":[],"valid":true,"volume":2.666667},"faces":[[0,3,2,1],[0,1,4],[1,2,4],[2,3,4],[3,0,4]],"materials":["default","default","default","default","default"],"name":"pyramid","vertices":[[-1,-1,0],[1,-1,0],[1,1,0],[-1,1,0],[0,0,2]]}

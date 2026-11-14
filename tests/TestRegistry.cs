@@ -91,6 +91,7 @@ internal static class DesktopTestHost
             AiJudgeBackstopTests.Register( registry, settings );
             AiStandaloneJudgeTests.Register( registry, settings );
             TopologyTests.Register( registry, settings );
+            SculptTopologyTests.Register( registry, settings );
             PromptEngineeringTests.Register( registry, settings );
             AiBuilderHealerTests.Register( registry, settings );
             SizeTests.Register( registry, settings );
@@ -101,13 +102,17 @@ internal static class DesktopTestHost
             PhaseFiveTests.Register( registry, settings );
             StepMutationSafetyTests.Register( registry, settings );
             AiLiveTests.Register( registry, settings );
+            ViewportRepairTests.Register( registry, settings );
             ViewportCorrectionTests.Register( registry, settings );
             OpenScriptStepTests.Register( registry, settings );
             HarnessTests.Register( registry, settings );
             AssetPathTests.Register( registry, settings );
             DocumentSessionTests.Register( registry, settings );
             EditHistoryTests.Register( registry, settings );
+            AssemblyPartTests.Register( registry, settings );
+            PluginSdkTests.Register( registry, settings );
             ClipEditTests.Register( registry, settings );
+            ClipTimeRemapTests.Register( registry, settings );
             ClipKeyEditorTests.Register( registry, settings );
             DocumentSaveTests.Register( registry, settings );
             GizmoMathTests.Register( registry, settings );
@@ -124,6 +129,7 @@ internal static class DesktopTestHost
             DependencyWatcherTests.Register( registry, settings );
             PreferencesAutosaveTests.Register( registry, settings );
             FbxDmxExportTests.Register( registry, settings );
+            MapExportRoundtripTests.Register( registry, settings ); // TEMP hammer-76, revert after run
             ClipBlendTests.Register( registry, settings );
             TimelineEventTests.Register( registry, settings );
             DistributionInventoryTests.Register( registry, settings );
@@ -144,7 +150,7 @@ internal static class DesktopTestHost
             PolypaintTests.Register( registry, settings );
             UvEditTests.Register( registry, settings );
             UvSeamTests.Register( registry, settings );
-            DyntopoTests.Register( registry, settings );
+            DynTopoTests.Register( registry, settings );
             PackagingTests.Register( registry, settings );
             InstalledArtifactSmokeTests.Register( registry, settings );
             MaterialGpuTests.Register( registry, settings );
@@ -178,6 +184,9 @@ internal static class DesktopTestHost
             AutoWeightTests.Register( registry, settings );
             SkinBinderAutoBiharmonicTests.Register( registry, settings );
             WeightPaintTests.Register( registry, settings );
+            MeshEditV5BakeTests.Register( registry, settings );
+            ProjectionPaintTests.Register( registry, settings );
+            DeformationExportTests.Register( registry, settings );
             SkinBinderOptionsTests.Register( registry, settings );
             ControllerFixTests.Register( registry, settings );
             BenchTests.Register( registry, settings );
@@ -186,6 +195,52 @@ internal static class DesktopTestHost
             FaceBoundaryEdgeTests.Register( registry, settings );
             OverlayDepthTests.Register( registry, settings );
             ControlRegistryTests.Register( registry, settings );
+            SheetMetalTests.Register( registry, settings );
+            ConfigurationFeatureTests.Register( registry, settings );
+            LineworkCommandTests.Register( registry, settings );
+            GeoNodesCommandTests.Register( registry, settings );
+            FeatherPlumageTests.Register( registry, settings );
+            ScaleCoatTests.Register( registry, settings );
+            WoundCommandTests.Register( registry, settings );
+            AutoRigCommandTests.Register( registry, settings );
+            SkinDetailAutoFacsTests.Register( registry, settings );
+            InsertMeshTests.Register( registry, settings );
+            BrepSolidTests.Register( registry, settings );
+            GameClipPipelineTests.Register( registry, settings );
+            McpServerTests.Register( registry, settings );
+            ManifoldBooleanTests.Register( registry, settings );
+            PaintChannelsTests.Register( registry, settings );
+            RigMetadataParityTests.Register( registry, settings );
+            ManualUvIslandTests.Register( registry, settings );
+            GlbRigExportTests.Register( registry, settings );
+            MikkTangentTests.Register( registry, settings );
+            BakerTests.Register( registry, settings );
+            AnimTriadTests.Register( registry, settings );
+            UsdStageTests.Register( registry, settings );
+            MaterialXTests.Register( registry, settings );
+            AlembicCacheTests.Register( registry, settings );
+            MocapRetargetTests.Register( registry, settings );
+            IkFkWeightPaintTests.Register( registry, settings );
+            SketchParametricTests.Register( registry, settings );
+            ProxyPoseRigGradeTests.Register( registry, settings );
+            ProxyPoseRigTests.Register( registry, settings );
+            McpResourcesTests.Register( registry, settings );
+            AssemblyMateTests.Register( registry, settings );
+            CharacterDnaTests.Register( registry, settings );
+            McpSafetyTests.Register( registry, settings );
+        SafetyGatesMapTests.Register( registry, settings ); // TEMP hammer-68, revert after run
+            KernelParityTests.Register( registry, settings );
+            McpModelingToolsTests.Register( registry, settings );
+            McpMapToolsTests.Register( registry, settings );
+            OpsCliTests.Register( registry, settings );
+            OpsCliMapTests.Register( registry, settings );
+            GateCheckTests.Register( registry, settings ); // LV1 grok-bot
+            ViewportPerfTests.Register( registry, settings );
+            ViewportPerfHostTests.Register( registry, settings );
+            DynTopoBrushTests.Register( registry, settings );
+            DyntopoServiceTests.Register( registry, settings );
+            AreaportalOccluderTests.Register( registry, settings );
+            NavMeshGenTests.Register( registry, settings );
             if ( settings.List )
             {
                 foreach ( var test in registry.Cases ) Console.WriteLine( $"{test.Group}/{test.Name} fixture={(test.Group == "survey" ? settings.SurveyPath : "synthetic")}" );

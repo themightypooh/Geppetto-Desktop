@@ -918,6 +918,63 @@ public static class SketchEdit
 	/// The copies are added to the sketch AND returned, the same way <see cref="Offset"/> hands
 	/// back what it made, so a caller can pick the new curves out without diffing the list.
 	/// </summary>
+	public static bool LinearPattern( Sketch sketch, IReadOnlyList<SketchCurve> curves, IReadOnlyList<int> points,
+		Vec2 step, int count, out List<SketchCurve> created, out string error ) =>
+		Pattern( sketch, curves, points, count, (p, k) => p + step * k,
+			step.Length > Eps, "Pattern spacing must be greater than zero.", out created, out error );
+
+	public static bool CircularPattern( Sketch sketch, IReadOnlyList<SketchCurve> curves, IReadOnlyList<int> points,
+		Vec2 centre, float totalDegrees, int count, out List<SketchCurve> created, out string error )
+	{
+		var full = MathF.Abs( MathF.Abs( totalDegrees ) - 360f ) < 1e-4f;
+		return Pattern( sketch, curves, points, count, (p, k) =>
+		{
+			var a = totalDegrees * MathF.PI / 180f * k / (full ? count : count - 1);
+			var d = p - centre;
+			return centre + new Vec2( d.x * MathF.Cos( a ) - d.y * MathF.Sin( a ), d.x * MathF.Sin( a ) + d.y * MathF.Cos( a ) );
+		}, float.IsFinite( totalDegrees ) && MathF.Abs( totalDegrees ) > Eps && MathF.Abs( totalDegrees ) <= 360f,
+			"Pattern angle must be nonzero and no more than 360 degrees.", out created, out error );
+	}
+
+	static bool Pattern( Sketch sketch, IReadOnlyList<SketchCurve> curves, IReadOnlyList<int> points,
+		int count, Func<Vec2, int, Vec2> transform, bool valid, string invalid,
+		out List<SketchCurve> created, out string error )
+	{
+		created = new(); error = null;
+		if ( count < 2 || count > 1000 ) { error = "Pattern count must be between 2 and 1000, including the original."; return false; }
+		if ( !valid ) { error = invalid; return false; }
+		var source = curves.Distinct().ToList();
+		if ( source.Any( c => !sketch.Curves.Contains( c ) || c is not (SketchLine or SketchArc or SketchCircle or SketchEllipse or SketchSpline) ) )
+		{ error = "Pattern selection contains an unsupported curve or a curve outside this sketch."; return false; }
+		if ( points.Any( p => p < 0 || p >= sketch.Points.Count ) ) { error = "Pattern selection contains a missing point."; return false; }
+		if ( source.Count == 0 && points.Count == 0 ) { error = "Select curves or points before making a pattern."; return false; }
+		for ( int k = 1; k < count; k++ )
+		{
+			var map = new Dictionary<int, int>();
+			int Point( int i )
+			{
+				if ( !map.TryGetValue( i, out var id ) ) map[i] = id = sketch.AddPoint( transform( sketch.Points[i], k ) );
+				return id;
+			}
+			foreach ( var p in points ) Point( p );
+			foreach ( var c in source )
+			{
+				SketchCurve copy = c switch
+				{
+					SketchLine l => new SketchLine( Point( l.Start ), Point( l.End ) ),
+					SketchArc a => new SketchArc( Point( a.Center ), Point( a.Start ), Point( a.End ), a.Clockwise ),
+					SketchCircle r => new SketchCircle( Point( r.Center ), r.Radius ),
+					SketchEllipse e => new SketchEllipse( Point( e.Center ), Point( e.MajorPoint ), e.MinorRadius ),
+					SketchSpline s => new SketchSpline( s.Points.Select( Point ).ToList(), s.Closed ),
+					_ => throw new InvalidOperationException( "Unsupported pattern curve." )
+				};
+				copy.Construction = c.Construction;
+				created.Add( sketch.Add( copy ) );
+			}
+		}
+		return true;
+	}
+
 	public static bool Mirror( Sketch sketch, IReadOnlyList<SketchCurve> curves, IReadOnlyList<int> points,
 		SketchLine axis, out List<SketchCurve> created, out string error )
 	{

@@ -45,6 +45,60 @@ dotnet publish "${PROJECT_DIR}/Marionette.Desktop.csproj" \
 # Ensure permissions on published native executable
 chmod +x "${STAGE_DIR}/marionette-desktop"
 
+echo "1b. Staging optional native libraries (explicit availability, no fake success)..."
+# Manifold boolean backend: the only hand-staged native in the tree.
+# packaging/native/linux-x86_64/libgmmanifold.so is the Mobile-built Linux x86_64
+# binary, copied verbatim (see packaging/MANIFOLD.md). It MUST land in
+# runtimes/linux-x64/native/ next to the published binary: that is the second
+# search path of ManifoldBoolean.Candidates() and the destination
+# DistributionInventory records as bundled. A sha256 mismatch fails the
+# package rather than shipping an unverified native.
+MANIFOLD_SRC="${SCRIPT_DIR}/native/linux-x86_64/libgmmanifold.so"
+MANIFOLD_SHA_EXPECTED="4d2a0c01ff59b00c6d75c5b258b74f841a7fa86d3744abcae04c7d259e6557fc"
+MANIFOLD_STATUS="absent"
+MANIFOLD_SHA=""
+MANIFOLD_SHA_DOC="$(sed -nE 's/.*sha256 `([0-9a-f]{64})`.*/\1/p' "${SCRIPT_DIR}/MANIFOLD.md" | head -n 1)"
+if [[ -n "${MANIFOLD_SHA_DOC}" && "${MANIFOLD_SHA_DOC}" != "${MANIFOLD_SHA_EXPECTED}" ]]; then
+    echo "ERROR: packaging/MANIFOLD.md records sha256 ${MANIFOLD_SHA_DOC} but package-linux.sh expects ${MANIFOLD_SHA_EXPECTED}. Update both records together when the native is rebuilt." >&2
+    exit 1
+fi
+if [[ -f "${MANIFOLD_SRC}" ]]; then
+    MANIFOLD_SHA="$(sha256sum "${MANIFOLD_SRC}" | awk '{print $1}')"
+    if [[ "${MANIFOLD_SHA}" != "${MANIFOLD_SHA_EXPECTED}" ]]; then
+        echo "ERROR: libgmmanifold.so sha256 mismatch: got ${MANIFOLD_SHA}, expected ${MANIFOLD_SHA_EXPECTED} (see packaging/MANIFOLD.md). Refusing to ship an unverified native." >&2
+        exit 1
+    fi
+    mkdir -p "${STAGE_DIR}/runtimes/linux-x64/native"
+    cp "${MANIFOLD_SRC}" "${STAGE_DIR}/runtimes/linux-x64/native/libgmmanifold.so"
+    chmod +x "${STAGE_DIR}/runtimes/linux-x64/native/libgmmanifold.so"
+    MANIFOLD_STATUS="bundled"
+    echo "  Manifold: bundled libgmmanifold.so (sha256 ${MANIFOLD_SHA})"
+else
+    echo "  WARNING: ${MANIFOLD_SRC} not present; package ships WITHOUT Manifold. Boolean operations fall back to the built-in ExactMeshBoolean and ManifoldBoolean.LastRoute records 'built-in (library not installed)' — never fake success." >&2
+fi
+
+# OpenVDB remesh / Instant Meshes retopo backends: no native is staged yet
+# (ticket integrate-openvdb-remesh-and-instant-meshes-retopo-backends is still
+# in flight). Nothing is copied and nothing is claimed. When that ticket lands
+# a native, stage it here the same way as Manifold (explicit soname + recorded
+# sha256 + a DistributionInventory entry) — never by globbing the directory.
+OPENVDB_STATUS="not-staged"
+if compgen -G "${SCRIPT_DIR}/native/linux-x86_64/*vdb*" > /dev/null; then
+    echo "  WARNING: an OpenVDB-looking native is staged under packaging/native/ but this script has no explicit handling for it — it is NOT copied into the package. Add the soname + sha256 here first." >&2
+    OPENVDB_STATUS="unstaged-present"
+fi
+
+# MikkTSpace tangents: pure managed C# (core/MikkTangents.cs) — there is no
+# native library to bundle. Record whether Program.Main wires the provider
+# (the integrator's one-liner next to SoftFail.HookKernel()); unwired means
+# NormalBake falls back to its built-in tangent path.
+MIKK_STATUS="managed (no native library)"
+if grep -q "MikkTangents.Install" "${PROJECT_DIR}/Program.cs" 2>/dev/null; then
+    MIKK_WIRED="true"
+else
+    MIKK_WIRED="false"
+fi
+
 echo "2. Generating launcher script (run.sh)..."
 cat << 'EOF' > "${STAGE_DIR}/run.sh"
 #!/usr/bin/env bash
@@ -260,6 +314,13 @@ To view CLI command line options:
 ```sh
 ./run.sh --help
 ```
+
+CPU-only work (no GPU needed) — create/edit/save/export through bot commands:
+```sh
+./run.sh --script build.txt --live --out out-dir
+./run.sh --list-bones --model sample/sample-rig.fbx
+```
+See CAPABILITIES.md for the native-library status recorded at package time.
 EOF
 
 cat << 'EOF' > "${STAGE_DIR}/NOTICES.md"
@@ -282,12 +343,17 @@ This package includes third-party software components licensed under permissive 
    - License: zlib/libpng License
    - https://www.glfw.org/
 
-4. .NET Runtime & Base Class Libraries
+4. Manifold mesh-boolean library (libgmmanifold.so)
+   - Copyright (c) elalish/manifold contributors, v3.5.4, plus the Geppetto gm_manifold.cpp shim
+   - License: Apache License 2.0
+   - https://github.com/elalish/manifold
+
+5. .NET Runtime & Base Class Libraries
    - Copyright (c) .NET Foundation and Contributors
    - License: MIT License
    - https://github.com/dotnet/runtime
 
-5. Effigy Kernel & Marionette Desktop
+6. Effigy Kernel & Marionette Desktop
    - Copyright (c) Geppetto Project Contributors
    - License: Project-Owned Internal Software
 EOF
@@ -303,6 +369,34 @@ cat << 'EOF' > "${STAGE_DIR}/CAPABILITIES.md"
 - Animation: RigAnim keyframe tracks (.riganim) with bone posing and timeline events
 - Project System: Portable DesktopProject manifests (.geppetto-project.json)
 - Runtime Independence: 100% self-contained; zero dependency on .NET SDK or host development tools
+- Native libraries: see build-info.json `nativeLibraries` for the exact status recorded at package time.
+  - Manifold (`libgmmanifold.so`, optional, bundled in `runtimes/linux-x64/native/` when present): mesh booleans via the native backend. When absent the kernel falls back to the built-in ExactMeshBoolean and `ManifoldBoolean.LastRoute` records `built-in (library not installed)` — booleans still work, without the native route.
+  - OpenVDB remesh / Instant Meshes retopo: no native staged yet; those backends report a capability error until their ticket lands a native. They are never claimed as working.
+  - MikkTSpace tangents: pure managed C# (`core/MikkTangents.cs`); no native library exists or is needed.
+  - EGL (`libEGL.so.1`) and OpenGL (`libGL.so.1`) are HOST-provided and required only for GPU rendering; they are never bundled.
+
+## CPU-only commands (no GPU, no display, no source checkout)
+
+These run against the engine-free kernel only and work on a host with no GPU:
+
+```sh
+./run.sh --help
+./run.sh --list-bones --model sample/sample-rig.fbx
+./run.sh --script build.txt --live --out out-dir   # bot commands: create/edit/save/export
+```
+
+`create/edit/save/export` through `--script` never creates a GL context. Headless GPU
+rendering (`./run.sh --headless ...`) is a separate, GPU-gated step: it needs hardware
+EGL 1.5+ and OpenGL 4.6, and fails with a clear error (no fallback, no fake frame) when
+no hardware EGL context is available.
+
+## .NET runtime policy
+
+- Self-contained net8.0, linux-x64; the exact bundled runtime is used (no roll-forward).
+- No host .NET SDK or runtime is required; the launcher unsets `DOTNET_ROOT` and
+  `DOTNET_MULTILEVEL_LOOKUP` so a conflicting host installation cannot leak in.
+- The EGL/OpenGL renderer is a host adapter outside the engine-free Effigy kernel:
+  `Effigy.Kernel.dll` has zero UI/windowing/GL references.
 EOF
 
 echo "4b. Bundling the cabinet: the AI model maker UI that drives the viewer..."
@@ -362,7 +456,26 @@ cat << EOF > "${STAGE_DIR}/build-info.json"
   "runtime": "linux-x64",
   "targetFramework": "net8.0",
   "sdkVersion": "${SDK_VERSION}",
-  "gitCommit": "${GIT_COMMIT}"
+  "gitCommit": "${GIT_COMMIT}",
+  "nativeLibraries": {
+    "manifold": { "soname": "libgmmanifold.so", "status": "${MANIFOLD_STATUS}", "sha256": "${MANIFOLD_SHA}", "required": false, "fallback": "ExactMeshBoolean (built-in); ManifoldBoolean.LastRoute records the route" },
+    "openvdb": { "status": "${OPENVDB_STATUS}", "required": false, "note": "No native staged yet; remesh/retopo backends report a capability error until the OpenVDB ticket lands its native." },
+    "mikktspace": { "status": "${MIKK_STATUS}", "wiredInProgramMain": ${MIKK_WIRED}, "required": false, "note": "Pure managed C# provider (core/MikkTangents.cs); no native library. Unwired means NormalBake uses its built-in tangent path." }
+  },
+  "runtimePolicy": {
+    "selfContained": true,
+    "targetFramework": "net8.0",
+    "targetRuntime": "linux-x64",
+    "hostDotnetSdkRequired": false,
+    "rollForward": "none (exact bundled runtime; the launcher unsets DOTNET_ROOT and DOTNET_MULTILEVEL_LOOKUP)",
+    "hostDependencies": [ "libEGL.so.1 (headless GPU only)", "libGL.so.1 (GPU rendering only)", "glibc >= 2.28" ]
+  },
+  "cpuOnlyCommands": [
+    "--help",
+    "--list-bones --model <file.fbx|file.effigy>",
+    "--script <build.txt> --live [--out <dir>]",
+    "--bench <args>"
+  ]
 }
 EOF
 

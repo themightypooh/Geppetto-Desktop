@@ -376,12 +376,11 @@ class TimelineBuildTests(unittest.TestCase):
         self.assertEqual(b.property('buildDir'), self.dir_one)
         self.assertEqual(self.f.qml_errors(), [])
 
-    def test_step_back_is_disabled_and_non_mutating(self):
+    def test_step_back_is_non_mutating(self):
+        # 2026-11-14: STEP - now shows the previous saved step (paused replay); it must never rewind the run.
         key = self.find('buildStepBackKey')
         self.assertIsNotNone(key)
-        self.assertFalse(key.property('enabled'))
-        self.assertIn('does not rewind', key.property('tip'))
-        self.assertEqual(key.property('opacity'), 0.45)
+        self.assertIn('Does not rewind', key.property('tip'))
         rewind_calls = []
         saved_rewind = self.host.rewind_run
         self.host.rewind_run = lambda r: rewind_calls.append(r) or False
@@ -394,7 +393,10 @@ class TimelineBuildTests(unittest.TestCase):
             self.host.rewind_run = saved_rewind
         self.assertEqual(rewind_calls, [])
         self.assertEqual(self.calls, [])
-        self.assertEqual(self.host._replay, {})
+        r = self.host._replay
+        if r:  # it opened a replay: paused, one step before the last
+            self.assertFalse(r.get('playing'))
+            self.assertEqual(r.get('at'), r.get('count') - 2)
         self.assertEqual(self.f.qml_errors(), [])
 
     def test_ruler_endpoints_sparse_steps_and_seek_does_not_resume(self):

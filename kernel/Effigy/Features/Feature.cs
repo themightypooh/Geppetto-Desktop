@@ -75,7 +75,10 @@ public sealed class Body
 		Mesh = mesh;
 	}
 
-	public Body Clone() => new( Id, Name, Mesh.Clone() )
+	public Body Clone() => Clone( Mesh.Clone() );
+
+	/// <summary>This body's settings around <paramref name="mesh"/>.</summary>
+	public Body Clone( PolyMesh mesh ) => new( Id, Name, mesh )
 		{ Visible = Visible, FeatureId = FeatureId, IsGarment = IsGarment, IsGarmentDetail = IsGarmentDetail, IsReference = IsReference, Layer = Layer, LayerAllowance = LayerAllowance };
 }
 
@@ -778,8 +781,16 @@ public abstract class Feature
 
 	protected abstract void Execute( FeatureContext ctx );
 
+	readonly List<FeatureHandle> _handles = new();
+
+	/// <summary>What the viewport can drag on this feature, from its last build.</summary>
+	public IReadOnlyList<FeatureHandle> Handles => _handles;
+
+	protected void AddHandle( FeatureHandle handle ) => _handles.Add( handle );
+
 	internal void Run( FeatureContext ctx )
 	{
+		_handles.Clear();
 		Error = null;
 		Warning = null;
 		Diagnostic = null;

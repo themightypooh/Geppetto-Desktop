@@ -272,6 +272,22 @@ public sealed class WeightPaintLayer
 		return touched;
 	}
 
+	/// <summary>Remove every painted influence that names a deleted bone. Rows left without influences
+	/// are removed so the normal bind can supply their weights again.</summary>
+	public int RemoveBone( string bone )
+	{
+		if ( string.IsNullOrEmpty( bone ) ) return 0;
+		var touched = 0;
+		foreach ( var vertex in new List<int>( _painted.Keys ) )
+		{
+			var named = _painted[vertex];
+			var removed = named.RemoveAll( x => string.Equals( x.Bone, bone, StringComparison.OrdinalIgnoreCase ) );
+			touched += removed;
+			if ( named.Count == 0 ) _painted.Remove( vertex );
+		}
+		return touched;
+	}
+
 	public WeightPaintLayer Clone()
 	{
 		var copy = new WeightPaintLayer { Topology = Topology, IsStale = IsStale };

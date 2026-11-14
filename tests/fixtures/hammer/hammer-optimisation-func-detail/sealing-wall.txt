@@ -1,0 +1,48 @@
+# sealing-wall.txt — sealed room with its sealing wall flagged func_detail (hammer-optimisation-func-detail)
+#
+# Same format as decorated-room.txt (see its header). The wall-x-pos brush is
+# one of the six shell brushes: without it the room leaks, so flagging it
+# func_detail must produce exactly one SealingBrushFuncDetail validation
+# warning (brush #3), and the built tree must report unsealed.
+brush floor
+plane -1 0 0 144
+plane 1 0 0 144
+plane 0 -1 0 144
+plane 0 1 0 144
+plane 0 0 -1 16
+plane 0 0 1 0
+brush ceiling
+plane -1 0 0 144
+plane 1 0 0 144
+plane 0 -1 0 144
+plane 0 1 0 144
+plane 0 0 -1 -128
+plane 0 0 1 144
+brush wall-x-neg
+plane -1 0 0 144
+plane 1 0 0 -128
+plane 0 -1 0 144
+plane 0 1 0 144
+plane 0 0 -1 0
+plane 0 0 1 128
+brush wall-x-pos detail
+plane -1 0 0 -128
+plane 1 0 0 144
+plane 0 -1 0 144
+plane 0 1 0 144
+plane 0 0 -1 0
+plane 0 0 1 128
+brush wall-y-neg
+plane -1 0 0 128
+plane 1 0 0 128
+plane 0 -1 0 144
+plane 0 1 0 -128
+plane 0 0 -1 0
+plane 0 0 1 128
+brush wall-y-pos
+plane -1 0 0 128
+plane 1 0 0 128
+plane 0 -1 0 -128
+plane 0 1 0 144
+plane 0 0 -1 0
+plane 0 0 1 128

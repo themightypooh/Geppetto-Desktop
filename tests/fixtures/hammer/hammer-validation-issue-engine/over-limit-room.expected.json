@@ -1,0 +1,7 @@
+{
+  "map": "over-limit-room",
+  "note": "Sealed room (6 brushes) with IssueLimits.MaxBrushes = 4. Exactly one LimitExceeded.",
+  "expected": [
+    { "kind": "LimitExceeded", "severity": "Error", "brushId": -1, "entityId": -1 }
+  ]
+}

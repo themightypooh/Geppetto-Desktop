@@ -31,9 +31,19 @@ public static class SculptBlob
 	/// <summary>Eight bytes so a file can be identified without parsing it.</summary>
 	static readonly byte[] Magic = Encoding.ASCII.GetBytes( "EFFIGYSC" );
 
-	/// <summary>Bumped when the layout changes. Refused by name rather than by crash, like the
-	/// document format's own version.</summary>
-	public const int Version = 1;
+	/// <summary>
+	/// Newest layout this build reads. Bumped when the layout changes. Refused by name
+	/// rather than by crash, like the document format's own version.
+	///
+	/// Format 2 (godlike-sculpt-layers-morph-targets-polygroups) appends a layer-stack
+	/// section and a polygroup section after the level layers. Format 1 blobs still
+	/// read, with no stack and no groups — and <see cref="Write(MultiresSculpt)"/> still
+	/// writes format 1, so a sculpt without layers keeps byte-identical blobs.
+	/// </summary>
+	public const int Version = 2;
+
+	/// <summary>Format 1: levels only, no layer stack, no polygroups.</summary>
+	const int VersionWithoutLayers = 1;
 
 	public const string Extension = ".sculpt";
 
@@ -56,7 +66,7 @@ public static class SculptBlob
 		using var w = new BinaryWriter( stream, Encoding.ASCII, leaveOpen: true );
 
 		w.Write( Magic );
-		w.Write( Version );
+		w.Write( VersionWithoutLayers );
 		w.Write( MultiresSculpt.TopologyId( sculpt.Cage ) );
 		w.Write( sculpt.LevelCount );
 
@@ -67,7 +77,57 @@ public static class SculptBlob
 		return stream.ToArray();
 	}
 
-	static void WriteLayer( BinaryWriter w, SculptLayer layer )
+	/// <summary>
+	/// Serialise a sculpt WITH its layer stack and polygroups (format 2). Either may
+	/// be null for "none attached". The stack must belong to the top level, and the
+	/// groups must cover the top level's faces — anything else is refused rather than
+	/// written against the wrong vertices.
+	/// </summary>
+	public static byte[] Write( MultiresSculpt sculpt, SculptLayerStack stack, PolygroupSet groups )
+	{
+		if ( sculpt is null )
+			throw new ArgumentNullException( nameof( sculpt ) );
+
+		if ( stack is not null
+			&& ( stack.Level != sculpt.TopLevel || stack.VertexCount != sculpt.LayerAt( sculpt.TopLevel ).Count ) )
+			throw new ArgumentException(
+				$"The layer stack lives on level {stack.Level} with {stack.VertexCount} vertices; "
+				+ $"this sculpt's top level is {sculpt.TopLevel} with {sculpt.LayerAt( sculpt.TopLevel ).Count}." );
+
+		using var stream = new MemoryStream();
+		using var w = new BinaryWriter( stream, Encoding.ASCII, leaveOpen: true );
+
+		w.Write( Magic );
+		w.Write( Version );
+		w.Write( MultiresSculpt.TopologyId( sculpt.Cage ) );
+		w.Write( sculpt.LevelCount );
+
+		for ( var level = 0; level < sculpt.LevelCount; level++ )
+			WriteLayer( w, sculpt.LayerAt( level ) );
+
+		w.Write( stack is not null );
+
+		if ( stack is not null )
+			stack.WriteTo( w );
+
+		w.Write( groups is not null );
+
+		if ( groups is not null )
+		{
+			var top = sculpt.Evaluate( sculpt.TopLevel );
+
+			if ( groups.FaceCount != top.FaceCount )
+				throw new ArgumentException(
+					$"Polygroups cover {groups.FaceCount} faces; the top level has {top.FaceCount}." );
+
+			groups.WriteTo( w, MultiresSculpt.TopologyId( top ) );
+		}
+
+		w.Flush();
+		return stream.ToArray();
+	}
+
+	internal static void WriteLayer( BinaryWriter w, SculptLayer layer )
 	{
 		var deltas = layer.Deltas;
 		var min = new Vec3( float.MaxValue, float.MaxValue, float.MaxValue );
@@ -102,7 +162,7 @@ public static class SculptBlob
 		}
 	}
 
-	static ushort Quantise( float value, float min, float range )
+	internal static ushort Quantise( float value, float min, float range )
 	{
 		if ( range <= 0f )
 			return 0;
@@ -111,7 +171,7 @@ public static class SculptBlob
 		return (ushort)Math.Clamp( MathF.Round( t * Steps ), 0f, Steps );
 	}
 
-	static float Dequantise( ushort q, float min, float range ) => range <= 0f ? min : min + range * q / Steps;
+	internal static float Dequantise( ushort q, float min, float range ) => range <= 0f ? min : min + range * q / Steps;
 
 	/// <summary>
 	/// Rebuild a sculpt from its bytes onto a cage.
@@ -120,8 +180,22 @@ public static class SculptBlob
 	/// the lot — so the blob does not store any of it and cannot be read without one. That is the
 	/// same decision as storing deltas in a derived frame, one level up: what is derivable is never
 	/// written, so it can never be stale.
+	///
+	/// Format 1 blobs read back with no stack and no groups; see
+	/// <see cref="Read(byte[], PolyMesh, out SculptLayerStack, out PolygroupSet)"/> for the
+	/// format 2 sections.
 	/// </summary>
-	public static MultiresSculpt Read( byte[] bytes, PolyMesh cage )
+	public static MultiresSculpt Read( byte[] bytes, PolyMesh cage ) =>
+		Read( bytes, cage, out _, out _ );
+
+	/// <summary>
+	/// Rebuild a sculpt from its bytes onto a cage, with the layer stack and polygroups
+	/// a format 2 blob carries. A format 1 blob returns null for both. A stack whose
+	/// level or vertex count does not match the rebuilt sculpt, or groups whose
+	/// topology does not match its top level, are refused — ids that land on the wrong
+	/// vertices are worse than no layers at all.
+	/// </summary>
+	public static MultiresSculpt Read( byte[] bytes, PolyMesh cage, out SculptLayerStack stack, out PolygroupSet groups )
 	{
 		if ( bytes is null )
 			throw new ArgumentNullException( nameof( bytes ) );
@@ -178,10 +252,39 @@ public static class SculptBlob
 		}
 
 		sculpt.ViewLevel = sculpt.TopLevel;
+
+		stack = null;
+		groups = null;
+
+		if ( version == VersionWithoutLayers )
+			return sculpt;
+
+		// Format 2: a layer-stack section, then a polygroup section, each with a flag.
+		if ( r.ReadBoolean() )
+		{
+			stack = SculptLayerStack.ReadFrom( r );
+
+			if ( stack.Level < 0 || stack.Level > sculpt.TopLevel
+				|| sculpt.LayerAt( stack.Level ).Count != stack.VertexCount )
+				throw new InvalidOperationException(
+					$"The layers in this sculpt live on level {stack.Level} with {stack.VertexCount} vertices; "
+					+ $"the rebuilt sculpt has {sculpt.TopLevel + 1} levels and {sculpt.LayerAt( sculpt.TopLevel ).Count} vertices at the top." );
+		}
+
+		if ( r.ReadBoolean() )
+		{
+			var top = sculpt.Evaluate( sculpt.TopLevel );
+			groups = PolygroupSet.ReadFrom( r, MultiresSculpt.TopologyId( top ) );
+
+			if ( groups.FaceCount != top.FaceCount )
+				throw new InvalidOperationException(
+					$"The polygroups in this sculpt cover {groups.FaceCount} faces; the top level has {top.FaceCount}." );
+		}
+
 		return sculpt;
 	}
 
-	static SculptLayer ReadLayer( BinaryReader r, int level, int expected )
+	internal static SculptLayer ReadLayer( BinaryReader r, int level, int expected )
 	{
 		var count = r.ReadInt32();
 
@@ -206,14 +309,14 @@ public static class SculptBlob
 		return new SculptLayer( deltas );
 	}
 
-	static void Write( BinaryWriter w, Vec3 v )
+	internal static void Write( BinaryWriter w, Vec3 v )
 	{
 		w.Write( v.x );
 		w.Write( v.y );
 		w.Write( v.z );
 	}
 
-	static Vec3 ReadVec( BinaryReader r ) => new( r.ReadSingle(), r.ReadSingle(), r.ReadSingle() );
+	internal static Vec3 ReadVec( BinaryReader r ) => new( r.ReadSingle(), r.ReadSingle(), r.ReadSingle() );
 
 	/// <summary>What <see cref="Write(MultiresSculpt)"/> will produce, without producing it — for a UI that wants to
 	/// say what a level costs on disk before the user commits to it.</summary>
@@ -372,12 +475,15 @@ public static class MeshEditBlob
 
 	/// <summary>2 added separated pieces after the main mesh; 3 added edge creases after the
 	/// pieces; 4 added the main mesh's marked UV seams (<see cref="PolyMesh.Seams"/>) after the
-	/// creases. Formats 1 to 3 still read, with no seams.</summary>
-	public const int Version = 4;
+	/// creases; 5 added the maps baked onto the main mesh (normal, AO; see
+	/// <see cref="MeshEditFeature.BakedNormal"/>) after the seams, deflated. Formats 1 to 4 still
+	/// read, with no seams / no bake.</summary>
+	public const int Version = 5;
 
 	public const string Extension = ".meshedit";
 
-	public static byte[] Write( PolyMesh mesh, long baseFingerprint, IReadOnlyList<PolyMesh> pieces = null, IReadOnlyDictionary<EdgeKey, float> creases = null )
+	public static byte[] Write( PolyMesh mesh, long baseFingerprint, IReadOnlyList<PolyMesh> pieces = null, IReadOnlyDictionary<EdgeKey, float> creases = null,
+		PaintCanvas bakedNormal = null, PaintCanvas bakedAo = null )
 	{
 		if ( mesh is null )
 			throw new ArgumentNullException( nameof( mesh ) );
@@ -416,15 +522,60 @@ public static class MeshEditBlob
 			}
 		}
 
+		WriteCanvas( w, bakedNormal );
+		WriteCanvas( w, bakedAo );
+
 		w.Flush();
 		return stream.ToArray();
+	}
+
+	public static PolyMesh Read( byte[] bytes, out long baseFingerprint, out List<PolyMesh> pieces, out Dictionary<EdgeKey, float> creases )
+		=> Read( bytes, out baseFingerprint, out pieces, out creases, out _, out _ );
+
+	/// <summary>A baked map: present flag, size, then the RGBA texels deflated (a 1024 normal map
+	/// is 4 MB raw and mostly runs).</summary>
+	static void WriteCanvas( BinaryWriter w, PaintCanvas c )
+	{
+		w.Write( c is not null );
+		if ( c is null )
+			return;
+		w.Write( c.Width );
+		w.Write( c.Height );
+		using var packed = new MemoryStream();
+		using ( var z = new System.IO.Compression.DeflateStream( packed, System.IO.Compression.CompressionLevel.Fastest, leaveOpen: true ) )
+			z.Write( c.Rgba, 0, c.Rgba.Length );
+		w.Write( (int)packed.Length );
+		w.Write( packed.GetBuffer(), 0, (int)packed.Length );
+	}
+
+	static PaintCanvas ReadCanvas( BinaryReader r )
+	{
+		if ( !r.ReadBoolean() )
+			return null;
+		var width = r.ReadInt32();
+		var height = r.ReadInt32();
+		var length = r.ReadInt32();
+		if ( width <= 0 || height <= 0 || width > 8192 || height > 8192 || length < 0 )
+			throw new InvalidDataException( "A baked map in this mesh edit is damaged." );
+		var c = new PaintCanvas( width, height );
+		using var z = new System.IO.Compression.DeflateStream( new MemoryStream( r.ReadBytes( length ) ), System.IO.Compression.CompressionMode.Decompress );
+		var read = 0;
+		while ( read < c.Rgba.Length )
+		{
+			var n = z.Read( c.Rgba, read, c.Rgba.Length - read );
+			if ( n <= 0 )
+				throw new InvalidDataException( "A baked map in this mesh edit is cut short." );
+			read += n;
+		}
+		return c;
 	}
 
 	public static PolyMesh Read( byte[] bytes, out long baseFingerprint ) => Read( bytes, out baseFingerprint, out _, out _ );
 
 	public static PolyMesh Read( byte[] bytes, out long baseFingerprint, out List<PolyMesh> pieces ) => Read( bytes, out baseFingerprint, out pieces, out _ );
 
-	public static PolyMesh Read( byte[] bytes, out long baseFingerprint, out List<PolyMesh> pieces, out Dictionary<EdgeKey, float> creases )
+	public static PolyMesh Read( byte[] bytes, out long baseFingerprint, out List<PolyMesh> pieces, out Dictionary<EdgeKey, float> creases,
+		out PaintCanvas bakedNormal, out PaintCanvas bakedAo )
 	{
 		if ( bytes is null )
 			throw new ArgumentNullException( nameof( bytes ) );
@@ -481,6 +632,13 @@ public static class MeshEditBlob
 				if ( a >= 0 && b >= 0 && a < mesh.VertexCount && b < mesh.VertexCount && a != b )
 					mesh.Seams.Add( new EdgeKey( a, b ) );
 			}
+		}
+
+		bakedNormal = bakedAo = null;
+		if ( version >= 5 )
+		{
+			bakedNormal = ReadCanvas( r );
+			bakedAo = ReadCanvas( r );
 		}
 
 		return mesh;

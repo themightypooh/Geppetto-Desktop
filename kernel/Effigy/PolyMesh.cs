@@ -92,6 +92,14 @@ public sealed class PolyMesh
 	public List<Vec3> Positions = new();
 	public List<Face> Faces = new();
 
+	// Vertex cache
+	private Vec3[] _cachedNormals;
+	private Vec3[] _cachedTangents;
+	private bool _normalsDirty = true;
+	private bool _tangentsDirty = true;
+
+	public void InvalidateVertexCache() { _normalsDirty = true; _tangentsDirty = true; _cachedNormals = null; _cachedTangents = null; }
+
 	/// <summary>
 	/// Second UV channel (UV2, lightmap): per-vertex UVs, parallel to <see cref="Positions"/>
 	/// when used. UV1 stays per corner on <see cref="Face.UVs"/> because seams need that; UV2
@@ -203,6 +211,16 @@ public sealed class PolyMesh
 
 	/// <summary>True for a ParticleFeature body: the soft render pass draws it as blended discs instead of opaque triangles when render particles=soft is set. Copied by Clone like the vertex channels.</summary>
 	public bool IsParticle;
+
+	/// <summary>True when a UVProject feature laid out this mesh's UVs in the
+	/// current build. Primitives ship per-face unit squares and imports bring
+	/// whatever tiles they had, and those all stack on the same square — a
+	/// lattice (scale coat, bake) cannot tell the faces apart on them, so it
+	/// refuses a mesh without this flag and tells the user to add a UVProject.
+	/// Set only by UVProjectFeature; a mesh rebuilt by another feature starts
+	/// without it. Copied by <see cref="Clone"/> like IsParticle, so an
+	/// incremental rebuild resuming from cache still sees it.</summary>
+	public bool UvAuthored;
 
 	public bool HasVertexEmission => VertexEmission is not null && VertexEmission.Length == Positions.Count;
 
@@ -448,6 +466,9 @@ public sealed class PolyMesh
 	/// vertex surrounded by one big face and several slivers leans toward the big one.</summary>
 	public Vec3[] ComputeVertexNormals()
 	{
+		if ( !_normalsDirty && _cachedNormals is not null && _cachedNormals.Length == Positions.Count )
+			return _cachedNormals;
+
 		var normals = new Vec3[Positions.Count];
 
 		foreach ( var f in Faces )
@@ -462,6 +483,8 @@ public sealed class PolyMesh
 		for ( var i = 0; i < normals.Length; i++ )
 			normals[i] = normals[i].Normal;
 
+		_cachedNormals = normals;
+		_normalsDirty = false;
 		return normals;
 	}
 
@@ -554,6 +577,16 @@ public sealed class PolyMesh
 		return result;
 	}
 
+
+	public Vec3[] ComputeVertexTangents()
+	{
+		if ( !_tangentsDirty && _cachedTangents is not null && _cachedTangents.Length == Positions.Count )
+			return _cachedTangents;
+		var tangents = new Vec3[Positions.Count];
+		_cachedTangents = tangents;
+		_tangentsDirty = false;
+		return tangents;
+	}
 	/// <summary>
 	/// Fan triangulation about the centroid, PROJECTED ONTO THE FACE'S OWN NORMAL so the fan's
 	/// backward triangles subtract instead of adding.
@@ -642,9 +675,11 @@ public sealed class PolyMesh
 		}
 	}
 
-	public PolyMesh Clone()
+	public PolyMesh Clone() => Clone( Paint?.Clone() );
+
+	public PolyMesh Clone( PaintCanvas paint )
 	{
-		var m = new PolyMesh { Positions = new List<Vec3>( Positions ), Skin = Skin?.Clone(), IsParticle = IsParticle };
+		var m = new PolyMesh { Positions = new List<Vec3>( Positions ), Skin = Skin?.Clone(), IsParticle = IsParticle, UvAuthored = UvAuthored };
 
 		if ( VertexColors is not null )
 			m.VertexColors = (Vec4[])VertexColors.Clone();

@@ -33,7 +33,7 @@ public sealed class KeyShadowMap : IDisposable
 	public KeyShadowMap( GL gl )
 	{
 		_gl = gl;
-		_shader = new GlShader( gl, RendererShaders.VertexSrc, "#version 460 core\nvoid main() {}" );
+		_shader = new GlShader( gl, RendererShaders.VertexSrc, RendererShaders.FurShadowFragmentSrc );
 		_mvp = _shader.Uniform( "uMvp" ); _model = _shader.Uniform( "uModel" ); _skinned = _shader.Uniform( "uSkinned" ); _bones = _shader.Uniform( "uBones[0]" );
 		Texture = gl.GenTexture();
 		gl.BindTexture( TextureTarget.Texture2D, Texture );
@@ -93,7 +93,7 @@ public sealed class KeyShadowMap : IDisposable
 		_shader.Use(); _shader.SetMatrix( _mvp, ViewProjection ); _shader.SetMatrix( _model, Matrix4x4.Identity );
 		_shader.SetInt( _skinned, skinned ? 1 : 0 );
 		if ( skinned ) _shader.SetMatrixArray( _bones, player.GpuBones );
-		mesh.Draw( _gl );
+		mesh.DrawBatched( _gl, _shader, -1 );
 		if ( live is { HasCasters: true } ) { _shader.SetInt( _skinned, 0 ); live.DrawDepth( _gl ); } // R9: live layers cast
 		_gl.Disable( EnableCap.PolygonOffsetFill );
 	}
@@ -114,7 +114,9 @@ public sealed class KeyShadowMap : IDisposable
 		{
 			Array.Fill(_boneMin, new Vector3(float.PositiveInfinity));
 			Array.Fill(_boneMax, new Vector3(float.NegativeInfinity));
-			for (int offset = 0; vertices is not null && offset < vertices.Length; offset += ViewportMesh.FloatsPerVertex)
+			// Read complete vertices only: a short or ragged array (synthetic meshes,
+			// stale fixtures) must never throw here — the shadow pass has no fallback.
+			for (int offset = 0; vertices is not null && offset + ViewportMesh.FloatsPerVertex <= vertices.Length; offset += ViewportMesh.FloatsPerVertex)
 			{
 				var position = new Vector3(vertices[offset], vertices[offset + 1], vertices[offset + 2]);
 				bool influenced = false;

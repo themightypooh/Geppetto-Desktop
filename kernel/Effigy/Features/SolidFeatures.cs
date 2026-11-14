@@ -664,6 +664,12 @@ public sealed class UVProjectFeature : Feature
 				for ( var i = 0; i < meshes.Count; i++ ) meshes[i].Seams = savedSeams[i];
 			}
 
+			// A layout this feature authored is one a lattice bake or a scale
+			// coat can map one-to-one; mark every body in the atlas so the coat
+			// can tell authored UVs from a primitive's placeholder squares.
+			foreach ( var b in bodies )
+				b.Mesh.UvAuthored = true;
+
 			return;
 		}
 
@@ -745,6 +751,11 @@ public sealed class UVProjectFeature : Feature
 			{
 				UVProjection.BoxProject( body.Mesh, Scale.Clamped );
 			}
+
+			// Mark the layout authored: Box/Planar/Cylinder/Sphere/Unwrap/Organic
+			// all land here, and a scale coat or lattice bake may only trust UVs
+			// this feature wrote — not a primitive's per-face unit squares.
+			body.Mesh.UvAuthored = true;
 		}
 
 		if ( unwrapping )
@@ -1014,15 +1025,6 @@ public sealed class MoveFaceFeature : Feature
 				"Click a face of the part in the viewport, then press Move Face" );
 		}
 
-		if ( MathF.Abs( Distance.Value ) < 1e-5f )
-		{
-			// Nothing to move: said rather than quietly passed, the same as Subdivide at 0 levels.
-			Warn( "Distance is 0, so the faces don't move",
-				"Move face pushes the picked faces along by Distance; at 0 they stay where they are.",
-				"Enter a distance, or drag the arrow on the face" );
-			return;
-		}
-
 		if ( Mode.Index == ModeTranslate && Direction.Value.LengthSquared < 1e-12f )
 		{
 			FailOn( "Direction",
@@ -1059,6 +1061,18 @@ public sealed class MoveFaceFeature : Feature
 				$"All {Faces.Count} of them named geometry that the features above this one no longer produce.",
 				"Pick the faces again on the current model",
 				"Move this feature back below the edit that changed them" );
+		}
+
+		var (centre, normal) = FeatureHandle.FacesAnchor( byBody );
+		AddHandle( FeatureHandle.Of( Distance, centre, Mode.Index == ModeTranslate ? Direction.Value : normal ) );
+
+		if ( MathF.Abs( Distance.Value ) < 1e-5f )
+		{
+			// Nothing to move: said rather than quietly passed, the same as Subdivide at 0 levels.
+			Warn( "Distance is 0, so the faces don't move",
+				"Move face pushes the picked faces along by Distance; at 0 they stay where they are.",
+				"Enter a distance, or drag the arrow on the face" );
+			return;
 		}
 
 		var moved = new List<(Body Body, PolyMesh Mesh)>();

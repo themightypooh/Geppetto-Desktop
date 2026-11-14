@@ -185,5 +185,191 @@ class WatchTests(unittest.TestCase):
             self.assertEqual([s["part"] for s in w["steps"]], ["", "A", "A"])
 
 
+class StopHoldTests(unittest.TestCase):
+    """STOP button path: halt at the step boundary, stopped-step record, resume."""
+
+    def _make_run(self, root, state_name="building", rev=3):
+        run = Path(root) / "run-stop"
+        live_dir = run / ".live"
+        (live_dir / "revisions").mkdir(parents=True)
+        (live_dir / "revisions" / ("%08d-x.effigy" % rev)).write_text("{}")
+        script = str(run / "build.txt")
+        Path(script).write_text("add Primitive shape=Box name=A\n")
+        (run.with_suffix(".json")).write_text(json.dumps({"script": script, "pid": 0}))
+        state = {"schemaVersion": 1, "ev": "ai-live", "runId": "owned", "sequence": 1,
+                 "state": state_name, "operation": "add_feature",
+                 "snapshot": {"revision": rev, "path": ".live/revisions/%08d-x.effigy" % rev},
+                 "control": {}}
+        (live_dir / "latest.json").write_text(json.dumps(state))
+        events = []
+        for r, op in ((1, "initial"),
+                      (2, "line 1: add Primitive shape=Box name=A"),
+                      (3, "line 2: set A size=2,1,1")):
+            if r <= rev:
+                events.append({"schemaVersion": 1, "ev": "ai-live", "runId": "owned", "sequence": r,
+                               "state": "revision", "operation": op,
+                               "snapshot": {"revision": r, "path": ".live/revisions/%08d-x.effigy" % r}})
+        # the journal always ends with the run's current state, like a real run
+        events.append({"schemaVersion": 1, "ev": "ai-live", "runId": "owned", "sequence": rev + 1,
+                       "state": state_name, "operation": "add_feature",
+                       "snapshot": {"revision": rev, "path": ".live/revisions/%08d-x.effigy" % rev},
+                       "control": {}})
+        (live_dir / "events.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))
+        (run / "notes.jsonl").write_text(json.dumps(
+            {"key": "n1", "time": "t", "run": "run-stop", "rev": 2, "op": "line 1: add Primitive shape=Box name=A",
+             "text": "po: the box looks small", "read": False}) + "\n")
+        return run
+
+    def _watcher(self, run, stop_event):
+        """Fake AiLiveControl: drains .live/commands like the real 50 ms poll loop."""
+        import threading
+        def go():
+            cmds = run / ".live" / "commands"
+            seen = set()
+            while not stop_event.is_set():
+                try:
+                    files = sorted(cmds.glob("*.json")) if cmds.is_dir() else []
+                except OSError:
+                    files = []
+                for f in files:
+                    if f.name in seen:
+                        continue
+                    try:
+                        cmd = json.loads(f.read_text())
+                    except (OSError, ValueError):
+                        continue
+                    seen.add(f.name)
+                    name = cmd.get("command")
+                    if name in ("pause", "resume"):
+                        try:
+                            st = json.loads((run / ".live" / "latest.json").read_text())
+                        except (OSError, ValueError):
+                            continue
+                        ctrl = st.get("control") or {}
+                        ctrl["paused"] = (name == "pause")
+                        st["control"] = ctrl
+                        st["sequence"] = st.get("sequence", 0) + 1
+                        (run / ".live" / "latest.json").write_text(json.dumps(st))
+                stop_event.wait(0.05)
+        t = threading.Thread(target=go, daemon=True)
+        t.start()
+        return t
+
+    def test_stop_hold_halts_at_step_boundary_and_writes_record(self):
+        import threading
+        with tempfile.TemporaryDirectory() as directory:
+            run = self._make_run(directory)
+            confirm = Path(directory) / "confirm"
+            real_confirm = live.gate.CONFIRM_DIR
+            live.gate.CONFIRM_DIR = str(confirm)
+            stop_event = threading.Event()
+            try:
+                self._watcher(run, stop_event)
+                done = live.stop_hold(str(run), notes="po: stop here", timeout_s=10)
+                self.assertTrue(done["halted"])
+                self.assertEqual(done["revision"], 3)
+                self.assertEqual(done["op"], "line 2: set A size=2,1,1")
+                # a pause command was queued (never a mid-step kill)
+                queued = [json.loads(f.read_text())["command"] for f in (run / ".live" / "commands").glob("*.json")]
+                self.assertIn("pause", queued)
+                # the stopped-step record is the resume point
+                recs = list((confirm / "stopped").glob("*.json"))
+                self.assertEqual(len(recs), 1)
+                rec = json.loads(recs[0].read_text())
+                self.assertEqual(rec["run_dir"], str(run))
+                self.assertEqual(rec["revision"], 3)
+                self.assertTrue(rec["script"].endswith("build.txt"))
+                self.assertTrue(rec["snapshot"].endswith("%08d-x.effigy" % 3))
+                self.assertIn("po: stop here", rec["notes"])
+                self.assertIn("the box looks small", rec["notes"])  # unread user note carried along
+                # resume clears the hold: the same run continues
+                live.send_command(str(run), "resume")
+                deadline = time.time() + 10
+                while time.time() < deadline:
+                    if not live.control_state(live.read_state(str(run))).get("paused"):
+                        break
+                    time.sleep(0.05)
+                self.assertFalse(live.control_state(live.read_state(str(run))).get("paused"))
+            finally:
+                stop_event.set()
+                live.gate.CONFIRM_DIR = real_confirm
+
+    def test_stop_hold_open_run_writes_record_immediately(self):
+        with tempfile.TemporaryDirectory() as directory:
+            run = self._make_run(directory, state_name="open", rev=2)
+            confirm = Path(directory) / "confirm"
+            real_confirm = live.gate.CONFIRM_DIR
+            live.gate.CONFIRM_DIR = str(confirm)
+            try:
+                done = live.stop_hold(str(run), timeout_s=5)
+                self.assertTrue(done["halted"])
+                self.assertEqual(done["revision"], 2)
+                self.assertFalse((run / ".live" / "commands").exists())  # no pause needed between steps
+                rec = json.loads(next((confirm / "stopped").glob("*.json")).read_text())
+                self.assertEqual(rec["revision"], 2)
+            finally:
+                live.gate.CONFIRM_DIR = real_confirm
+
+    def test_stop_hold_refuses_finished_or_unknown_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            run = self._make_run(directory, state_name="completed", rev=3)
+            self.assertRaises(ValueError, live.stop_hold, str(run))
+            self.assertRaises(ValueError, live.stop_hold, str(Path(directory) / "nope"))
+
+    def test_host_stop_button_records_open_run_and_chat_offers_resume_steer(self):
+        # the chat-panel STOP wiring headless: QCoreApplication, no window, no live Geppetto
+        import sys
+        from unittest.mock import patch
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "cabinet"))
+        import host
+        from PySide6.QtCore import QCoreApplication
+        app = QCoreApplication.instance() or QCoreApplication([])
+        with tempfile.TemporaryDirectory() as directory:
+            run = self._make_run(directory, state_name="open", rev=2)
+            confirm = Path(directory) / "confirm"
+            real_confirm = live.gate.CONFIRM_DIR
+            live.gate.CONFIRM_DIR = str(confirm)
+            try:
+                obj = host.Host()
+                obj.runTimer.stop()
+                obj.jobs[str(run)] = object()  # a live run, as in a running chest
+                obj.stopRunAtStep(str(run))
+                self.assertIn(str(run), obj._stopped_runs)
+                rec = obj._stopped_runs[str(run)]
+                self.assertEqual(rec["revision"], 2)
+                self.assertTrue(rec["snapshot"].endswith("%08d-x.effigy" % 2))
+                note = obj.claude.messages[-1]["text"]
+                self.assertIn("STOPPED", note)
+                self.assertIn("step 2", note)
+                self.assertIn("RESUME", note)
+                self.assertIn("STEER", note)
+                # RESUME: the same run gets a resume command, the offer clears, nothing sent to a provider
+                self.assertTrue(obj._stopped_chat_command("resume"))
+                self.assertEqual(obj._stopped_runs, {})
+                queued = [json.loads(f.read_text())["command"] for f in (run / ".live" / "commands").glob("*.json")]
+                self.assertIn("resume", queued)
+                self.assertIn("RESUMED", obj.claude.messages[-1]["text"])
+                # STEER: steering notes queue as a direction on the held run
+                obj.stopRunAtStep(str(run))
+                self.assertTrue(obj._stopped_chat_command("steer: thicker horns"))
+                instructs = [json.loads(f.read_text()) for f in (run / ".live" / "commands").glob("*.json")
+                             if json.loads(f.read_text())["command"] == "instruct"]
+                self.assertTrue(any("thicker horns" in c["text"] for c in instructs))
+                self.assertIn("Steering queued", obj.claude.messages[-1]["text"])
+                # ordinary chat is untouched by the intercept
+                self.assertFalse(obj._stopped_chat_command("resume the game"))
+            finally:
+                live.gate.CONFIRM_DIR = real_confirm
+
+    def test_parse_stopped_command(self):
+        self.assertEqual(live.parse_stopped_command("resume"), ("resume", ""))
+        self.assertEqual(live.parse_stopped_command("  RESUME  "), ("resume", ""))
+        self.assertEqual(live.parse_stopped_command("STEER make it bigger"), ("steer", "make it bigger"))
+        self.assertEqual(live.parse_stopped_command("steer: thicker horns"), ("steer", "thicker horns"))
+        self.assertEqual(live.parse_stopped_command("resume the game"), (None, None))
+        self.assertEqual(live.parse_stopped_command("steer"), (None, None))
+        self.assertEqual(live.parse_stopped_command("hello"), (None, None))
+
+
 if __name__ == '__main__':
     unittest.main()

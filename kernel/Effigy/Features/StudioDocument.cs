@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -7,6 +7,7 @@ using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Effigy.Assembly;
 
 namespace Effigy;
 
@@ -36,12 +37,21 @@ namespace Effigy;
 /// It also means an unhandled field type is possible, so DocumentTests asserts that every feature
 /// type in the assembly round-trips every field it declares. Adding state a save cannot carry fails
 /// the suite rather than quietly not saving, which is the failure this design could otherwise have.
+///
+/// MAP DOCUMENTS reuse this file rather than forking it. MapDocument (kernel/Effigy/Map/)
+/// follows the same pattern — ordered history, rollback bar, hand-written diffable text —
+/// and MapDocumentIo builds its lines from the shared primitives below (Num / Vec / Vec2 /
+/// ParseFloat / ParseInt / ParseVec3 / OneLine / Split, promoted to internal for exactly
+/// that) and saves through AtomicWriteText. The map format version lives in MapDocumentIo;
+/// this file's Version stays the studio format. Do not copy these helpers into a second
+/// save/load implementation: a number that formats differently in a map file than in a
+/// studio file is a bug, and two copies is how it happens.
 /// </summary>
 public static class StudioDocument
 {
 	/// <summary>The newest format this build can WRITE and the newest it can read. A file claiming
 	/// more than this is refused by name rather than by crash.</summary>
-	public const int Version = 2;
+	public const int Version = 4;
 
 	/// <summary>
 	/// The oldest format that can express any document - everything before the rig block existed.
@@ -58,6 +68,16 @@ public static class StudioDocument
 	/// <summary>The format that first carried a rig block.</summary>
 	const int VersionRig = 2;
 
+	/// <summary>The format that first carried persistent assembly definitions, occurrences and joints.</summary>
+	const int VersionAssembly = 3;
+
+	/// <summary>The format that first carried CAD configuration tables
+	/// (<see cref="ConfigurationFeature"/>). A document holding configurations stamps 4 so an
+	/// older reader refuses it by name rather than opening a model whose variants it would
+	/// silently drop (an unknown feature type would fail closed anyway — see ReadFeature —
+	/// but the format error says what is missing).</summary>
+	const int VersionConfiguration = 4;
+
 	public const string Extension = ".effigy";
 
 	// --- writing ------------------------------------------------------------------------------
@@ -65,15 +85,54 @@ public static class StudioDocument
 	public static void WriteFile( PartStudio studio, string path ) =>
 		File.WriteAllText( path, Write( studio ) );
 
+	/// <summary>s&box GameResources require JSON. Keep the lossless document text
+	/// inside the asset envelope; standalone documents retain the original format.</summary>
+	public static string WriteAsset( PartStudio studio ) =>
+		System.Text.Json.JsonSerializer.Serialize( new Dictionary<string, string> { ["StudioText"] = Write( studio ) } );
+
+	public static void WriteAssetFile( PartStudio studio, string path )
+	{
+		var temporary = path + ".writing";
+		try
+		{
+			File.WriteAllText( temporary, WriteAsset( studio ) );
+			File.Move( temporary, path, overwrite: true );
+		}
+		finally { if ( File.Exists( temporary ) ) File.Delete( temporary ); }
+	}
+
+	/// <summary>
+	/// Atomic text save for documents that are not part studios: same-directory temp +
+	/// complete write + rename/replace, never delete-then-write. MapDocumentIo.Save uses
+	/// this (CONTRACTS.md save contract); the studio asset path above is the same shape
+	/// for .effigy assets.
+	/// </summary>
+	internal static void AtomicWriteText( string path, string text )
+	{
+		var temporary = path + ".writing";
+		try
+		{
+			File.WriteAllText( temporary, text );
+			File.Move( temporary, path, overwrite: true );
+		}
+		finally { if ( File.Exists( temporary ) ) File.Delete( temporary ); }
+	}
+
 	/// <summary>One picture's document line, without the newline: refimage VIEW HEIGHT OX OY DEPTH OPACITY VISIBLE TAG KIND CAL PATH ('-' when untagged).</summary>
-	public static string ReferenceImageLine( ReferenceImage image ) =>
-		new StringBuilder( "refimage " ).Append( image.View ).Append( ' ' ).Append( Num( image.Height ) ).Append( ' ' )
+	public static string ReferenceImageLine( ReferenceImage image )
+	{
+		var sb = new StringBuilder( "refimage " ).Append( image.View ).Append( ' ' ).Append( Num( image.Height ) ).Append( ' ' )
 			.Append( Num( image.Offset.x ) ).Append( ' ' ).Append( Num( image.Offset.y ) ).Append( ' ' )
 			.Append( Num( image.Depth ) ).Append( ' ' ).Append( Num( image.Opacity ) ).Append( ' ' )
-			.Append( image.Visible ? 1 : 0 ).Append( ' ' )
-			.Append( string.IsNullOrWhiteSpace( image.Tag ) ? "-" : image.Tag ).Append( ' ' )
-			.Append( string.IsNullOrWhiteSpace( image.Kind ) ? "unknown" : image.Kind ).Append( ' ' )
-			.Append( image.Calibrated ? 1 : 0 ).Append( ' ' ).Append( OneLine( image.Path ) ).ToString();
+			.Append( image.Visible ? 1 : 0 ).Append( ' ' );
+		if ( !string.IsNullOrWhiteSpace( image.Tag ) || ( !string.IsNullOrWhiteSpace( image.Kind ) && image.Kind != "unknown" ) || image.Calibrated )
+		{
+			sb.Append( string.IsNullOrWhiteSpace( image.Tag ) ? "-" : image.Tag ).Append( ' ' )
+				.Append( string.IsNullOrWhiteSpace( image.Kind ) ? "unknown" : image.Kind ).Append( ' ' )
+				.Append( image.Calibrated ? 1 : 0 ).Append( ' ' );
+		}
+		return sb.Append( OneLine( image.Path ) ).ToString();
+	}
 
 	public static string Write( PartStudio studio )
 	{
@@ -82,9 +141,14 @@ public static class StudioDocument
 
 		var sb = new StringBuilder();
 
-		// See VersionBase: the stamp says what a reader NEEDS, so a part nobody has rigged still
-		// claims 1 and still opens in the build that shipped before this block existed.
-		var version = studio.Rig is { Count: > 0 } ? VersionRig : VersionBase;
+		// Stamp only what the data needs: legacy documents remain format 1/2, while assembly-bearing
+		// documents use 3 so older readers fail closed rather than silently dropping occurrences.
+		// Configuration-bearing documents use 4, for the same reason.
+		var version = studio.Features.OfType<ConfigurationFeature>().Any( c => c.HasConfigurations )
+			? VersionConfiguration
+			: studio.Assembly?.HasData == true
+			? VersionAssembly
+			: studio.Rig is { Count: > 0 } ? VersionRig : VersionBase;
 
 		sb.Append( "effigy " ).Append( version ).Append( '\n' );
 		sb.Append( "rollback " ).Append( studio.RollbackIndex ).Append( '\n' );
@@ -111,6 +175,10 @@ public static class StudioDocument
 		foreach ( var (slot, scale) in studio.MaterialScales.OrderBy( kv => kv.Key ) )
 			sb.Append( "materialscale " ).Append( slot ).Append( ' ' )
 				.Append( Num( scale.x ) ).Append( ' ' ).Append( Num( scale.y ) ).Append( '\n' );
+
+		foreach ( var edit in studio.ManualUVEdits )
+			if ( edit is not null && !string.IsNullOrWhiteSpace( edit.BodyId ) && !string.IsNullOrWhiteSpace( edit.FaceKey ) )
+				sb.Append( edit.WriteLine() ).Append( '\n' );
 
 		// Only the slots that have a look, so documents without one keep their bytes.
 		foreach ( var (slot, look) in studio.MaterialLooks.OrderBy( kv => kv.Key ) )
@@ -206,13 +274,7 @@ public static class StudioDocument
 			if ( image is null || string.IsNullOrWhiteSpace( image.Path ) )
 				continue;
 
-			sb.Append( "refimage " ).Append( image.View ).Append( ' ' ).Append( Num( image.Height ) ).Append( ' ' )
-				.Append( Num( image.Offset.x ) ).Append( ' ' ).Append( Num( image.Offset.y ) ).Append( ' ' )
-				.Append( Num( image.Depth ) ).Append( ' ' ).Append( Num( image.Opacity ) ).Append( ' ' )
-				.Append( image.Visible ? 1 : 0 ).Append( ' ' )
-				.Append( string.IsNullOrWhiteSpace( image.Tag ) ? "-" : image.Tag ).Append( ' ' )
-				.Append( string.IsNullOrWhiteSpace( image.Kind ) ? "unknown" : image.Kind ).Append( ' ' )
-				.Append( image.Calibrated ? 1 : 0 ).Append( ' ' ).Append( OneLine( image.Path ) ).Append( '\n' );
+			sb.Append( ReferenceImageLine( image ) ).Append( '\n' );
 		}
 
 		foreach ( var mark in studio.RefMarks )
@@ -253,11 +315,21 @@ public static class StudioDocument
 		// state, not a modelling operation. Writing it after the features would read as if it were
 		// one of them, which is the single thing this format should not imply about a rig.
 		WriteRig( sb, studio );
+		WriteAssembly( sb, studio.Assembly );
 
 		foreach ( var feature in studio.Features )
 			WriteFeature( sb, feature );
 
 		return sb.ToString();
+	}
+
+	static void WriteAssembly( StringBuilder sb, AssemblyDocument assembly )
+	{
+		if ( assembly is null || !assembly.HasData )
+			return;
+
+		// Compact JSON stays on one readable text line; strings and extension values are escaped.
+		sb.Append( "assemblyjson " ).Append( assembly.ToJson() ).Append( '\n' );
 	}
 
 	/// <summary>
@@ -323,6 +395,10 @@ public static class StudioDocument
 			sb.Append( "\t\tz " ).Append( Vec( bone.Local.Z ) ).Append( '\n' );
 			sb.Append( "\t\torigin " ).Append( Vec( bone.Local.Origin ) ).Append( '\n' );
 			sb.Append( "\t\tlength " ).Append( Num( bone.Length ) ).Append( '\n' );
+			if ( !bone.Deform )
+				sb.Append( "\t\tdeform 0\n" );
+			if ( bone.EnvelopeRadius > 1e-6f )
+				sb.Append( "\t\tenveloperadius " ).Append( Num( bone.EnvelopeRadius ) ).Append( '\n' );
 
 			// Absent means rigid, which is what Bone.Soft being null means and what nearly every
 			// bone is. Four zeros would be a different thing entirely - a bone with no spring that
@@ -334,6 +410,8 @@ public static class StudioDocument
 					.Append( Num( soft.Weight ) ).Append( ' ' )
 					.Append( Num( soft.MaxAngle ) ).Append( '\n' );
 			}
+			if ( bone.Bendy is { } bendy )
+				sb.Append( "\t\tbendy " ).Append( bendy.Segments ).Append( ' ' ).Append( Num( bendy.EaseIn ) ).Append( ' ' ).Append( Num( bendy.EaseOut ) ).Append( '\n' );
 
 			sb.Append( "\tendbone\n" );
 		}
@@ -350,6 +428,18 @@ public static class StudioDocument
 			sb.Append( "\troot " ).Append( OneLine( rig.RootBone ) ).Append( '\n' );
 		if ( !string.IsNullOrWhiteSpace( rig.HipsBone ) )
 			sb.Append( "\thips " ).Append( OneLine( rig.HipsBone ) ).Append( '\n' );
+		if ( !string.IsNullOrWhiteSpace( studio.RigBindMethod ) && studio.RigBindMethod != "bodies" )
+			sb.Append( "\tbindmethod " ).Append( OneLine( studio.RigBindMethod ) ).Append( '\n' );
+		if ( Math.Abs( studio.RigEnvelopeScale - 1f ) > 1e-6f )
+			sb.Append( "\tenvelopescale " ).Append( Num( studio.RigEnvelopeScale ) ).Append( '\n' );
+		foreach ( var (boneName, flags) in studio.RigBoneFlags )
+			if ( !string.IsNullOrWhiteSpace( boneName ) && !string.IsNullOrWhiteSpace( flags ) && rig.IndexOf( boneName ) >= 0 )
+				sb.Append( "\tboneflags " ).Append( flags.Replace( " ", "" ) ).Append( ' ' ).Append( OneLine( boneName ) ).Append( '\n' );
+		// Host-owned rig workspace state: one JSON payload lets a host preserve collections,
+		// display looks and named poses without putting auxiliary files beside the document.
+		// It remains inside the rig block, so older readers skip it along with other unknown rig data.
+		if ( !string.IsNullOrWhiteSpace( studio.RigWorkspaceJson ) )
+			sb.Append( "\trigworkspacejson " ).Append( OneLine( studio.RigWorkspaceJson ) ).Append( '\n' );
 
 		// INSIDE THE RIG BLOCK so an older reader skips it rather than refusing the file — ReadRig
 		// ignores keys it does not recognise. Weight paint without bones is not a thing, so a
@@ -387,6 +477,15 @@ public static class StudioDocument
 		}
 
 		sb.Append( "\tendweights\n" );
+	}
+
+	/// <summary>One feature exactly as <see cref="Write"/> puts it in a document. Two features with the
+	/// same text build the same thing from the same input (<see cref="StudioCache.LoadOnto"/>).</summary>
+	internal static string FeatureText( Feature feature )
+	{
+		var sb = new StringBuilder();
+		WriteFeature( sb, feature );
+		return sb.ToString();
 	}
 
 	static void WriteFeature( StringBuilder sb, Feature feature )
@@ -534,9 +633,38 @@ public static class StudioDocument
 				// the entire path by one. A second keyword costs nothing, reads as what it is in a
 				// format meant to be diffed by hand, and lands in the same list at the same position,
 				// which is all the ordering an interleaved log needs.
+				//
+				// A CLONE IS A THIRD LINE KIND for the same reason, with its offset leading the line:
+				// `clone <field> ox oy oz <stroke>`. A build that predates cloning skips the keyword
+				// it does not know, which drops the clone rather than replaying it as a white stroke.
+				//
+				// A SMUDGE IS A FOURTH, `smudge <field> <stroke>`, so an older build drops it rather
+				// than replaying it as a plain stroke in its unused colour.
 				foreach ( var s in strokes )
+				{
+					if ( s.Smudge && !s.Erase )
+					{
+						sb.Append( "\tsmudge " ).Append( field.Name ).Append( ' ' ).Append( Stroke( s ) ).Append( '\n' );
+						continue;
+					}
+
+					// A BLUR IS A FIFTH, `blur <field> <stroke>`, for the same reason as a smudge.
+					if ( s.Blur && !s.Erase )
+					{
+						sb.Append( "\tblur " ).Append( field.Name ).Append( ' ' ).Append( Stroke( s ) ).Append( '\n' );
+						continue;
+					}
+
+					if ( s.Clone && !s.Erase )
+					{
+						sb.Append( "\tclone " ).Append( field.Name ).Append( ' ' )
+							.Append( Vec( s.CloneOffset ) ).Append( ' ' ).Append( Stroke( s ) ).Append( '\n' );
+						continue;
+					}
+
 					sb.Append( s.Erase ? "\terase " : "\tstroke " )
 						.Append( field.Name ).Append( ' ' ).Append( Stroke( s ) ).Append( '\n' );
+				}
 
 				return;
 
@@ -575,6 +703,12 @@ public static class StudioDocument
 					.Append( bodyId ).Append( ' ' ).Append( r.Affected ).Append( ' ' )
 					.Append( Num( r.MaxTangential ) ).Append( ' ' ).Append( Num( r.MaxNormal ) ).Append( '\n' );
 
+			return;
+
+		case System.Enum e:
+			// A plain enum (SketchStatus, and anything like it): the name, so a
+			// rename stays readable and an unknown name fails loudly on load.
+			sb.Append( "\tenum " ).Append( field.Name ).Append( ' ' ).Append( e.ToString() ).Append( '\n' );
 			return;
 
 		case null:
@@ -686,6 +820,14 @@ public static class StudioDocument
 	/// </summary>
 	public static PartStudio Read( string text )
 	{
+		if ( ( text ?? "" ).TrimStart().StartsWith( "{" ) )
+		{
+			using var asset = System.Text.Json.JsonDocument.Parse( text );
+			if ( !asset.RootElement.TryGetProperty( "StudioText", out var document ) || document.ValueKind != System.Text.Json.JsonValueKind.String )
+				throw new FormatException( "The Effigy asset has no StudioText document." );
+			text = document.GetString();
+		}
+
 		var studio = new PartStudio();
 		var lines = (text ?? "").Replace( "\r\n", "\n" ).Split( '\n' );
 		var rollback = int.MaxValue;
@@ -705,6 +847,7 @@ public static class StudioDocument
 		}
 
 		i++;
+		var assemblyRead = false;
 
 		for ( ; i < lines.Length; i++ )
 		{
@@ -742,6 +885,12 @@ public static class StudioDocument
 						new Vec2( ParseFloat( parts[1] ), ParseFloat( parts[2] ) ) );
 				}
 
+				continue;
+			}
+
+			if ( line.StartsWith( "manualuv " ) )
+			{
+				if ( ManualUVIslandEdit.ReadLine( line ) is { } edit ) studio.ManualUVEdits.Add( edit );
 				continue;
 			}
 
@@ -968,6 +1117,24 @@ public static class StudioDocument
 				continue;
 			}
 
+			if ( line.StartsWith( "assemblyjson ", StringComparison.Ordinal ) )
+			{
+				if ( version < VersionAssembly )
+					throw new InvalidDataException( $"Line {i + 1}: assembly data requires Effigy format {VersionAssembly}." );
+				if ( assemblyRead )
+					throw new InvalidDataException( $"Line {i + 1}: duplicate assembly data block." );
+				try
+				{
+					studio.Assembly = AssemblyDocument.FromJson( line[13..].Trim() );
+				}
+				catch ( Exception e ) when ( e is FormatException or JsonException or ArgumentException )
+				{
+					throw new InvalidDataException( $"Line {i + 1}: assembly data is malformed.", e );
+				}
+				assemblyRead = true;
+				continue;
+			}
+
 			if ( !line.StartsWith( "feature " ) )
 				throw new InvalidDataException( $"Line {i + 1}: expected a feature, found '{line}'" );
 
@@ -1061,6 +1228,37 @@ public static class StudioDocument
 				if ( parts.Length == 2 && !string.IsNullOrWhiteSpace( parts[0] ) )
 					studio.BodyBoneMap[parts[0]] = parts[1].Trim();
 
+				continue;
+			}
+
+			if ( line.StartsWith( "bindmethod " ) )
+			{
+				var method = line[11..].Trim().ToLowerInvariant();
+				if ( method is "bodies" or "heat" or "voxel" or "distance" or "biharmonic" or "envelope" )
+					studio.RigBindMethod = method;
+				continue;
+			}
+
+			if ( line.StartsWith( "boneflags " ) )
+			{
+				var parts = line[10..].Split( ' ', 2, StringSplitOptions.RemoveEmptyEntries );
+				if ( parts.Length == 2 && !string.IsNullOrWhiteSpace( parts[1] ) )
+					studio.RigBoneFlags[parts[1].Trim()] = parts[0];
+				continue;
+			}
+
+			if ( line.StartsWith( "envelopescale " ) )
+			{
+				if ( float.TryParse( line[14..].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var scale ) && float.IsFinite( scale ) )
+					studio.RigEnvelopeScale = Math.Clamp( scale, 0.25f, 4f );
+				continue;
+			}
+
+			if ( line.StartsWith( "rigworkspacejson " ) )
+			{
+				// The host validates its opaque JSON on use. Keeping it here lets an Effigy-only
+				// reader round-trip host state without gaining a dependency on that host.
+				studio.RigWorkspaceJson = line[17..].Trim();
 				continue;
 			}
 
@@ -1223,6 +1421,9 @@ public static class StudioDocument
 		var length = 1f;
 		Vec3 x = new( 1, 0, 0 ), y = new( 0, 1, 0 ), z = new( 0, 0, 1 ), origin = default;
 		SoftBone soft = null;
+		BendyBoneSettings bendy = null;
+		var deform = true;
+		var envelopeRadius = 0f;
 
 		for ( i++; i < lines.Length; i++ )
 		{
@@ -1240,6 +1441,22 @@ public static class StudioDocument
 			if ( line.StartsWith( "z " ) ) { z = ParseVec3( line[2..] ); continue; }
 			if ( line.StartsWith( "origin " ) ) { origin = ParseVec3( line[7..] ); continue; }
 			if ( line.StartsWith( "length " ) ) { length = ParseFloat( line[7..] ); continue; }
+			if ( line.StartsWith( "bendy " ) )
+			{
+				var parts = line[6..].Split( ' ', StringSplitOptions.RemoveEmptyEntries );
+				bendy = new BendyBoneSettings();
+				if ( parts.Length > 0 ) bendy.Segments = Math.Clamp( ParseInt( parts[0], 8 ), 1, 32 );
+				if ( parts.Length > 1 ) bendy.EaseIn = Math.Clamp( ParseFloat( parts[1] ), 0f, 3f );
+				if ( parts.Length > 2 ) bendy.EaseOut = Math.Clamp( ParseFloat( parts[2] ), 0f, 3f );
+				continue;
+			}
+			if ( line.StartsWith( "deform " ) ) { deform = ParseInt( line[7..], 1 ) != 0; continue; }
+			if ( line.StartsWith( "enveloperadius " ) )
+			{
+				var parsed = ParseFloat( line[15..] );
+				envelopeRadius = float.IsFinite( parsed ) ? Math.Clamp( parsed, 0f, 1000f ) : 0f;
+				continue;
+			}
 
 			if ( line.StartsWith( "soft " ) )
 			{
@@ -1267,6 +1484,9 @@ public static class StudioDocument
 		{
 			var index = rig.AddBone( name, parent, new Xform( x, y, z, origin ), length );
 			rig.Bones[index].Soft = soft;
+			rig.Bones[index].Bendy = bendy;
+			rig.Bones[index].Deform = deform;
+			rig.Bones[index].EnvelopeRadius = envelopeRadius;
 		}
 		catch ( ArgumentException e )
 		{
@@ -1419,6 +1639,15 @@ public static class StudioDocument
 				field.SetValue( feature, value );
 				return;
 
+			case "enum":
+				// A plain enum field (SketchStatus): the name WriteField wrote.
+				// An unknown name throws rather than silently keeping a stale value.
+				if ( System.Enum.TryParse( field.FieldType, value, ignoreCase: true, out var enumValue ) )
+					field.SetValue( feature, enumValue );
+				else
+					throw new InvalidDataException( $"Line {i + 1}: '{value}' is not a {field.FieldType.Name}." );
+				return;
+
 			case "vec2":
 			{
 				var parts = value.Split( ' ', StringSplitOptions.RemoveEmptyEntries );
@@ -1525,6 +1754,9 @@ public static class StudioDocument
 
 			case "stroke":
 			case "erase":
+			case "clone":
+			case "smudge":
+			case "blur":
 			{
 				// BOTH KINDS LAND IN ONE LIST, IN FILE ORDER. Paint and erase interleave — the log is
 				// what makes an erase survive a rebuild — so they share the field, and clearedLists
@@ -1547,12 +1779,30 @@ public static class StudioDocument
 					clearedLists.Add( field.Name );
 				}
 
+				Vec3 cloneOffset = default;
+
+				if ( key == "clone" )
+				{
+					// The offset's three numbers lead the line; what follows is an ordinary stroke.
+					var parts = value.Split( ' ', 4, StringSplitOptions.RemoveEmptyEntries );
+
+					if ( parts.Length < 4 )
+						return;
+
+					cloneOffset = new Vec3( ParseFloat( parts[0] ), ParseFloat( parts[1] ), ParseFloat( parts[2] ) );
+					value = parts[3];
+				}
+
 				var stroke = ParseStroke( value );
 
 				if ( stroke is null )
 					return;
 
 				stroke.Erase = key == "erase";
+				stroke.Clone = key == "clone";
+				stroke.Smudge = key == "smudge";
+				stroke.Blur = key == "blur";
+				stroke.CloneOffset = cloneOffset;
 				strokes.Add( stroke );
 				return;
 			}
@@ -1765,9 +2015,11 @@ public static class StudioDocument
 	/// <summary>Round-trip float formatting. "R" rather than a fixed number of decimals: a
 	/// dimension typed as 0.1 has to come back as 0.1, and a rounded one comes back as a model that
 	/// has moved very slightly every time it is opened and saved.</summary>
-	static string Num( float f ) => f.ToString( "R", CultureInfo.InvariantCulture );
+	internal static string Num( float f ) => f.ToString( "R", CultureInfo.InvariantCulture );
 
-	static string Vec( Vec3 v ) => $"{Num( v.x )} {Num( v.y )} {Num( v.z )}";
+	internal static string Vec( Vec3 v ) => $"{Num( v.x )} {Num( v.y )} {Num( v.z )}";
+
+	internal static string Vec2( Vec2 v ) => $"{Num( v.x )} {Num( v.y )}";
 
 	static string Face( FaceRef f ) =>
 		$"{f.BodyId} {Vec( f.Point )} {Vec( f.Normal )} {Num( f.Anchor.x )} {Num( f.Anchor.y )} "
@@ -1932,14 +2184,14 @@ public static class StudioDocument
 		return stroke;
 	}
 
-	static Vec3 ParseVec3( string value )
+	internal static Vec3 ParseVec3( string value )
 	{
 		var p = value.Split( ' ', StringSplitOptions.RemoveEmptyEntries );
 
 		return new Vec3( ParseFloat( p[0] ), ParseFloat( p[1] ), ParseFloat( p[2] ) );
 	}
 
-	static (string Key, string Value) Split( string line )
+	internal static (string Key, string Value) Split( string line )
 	{
 		var space = line.IndexOf( ' ' );
 
@@ -1959,11 +2211,11 @@ public static class StudioDocument
 		return float.TryParse( s.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out _ );
 	}
 
-	static float ParseFloat( string s ) =>
+	internal static float ParseFloat( string s ) =>
 		float.TryParse( s, NumberStyles.Float, CultureInfo.InvariantCulture, out var f ) ? f : 0f;
 
-	static int ParseInt( string s, int fallback ) =>
+	internal static int ParseInt( string s, int fallback ) =>
 		int.TryParse( s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var i ) ? i : fallback;
 
-	static string OneLine( string s ) => s.Replace( '\n', ' ' ).Replace( '\r', ' ' ).Trim();
+	internal static string OneLine( string s ) => s.Replace( '\n', ' ' ).Replace( '\r', ' ' ).Trim();
 }

@@ -70,11 +70,13 @@ public static class BuildScriptAnim
 
 	/// <summary>Run a script against a skeleton. The skeleton is required: gait, wave,
 	/// spring, thrash, breathe, look_at, lint and blend all sample poses through it.</summary>
-	public static Result Run( string text, Skeleton skeleton )
+	public static Result Run( string text, Skeleton skeleton, RigAnimFile initialClip = null )
 	{
 		ArgumentNullException.ThrowIfNull( skeleton );
 
 		var result = new Result();
+		// s&box twin: a chat edit runs against the open clip, seeded as "current".
+		if ( initialClip is not null ) { result.Clips["current"] = initialClip; result.Current = "current"; }
 		var presets = new Dictionary<string, Dictionary<string, RigPose>>( StringComparer.OrdinalIgnoreCase );
 		var lines = (text ?? "").Split( '\n' );
 
@@ -484,8 +486,10 @@ public static class BuildScriptAnim
 				}
 
 				var boneName = Req( opts, "bone" );
+				var boneIndex = skeleton.IndexOf( boneName );
+				if ( boneIndex < 0 ) throw new AnimException( $"skeleton has no bone '{boneName}' for key" );
 				var track = clip.Tracks.FirstOrDefault( t => t.Kind == RigTrackKind.Bone && t.Name == boneName );
-				var basePose = track is { Keys.Count: > 0 } ? track.Evaluate( frame ) : RigPose.Identity;
+				var basePose = track is { Keys.Count: > 0 } ? track.Evaluate( frame ) : RigPose.FromXform( skeleton.Bones[boneIndex].Local );
 				var pos2 = opts.TryGetValue( "pos", out var posText ) ? Vec( posText, "pos=" ) : basePose.Position;
 				var scale2 = opts.TryGetValue( "scale", out var scaleText ) ? Vec( scaleText, "scale=" ) : basePose.Scale;
 				var rot2 = basePose.Rotation;

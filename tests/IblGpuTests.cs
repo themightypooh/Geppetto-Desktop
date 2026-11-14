@@ -133,7 +133,10 @@ internal static class IblGpuTests
     {
         var vertices = new List<float>();
         foreach (var p in new[] {new Vector3(0,-1,-1), new Vector3(0,1,-1), new Vector3(0,1,1), new Vector3(0,-1,1)})
-            vertices.AddRange(new[] {p.X,p.Y,p.Z,n.X,n.Y,n.Z,0,0,0,0,1,0,0,0,0,0,0,1,0,1f});
+            // 24 floats/vertex = CpuMesh.FloatsPerVertex (pos 3 + nrm 3 + bones 4 +
+            // weights 4 + UV 2 + tangent/sign 4 + colour 4). The colour was missing
+            // (20-float packing) and every vertex past the first rendered misaligned.
+            vertices.AddRange(new[] {p.X,p.Y,p.Z,n.X,n.Y,n.Z,0,0,0,0,1,0,0,0,0,0,0,1,0,1f,1,1,1,1});
         return new ViewportMesh { Vertices = vertices.ToArray(), Indices = new uint[] {0,1,2,0,2,3},
             Batches = new[] {new CpuMesh.DrawBatch("card", new MaterialPalette.Entry("card", .5f,.5f,.5f,rough,metal),0,6)},
             Centre = Vector3.Zero, Radius = 2, TriangleCount = 2, BodyCount = 1 };

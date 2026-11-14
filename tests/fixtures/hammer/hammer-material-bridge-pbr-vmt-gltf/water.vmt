@@ -1,0 +1,9 @@
+"Water"
+{
+	"$basetexture" "water/water001a"
+	"$surfaceprop" "water"
+	"$roughness" "0.100"
+	"$translucent" "1"
+	"$alpha" "0.800"
+	"$custom_flow" "1.5"
+}

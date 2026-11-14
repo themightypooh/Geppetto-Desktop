@@ -59,3 +59,49 @@
 {"event": "run_registered", "id": "gate-1793053973-c7d25cb6", "pid": 62873, "run": "/home/poo/.local/share/geppetto/research/script-export_piranha-20261026-183256-62855", "t": 1793053976.9971669}
 {"event": "intent_placed", "id": "gate-1793053973-c7d25cb6", "pane": "3", "run": "/home/poo/.local/share/geppetto/research/script-export_piranha-20261026-183256-62855", "t": 1793053978.4989448}
 {"event": "first_frame", "id": "gate-1793053973-c7d25cb6", "pane": "3", "run": "/home/poo/.local/share/geppetto/research/script-export_piranha-20261026-183256-62855", "t": 1793053980.6133144}
+{"event": "stopped_step", "revision": 3, "run_dir": "/tmp/tmpy4clyla3/run-stop", "t": 1793353678.1840866}
+{"event": "stopped_step", "revision": 2, "run_dir": "/tmp/tmp79si9cp5/run-stop", "t": 1793353683.2465124}
+{"event": "stopped_step", "revision": 3, "run_dir": "/tmp/tmpxtry61hh/run-stop", "t": 1793353713.2911792}
+{"event": "stopped_step", "revision": 3, "run_dir": "/tmp/tmp7lvroyga/run-stop", "t": 1793353723.4445152}
+{"event": "stopped_step", "revision": 2, "run_dir": "/tmp/tmpz0rpel9g/run-stop", "t": 1793353728.5570314}
+{"event": "stopped_step", "revision": 3, "run_dir": "/tmp/tmpzrr0kp0j/run-stop", "t": 1793353758.5997553}
+{"event": "stopped_step", "revision": 3, "run_dir": "/tmp/tmpnaw1c1ot/run-stop", "t": 1793353779.705135}
+{"event": "stopped_step", "revision": 2, "run_dir": "/tmp/tmpk4ocf9w2/run-stop", "t": 1793353779.7568762}
+{"event": "stopped_step", "revision": 2, "run_dir": "/tmp/tmp9gh6noo9/run-stop", "t": 1793353825.2670932}
+{"event": "stopped_step", "revision": 3, "run_dir": "/tmp/tmp668m_x64/run-stop", "t": 1793353825.4803624}
+{"event": "stopped_step", "revision": 2, "run_dir": "/tmp/tmpieusy99b/run-stop", "t": 1793353825.5362175}
+{"event": "stopped_step", "revision": 2, "run_dir": "/tmp/tmpxm16uf5b/run-stop", "t": 1793353845.4830341}
+{"event": "stopped_step", "revision": 2, "run_dir": "/tmp/tmpxm16uf5b/run-stop", "t": 1793353845.4838777}
+{"event": "stopped_step", "revision": 3, "run_dir": "/tmp/tmpc2e7rn_c/run-stop", "t": 1793353845.6861556}
+{"event": "stopped_step", "revision": 2, "run_dir": "/tmp/tmpt1d6d3sw/run-stop", "t": 1793353845.7885036}
+{"event": "stopped_step", "revision": 2, "run_dir": "/tmp/tmp07cu04iv/run-stop", "t": 1793354006.3938344}
+{"event": "stopped_step", "revision": 2, "run_dir": "/tmp/tmp07cu04iv/run-stop", "t": 1793354006.394471}
+{"event": "stopped_step", "revision": 3, "run_dir": "/tmp/tmp0n2ytxa9/run-stop", "t": 1793354006.5965097}
+{"event": "stopped_step", "revision": 2, "run_dir": "/tmp/tmpdcy68p40/run-stop", "t": 1793354006.6483636}
+{"event": "intent_filed", "first_geom_line": 2, "id": "gate-1793384465-edf3c538", "lines": 39, "pane": "1", "subject": "Cloakmote baby: import approved parts and place measured skeleton", "t": 1793384466.1806846, "worker": "codex-rt"}
+{"event": "intent_no", "id": "gate-1793384465-edf3c538", "subject": "Cloakmote baby: import approved parts and place measured skeleton", "t": 1793384499.2395277}
+{"event": "stopped_step", "revision": 2, "run_dir": "/tmp/tmpef4pegox/run-stop", "t": 1794588408.4618273}
+{"event": "stopped_step", "revision": 2, "run_dir": "/tmp/tmpef4pegox/run-stop", "t": 1794588408.4626167}
+{"event": "stopped_step", "revision": 3, "run_dir": "/tmp/tmp6ww3ttu9/run-stop", "t": 1794588408.6643472}
+{"event": "stopped_step", "revision": 2, "run_dir": "/tmp/tmpxl_hge4t/run-stop", "t": 1794588408.7162757}
+{"event": "intent_filed", "first_geom_line": 1, "id": "gate-1794695437-81a046ee", "lines": 7, "pane": "1", "subject": "Ruinfolk squirrel v7: remove splotchy paint + tail nubs, broad plume tail, smooth lumps, fur on", "t": 1794695438.9726038, "worker": "claude"}
+{"event": "intent_yes", "id": "gate-1794695437-81a046ee", "subject": "Ruinfolk squirrel v7: remove splotchy paint + tail nubs, broad plume tail, smooth lumps, fur on", "t": 1794695445.96193}
+{"event": "launch_dispatched", "id": "gate-1794695437-81a046ee", "t": 1794695446.2707832}
+{"event": "run_start", "id": "gate-1794695437-81a046ee", "script_hash": "8b262fa23c840841a2b04c22414e8adf25a18cdc60457e8becbd2b223b95375e", "session": "ab29e97f-5bfc-4c15-8a58-01625b498420", "subject": "Ruinfolk squirrel v7: remove splotchy paint + tail nubs, broad plume tail, smooth lumps, fur on", "t": 1794695446.6888127, "worker": "claude"}
+{"event": "run_registered", "id": "gate-1794695437-81a046ee", "pid": 590209, "run": "/home/poo/.local/share/geppetto/research/script-pass1-20261114-173046-589854", "t": 1794695446.8043287}
+{"event": "intent_filed", "first_geom_line": 3, "id": "gate-1794697089-ce66e565", "lines": 9, "pane": "2", "subject": "Ruinfolk squirrel: fix eyes", "t": 1794697089.3880572, "worker": "claude"}
+{"event": "intent_yes", "id": "gate-1794697089-ce66e565", "subject": "Ruinfolk squirrel: fix eyes", "t": 1794697095.1578722}
+{"event": "launch_dispatched", "id": "gate-1794697089-ce66e565", "t": 1794697095.4784837}
+{"event": "run_start", "id": "gate-1794697089-ce66e565", "script_hash": "3f524aa4cee9cf6aa6a57d2819ae35a1c8ba3f04fa0cf240fa83eb7db816c717", "session": "ab29e97f-5bfc-4c15-8a58-01625b498420", "subject": "Ruinfolk squirrel: fix eyes", "t": 1794697095.8385692, "worker": "claude"}
+{"event": "run_registered", "id": "gate-1794697089-ce66e565", "pid": 630536, "run": "/home/poo/.local/share/geppetto/research/script-eyes-20261114-175815-630481", "t": 1794697095.9559276}
+{"event": "intent_filed", "first_geom_line": 3, "id": "gate-1794697108-7cfed336", "lines": 9, "pane": "3", "subject": "Ruinfolk squirrel: fix eyes", "t": 1794697108.5826883, "worker": "claude"}
+{"event": "intent_placed", "id": "gate-1794697089-ce66e565", "pane": "2", "run": "/home/poo/.local/share/geppetto/research/script-eyes-20261114-175815-630481", "t": 1794697116.545353}
+{"event": "intent_yes", "id": "gate-1794697108-7cfed336", "subject": "Ruinfolk squirrel: fix eyes", "t": 1794697116.8818183}
+{"event": "first_frame", "id": "gate-1794697089-ce66e565", "pane": "2", "run": "/home/poo/.local/share/geppetto/research/script-eyes-20261114-175815-630481", "t": 1794697118.656851}
+{"event": "intent_filed", "first_geom_line": 3, "id": "gate-1794697125-54c33539", "lines": 9, "pane": "3", "subject": "Ruinfolk squirrel: fix eyes", "t": 1794697126.376628, "worker": "claude"}
+{"event": "intent_yes", "id": "gate-1794697125-54c33539", "subject": "Ruinfolk squirrel: fix eyes", "t": 1794697129.816303}
+{"event": "launch_dispatched", "id": "gate-1794697125-54c33539", "t": 1794697130.2600214}
+{"event": "run_start", "id": "gate-1794697125-54c33539", "script_hash": "3f524aa4cee9cf6aa6a57d2819ae35a1c8ba3f04fa0cf240fa83eb7db816c717", "session": "ab29e97f-5bfc-4c15-8a58-01625b498420", "subject": "Ruinfolk squirrel: fix eyes", "t": 1794697130.965131, "worker": "claude"}
+{"event": "run_registered", "id": "gate-1794697125-54c33539", "pid": 631389, "run": "/home/poo/.local/share/geppetto/research/script-eyes-20261114-175851-631324", "t": 1794697131.1034677}
+{"event": "intent_placed", "id": "gate-1794697125-54c33539", "pane": "3", "run": "/home/poo/.local/share/geppetto/research/script-eyes-20261114-175851-631324", "t": 1794697146.3370967}
+{"event": "first_frame", "id": "gate-1794697125-54c33539", "pane": "3", "run": "/home/poo/.local/share/geppetto/research/script-eyes-20261114-175851-631324", "t": 1794697148.7118437}

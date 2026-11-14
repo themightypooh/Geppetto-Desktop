@@ -143,9 +143,14 @@ public static class UVLayoutCheck
 				report.OverlappingTexels = coverage.OverlappingTexels;
 				report.OutsideSquareFaces = coverage.FacesOutsideTheSquare;
 			}
-			catch
+			catch (System.Exception soft)
 			{
 				// A layout too degenerate to rasterise still gets the rest of the grade.
+				// Kept difference vs Mobile: Mobile logs this via Effigy.KernelLog.Soft;
+				// Desktop has no KernelLog yet (port-mobile-kernellog-facility-to-desktop-kernel
+				// owns that file), so the same "[kernel soft-fail]" text goes to stderr
+				// until then - swap this line for the KernelLog.Soft call when it lands.
+				Console.Error.WriteLine( $"[kernel soft-fail] UVLayoutCheck.Grade bake coverage: {soft.GetType().Name}: {soft.Message}" );
 			}
 		}
 

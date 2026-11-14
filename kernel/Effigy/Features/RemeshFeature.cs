@@ -74,6 +74,9 @@ public sealed class RemeshFeature : Feature
 
 	const long MaxVoxels = 60_000_000;
 
+	/// <summary>Optional host voxel engine (parts, voxel, smooth passes) -> skin, or null for the built-in SurfaceNets.</summary>
+	public static System.Func<IReadOnlyList<PolyMesh>, float, int, PolyMesh> VoxelBackend;
+
 	/// <summary>Quads to aim for, per body, in Quad mode. A target rather than a promise — the
 	/// lattice decides where faces fall, and the count lands within about ten percent.</summary>
 	public readonly IntParam Faces = new( "Faces", 4000, 16, 400_000 ) { Slider = false };
@@ -323,6 +326,21 @@ public sealed class RemeshFeature : Feature
 					"The voxel is too small for the size of the part",
 					$"Meshing would sample {voxels:N0} voxels; the limit is {MaxVoxels:N0}.",
 					$"Set Voxel to {fits:0.##} or more" );
+			}
+
+			// A host can plug in a faster voxel engine (Geppetto Mobile: OpenVDB). It takes the parts' mesh,
+			// the voxel and the smoothing passes and returns the finished skin, or null to fall back to SurfaceNets.
+			// Fillets and multi-part blends need the built-in field: it preserves the nearest part's material.
+			if ( VoxelBackend is not null && parts.Count == 1 && Fillet.Clamped <= 0f )
+			{
+				var fast = VoxelBackend( parts.Select( b => b.Mesh ).ToList(), voxel, Smooth.Clamped );
+				if ( fast is not null && fast.FaceCount > 0 )
+				{
+					foreach ( var face in fast.Faces ) face.Material = leaves[0].Material;
+					parts[0].Mesh = fast;
+					foreach ( var gone in parts.Skip( 1 ) ) ctx.Bodies.Remove( gone );
+					continue;
+				}
 			}
 
 			var result = SurfaceNets.Mesh( field, voxel );

@@ -16,7 +16,7 @@ public sealed class PrimitiveFeature : Feature
 	public override string TypeName => Shape.Value;
 
 	public readonly ChoiceParam Shape = new( "Shape",
-		new[] { "Box", "Cylinder", "Sphere", "Wedge", "Tube", "Torus", "Cone", "Capsule", "Plane" } );
+		new[] { "Box", "Cylinder", "Sphere", "Wedge", "Tube", "Plane", "Torus", "Cone", "Capsule" } );
 
 	public readonly FloatParam SizeX = new( "Width", 1f, 0.0001f, unit: "u" );
 	public readonly FloatParam SizeY = new( "Depth", 1f, 0.0001f, unit: "u" );
@@ -240,8 +240,73 @@ public sealed class TransformFeature : Feature
 			* Xform.Rotate( RotationAxis.Value, RotationAngle.Value * MathF.PI / 180f )
 			* Xform.Scale( scale );
 
-		foreach ( var body in RequireBodies( ctx, Bodies ) )
+		var bodies = RequireBodies( ctx, Bodies ).ToList();
+		var centre = bodies.Aggregate( Vec3.Zero, ( c, b ) => c + PatternVariation.Centroid( b.Mesh ) ) * ( 1f / bodies.Count );
+		var turned = ( Xform.Rotate( RotationAxis.Value, RotationAngle.Value * MathF.PI / 180f ) * Xform.Scale( scale ) ).TransformPoint( centre );
+
+		void Arrow( string label, Vec3 axis, Func<Vec3, float> get, Func<Vec3, float, Vec3> set ) => AddHandle(
+			new FeatureHandle( label, turned, axis, () => get( Translate.Value ), v => Translate.Value = set( Translate.Value, v ) ) );
+
+		Arrow( "X", new Vec3( 1, 0, 0 ), t => t.x, ( t, v ) => new Vec3( v, t.y, t.z ) );
+		Arrow( "Y", new Vec3( 0, 1, 0 ), t => t.y, ( t, v ) => new Vec3( t.x, v, t.z ) );
+		Arrow( "Z", new Vec3( 0, 0, 1 ), t => t.z, ( t, v ) => new Vec3( t.x, t.y, v ) );
+
+		// Turning happens about the world origin, so that is where the ring sits.
+		if ( RotationAxis.Value.LengthSquared >= 1e-12f )
+			AddHandle( FeatureHandle.Of( RotationAngle, Vec3.Zero, RotationAxis.Value, isAngle: true ) );
+
+		foreach ( var body in bodies )
 			MeshTransform.Apply( body.Mesh, xform );
+	}
+}
+
+/// <summary>
+/// A persistent assembly relation between two independent bodies. The first selected body is the
+/// reference part; this feature moves the second so its vertex centroid stays at the chosen mate
+/// offset from the reference centroid on every rebuild. Fixed centers captures the current offset,
+/// Coincident centers brings the centers together, and Center distance keeps them on a chosen axis.
+/// </summary>
+public sealed class AssemblyMateFeature : Feature
+{
+	public override string TypeName => "Mate";
+	public override GeometryKind Accepts => GeometryKind.Body;
+
+	public readonly BodySelectionParam Bodies = new( "Parts A / B" );
+	public readonly ChoiceParam Kind = new( "Mate type", new[] { "Fixed centers", "Coincident centers", "Center distance" } );
+	public readonly Vec3Param Offset = new( "Fixed offset", Vec3.Zero );
+	public readonly ChoiceParam Axis = new( "Distance axis", new[] { "X", "Y", "Z" } );
+	public readonly FloatParam Distance = new( "Center distance", 10f, 0f, 10000f, "u" );
+
+	public override IReadOnlyList<IParam> Parameters => new IParam[] { Bodies, Kind, Offset, Axis, Distance };
+
+	protected override void Execute( FeatureContext ctx )
+	{
+		if ( Bodies.BodyIds.Count != 2 || Bodies.BodyIds[0] == Bodies.BodyIds[1] )
+		{
+			FailOn( "Parts A / B", "A mate needs two different parts",
+				$"Selected {Bodies.BodyIds.Count} part(s). Select exactly two independent bodies.",
+				"Pick two bodies before adding the mate" );
+		}
+
+		var parts = RequireBodies( ctx, Bodies ).ToList();
+		if ( parts.Count != 2 )
+		{
+			FailOn( "Parts A / B", "A mate's part is unavailable",
+				$"Only {parts.Count} of the two selected bodies are available at this point in the feature tree.",
+				"Move the mate below both part features, or reselect the current bodies" );
+		}
+
+		var reference = parts[0];
+		var moving = parts[1];
+		var a = PatternVariation.Centroid( reference.Mesh );
+		var b = PatternVariation.Centroid( moving.Mesh );
+		var offset = Kind.Index switch
+		{
+			1 => Vec3.Zero,
+			2 => (Axis.Index switch { 1 => new Vec3( 0, 1, 0 ), 2 => new Vec3( 0, 0, 1 ), _ => new Vec3( 1, 0, 0 ) }) * Distance.Clamped,
+			_ => Offset.Value,
+		};
+		MeshTransform.Apply( moving.Mesh, Xform.Translate( a + offset - b ) );
 	}
 }
 
@@ -622,7 +687,8 @@ public sealed class CurvePatternFeature : Feature
 	}
 }
 
-/// <summary>Reflects bodies in a plane. Onshape's Mirror.</summary>
+/// <summary>Reflects bodies in a plane: a picked face, a datum Plane, or Plane through / Plane normal
+/// (see <see cref="CutPlane"/>). Onshape's Mirror.</summary>
 public sealed class MirrorFeature : Feature
 {
 	public override string TypeName => "Mirror";
@@ -635,20 +701,27 @@ public sealed class MirrorFeature : Feature
 	public readonly BoolParam KeepOriginal = new( "Keep original", true );
 	public readonly BoolParam Merge = new( "Merge into one body", false );
 
+	/// <summary>The face to mirror across, when one was picked (wins over the numbers). See <see cref="CutPlane"/>.</summary>
+	public FaceRef? PlaneFace;
+
+	/// <summary>The datum Plane feature to mirror across, when one was picked.</summary>
+	public string PlaneId = "";
+
 	public override IReadOnlyList<IParam> Parameters =>
 		new IParam[] { Bodies, PlanePoint, PlaneNormal, KeepOriginal, Merge };
 
 	protected override void Execute( FeatureContext ctx )
 	{
-		if ( PlaneNormal.Value.LengthSquared < 1e-12f )
+		if ( !CutPlane.TryResolve( ctx, PlaneFace, PlaneId, PlanePoint.Value, PlaneNormal.Value, out var origin, out var normal, out var problem ) )
 		{
 			FailOn( "Plane normal",
-				"Plane normal cannot be zero",
-				"A mirror needs a plane to reflect across, and a zero normal does not define one.",
+				problem,
+				"A mirror needs a plane to reflect across: a picked face, a Plane, or a normal that is not zero.",
+				"Pick a face or a plane to mirror across",
 				"Set Plane normal to the direction the mirror should face" );
 		}
 
-		var xform = Xform.Mirror( PlanePoint.Value, PlaneNormal.Value );
+		var xform = Xform.Mirror( origin, normal );
 		var sources = RequireBodies( ctx, Bodies );
 
 		foreach ( var source in sources )

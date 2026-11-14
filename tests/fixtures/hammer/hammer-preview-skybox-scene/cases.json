@@ -1,0 +1,22 @@
+{
+  "skybox-room": {
+    "skyname": "sky_day01_01",
+    "sky_camera_origin": [
+      512,
+      512,
+      512
+    ],
+    "scale": 16,
+    "preview_faces": 6,
+    "bounds_min": [
+      512,
+      512,
+      512
+    ],
+    "bounds_max": [
+      522,
+      522,
+      522
+    ]
+  }
+}

@@ -272,3 +272,31 @@ internal static class ShapeKeyCarry
 		}
 	}
 }
+
+/// <summary>
+/// Install generated morphs on a mesh (the FACS synthesis route): each morph replaces any
+/// same-named finished morph, the way <see cref="ShapeKeyEndFeature"/> replaces a re-recorded key,
+/// and a morph whose delta count is not the vertex count is refused by name instead of written
+/// wrong. Used by <see cref="FaceRig.SynthesizeFacsMorphs"/>; the recording path above stays the
+/// only way a sculpted key is captured.
+/// </summary>
+public static class FacsMorphInstall
+{
+	/// <summary>Install the morphs, replacing same-named ones. Returns how many were installed.</summary>
+	public static int Install( PolyMesh mesh, IEnumerable<MeshMorph> morphs )
+	{
+		if ( mesh is null ) throw new ArgumentNullException( nameof( mesh ) );
+		if ( morphs is null ) throw new ArgumentNullException( nameof( morphs ) );
+		var installed = 0;
+		foreach ( var morph in morphs )
+		{
+			if ( morph is null || string.IsNullOrWhiteSpace( morph.Name ) ) continue;
+			if ( morph.Deltas is null || morph.Deltas.Length != mesh.VertexCount )
+				throw new ArgumentException( $"Morph '{morph.Name}' has {morph.Deltas?.Length ?? 0} deltas for a {mesh.VertexCount}-vertex mesh.", nameof( morphs ) );
+			mesh.Morphs.RemoveAll( m => m != morph && m?.Name == morph.Name );
+			mesh.Morphs.Add( morph );
+			installed++;
+		}
+		return installed;
+	}
+}

@@ -67,7 +67,7 @@ public sealed class VdmStampFeature : Feature
 		new IParam[] { Bodies, Stamp, FieldFile, Center, Direction, Tangent, Radius, Strength };
 
 	/// <summary>The last stamp result per body, for dialogs and tests. Empty before the first rebuild.</summary>
-	public readonly Dictionary<string, VdmStampResult> LastResults = new();
+	public Dictionary<string, VdmStampResult> LastResults { get; } = new();
 
 	VdmField LoadField()
 	{

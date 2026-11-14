@@ -1,0 +1,164 @@
+{
+  "cases": [
+    {
+      "expectedHullPointCount": null,
+      "expectedOutcome": "Created",
+      "expectedReasonContains": null,
+      "expectedVolume": 262144,
+      "height": 64,
+      "name": "square-64",
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          64,
+          0
+        ],
+        [
+          64,
+          64
+        ],
+        [
+          0,
+          64
+        ]
+      ]
+    },
+    {
+      "expectedHullPointCount": null,
+      "expectedOutcome": "Created",
+      "expectedReasonContains": null,
+      "expectedVolume": 131072,
+      "height": 64,
+      "name": "right-triangle",
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          64,
+          0
+        ],
+        [
+          0,
+          64
+        ]
+      ]
+    },
+    {
+      "expectedHullPointCount": null,
+      "expectedOutcome": "Created",
+      "expectedReasonContains": null,
+      "expectedVolume": 42561.176,
+      "height": 16,
+      "name": "regular-hexagon-radius-32",
+      "points": [
+        [
+          32,
+          0
+        ],
+        [
+          16,
+          27.71281292110204
+        ],
+        [
+          -16,
+          27.71281292110204
+        ],
+        [
+          -32,
+          0
+        ],
+        [
+          -16,
+          -27.71281292110204
+        ],
+        [
+          16,
+          -27.71281292110204
+        ]
+      ]
+    },
+    {
+      "expectedHullPointCount": 4,
+      "expectedOutcome": "RejectedNonConvex",
+      "expectedReasonContains": "polygon-non-convex",
+      "expectedVolume": null,
+      "height": 64,
+      "name": "concave-dart",
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          64,
+          0
+        ],
+        [
+          64,
+          64
+        ],
+        [
+          32,
+          32
+        ],
+        [
+          0,
+          64
+        ]
+      ]
+    },
+    {
+      "expectedHullPointCount": 4,
+      "expectedOutcome": "RejectedSelfIntersecting",
+      "expectedReasonContains": "polygon-self-intersecting",
+      "expectedVolume": null,
+      "height": 64,
+      "name": "bowtie",
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          64,
+          64
+        ],
+        [
+          64,
+          0
+        ],
+        [
+          0,
+          64
+        ]
+      ]
+    },
+    {
+      "expectedHullPointCount": 2,
+      "expectedOutcome": "RejectedDegenerate",
+      "expectedReasonContains": "polygon-degenerate",
+      "expectedVolume": null,
+      "height": 64,
+      "name": "collinear",
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          32,
+          0
+        ],
+        [
+          64,
+          0
+        ]
+      ]
+    }
+  ]
+}

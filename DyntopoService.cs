@@ -134,6 +134,14 @@ public static class DyntopoService
 	/// <see cref="Options.MaxIterations"/> is reached. Splits are edge-consistent:
 	/// an edge shared by two faces gets exactly one midpoint vertex, referenced by
 	/// both rebuilt faces, so no cracks open along shared edges.
+	///
+	/// A split face is fan-triangulated back into triangles (from corner 0, keeping
+	/// UVs and material). Without that step a split triangle would come back as a
+	/// quad — one face where two belong — so the face count would never grow no
+	/// matter how fine the detail size, and every caller counting faces would
+	/// report no tessellation at all. The fan preserves the Euler characteristic
+	/// exactly: each n-corner face becomes n-2 triangles with n-3 new diagonals,
+	/// so V - E + F is unchanged by the triangulation step.
 	/// </summary>
 	public static PolyMesh Subdivide( PolyMesh source, Options options )
 	{
@@ -224,8 +232,21 @@ public static class DyntopoService
 		}
 
 		// Rebuild every face, inserting each split edge's midpoint after its start
-		// corner, with the face-local UV average. Faces untouched by any split edge
-		// are copied unchanged.
+		// corner, with the face-local UV average, then fan-triangulate every touched
+		// face back into triangles. Faces untouched by any split edge are copied
+		// unchanged. The fan is what makes a split add faces at all: without it a
+		// split triangle comes back as a quad and the face count never moves.
+		// Fan origin: the first midpoint corner of the face. A fan from corner 0
+		// draws diagonal (0,2) — and when the split edge is the face's closing
+		// edge, (0,2) IS that split edge: the fan resurrects it whole, the
+		// original triangle comes back verbatim, and a duplicate flipped pair
+		// (a,c,M)/(a,M,c) is added alongside it. The split then does not stick
+		// (the same edge is a candidate again next pass) and V - E + F jumps.
+		// A midpoint can never be an endpoint of an original edge, so no fan
+		// diagonal from a midpoint corner is ever a split edge. (A touched face
+		// always has a midpoint; corner 0 is only the unreachable fallback.)
+		var midVerts = new HashSet<int>( midpoints.Values );
+		var rebuilt = new List<Face>( m.Faces.Count );
 		for ( int fi = 0; fi < m.Faces.Count; fi++ )
 		{
 			var f = m.Faces[ fi ];
@@ -235,7 +256,7 @@ public static class DyntopoService
 			{
 				if ( midpoints.ContainsKey( new EdgeKey( f.Indices[ c ], f.Indices[ ( c + 1 ) % n ] ) ) ) { touches = true; break; }
 			}
-			if ( !touches ) continue;
+			if ( !touches ) { rebuilt.Add( f ); continue; }
 			var indices = new List<int>( n + 2 );
 			var uvs = new List<Vec2>( n + 2 );
 			for ( int c = 0; c < n; c++ )
@@ -251,8 +272,32 @@ public static class DyntopoService
 					uvs.Add( new Vec2( ( u0.x + u1.x ) * 0.5f, ( u0.y + u1.y ) * 0.5f ) );
 				}
 			}
-			m.Faces[ fi ] = new Face( indices.ToArray(), uvs.ToArray(), f.Material );
+			if ( indices.Count == 3 )
+			{
+				rebuilt.Add( new Face( indices.ToArray(), uvs.ToArray(), f.Material ) );
+				continue;
+			}
+			// Fan from the first midpoint corner: n corners become n-2 triangles
+			// and n-3 diagonals, so V - E + F is unchanged and every face under
+			// the brush stays a triangle — and the split sticks, because no fan
+			// diagonal is a split edge.
+			int origin = 0;
+			for ( int k = 0; k < indices.Count; k++ )
+				if ( midVerts.Contains( indices[ k ] ) ) { origin = k; break; }
+			int corners = indices.Count;
+			for ( int j = 1; j + 1 < corners; j++ )
+			{
+				int i0 = origin;
+				int i1 = ( origin + j ) % corners;
+				int i2 = ( origin + j + 1 ) % corners;
+				rebuilt.Add( new Face(
+					new[] { indices[ i0 ], indices[ i1 ], indices[ i2 ] },
+					new[] { uvs[ i0 ], uvs[ i1 ], uvs[ i2 ] },
+					f.Material ) );
+			}
 		}
+		m.Faces.Clear();
+		m.Faces.AddRange( rebuilt );
 
 		if ( m.Seams is not null && m.Seams.Count > 0 )
 		{

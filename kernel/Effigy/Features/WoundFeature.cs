@@ -23,7 +23,9 @@ namespace Effigy;
 /// coarse cage reads as a dent with coloured terraces, not a hole with an interior — put a
 /// Subdivide above it if the gash needs real interior walls. The terrace boundaries are
 /// radial fractions of the width, not measured anatomy: a real wound's fat layer is not
-/// 25% of anything. And the target body is modified in place, like FleshMaterial does: the
+/// 25% of anything; when the cage is coarser than a terrace band, a missing layer borrows
+/// the closest floor vertex from a layer that can spare one, so every named layer still shows
+/// at least once. And the target body is modified in place, like FleshMaterial does: the
 /// wound is a step in the history, not a new part.
 /// </summary>
 public sealed class WoundFeature : Feature
@@ -58,6 +60,21 @@ public sealed class WoundFeature : Feature
 	public override IReadOnlyList<IParam> Parameters => new IParam[]
 		{ Target, Path, Width, Depth, LipRoll, Layers, TendonCount, Seed, SlotSkin, SlotFat, SlotMuscle, SlotBone };
 	public override IReadOnlyList<IParam> AdvancedParameters => new IParam[] { Seed, SlotSkin, SlotFat, SlotMuscle, SlotBone };
+
+	/// <summary>
+	/// The wound the last rebuild cut, as data a bot can report back: the target
+	/// body, how many vertices moved, the terrace layers in rim-to-centre order,
+	/// how many tendon strands were spanned, and the one-line summary (the same
+	/// text as <see cref="Feature.Warning"/>). This is a runtime report, not a
+	/// parameter: it is re-derived on every rebuild and is not saved — the
+	/// feature's parameters are what round-trip through save/reopen, and the
+	/// record comes back identical because Execute runs again on the same mesh.
+	/// Null before the first run, and after a run that failed.
+	/// </summary>
+	public sealed record WoundRecord( string Target, int AffectedVertices, IReadOnlyList<string> Layers, int Tendons, string Summary );
+
+	/// <summary>Set by Execute on every rebuild; null before the first run or when the run failed.</summary>
+	public WoundRecord? LastRecord { get; private set; }
 
 	/// <summary>Slot per terrace layer, in Layers order.</summary>
 	public int SlotFor( string layer ) => layer.ToLowerInvariant() switch
@@ -119,6 +136,7 @@ public sealed class WoundFeature : Feature
 
 	protected override void Execute( FeatureContext ctx )
 	{
+		LastRecord = null;
 		var body = ctx.Bodies.FirstOrDefault( b =>
 			string.Equals( b.Name, Target.Value, StringComparison.OrdinalIgnoreCase ) || b.Id == Target.Value );
 		if ( body is null )
@@ -148,6 +166,8 @@ public sealed class WoundFeature : Feature
 		var layerOfVertex = new int[mesh.VertexCount];
 		Array.Fill( layerOfVertex, -1 );
 		var affected = 0;
+		var floor = new List<int>();
+		var distOfVertex = new float[mesh.VertexCount];
 
 		for ( var vi = 0; vi < mesh.VertexCount; vi++ )
 		{
@@ -163,6 +183,8 @@ public sealed class WoundFeature : Feature
 				var li = LayerIndex( r, layers.Count );
 				layerOfVertex[vi] = li;
 				colours[vi] = FleshMaterial.WoundColour( layers[li] );
+				floor.Add( vi );
+				distOfVertex[vi] = dist;
 			}
 			else if ( lipWidth > 0f )
 			{
@@ -178,7 +200,37 @@ public sealed class WoundFeature : Feature
 		if ( affected == 0 )
 		{
 			Warning = $"Path '{Path.Value}' touches no vertex of '{body.Name}' — the wound changed nothing. Move the path onto the surface, or widen Width.";
+			LastRecord = new WoundRecord( Target.Value, 0, layers, 0, Warning );
 			return;
+		}
+
+		// A terrace band is Width / (2 * layers) wide — 0.15 u here — while this
+		// cage is ~0.5 u, so the centre bands can hold no vertex at all: the
+		// wound would promise Bone at the centre and show none. Guarantee every
+		// named layer colours at least one floor vertex, deepest missing layer
+		// first, taking the closest floor vertex from a layer that can spare
+		// one. Lip vertices never donate: the lip is always the rim layer.
+		// With fewer floor vertices than layers some layers still cannot show;
+		// the pass then does its best and stops.
+		var perLayer = new int[layers.Count];
+		foreach ( var vi in floor ) perLayer[layerOfVertex[vi]]++;
+		for ( var li = layers.Count - 1; li >= 0; li-- )
+		{
+			while ( perLayer[li] == 0 )
+			{
+				var donor = -1;
+				var donorDist = float.MaxValue;
+				foreach ( var vi in floor )
+				{
+					var lj = layerOfVertex[vi];
+					if ( perLayer[lj] > 1 && distOfVertex[vi] < donorDist ) { donor = vi; donorDist = distOfVertex[vi]; }
+				}
+				if ( donor < 0 ) break;
+				perLayer[layerOfVertex[donor]]--;
+				layerOfVertex[donor] = li;
+				colours[donor] = FleshMaterial.WoundColour( layers[li] );
+				perLayer[li]++;
+			}
 		}
 
 		foreach ( var face in mesh.Faces )
@@ -243,5 +295,6 @@ public sealed class WoundFeature : Feature
 		Warning = tendons > 0
 			? $"{affected} vertices wounded on '{body.Name}' ({layers.Count} terraces) with {tendons} tendon(s)."
 			: $"{affected} vertices wounded on '{body.Name}' ({layers.Count} terraces).";
+		LastRecord = new WoundRecord( Target.Value, affected, layers, tendons, Warning );
 	}
 }

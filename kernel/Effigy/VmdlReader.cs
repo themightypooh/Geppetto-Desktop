@@ -178,6 +178,10 @@ namespace Effigy
 						yield return file;
 				foreach ( string sub in dirs )
 				{
+                    // Discovery must not leave the project or revisit it through directory links.
+                    try { if ((File.GetAttributes(sub) & FileAttributes.ReparsePoint) != 0) continue; }
+                    catch (IOException) { continue; }
+                    catch (UnauthorizedAccessException) { continue; }
 					string name = Path.GetFileName( sub );
 					if ( name.StartsWith( ".", StringComparison.Ordinal ) ) continue;
 					if ( string.Equals( name, "backups", StringComparison.OrdinalIgnoreCase ) ) continue;

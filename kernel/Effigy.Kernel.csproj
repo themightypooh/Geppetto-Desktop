@@ -1,5 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <!-- Kernel parity provenance (2026-11-13, define-shared-kernel-provenance-and-parity-merge-contract):
+       Desktop kernel/Effigy/ is canonical for shared kernel files; Mobile
+       vendor/geppetto-desktop/kernel/ is a synced mirror, never hand-edited.
+       Inventory: handoffs/kernel-parity-inventory.json (regenerate with
+       tools/kernel-parity/inventory.py). Policy: handoffs/kernel-parity-contract.md.
+       Do not change the Effigy/**/*.cs glob, Deterministic, or the pinned
+       InformationalVersion as part of a parity sync. -->
   <PropertyGroup>
     <OutputType>Library</OutputType>
     <TargetFramework>net8.0</TargetFramework>

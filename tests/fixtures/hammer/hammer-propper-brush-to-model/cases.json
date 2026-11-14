@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "name": "trim",
+      "description": "A 4x1x1 bar with a 1x1x1 riser on top of its +X end, sharing the bar's top face. The Propper++ acceptance case: a trim brush selection that must become one prop.",
+      "brushes": [
+        { "size": [4, 1, 1], "offset": [0, 0, 0] },
+        { "size": [1, 1, 1], "offset": [1.5, 0, 1] }
+      ],
+      "materials": ["trim/brick"],
+      "expectedVolume": 5.0,
+      "expectedFaces": 12,
+      "expectedCentre": [0, 0, 0.5],
+      "notes": "Volume is exact: the two boxes share exactly one face (bar top z=0.5 over x 1..2), so no volume is double-counted. Centre z is 0.5 because the selection spans z -0.5..1.5."
+    }
+  ]
+}

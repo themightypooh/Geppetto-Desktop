@@ -141,7 +141,7 @@ internal static class AntiAliasingTests
     static ViewportMesh Triangle(Vector3[] points)
     {
         var vertices = new List<float>();
-        foreach(var p in points) vertices.AddRange(new[] {p.X,p.Y,p.Z,1,0,0,0,0,0,0,1,0,0,0,0,0,0,1,0,1f});
+        foreach(var p in points) vertices.AddRange(new[] {p.X,p.Y,p.Z,1,0,0,0,0,0,0,1,0,0,0,0,0,0,1,0,1f,1,1,1,1}); // 24 floats/vertex (CpuMesh.FloatsPerVertex): white colour appended
         var material = new MaterialPalette.Entry("edge",0,0,0,1,0,100,100,100);
         var data = vertices.ToArray();
         return new ViewportMesh { Vertices=data, BaseVertices=(float[])data.Clone(), Indices=new uint[]{0,1,2},

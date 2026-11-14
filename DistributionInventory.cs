@@ -134,6 +134,30 @@ public static class DistributionInventory
 				IsRequired: false,
 				IsBundled: true,
 				HostPackageHint: "Bundled via Ultz.Native.GLFW in runtimes/linux-x64/native; fallback host package: libglfw3."
+			),
+			new NativeLibraryDependency(
+				Name: "Manifold",
+				Soname: "libgmmanifold.so",
+				Purpose: "Manifold mesh booleans (union / difference / intersect) for the kernel boolean provider; optional — the built-in ExactMeshBoolean runs when the library is absent.",
+				IsRequired: false,
+				IsBundled: true,
+				HostPackageHint: "Bundled in runtimes/linux-x64/native (see packaging/MANIFOLD.md); rebuild with the Mobile tree's tools/build-manifold.sh — no host package."
+			),
+			new NativeLibraryDependency(
+				Name: "OpenVDB",
+				Soname: "libgmvdb.so",
+				Purpose: "OpenVDB voxel remesh / SDF skin for the kernel RemeshFeature voxel backend; optional — the built-in SurfaceNets voxel path runs when the library is absent.",
+				IsRequired: false,
+				IsBundled: true,
+				HostPackageHint: "Bundled in runtimes/linux-x64/native (see packaging/OPENVDB.md); rebuild with the Mobile tree's tools/build-openvdb.sh — no host package."
+			),
+			new NativeLibraryDependency(
+				Name: "Instant Meshes",
+				Soname: "libgminstantmeshes.so",
+				Purpose: "Instant Meshes quad-dominant auto retopo for RetopoService.AutoRetopo; optional — voxel remesh and manual retopo still work when the library is absent.",
+				IsRequired: false,
+				IsBundled: true,
+				HostPackageHint: "Bundled in runtimes/linux-x64/native (see packaging/INSTANTMESHES.md); rebuild with the Mobile tree's tools/build-instantmeshes.sh — no host package."
 			)
 		};
 	}
@@ -170,6 +194,9 @@ public static class DistributionInventory
 			new LicenseAuditEntry( "Ultz.Native.SDL (SDL2)", "zlib License", "Zlib", LicenseCategory.Permissive, true, "Permissive open-source; Sam Lantinga and SDL contributors; binary redistribution allowed" ),
 			new LicenseAuditEntry( "Ultz.Native.GLFW (GLFW)", "zlib/libpng License", "Zlib", LicenseCategory.Permissive, true, "Permissive open-source; Marcus Geelnard and Camilla Löwy; binary redistribution allowed" ),
 			new LicenseAuditEntry( ".NET Runtime / BCL", "MIT License", "MIT", LicenseCategory.Permissive, true, "Microsoft Corporation; standard .NET 8.0 permissive license" ),
+			new LicenseAuditEntry( "Manifold (libgmmanifold.so)", "Apache License 2.0", "Apache-2.0", LicenseCategory.Permissive, true, "Permissive open-source; elalish/manifold v3.5.4 plus the Geppetto gm_manifold.cpp shim; binary redistribution allowed" ),
+			new LicenseAuditEntry( "OpenVDB (libgmvdb.so)", "Apache License 2.0", "Apache-2.0", LicenseCategory.Permissive, true, "Permissive open-source; OpenVDB v12.1.1 plus the Geppetto gm_vdb.cpp shim; the same .so also bundles oneTBB (Apache-2.0); binary redistribution allowed" ),
+			new LicenseAuditEntry( "Instant Meshes (libgminstantmeshes.so)", "BSD 3-Clause License", "BSD-3-Clause", LicenseCategory.Permissive, true, "Permissive open-source; wjakob/instant-meshes (commit 7b31608) plus the Geppetto gm_instantmeshes.cpp shim; the same .so also bundles Eigen (MPL-2.0) and oneTBB (Apache-2.0); binary redistribution allowed" ),
 			new LicenseAuditEntry( "Effigy.Kernel", "Project-Owned", "Owner-Proprietary", LicenseCategory.ProjectOwned, true, "Geppetto Desktop project internal kernel; fully owned" ),
 			new LicenseAuditEntry( "Marionette.Desktop", "Project-Owned", "Owner-Proprietary", LicenseCategory.ProjectOwned, true, "Geppetto Desktop desktop application; fully owned" )
 		};

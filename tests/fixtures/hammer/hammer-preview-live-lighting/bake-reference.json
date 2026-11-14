@@ -1,0 +1,11 @@
+{
+  "comment": "hammer-preview-live-lighting bake snapshot: per-face average luxels (HDR linear) from LiveLighting Full on room.json, recorded 2026-11-13 from the isolated harness run (14/16 at the time; the 2 failures were the spot-cone sign bug, since fixed, and this missing file). REGRESSION SNAPSHOT, not an independent bake: hammer-lightmap-progressive-bake has not landed, so no independent baked values exist yet. The final integrator re-records this file from the real bake when it lands; until then it guards the preview numbers against drift. Face 0 floor, 1 ceiling, 2-5 walls.",
+  "averages": {
+    "0": [1.0520184, 1.0520184, 1.1120187],
+    "1": [0.55201936, 0.55201936, 0.6120188],
+    "2": [0.5097648, 0.5097648, 0.569765],
+    "3": [0.5097648, 0.5097648, 0.569765],
+    "4": [0.5097648, 0.5097648, 0.569765],
+    "5": [0.5097648, 0.5097648, 0.569765]
+  }
+}

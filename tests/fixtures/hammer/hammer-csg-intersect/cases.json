@@ -1,0 +1,140 @@
+{
+  "cases": [
+    {
+      "convex": true,
+      "expectedFaces": 6,
+      "expectedVolume": 32,
+      "name": "intersect-partial",
+      "note": "Two 4-cubes offset 2 on X overlap on x in [0,2]: 2*4*4 = 32.",
+      "op": "intersect",
+      "target": [
+        4,
+        4,
+        4
+      ],
+      "tool": [
+        4,
+        4,
+        4
+      ],
+      "toolOffset": [
+        2,
+        0,
+        0
+      ]
+    },
+    {
+      "convex": true,
+      "expectedFaces": 6,
+      "expectedVolume": 8,
+      "name": "intersect-contained",
+      "note": "A 2-cube fully inside a 4-cube: the overlap is the 2-cube itself, 8.",
+      "op": "intersect",
+      "target": [
+        4,
+        4,
+        4
+      ],
+      "tool": [
+        2,
+        2,
+        2
+      ],
+      "toolOffset": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "convex": true,
+      "expectedFaces": 6,
+      "expectedVolume": 64,
+      "name": "intersect-identical",
+      "note": "Identical 4-cubes: the overlap is the whole cube, 64.",
+      "op": "intersect",
+      "target": [
+        4,
+        4,
+        4
+      ],
+      "tool": [
+        4,
+        4,
+        4
+      ],
+      "toolOffset": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "empty": true,
+      "name": "intersect-disjoint",
+      "note": "Tool 10 units away on X: no shared volume, named empty result csg-empty-result.",
+      "op": "intersect",
+      "target": [
+        4,
+        4,
+        4
+      ],
+      "tool": [
+        2,
+        2,
+        2
+      ],
+      "toolOffset": [
+        10,
+        0,
+        0
+      ]
+    },
+    {
+      "empty": true,
+      "name": "intersect-touching-face",
+      "note": "2-cubes sharing only the x=1 face plane: zero shared volume, named empty result \u2014 never a zero-volume brush.",
+      "op": "intersect",
+      "target": [
+        2,
+        2,
+        2
+      ],
+      "tool": [
+        2,
+        2,
+        2
+      ],
+      "toolOffset": [
+        2,
+        0,
+        0
+      ]
+    },
+    {
+      "convex": true,
+      "expectedFaces": 6,
+      "expectedVolume": 8,
+      "name": "intersect-shared-face-coplanar",
+      "note": "Overlap shares the big cube's +X face plane (x=2): 2*2*2 = 8, one clean 6-face box after coplanar merge on output.",
+      "op": "intersect",
+      "target": [
+        4,
+        4,
+        4
+      ],
+      "tool": [
+        2,
+        2,
+        2
+      ],
+      "toolOffset": [
+        1,
+        0,
+        0
+      ]
+    }
+  ],
+  "note": "Acceptance cases for hammer-csg-intersect. All boxes are axis-aligned and centred on the origin unless toolOffset moves the tool; volumes are in Geppetto Desktop kernel units (inches, Z-up). The mapcsgintersect test group recomputes every case from this file. Cases with \"empty\": true expect TryIntersect to refuse with reason csg-empty-result and no mesh \u2014 disjoint, or merely touching, solids share no volume.",
+  "schema": "hammer-csg-acceptance/v1"
+}

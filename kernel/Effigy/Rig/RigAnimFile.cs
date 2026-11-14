@@ -557,6 +557,21 @@ public static class RigHermite
 /// which model the clip was made on, plus where its objects and props stand - an IK goal can be
 /// keyed against one. Lights, cameras and events are Marionette's business.
 /// </summary>
+/// <summary>
+/// One named frame on the timeline ruler - Marionette's RigMark (RigAnimDocument.cs): a flag on the
+/// ruler, a name beside it, a free-text note. Saved in the clip's "Marks" array.
+/// </summary>
+public sealed class RigAnimMark
+{
+	public string Name = "mark";
+	public int Frame;
+
+	/// <summary>Free text - what happens here, what to listen for, who asked for it.</summary>
+	public string Note = "";
+
+	public RigAnimMark Clone() => new() { Name = Name, Frame = Frame, Note = Note };
+}
+
 public sealed class RigAnimFile
 {
 	public string SourceModel = "";
@@ -630,6 +645,16 @@ public sealed class RigAnimFile
 
 	/// <summary>The clip's MorphEvents, in file order (a later one wins where two overlap).</summary>
 	public List<RigMorphEvent> MorphEvents = new();
+
+	/// <summary>
+	/// The clip's Marks - named frames on the timeline ruler (Marionette's RigAnimDocument.Marks).
+	/// Null means "not read": RigAnimWriter then keeps whatever marks the base JSON had. Read always
+	/// sets it, so a clip read from a file writes its marks back as they are now.
+	/// </summary>
+	public List<RigAnimMark> Marks;
+
+	/// <summary>Marionette's RigAnimDocument.MarksInOrder: the marks by frame, nulls skipped.</summary>
+	public IEnumerable<RigAnimMark> MarksInOrder => ( Marks ?? new List<RigAnimMark>() ).Where( m => m is not null ).OrderBy( m => m.Frame );
 
 	/// <summary>
 	/// Every morph the clip drives at a frame: keyed morph curves (RigTrackKind.Morph) first, then
@@ -850,6 +875,7 @@ public sealed class RigAnimFile
 
 		ReadPlacements( root, clip );
 		ReadMorphEvents( root, clip );
+		ReadMarks( root, clip );
 		clip.RootMotion = RootMotionSettings.Read( root );
 
 		if ( !root.TryGetProperty( "BoneTracks", out var tracks ) || tracks.ValueKind != JsonValueKind.Array )
@@ -1066,6 +1092,28 @@ public sealed class RigAnimFile
 		}
 
 		return null;
+	}
+
+	/// <summary>The clip's Marks (Marionette's RigMark: Name, Frame, Note), in file order.</summary>
+	static void ReadMarks( JsonElement root, RigAnimFile clip )
+	{
+		clip.Marks = new List<RigAnimMark>();
+
+		if ( !root.TryGetProperty( "Marks", out var marks ) || marks.ValueKind != JsonValueKind.Array )
+			return;
+
+		foreach ( var m in marks.EnumerateArray() )
+		{
+			if ( m.ValueKind != JsonValueKind.Object )
+				continue;
+
+			clip.Marks.Add( new RigAnimMark
+			{
+				Name = Str( m, "Name" ) ?? "mark",
+				Frame = m.TryGetProperty( "Frame", out var f ) && f.ValueKind == JsonValueKind.Number ? (int)MathF.Round( f.GetSingle() ) : 0,
+				Note = Str( m, "Note" ) ?? "",
+			} );
+		}
 	}
 
 	static void ReadMorphEvents( JsonElement root, RigAnimFile clip )

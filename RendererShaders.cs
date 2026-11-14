@@ -58,12 +58,42 @@ void main() {
 	// the authored outward side.
 	vMirror = mirror;
 	vUv = aUv;
-	vColor = aColor.rgb;
+	vColor = aColor.a > 0.0 ? aColor.rgb : vec3(1.0);
 	// Bind-pose object position: procedural material masks stay stuck to the surface as it moves.
 	vObject = aPos;
 	gl_Position = uMvp * world;
 }
 ";
+
+    // Shared by visible and shadow passes so shell holes cast matching shadows.
+    public const string FurMaskSrc = @"
+uniform int uFur;
+uniform float uFurDensity;
+uniform float uFurClump;
+void applyFurMask(vec2 uv, float height) {
+    if (uFur == 0 || height <= 0.001) return;
+    float h = clamp(height, 0.0, 1.0);
+    // Primary fine strand grid + secondary micro-fibre octave so UV-packed islands
+    // render as dense, sleek hair strands rather than coarse polka-dot cells.
+    float dens = max(1.0, uFurDensity) * 24.0;
+    vec2 cell = uv * dens;
+    vec2 id = floor(cell);
+    vec2 seed = fract(sin(vec2(dot(id, vec2(127.1, 311.7)), dot(id, vec2(269.5, 183.3)))) * 43758.5453);
+    vec2 centre = mix(vec2(0.5), 0.22 + seed * 0.56, 1.0 - uFurClump * 0.55);
+    vec2 delta = fract(cell) - centre;
+    // Slight directional elongation along V so strands read as combed fibres
+    float distPrimary = length(delta * vec2(1.15, 0.82));
+    // Secondary fine fibre layer (2.3x finer, rotated)
+    vec2 cell2 = vec2(uv.x * 0.866 - uv.y * 0.5, uv.x * 0.5 + uv.y * 0.866) * dens * 2.3;
+    vec2 id2 = floor(cell2);
+    vec2 seed2 = fract(sin(vec2(dot(id2, vec2(419.2, 173.9)), dot(id2, vec2(113.5, 521.1)))) * 31415.9265);
+    float distFine = length(fract(cell2) - (0.25 + seed2 * 0.5));
+    float strandVar = 0.82 + 0.36 * fract(seed.x * 7.13 + seed.y * 3.71);
+    float radius = mix(0.62, 0.08, pow(h, 0.78)) * strandVar;
+    if (distPrimary > radius && distFine > radius * 0.72) discard;
+}
+";
+    public const string FurShadowFragmentSrc = "#version 460 core\nin vec2 vUv; in vec3 vColor;\n" + FurMaskSrc + "\nvoid main() { applyFurMask(vUv, vColor.r); }";
 
 	public const string FragmentSrc = @"#version 460 core
 in vec3 vNrm;
@@ -75,6 +105,10 @@ in float vMirror;
 in vec3 vObject;
 in vec3 vColor;
 
+" + FurMaskSrc + @"
+uniform vec3 uFurColor;
+uniform vec3 uFurRim;
+uniform float uFurDarkRoots;
 uniform vec3 uAlbedo;
 uniform sampler2D uAlbedoMap;
 uniform sampler2D uNormalMap;
@@ -332,6 +366,13 @@ void main() {
 	float metal = clamp(uMetallic * texture(uMetallicMap, transformUv(vUv, 3)).r, 0.0, 1.0);
 	vec4 albedoTex = texture(uAlbedoMap, transformUv(vUv, 0));
 	vec3 albedo = uAlbedo * albedoTex.rgb * vColor;
+    if (uFur != 0) {
+        float height = clamp(vColor.r, 0.0, 1.0);
+        applyFurMask(vUv, height);
+        albedo = uFurColor * albedoTex.rgb * mix(1.0 - uFurDarkRoots * 0.7, 1.0, height);
+        albedo = mix(albedo, uFurRim, pow(1.0 - max(dot(n, v), 0.0), 4.0) * height * 0.3);
+        rough = max(rough, 0.85); metal = 0.0;
+    }
 	float matAlpha = uBaseAlpha * albedoTex.a;
 	if (uAlphaMode == 1 && matAlpha < uAlphaCutoff) discard;
 	if (uAlphaMode == 3 && matAlpha <= r6Hash()) discard;

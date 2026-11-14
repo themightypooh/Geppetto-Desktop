@@ -1,0 +1,19 @@
+{
+  "length": 128,
+  "width": 128,
+  "height": 128,
+  "wallThickness": 8,
+  "wall": "East",
+  "openingWidth": 64,
+  "openingHeight": 48,
+  "sillHeight": 32,
+  "offsetAlongWall": 0,
+  "expected": {
+    "eastWallVolumeAfterCut": 106496,
+    "openingCenter": [68, 0, 56],
+    "openingU0": -32,
+    "openingU1": 32,
+    "openingV0": 32,
+    "openingV1": 80
+  }
+}

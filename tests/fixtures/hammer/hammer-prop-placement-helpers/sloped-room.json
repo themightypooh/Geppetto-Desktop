@@ -1,0 +1,28 @@
+{
+  "comment": "Prop placement fixture: a sealed room (floor top z=0, ceiling bottom z=128) with one sloped displacement patch. The displacement covers x/y -128..128, 5x5 grid, heights rise with +X: 0/32/64/96/128 across columns, so the slope is dz/dx = 0.5 (26.57 deg, normal (-0.4472, 0, 0.8944)). At (0,0) the displacement height is 64, above the flat floor (0). crate_on_slope sits above the slope (origin z=100, below the ceiling bottom at 128); lamp_under_ceiling sits below the ceiling at x=64, where the displacement is 96.",
+  "brushes": [
+    { "id": "floor", "min": [-144, -144, -16], "max": [144, 144, 0], "detail": false, "material": "concrete" },
+    { "id": "ceiling", "min": [-144, -144, 128], "max": [144, 144, 144], "detail": false, "material": "concrete" },
+    { "id": "wall-west", "min": [-144, -144, 0], "max": [-128, 144, 128], "detail": false, "material": "concrete" },
+    { "id": "wall-east", "min": [128, -144, 0], "max": [144, 144, 128], "detail": false, "material": "concrete" },
+    { "id": "wall-south", "min": [-128, -144, 0], "max": [128, -128, 128], "detail": false, "material": "concrete" },
+    { "id": "wall-north", "min": [-128, 128, 0], "max": [128, 144, 128], "detail": false, "material": "concrete" }
+  ],
+  "entities": [
+    { "class": "info_player_start", "origin": [0, 0, 0], "yaw": 0 },
+    { "class": "prop_static", "origin": [0, 0, 100], "yaw": 0, "keyvalues": { "model": "props/crate.mdl", "targetname": "crate_on_slope" } },
+    { "class": "prop_static", "origin": [64, 0, 100], "yaw": 90, "keyvalues": { "model": "props/lamp.mdl", "targetname": "lamp_under_ceiling" } }
+  ],
+  "displacements": [
+    {
+      "origin": [-128, -128, 0], "sizeX": 256, "sizeY": 256, "columns": 5, "rows": 5,
+      "heights": [
+        [0, 32, 64, 96, 128],
+        [0, 32, 64, 96, 128],
+        [0, 32, 64, 96, 128],
+        [0, 32, 64, 96, 128],
+        [0, 32, 64, 96, 128]
+      ]
+    }
+  ]
+}

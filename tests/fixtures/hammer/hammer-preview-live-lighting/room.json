@@ -1,0 +1,16 @@
+{
+  "comment": "hammer-preview-live-lighting fixture: one sealed interior room, 256x256 floor, 128 high, faces wound so normals point INWARD (floor +Z, ceiling -Z, walls inward). One point light at the room centre, one overhead sun, one light_environment ambient. LiveLightingTests 'room fixture' loads this, evaluates Full, and asserts the floor is brighter than the ceiling and that CompareToBake passes against bake-reference.json.",
+  "faces": [
+    { "id": 0, "material": "brick/brickwall001", "albedo": [1, 1, 1], "lightmapScale": 16, "vertices": [[0, 0, 0], [256, 0, 0], [256, 256, 0], [0, 256, 0]] },
+    { "id": 1, "material": "concrete/concretefloor001", "albedo": [1, 1, 1], "lightmapScale": 16, "vertices": [[0, 0, 128], [0, 256, 128], [256, 256, 128], [256, 0, 128]] },
+    { "id": 2, "material": "brick/brickwall001", "albedo": [1, 1, 1], "lightmapScale": 16, "vertices": [[0, 0, 0], [0, 0, 128], [256, 0, 128], [256, 0, 0]] },
+    { "id": 3, "material": "brick/brickwall001", "albedo": [1, 1, 1], "lightmapScale": 16, "vertices": [[256, 256, 0], [256, 256, 128], [0, 256, 128], [0, 256, 0]] },
+    { "id": 4, "material": "brick/brickwall001", "albedo": [1, 1, 1], "lightmapScale": 16, "vertices": [[0, 0, 0], [0, 256, 0], [0, 256, 128], [0, 0, 128]] },
+    { "id": 5, "material": "brick/brickwall001", "albedo": [1, 1, 1], "lightmapScale": 16, "vertices": [[256, 0, 0], [256, 0, 128], [256, 256, 128], [256, 256, 0]] }
+  ],
+  "lights": [
+    { "kind": "point", "id": 0, "position": [128, 128, 64], "color": [1, 1, 1], "intensity": 2, "range": 0 },
+    { "kind": "sun", "id": 1, "direction": [0, 0, -1], "color": [1, 1, 1], "intensity": 0.5 },
+    { "kind": "environment", "id": 2, "color": [0.2, 0.2, 0.25], "intensity": 1 }
+  ]
+}

@@ -1,0 +1,214 @@
+{
+  "brushes": [
+    {
+      "id": "floor",
+      "min": [
+        -144,
+        -144,
+        -16
+      ],
+      "max": [
+        144,
+        144,
+        0
+      ],
+      "detail": false,
+      "material": "concrete"
+    },
+    {
+      "id": "ceiling",
+      "min": [
+        -144,
+        -144,
+        128
+      ],
+      "max": [
+        144,
+        144,
+        144
+      ],
+      "detail": false,
+      "material": "concrete"
+    },
+    {
+      "id": "wall-west",
+      "min": [
+        -144,
+        -144,
+        0
+      ],
+      "max": [
+        -128,
+        144,
+        128
+      ],
+      "detail": false,
+      "material": "concrete"
+    },
+    {
+      "id": "wall-east",
+      "min": [
+        128,
+        -144,
+        0
+      ],
+      "max": [
+        144,
+        144,
+        128
+      ],
+      "detail": false,
+      "material": "concrete"
+    },
+    {
+      "id": "wall-south",
+      "min": [
+        -128,
+        -144,
+        0
+      ],
+      "max": [
+        128,
+        -128,
+        128
+      ],
+      "detail": false,
+      "material": "concrete"
+    },
+    {
+      "id": "wall-north",
+      "min": [
+        -128,
+        128,
+        0
+      ],
+      "max": [
+        128,
+        144,
+        128
+      ],
+      "detail": false,
+      "material": "concrete"
+    },
+    {
+      "id": "platform",
+      "min": [
+        -144,
+        0,
+        -16
+      ],
+      "max": [
+        144,
+        144,
+        54
+      ],
+      "detail": false,
+      "material": "concrete"
+    },
+    {
+      "id": "tread-0",
+      "min": [
+        -64,
+        -18,
+        -16
+      ],
+      "max": [
+        64,
+        0,
+        45
+      ],
+      "detail": false,
+      "material": "concrete"
+    },
+    {
+      "id": "tread-1",
+      "min": [
+        -64,
+        -36,
+        -16
+      ],
+      "max": [
+        64,
+        -18,
+        36
+      ],
+      "detail": false,
+      "material": "concrete"
+    },
+    {
+      "id": "tread-2",
+      "min": [
+        -64,
+        -54,
+        -16
+      ],
+      "max": [
+        64,
+        -36,
+        27
+      ],
+      "detail": false,
+      "material": "concrete"
+    },
+    {
+      "id": "tread-3",
+      "min": [
+        -64,
+        -72,
+        -16
+      ],
+      "max": [
+        64,
+        -54,
+        18
+      ],
+      "detail": false,
+      "material": "concrete"
+    },
+    {
+      "id": "tread-4",
+      "min": [
+        -64,
+        -90,
+        -16
+      ],
+      "max": [
+        64,
+        -72,
+        9
+      ],
+      "detail": false,
+      "material": "concrete"
+    }
+  ],
+  "entities": [
+    {
+      "class": "info_player_start",
+      "origin": [
+        -100,
+        -100,
+        0
+      ],
+      "yaw": 0
+    },
+    {
+      "class": "info_node",
+      "origin": [
+        -100,
+        -100,
+        0
+      ],
+      "yaw": 0
+    },
+    {
+      "class": "info_node",
+      "origin": [
+        0,
+        72,
+        54
+      ],
+      "yaw": 0
+    }
+  ],
+  "displacements": []
+}

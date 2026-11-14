@@ -52,6 +52,10 @@ public static class FbxBinary
 	};
 
 	/// <summary>`P` types whose values are int32, per the FBX SDK's property types.</summary>
+	static readonly HashSet<string> LongArrays = new() { "KeyTime" };
+
+	static readonly HashSet<string> FloatArrays = new() { "KeyValueFloat", "KeyAttrDataFloat" };
+
 	static readonly HashSet<string> IntProperties = new( StringComparer.OrdinalIgnoreCase )
 	{
 		"int", "Integer", "enum", "bool", "Bool", "Visibility Inheritance",
@@ -293,6 +297,13 @@ public static class FbxBinary
 	{
 		var parts = values.Split( ',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries );
 
+		// Animation curves: times are KTime (int64 ticks), values and tangent data are float32.
+		if ( LongArrays.Contains( name ) )
+			return Array.ConvertAll( parts, p => long.Parse( p, CultureInfo.InvariantCulture ) );
+
+		if ( FloatArrays.Contains( name ) )
+			return Array.ConvertAll( parts, p => float.Parse( p, CultureInfo.InvariantCulture ) );
+
 		// An array of a name this does not know is doubles when it is written as decimals - a
 		// NormalsW or a BinormalsW from another exporter - rather than a parse failure.
 		if ( DoubleArrays.Contains( name ) || Array.Exists( parts, p => p.IndexOfAny( new[] { '.', 'e', 'E' } ) >= 0 ) )
@@ -388,6 +399,24 @@ public static class FbxBinary
 				w.Write( 0u );
 				w.Write( (uint)(da.Length * 8) );
 				foreach ( var v in da )
+					w.Write( v );
+				return;
+
+			case long[] la:
+				w.Write( (byte)'l' );
+				w.Write( (uint)la.Length );
+				w.Write( 0u );
+				w.Write( (uint)(la.Length * 8) );
+				foreach ( var v in la )
+					w.Write( v );
+				return;
+
+			case float[] fa:
+				w.Write( (byte)'f' );
+				w.Write( (uint)fa.Length );
+				w.Write( 0u );
+				w.Write( (uint)(fa.Length * 4) );
+				foreach ( var v in fa )
 					w.Write( v );
 				return;
 

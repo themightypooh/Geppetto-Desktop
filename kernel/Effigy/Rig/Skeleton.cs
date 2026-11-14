@@ -35,6 +35,20 @@ public sealed class Bone
 	/// </summary>
 	public SoftBone Soft;
 
+	/// <summary>Optional Blender-style B-Bone settings. Null keeps rigid skinning.</summary>
+	public BendyBoneSettings Bendy;
+	/// <summary>
+	/// Whether this bone contributes to skin deformation. A disabled bone still carries children,
+	/// constraints and poses, so it is useful as a control without pulling vertices itself.
+	/// </summary>
+	public bool Deform = true;
+
+	/// <summary>
+	/// Explicit envelope radius in model units, or zero to fit one from the mesh when envelope
+	/// binding. The Rig workspace's overall envelope scale still multiplies an explicit radius.
+	/// </summary>
+	public float EnvelopeRadius;
+
 	public Bone( string name, int parent, Xform local, float length )
 	{
 		Name = name;
@@ -43,7 +57,13 @@ public sealed class Bone
 		Length = length;
 	}
 
-	public Bone Clone() => new( Name, Parent, Local, Length ) { Soft = Soft?.Clone() };
+	public Bone Clone() => new( Name, Parent, Local, Length )
+	{
+		Soft = Soft?.Clone(),
+		Bendy = Bendy is null ? null : new BendyBoneSettings { Segments = Bendy.Segments, EaseIn = Bendy.EaseIn, EaseOut = Bendy.EaseOut },
+		Deform = Deform,
+		EnvelopeRadius = EnvelopeRadius,
+	};
 }
 
 /// <summary>
@@ -446,7 +466,10 @@ public sealed class Skeleton
 
 			var local = mappedParent < 0 ? worlds[i] : worlds[mappedParent].Inverse * worlds[i];
 
-			newBones.Add( new Bone( bone.Name, mappedParent, local, bone.Length ) { Soft = bone.Soft?.Clone() } );
+			var kept = bone.Clone();
+			kept.Parent = mappedParent;
+			kept.Local = local;
+			newBones.Add( kept );
 			oldToNew[i] = newBones.Count - 1;
 		}
 
@@ -491,7 +514,7 @@ public sealed class Skeleton
 		var heads = new Vec3[count];
 		var tails = new Vec3[count];
 		var ups = new Vec3[count];
-		var softs = new SoftBone[count];
+		var originals = new Bone[count];
 		var parents = new int[count];
 		var movedName = Bones[index].Name;
 
@@ -502,7 +525,7 @@ public sealed class Skeleton
 			heads[i] = world.Origin;
 			tails[i] = TailWorld( i );
 			ups[i] = world.Z;
-			softs[i] = Bones[i].Soft?.Clone();
+			originals[i] = Bones[i].Clone();
 			parents[i] = Bones[i].Parent;
 		}
 
@@ -537,7 +560,12 @@ public sealed class Skeleton
 		{
 			var mappedParent = parents[i] < 0 ? -1 : IndexOf( names[parents[i]] );
 			AddBoneFromPoints( names[i], mappedParent, heads[i], tails[i], ups[i] );
-			Bones[Bones.Count - 1].Soft = softs[i];
+			var rebuilt = Bones[Bones.Count - 1];
+			var kept = originals[i];
+			kept.Parent = rebuilt.Parent;
+			kept.Local = rebuilt.Local;
+			kept.Length = rebuilt.Length;
+			Bones[Bones.Count - 1] = kept;
 		}
 
 		return IndexOf( movedName );
@@ -555,8 +583,9 @@ public sealed class Skeleton
 	/// backwards, so reflecting the two points a bone is defined by is exactly right rather than a
 	/// shortcut that happens to work.
 	///
-	/// Naming swaps a trailing _L/_R, _l/_r, .L/.R (Blender's own convention); anything else gets
-	/// "_mirrored" appended. A collision with an existing name — mirroring twice, or a name that
+	/// Naming uses the same <see cref="FlipSideSuffix"/> rules as <see cref="MirrorPartners"/>:
+	/// _L/_R, .L/.R, Left/Right words, and l_/r_ prefixes. An unpaired name gets "_mirrored" appended.
+	/// A collision with an existing name — mirroring twice, or a name that
 	/// already looks mirrored — gets a numeric suffix rather than throwing, since this is meant to
 	/// be safe to lean on while roughing out a rig.
 	///
@@ -586,6 +615,13 @@ public sealed class Skeleton
 			var tail = Reflect( TailWorld( sourceIndex ) );
 
 			var newIndex = AddBoneFromPoints( UniqueName( MirroredName( bone.Name ) ), mirroredParent, head, tail );
+			var rebuilt = Bones[newIndex];
+			var kept = bone.Clone();
+			kept.Name = rebuilt.Name;
+			kept.Parent = rebuilt.Parent;
+			kept.Local = rebuilt.Local;
+			kept.Length = rebuilt.Length;
+			Bones[newIndex] = kept;
 
 			if ( sourceIndex == root )
 				newRootIndex = newIndex;
@@ -643,10 +679,31 @@ public sealed class Skeleton
 		return map;
 	}
 
-	/// <summary>`..._L` becomes `..._R` and back, including when digits follow the side letter.
-	/// Null when the name does not name a side.</summary>
+	/// <summary>
+	/// Pair a left/right bone name with its partner. Understands the three conventions used in the wild:
+	/// <c>_L</c>/<c>_R</c> (and <c>.L</c>/<c>.R</c>, digits after the letter), word forms
+	/// <c>Left</c>/<c>Right</c> as a suffix or prefix, and prefix <c>l_</c>/<c>r_</c>.
+	/// Null when the name does not name a side.
+	/// </summary>
 	public static string FlipSideSuffix( string name )
 	{
+		if ( string.IsNullOrEmpty( name ) )
+			return null;
+
+		// Word forms first so "left_arm" pairs as Left/Right rather than as a bare l_ prefix.
+		if ( TryFlipSideWord( name, out var word ) )
+			return word;
+
+		// Prefix l_ / r_ (and L_ / R_).
+		if ( name.Length >= 3 )
+		{
+			if ( name.StartsWith( "l_", StringComparison.Ordinal ) ) return "r_" + name[2..];
+			if ( name.StartsWith( "r_", StringComparison.Ordinal ) ) return "l_" + name[2..];
+			if ( name.StartsWith( "L_", StringComparison.Ordinal ) ) return "R_" + name[2..];
+			if ( name.StartsWith( "R_", StringComparison.Ordinal ) ) return "L_" + name[2..];
+		}
+
+		// Suffix _L/_R or .L/.R, including when digits follow the side letter (finger_L1, arm.L.001-style trailing digits).
 		for ( var i = name.Length - 1; i >= 1; i-- )
 		{
 			if ( char.IsDigit( name[i] ) )
@@ -654,7 +711,12 @@ public sealed class Skeleton
 
 			var c = name[i];
 
-			if ( (c != 'L' && c != 'R' && c != 'l' && c != 'r') || name[i - 1] != '_' )
+			if ( c != 'L' && c != 'R' && c != 'l' && c != 'r' )
+				return null;
+
+			var sep = name[i - 1];
+
+			if ( sep != '_' && sep != '.' )
 				return null;
 
 			var swapped = c switch { 'L' => 'R', 'R' => 'L', 'l' => 'r', _ => 'l' };
@@ -664,14 +726,58 @@ public sealed class Skeleton
 		return null;
 	}
 
+	static bool TryFlipSideWord( string name, out string flipped )
+	{
+		flipped = null;
+		var pairs = new (string Left, string Right)[] { ("Left", "Right"), ("left", "right"), ("LEFT", "RIGHT") };
+
+		foreach ( var (left, right) in pairs )
+		{
+			if ( name.EndsWith( left, StringComparison.Ordinal ) && name.Length > left.Length )
+			{
+				flipped = name[..^left.Length] + right;
+				return true;
+			}
+
+			if ( name.EndsWith( right, StringComparison.Ordinal ) && name.Length > right.Length )
+			{
+				flipped = name[..^right.Length] + left;
+				return true;
+			}
+
+			if ( name.Equals( left, StringComparison.Ordinal ) )
+			{
+				flipped = right;
+				return true;
+			}
+
+			if ( name.Equals( right, StringComparison.Ordinal ) )
+			{
+				flipped = left;
+				return true;
+			}
+
+			if ( name.StartsWith( left, StringComparison.Ordinal ) && name.Length > left.Length )
+			{
+				flipped = right + name[left.Length..];
+				return true;
+			}
+
+			if ( name.StartsWith( right, StringComparison.Ordinal ) && name.Length > right.Length )
+			{
+				flipped = left + name[right.Length..];
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	static string MirroredName( string name )
 	{
-		if ( name.EndsWith( "_L" ) ) return name[..^2] + "_R";
-		if ( name.EndsWith( "_R" ) ) return name[..^2] + "_L";
-		if ( name.EndsWith( "_l" ) ) return name[..^2] + "_r";
-		if ( name.EndsWith( "_r" ) ) return name[..^2] + "_l";
-		if ( name.EndsWith( ".L" ) ) return name[..^2] + ".R";
-		if ( name.EndsWith( ".R" ) ) return name[..^2] + ".L";
+		if ( FlipSideSuffix( name ) is { } flipped )
+			return flipped;
+
 		return name + "_mirrored";
 	}
 

@@ -1,0 +1,39 @@
+# workflow-anim.txt — ANIM script (BuildScriptAnim.Run), NOT a BuildScript.
+# Runs against a Skeleton (the workflow's Hero citizen rig). There is
+# currently NO CLI or bot tool that runs it (see WORKFLOW.md W2): the
+# integrator drives it from a test harness (BuildScriptAnim.Run(text, rig))
+# or wires the missing driver. Bone names are CitizenSkeleton.Build() names.
+# Same clip definitions as ../export-verify/fixtures/character-clips.txt
+# (shared on purpose: one rig, one clip set, two harnesses).
+clip name=walk fps=30 frames=60
+key bone=pelvis frame=0 pos=0,0,0 rot=0,0,0
+key bone=pelvis frame=30 pos=0,0,2 rot=0,0,0
+key bone=pelvis frame=60 pos=0,0,0 rot=0,0,0
+key bone=thigh_L frame=0 rot=0,0,0
+key bone=thigh_L frame=15 rot=20,0,0
+key bone=thigh_L frame=30 rot=0,0,0
+key bone=thigh_L frame=45 rot=-20,0,0
+key bone=thigh_L frame=60 rot=0,0,0
+key bone=thigh_R frame=0 rot=0,0,0
+key bone=thigh_R frame=15 rot=-20,0,0
+key bone=thigh_R frame=30 rot=0,0,0
+key bone=thigh_R frame=45 rot=20,0,0
+key bone=thigh_R frame=60 rot=0,0,0
+key bone=spine_1 frame=0 rot=0,0,0
+key bone=spine_1 frame=30 rot=5,0,0
+key bone=spine_1 frame=60 rot=0,0,0
+key bone=head frame=0 rot=0,0,0
+key bone=head frame=30 rot=-5,0,0
+key bone=head frame=60 rot=0,0,0
+key bone=ToolLeverBone frame=0 rot=0,0,0
+key bone=ToolLeverBone frame=30 rot=0,0,45
+key bone=ToolLeverBone frame=60 rot=0,0,0
+save_clip path=out/walk.riganim
+clip name=idle fps=30 frames=30
+key bone=pelvis frame=0 pos=0,0,0 rot=0,0,0
+key bone=pelvis frame=15 pos=0,0,0.5 rot=0,0,0
+key bone=pelvis frame=30 pos=0,0,0 rot=0,0,0
+key bone=spine_1 frame=0 rot=0,0,0
+key bone=spine_1 frame=15 rot=2,0,0
+key bone=spine_1 frame=30 rot=0,0,0
+save_clip path=out/idle.riganim

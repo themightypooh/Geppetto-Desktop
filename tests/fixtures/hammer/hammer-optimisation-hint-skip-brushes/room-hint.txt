@@ -1,0 +1,9 @@
+# Hint slab across the sealed room: x in [-2, 2], y in [-32, 32], z in [0, 128].
+# The +X face (x = 2) is hint; the rest are skip.
+brush room-hint
+face -1 0 0 2 tools/toolsskip
+face 1 0 0 2 tools/toolshint
+face 0 -1 0 32 tools/toolsskip
+face 0 1 0 32 tools/toolsskip
+face 0 0 -1 0 tools/toolsskip
+face 0 0 1 128 tools/toolsskip

@@ -56,6 +56,19 @@ public sealed class SculptEdit
 	/// <summary>Whether this stroke painted the mask rather than moving the surface.</summary>
 	public bool IsMask => _maskBefore is not null;
 
+	/// <summary>
+	/// The touched vertices' positions before the stroke, or null unless this moved the surface.
+	///
+	/// A caller with its own undo reads the touched set off <c>After.Keys</c> and stores the
+	/// matching frame-space deltas (see <see cref="MultiresSculpt.ApplyEdit"/>) rather than these
+	/// positions: positions round-trip through the frames with a ulp of error, while deltas copy
+	/// bit-exact, which is what makes undoing every stroke restore the starting blob byte for byte.
+	/// </summary>
+	public IReadOnlyDictionary<int, Vec3> Before => _before;
+
+	/// <summary>The touched vertices' positions after the stroke, or null unless this moved the surface.</summary>
+	public IReadOnlyDictionary<int, Vec3> After => _after;
+
 	/// <summary>How many vertices this stroke actually changed.</summary>
 	public int Count => _before?.Count ?? _maskBefore?.Count ?? _removed.Count;
 
@@ -245,6 +258,15 @@ public sealed class SculptSession
 	/// the working mesh and both are dropped together when it is replaced.</summary>
 	List<EdgeKey>[] _neighbors;
 	BrushUndo _undo;
+	static readonly IReadOnlyDictionary<int, Vec3> NoStrokeTouch = new Dictionary<int, Vec3>();
+
+	/// <summary>
+	/// Vertices this open stroke has moved, with the position each had before the stroke.
+	/// Empty when no stroke is running. The phone app uses the keys as the dirty set for a
+	/// partial mesh upload. Read-only: the positions are the pre-stroke ones, not the live ones.
+	/// </summary>
+	public IReadOnlyDictionary<int, Vec3> StrokeTouched => _undo?.Previous ?? NoStrokeTouch;
+
 	Vec3 _lastSample;
 	Vec3 _lazyPoint;
 	bool _lazyInit;
@@ -260,6 +282,17 @@ public sealed class SculptSession
 	int _displayLevel = -1;
 	int _displayMaskRevision = -1;
 	bool _displayHidden;
+
+	/// <summary>
+	/// Whether <see cref="EndStroke"/>, <see cref="ApplyFilter"/> and <see cref="RemoveTopLevel"/>
+	/// push onto the session's own undo stack.
+	///
+	/// True keeps the historical behaviour: the session owns undo and <see cref="Undo"/> /
+	/// <see cref="Redo"/> step it. A caller with its own undo (Poohdot's document history) sets this
+	/// false and stores the returned edit itself — otherwise every stroke lives twice, once per
+	/// stack, and the session's copy leaks, since nothing pops it and nothing caps it.
+	/// </summary>
+	public bool KeepHistory = true;
 
 	readonly Stack<SculptEdit> _done = new();
 	readonly Stack<SculptEdit> _undone = new();
@@ -447,6 +480,65 @@ public sealed class SculptSession
 
 	/// <summary>Push the held region out one ring, or with <paramref name="shrink"/> pull it in.</summary>
 	public void GrowMask( bool shrink = false ) => MaskFor( Level ).Grow( _sculpt.Evaluate( Level ), shrink );
+
+	/// <summary>Soften the mask's edges by <paramref name="iterations"/> rings (Smooth Mask).</summary>
+	public void BlurMask( int iterations = 1 ) => MaskFor( Level ).Blur( _sculpt.Evaluate( Level ), iterations );
+
+	/// <summary>Harden the mask's edges (Sharpen Mask), the opposite of <see cref="BlurMask"/>.</summary>
+	public void SharpenMask( int iterations = 1 ) => MaskFor( Level ).Sharpen( _sculpt.Evaluate( Level ), iterations );
+
+	/// <summary>
+	/// Topological symmetry: with ONE mirror plane on and no radial copies, mirror strokes and mask
+	/// paint to each vertex's topological twin (see <see cref="TopologySymmetry"/>) instead of to the
+	/// reflected position, so mirroring keeps working on a posed or lopsided model. With several
+	/// planes or radial copies on, symmetry stays positional. The twin map is built from the level's
+	/// rest surface and rebuilt only when the level's vertex count or the plane changes.
+	/// </summary>
+	public bool TopologyMirror;
+
+	int[] _topoMap;
+	int _topoLevel = -1, _topoCount = -1;
+	MirrorAxis _topoAxis;
+
+	/// <summary>The single mirror plane topological symmetry would use, or None when it does not apply.</summary>
+	public MirrorAxis TopologyAxis
+	{
+		get
+		{
+			if ( !TopologyMirror || Radial > 1 )
+				return MirrorAxis.None;
+
+			return ( MirrorAxes | BrushSymmetry.AxesOf( Mirror ) ) switch
+			{
+				SymmetryAxes.X => MirrorAxis.X,
+				SymmetryAxes.Y => MirrorAxis.Y,
+				SymmetryAxes.Z => MirrorAxis.Z,
+				_ => MirrorAxis.None,
+			};
+		}
+	}
+
+	/// <summary>The twin map for the current level and plane, or null when topological symmetry is off.</summary>
+	public int[] TopologyMap
+	{
+		get
+		{
+			var axis = TopologyAxis;
+			if ( axis == MirrorAxis.None )
+				return null;
+
+			var rest = _sculpt.Rest( Level );
+			if ( _topoMap is null || _topoLevel != Level || _topoCount != rest.VertexCount || _topoAxis != axis )
+			{
+				_topoMap = TopologySymmetry.Build( rest, axis );
+				_topoLevel = Level;
+				_topoCount = rest.VertexCount;
+				_topoAxis = axis;
+			}
+
+			return _topoMap;
+		}
+	}
 
 	/// <summary>Hold everything but the connected piece under <paramref name="point"/> — the
 	/// nearest vertex of the face the cursor is over.</summary>
@@ -671,8 +763,11 @@ public sealed class SculptSession
 		if ( edit is null )
 			return null;
 
-		_done.Push( edit );
-		_undone.Clear();
+		if ( KeepHistory )
+		{
+			_done.Push( edit );
+			_undone.Clear();
+		}
 
 		return edit;
 	}
@@ -751,8 +846,11 @@ public sealed class SculptSession
 		var level = _sculpt.TopLevel;
 		var dropped = _sculpt.RemoveTopLevel();
 
-		_done.Push( new SculptEdit( level, dropped ) );
-		_undone.Clear();
+		if ( KeepHistory )
+		{
+			_done.Push( new SculptEdit( level, dropped ) );
+			_undone.Clear();
+		}
 
 		return true;
 	}
@@ -793,10 +891,25 @@ public sealed class SculptSession
 			return null;
 		_sculpt.Record( level, mesh );
 		var edit = new SculptEdit( level, before, after );
-		_done.Push( edit );
-		_undone.Clear();
+
+		if ( KeepHistory )
+		{
+			_done.Push( edit );
+			_undone.Clear();
+		}
+
 		return edit;
 	}
+
+	/// <summary>
+	/// Pop the session's most recent edit off its undo stack and hand it over, or null when empty.
+	///
+	/// For a caller that keeps history on (so multi-step gestures accumulate normally) but owns the
+	/// real undo elsewhere: take each committed edit and store it there, and the session's stack
+	/// stays empty with nothing living twice. Most such callers want <see cref="KeepHistory"/> = false
+	/// instead — steadier, since an untaken edit cannot pile up — and this for tests and handoffs.
+	/// </summary>
+	public SculptEdit TakeLastEdit() => _done.Count > 0 ? _done.Pop() : null;
 
 	public bool Undo() => Step( _done, _undone, forward: false );
 
@@ -841,6 +954,13 @@ public sealed class SculptSession
 
 	void Dab( Vec3 point, Vec3 normal, Vec3 direction )
 	{
+		var topo = TopologyMap;
+		if ( topo is not null && topo.Length == _working.VertexCount )
+		{
+			TopologyDab( topo, point, normal, direction );
+			return;
+		}
+
 		if ( Masking )
 		{
 			var mask = MaskFor( Level );
@@ -863,5 +983,82 @@ public sealed class SculptSession
 		// mean snapping protected vertices back, which leaves a hard edge where the mask fades.
 		var undo = Effigy.Brush.Apply( _working, stroke, _frames, _strokeMask ?? ActiveMask?.Values, _bvh, _neighbors, _undo );
 		_undo.Absorb( undo );
+	}
+
+	// One dab under topological symmetry: the stroke runs on the touched side only, then every vertex it
+	// moved hands the same move, reflected, to its twin. Mask paint copies the new values across the same way.
+	void TopologyDab( int[] topo, Vec3 point, Vec3 normal, Vec3 direction )
+	{
+		var axis = _topoAxis;
+		if ( Masking )
+		{
+			var mask = MaskFor( Level );
+			var before = (float[])mask.Values.Clone();
+			mask.Paint( _working, _bvh, point, Radius, Erasing ? -Strength : Strength, Falloff );
+			var values = mask.Values;
+			for ( var i = 0; i < values.Length; i++ )
+			{
+				var t = topo[i];
+				if ( t >= 0 && t != i && values[i] != before[i] && values[t] == before[t] )
+					values[t] = values[i];
+			}
+
+			return;
+		}
+
+		var stroke = new BrushStroke { Kind = Brush, Falloff = Falloff, Alpha = Alpha };
+		stroke.Samples.Add( new BrushSample( point, normal, Radius, Inverted ? -Strength : Strength, direction ) );
+		var weights = _strokeMask ?? ActiveMask?.Values;
+		var undo = Effigy.Brush.Apply( _working, stroke, _frames, weights, _bvh, _neighbors, _undo );
+
+		var pos = _working.Positions;
+		var moves = new Dictionary<int, Vec3>();
+		foreach ( var (v, prev) in undo.Previous )
+		{
+			var t = topo[v];
+			if ( t < 0 )
+				continue;
+
+			var delta = pos[v] - prev;
+			if ( t == v )
+			{
+				// On the plane: keep only the in-plane part, so the centre line stays on the centre line.
+				pos[v] = prev + ( delta + Effigy.Brush.Mirror( delta, axis ) ) * 0.5f;
+				continue;
+			}
+
+			var share = weights is null ? 1f : Math.Clamp( weights[t], 0f, 1f );
+			if ( share <= 0f )
+				continue;
+
+			var m = Effigy.Brush.Mirror( delta, axis ) * share;
+			moves[t] = moves.TryGetValue( t, out var had ) ? had + m : m;
+		}
+
+		if ( moves.Count == 0 )
+		{
+			_undo.Absorb( undo );
+			return;
+		}
+
+		var lo = new Vec3( float.MaxValue, float.MaxValue, float.MaxValue );
+		var hi = new Vec3( float.MinValue, float.MinValue, float.MinValue );
+		void Grow( Vec3 q )
+		{
+			lo = new Vec3( MathF.Min( lo.x, q.x ), MathF.Min( lo.y, q.y ), MathF.Min( lo.z, q.z ) );
+			hi = new Vec3( MathF.Max( hi.x, q.x ), MathF.Max( hi.y, q.y ), MathF.Max( hi.z, q.z ) );
+		}
+
+		foreach ( var (t, m) in moves )
+		{
+			undo.Remember( t, pos[t] );
+			Grow( pos[t] );
+			pos[t] += m;
+			Grow( pos[t] );
+		}
+
+		_undo.Absorb( undo );
+		// The twins moved somewhere the brush's own refit did not look: refit the box round them.
+		_bvh?.RefitRegion( _working, ( lo + hi ) * 0.5f, ( hi - lo ).Length * 0.5f + Radius );
 	}
 }

@@ -706,7 +706,7 @@ public sealed class FurFeature : Feature
 	public override IReadOnlyList<IParam> AdvancedParameters => new IParam[] { Clump, DarkRoots, RimColour, MaterialSlot };
 
 	/// <summary>The slot the last rebuild put the shells on, or -1 when it did not run.</summary>
-	public int ResolvedSlot { get; private set; } = -1;
+	public int ResolvedSlot { get; internal set; } = -1;
 
 	public int ShellFaces { get; private set; }
 

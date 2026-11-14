@@ -1,0 +1,22 @@
+# Hammer Desktop AI: BuildScript verbs for native map tools — acceptance script.
+# Board: hammer-ai-buildscript-verbs-map. Run headlessly:
+#   BuildScript.Run(new PartStudio(), File.ReadAllText("sealed-room.effigy-script"), baseDir)
+# Builds a sealed room (floor + 4 walls + ceiling, player start, light,
+# brush door + logic_auto -> door Open I/O), then validation + Quick Play.
+# Expected: map_validate logs its summary, map_compile preset=quickplay
+# reports "quickplay sealed". The same script is inlined in
+# tests/BuildScriptMapTests.cs (SealedRoomScript) with a fresh map name per run.
+map_brush_create floor shape=box min=-256,-256,0 max=256,256,16 material=dev/dev_measuregeneric01 map=room1
+map_brush_create wall-n shape=box min=-256,-256,0 max=256,-240,192 material=brick/brickwall001 map=room1
+map_brush_create wall-s shape=box min=-256,240,0 max=256,256,192 material=brick/brickwall001 map=room1
+map_brush_create wall-w shape=box min=-256,-256,0 max=-240,256,192 material=brick/brickwall001 map=room1
+map_brush_create wall-e shape=box min=240,-256,0 max=256,256,192 material=brick/brickwall001 map=room1
+map_brush_create ceil shape=box min=-256,-256,176 max=256,256,192 material=dev/dev_measuregeneric01 map=room1
+map_entity_place class=info_player_start origin=0,0,32 map=room1
+map_entity_place class=light origin=0,0,160 map=room1
+map_brush_create door-panel shape=box min=-32,-128,16 max=32,-112,144 material=dev/dev_measuregeneric01 map=room1
+map_entity_place class=func_door brush=door-panel targetname=door1 map=room1
+map_entity_place class=logic_auto origin=0,0,32 targetname=auto1 map=room1
+map_entity_io_add source=auto1 event=OnMapSpawn target=door1 input=Open delay=1 map=room1
+map_validate map=room1
+map_compile preset=quickplay map=room1

@@ -1,0 +1,91 @@
+{
+  "brushes": [
+    {
+      "id": "ceiling",
+      "min": [
+        -144,
+        -144,
+        128
+      ],
+      "max": [
+        144,
+        144,
+        144
+      ],
+      "detail": false,
+      "material": "concrete"
+    },
+    {
+      "id": "wall-west",
+      "min": [
+        -144,
+        -144,
+        0
+      ],
+      "max": [
+        -128,
+        144,
+        128
+      ],
+      "detail": false,
+      "material": "concrete"
+    },
+    {
+      "id": "wall-east",
+      "min": [
+        128,
+        -144,
+        0
+      ],
+      "max": [
+        144,
+        144,
+        128
+      ],
+      "detail": false,
+      "material": "concrete"
+    },
+    {
+      "id": "wall-south",
+      "min": [
+        -128,
+        -144,
+        0
+      ],
+      "max": [
+        128,
+        -128,
+        128
+      ],
+      "detail": false,
+      "material": "concrete"
+    },
+    {
+      "id": "wall-north",
+      "min": [
+        -128,
+        128,
+        0
+      ],
+      "max": [
+        128,
+        144,
+        128
+      ],
+      "detail": false,
+      "material": "concrete"
+    }
+  ],
+  "entities": [
+    {
+      "class": "info_player_start",
+      "origin": [
+        0,
+        0,
+        0
+      ],
+      "yaw": 0
+    }
+  ],
+  "displacements": []
+}

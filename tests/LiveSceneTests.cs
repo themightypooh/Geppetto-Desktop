@@ -46,13 +46,13 @@ internal static class LiveSceneTests
 			using var renderer = new SceneRenderer( gl ) { SsaoStrength = 0, SsrStrength = 0 };
 			var cam = Camera( 20 );
 			using var plain = ViewportMesh.FromPolyMesh( Cube( .8f ), _ => "cube" );
-			var stack = new ModifierStack();
+			var stack = new Marionette.Desktop.ModifierStack();
 			stack.Modifiers.Add( new SubdivisionModifier { Levels = 2 } );
 			stack.Modifiers.Add( new DisplaceModifier { Distance = .4f } );
 			using var modified = stack.Apply( plain );
 			Check( !ReferenceEquals( modified, plain ) && modified.Vertices.Length > plain.Vertices.Length, $"modifier stack did not produce new geometry: {stack.LastSummary}" );
 			stack.Modifiers.ForEach( m => m.Enabled = false );
-			Check( ReferenceEquals( stack.Apply( plain ), plain ), "disabled stack must return the source mesh" );
+			Check( ReferenceEquals( stack.Apply( plain ), plain.Cpu ), "disabled stack must return the source mesh" );
 			plain.Upload( gl ); modified.Upload( gl );
 			try
 			{

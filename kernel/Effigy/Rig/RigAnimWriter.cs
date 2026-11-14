@@ -20,6 +20,24 @@ namespace Effigy;
 /// </summary>
 public static class RigAnimWriter
 {
+	/// <summary>True when the clip's marks are exactly what the base's Marks array reads as, so the base
+	/// array (with any entries or fields the reader skips) can stay untouched.</summary>
+	static bool SameMarks( System.Collections.Generic.List<RigAnimMark> marks, JsonArray baseMarks )
+	{
+		if ( baseMarks is null ) return false;
+		var read = new System.Collections.Generic.List<(string, int, string)>();
+		foreach ( var n in baseMarks )
+		{
+			if ( n is not JsonObject o ) continue;
+			string name = o["Name"] is JsonValue nv && nv.TryGetValue<string>( out var ns ) ? ns : "mark";
+			int frame = o["Frame"] is JsonValue fv && fv.TryGetValue<double>( out var fd ) ? (int)MathF.Round( (float)fd ) : 0;
+			string note = o["Note"] is JsonValue tv && tv.TryGetValue<string>( out var ts ) ? ts : "";
+			read.Add( (name, frame, note) );
+		}
+		var have = marks.Where( m => m is not null ).Select( m => (m.Name ?? "mark", m.Frame, m.Note ?? "") ).ToList();
+		return have.SequenceEqual( read );
+	}
+
 	public static string Write( RigAnimFile clip, string baseJson = null )
 	{
 		if ( clip is null ) throw new ArgumentNullException( nameof( clip ) );
@@ -41,6 +59,18 @@ public static class RigAnimWriter
 		root["RigAsset"] = clip.RigAsset ?? "";
 		root["AnimationSpeed"] = clip.FrameRate;
 		root["FrameCount"] = Math.Max( clip.FrameCount, clip.LastKeyFrame + 1 );
+
+		// Marks the clip read (or was given) win; a clip that never read them keeps the base's.
+		if ( clip.Marks is { } marks && !SameMarks( marks, root["Marks"] as JsonArray ) )
+		{
+			var list = new JsonArray();
+			foreach ( var m in marks )
+			{
+				if ( m is null ) continue;
+				list.Add( new JsonObject { ["Name"] = m.Name ?? "mark", ["Frame"] = m.Frame, ["Note"] = m.Note ?? "" } );
+			}
+			root["Marks"] = list;
+		}
 
 		if ( clip.RootMotion is { } motion )
 		{

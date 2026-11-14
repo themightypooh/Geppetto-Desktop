@@ -1,0 +1,13 @@
+{
+  "notes": "Drag cases for GizmoModel.DragToTransform. drag is a GizmoDrag ViewDelta (x = view Right, y = view Up, z = view Forward), view is a GizmoView preset name. Rotation angles are degrees, measured in the rotation plane from the plane U axis toward V (right-hand rule about the axis). pivot-rotate-centre expects the point [11,0,0] to land at [10+cos45, sin45, 0].",
+  "cases": [
+    { "name": "translate-lock-x", "mode": "translate", "space": "global", "lock": "X", "pivot": [0, 0, 0], "orientation": null, "snap": false, "grid": 16, "angleSnap": 15, "drag": [10, 5, 0], "view": "front", "expect": { "kind": "translation", "value": [10, 0, 0] } },
+    { "name": "translate-plane-xy", "mode": "translate", "space": "global", "lock": "XY", "pivot": [0, 0, 0], "orientation": null, "snap": false, "grid": 16, "angleSnap": 15, "drag": [10, 5, 3], "view": "front", "expect": { "kind": "translation", "value": [10, 5, 0] } },
+    { "name": "translate-snap-16", "mode": "translate", "space": "global", "lock": "X", "pivot": [0, 0, 0], "orientation": null, "snap": true, "grid": 16, "angleSnap": 15, "drag": [10, 0, 0], "view": "front", "expect": { "kind": "translation", "value": [16, 0, 0] } },
+    { "name": "rotate-global-z-45", "mode": "rotate", "space": "global", "lock": "Z", "pivot": [0, 0, 0], "orientation": null, "snap": false, "grid": 16, "angleSnap": 15, "drag": [1, 1, 0], "view": "front", "expect": { "kind": "rotation", "axis": [0, 0, 1], "angleDegrees": 45 } },
+    { "name": "rotate-local-z-differs", "mode": "rotate", "space": "local", "lock": "Z", "pivot": [0, 0, 0], "orientation": { "axis": [0, 1, 0], "degrees": 90 }, "snap": false, "grid": 16, "angleSnap": 15, "drag": [1, 1, 1], "view": "front", "expect": { "kind": "rotation", "axis": [1, 0, 0], "angleDegrees": -45 } },
+    { "name": "rotate-snap-17-to-15", "mode": "rotate", "space": "global", "lock": "Z", "pivot": [0, 0, 0], "orientation": null, "snap": true, "grid": 16, "angleSnap": 15, "drag": [0.9563048, 0.2923717, 0], "view": "front", "expect": { "kind": "rotation", "axis": [0, 0, 1], "angleDegrees": 15 } },
+    { "name": "scale-lock-x", "mode": "scale", "space": "global", "lock": "X", "pivot": [0, 0, 0], "orientation": null, "snap": false, "grid": 16, "angleSnap": 15, "drag": [0.5, 2, 0], "view": "front", "expect": { "kind": "scale", "factors": [1.5, 1, 1] } },
+    { "name": "pivot-rotate-centre", "mode": "rotate", "space": "global", "lock": "Z", "pivot": [10, 0, 0], "orientation": null, "snap": false, "grid": 16, "angleSnap": 15, "drag": [1, 1, 0], "view": "front", "expect": { "kind": "point", "in": [11, 0, 0], "out": [10.7071068, 0.7071068, 0] } }
+  ]
+}

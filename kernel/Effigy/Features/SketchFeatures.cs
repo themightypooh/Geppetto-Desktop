@@ -22,6 +22,16 @@ public sealed class SketchFeature : Feature
 
 	public Sketch Sketch = new();
 
+	/// <summary>The last solve that ran with constraints on it, or null when the sketch has
+	/// none. Stale when constraints were removed after a solve — the sketch has no rules left
+	/// to solve, so there is nothing to re-run.</summary>
+	public SolveResult LastSolve;
+
+	/// <summary>Blue/black/red for this sketch, from the last solve. UnderDefined until a solve
+	/// with constraints runs; a constraint-free sketch is under-defined by definition, since
+	/// nothing pins any of its points down.</summary>
+	public SketchStatus Status = SketchStatus.UnderDefined;
+
 	public readonly ChoiceParam Plane = new( "Plane", new[] { "Top (XY)", "Front (XZ)", "Right (YZ)" } );
 	public readonly FloatParam PlaneOffset = new( "Offset", 0f, unit: "u" );
 
@@ -75,21 +85,39 @@ public sealed class SketchFeature : Feature
 		// know a solver exists. A sketch with no constraints costs one comparison.
 		if ( Sketch.Constraints.Count > 0 )
 		{
+			// A driven dimension reports, it does not drive: its expression, if it has one, is
+			// not evaluated and cannot fail the feature. It is measured after the solve below.
+			foreach ( var c in Sketch.Constraints.Where( c => !c.Driven && !string.IsNullOrWhiteSpace( c.Expr ) ) )
+			{
+				foreach ( var name in VariableResolver.ReferencedNames( c.Expr ) )
+					if ( ctx.Resolve?.Invoke( name ) == null )
+						Fail( $"No variable called {name}", "A sketch dimension refers to a missing or invalid variable.", "Add or fix it in CAD > Finish > Variables" );
+				if ( !Expression.TryEvaluate( c.Expr, null, ctx.Resolve, out var value ) || !float.IsFinite( value ) )
+					Fail( $"Cannot evaluate dimension {c.Expr}", "The dimension expression is invalid.", "Check the formula" );
+				if ( value <= 0 && c.Kind != SketchConstraintKind.Angle )
+					Fail( "A dimension must be greater than zero.", c.Expr, "Change the variable or formula" );
+				c.Value = value;
+			}
 			var solve = Sketch.Solve();
+			LastSolve = solve;
+			Status = solve.Status;
+
+			// Driven dimensions read back what the solved geometry measures.
+			SketchDiagnosis.MeasureDriven( Sketch );
 
 			if ( !solve.Converged )
 			{
 				// A warning rather than an error, deliberately: the points are left at the solver's
 				// best attempt, which is still a drawable sketch. Failing the feature would blank
-				// the model the moment a sketch became momentarily over-constrained mid-edit.
-				Warning = $"Sketch constraints did not fully solve — residual {solve.Residual:0.###e0} "
-					+ $"after {solve.Iterations} iterations. The geometry is the closest fit found.";
+				// the model the moment a sketch became momentarily over-constrained mid-edit. The
+				// diagnosis names the rules that disagree, so the warning says which dimensions
+				// to look at instead of only saying that something does.
+				Warning = SketchDiagnosis.Describe( Sketch, solve );
 			}
 			else if ( solve.RedundantConstraints > 0 )
 			{
-				Warning = $"{solve.RedundantConstraints} constraint(s) repeat something already "
-					+ "implied by the others. Harmless, but removing them makes the sketch easier "
-					+ "to reason about.";
+				Warning = SketchDiagnosis.Describe( Sketch, solve )
+					+ " Harmless, but removing them makes the sketch easier to reason about.";
 			}
 		}
 
@@ -866,9 +894,44 @@ public sealed class ExtrudeFeature : SketchConsumingFeature
 	/// needs a boolean — both are questions about DISTANCE, answered by a raycast, and the solid they
 	/// produce is an ordinary prism. That is worth saying because "up to face" sits next to "cut" in
 	/// every CAD tool and reads like it must need one.
+	///
+	/// UP TO VERTEX and UP TO BODY were added after the first four, so they come last: a saved index
+	/// keeps meaning what it meant. Up to vertex stops level with a point (the cap passes through it),
+	/// Up to body is Up to next against one chosen body only, so a part in front does not stop it.
 	/// </summary>
 	public readonly ChoiceParam Termination = new( "Termination",
-		new[] { "Blind", "Up to next", "Through all" } );
+		new[] { "Blind", "Up to next", "Through all", "Up to face", "Up to vertex", "Up to body" } );
+
+	/// <summary>The face "Up to face" stops at, picked in the viewport. Saved like a plane's face.</summary>
+	public FaceRef? UpTo;
+
+	/// <summary>The point "Up to vertex" stops level with, in model space. The box fills it from a picked
+	/// corner; it is a number rather than a vertex index because indices change when the part does.</summary>
+	public readonly Vec3Param UpToPoint = new( "Up to point", Vec3.Zero );
+
+	/// <summary>The body "Up to body" stops at. Body ids are stable across rebuilds.</summary>
+	public string UpToBodyId = "";
+
+	/// <summary>The termination numbers the second end can use, in the order <see cref="SecondEnd"/>
+	/// lists them. Up to face is left out: one picked face per extrude is what the box can show.</summary>
+	static readonly int[] SecondEndTerminations = { 0, 1, 2, 4, 5 };
+
+	/// <summary>
+	/// How the OTHER side ends, Onshape's second end position with its own end type. Blind keeps the
+	/// old meaning (Second distance, zero = one-sided); the others measure backwards from the sketch
+	/// the same way the first end measures forwards. Symmetric wins over it, as it always did.
+	/// </summary>
+	public readonly ChoiceParam SecondEnd = new( "Second end",
+		new[] { "Blind", "Up to next", "Through all", "Up to vertex", "Up to body" } );
+
+	/// <summary>The point the second end stops level with (second end Up to vertex).</summary>
+	public readonly Vec3Param SecondUpToPoint = new( "Second up to point", Vec3.Zero );
+
+	/// <summary>The body the second end stops at (second end Up to body).</summary>
+	public string SecondUpToBodyId = "";
+
+	/// <summary>The second end's termination number in <see cref="Termination"/>'s terms.</summary>
+	int SecondTermination => SecondEndTerminations[Math.Clamp( SecondEnd.Index, 0, SecondEndTerminations.Length - 1 )];
 
 	public readonly FloatParam Distance = new( "Distance", 1f, unit: "u" );
 	public readonly BoolParam Symmetric = new( "Symmetric", false );
@@ -884,6 +947,16 @@ public sealed class ExtrudeFeature : SketchConsumingFeature
 	/// intent and silently doubling up would be worse than ignoring one.
 	/// </summary>
 	public readonly FloatParam SecondDistance = new( "Second distance", 0f, 0f, unit: "u" );
+
+	/// <summary>
+	/// How far from the sketch (or picked face) the solid starts, along the way it travels. Zero
+	/// starts on it, which is what it has always done; negative starts behind it.
+	///
+	/// Onshape's "Offset start". A blind extrude keeps its length and moves as a whole, so Distance
+	/// still means how thick the solid is. A measured one (Up to next, Through all, Up to face) still
+	/// ends where the model says and only its start moves.
+	/// </summary>
+	public readonly FloatParam StartOffset = new( "Start offset", 0f, unit: "u" );
 
 	/// <summary>
 	/// Draft angle, in degrees. Positive narrows toward the far end.
@@ -939,9 +1012,31 @@ public sealed class ExtrudeFeature : SketchConsumingFeature
 		return ctx.Bodies.Any( b => b.Id == bodyId );
 	}
 
-	public override IReadOnlyList<IParam> Parameters => Termination.Index == 0
-		? new IParam[] { Sketch, Termination, Distance, SecondDistance, Symmetric, Flip, Taper, Result, Material }
-		: new IParam[] { Sketch, Termination, Flip, Taper, Result, Material };
+	public override IReadOnlyList<IParam> Parameters
+	{
+		get
+		{
+			var list = new List<IParam> { Sketch, Termination };
+			if ( Termination.Index == 0 ) list.Add( Distance );
+			if ( Termination.Index == 4 ) list.Add( UpToPoint );
+			list.Add( StartOffset );
+			list.AddRange( SecondEndParameters );
+			if ( Termination.Index == 0 ) list.Add( Symmetric );
+			list.AddRange( new IParam[] { Flip, Taper, Result, Material } );
+			return list;
+		}
+	}
+
+	/// <summary>The second end's rows: its type, then the distance or point that type reads.</summary>
+	IEnumerable<IParam> SecondEndParameters
+	{
+		get
+		{
+			yield return SecondEnd;
+			if ( SecondEnd.Index == 0 ) yield return SecondDistance;
+			if ( SecondEnd.Index == 3 ) yield return SecondUpToPoint;
+		}
+	}
 
 	/// <summary>
 	/// What an extrude is asked for once in twenty.
@@ -953,7 +1048,7 @@ public sealed class ExtrudeFeature : SketchConsumingFeature
 	/// out of the dialog entirely and lives on the ADD/REMOVE strip over the viewport.
 	/// </summary>
 	public override IReadOnlyList<IParam> AdvancedParameters =>
-		new IParam[] { SecondDistance, Taper, Material };
+		SecondEndParameters.Concat( new IParam[] { Taper, Material } ).ToList();
 
 	protected override void Execute( FeatureContext ctx )
 	{
@@ -970,16 +1065,21 @@ public sealed class ExtrudeFeature : SketchConsumingFeature
 
 		var sign = DirectionSign( ctx );
 
+		var samples = SampleOrigins( sketch, profiles ).ToList();
+
+		if ( Termination.Index == 0 && samples.Count > 0 )
+			AddHandle( FeatureHandle.Of( Distance, samples.Aggregate( Vec3.Zero, ( a, b ) => a + b ) * ( 1f / samples.Count ), sketch.Plane.Normal * sign ) );
+
 		var reach = Termination.Index == 0
 			? Distance.Value
-			: MeasuredDistance( ctx, sketch.Plane.Origin, sketch.Plane.Normal * sign,
-				SampleOrigins( sketch, profiles ) );
+			: MeasuredDistance( ctx, sketch.Plane.Origin, sketch.Plane.Normal * sign, samples,
+				Termination.Index, UpToPoint.Value, UpToBodyId );
 
-		RequireThickness( reach, profiles );
+		RequireThickness( Termination.Index == 0 ? reach : reach - StartOffset.Value, profiles );
 
 		var distance = reach * sign;
 
-		var (near, far) = Ends( distance );
+		var (near, far) = Ends( distance, sign, SecondReach( ctx, sketch.Plane.Origin, sketch.Plane.Normal * sign, samples ) );
 
 		foreach ( var profile in profiles )
 		{
@@ -1032,6 +1132,12 @@ public sealed class ExtrudeFeature : SketchConsumingFeature
 				"Move this feature back below the edit that changed them" );
 		}
 
+		if ( Termination.Index == 0 )
+		{
+			var (centre, normal) = FeatureHandle.FacesAnchor( byBody );
+			AddHandle( FeatureHandle.Of( Distance, centre, normal * DirectionSign( ctx ) ) );
+		}
+
 		if ( IsAPlainPull )
 			PullFaces( byBody );
 		else
@@ -1052,6 +1158,7 @@ public sealed class ExtrudeFeature : SketchConsumingFeature
 		Termination.Index == 0
 		&& !Symmetric.Value
 		&& MathF.Abs( SecondDistance.Value ) < 1e-6f
+		&& MathF.Abs( StartOffset.Value ) < 1e-6f
 		&& MathF.Abs( Taper.Clamped ) < 1e-6f
 		&& Result.Index is 0 or 2;
 
@@ -1133,13 +1240,15 @@ public sealed class ExtrudeFeature : SketchConsumingFeature
 
 		foreach ( var (body, plane, profile) in jobs )
 		{
+			var samples = SampleOrigins( profile, plane ).ToList();
 			var reach = Termination.Index == 0
 				? Distance.Value
-				: MeasuredDistance( ctx, plane.Origin, plane.Normal * sign, SampleOrigins( profile, plane ) );
+				: MeasuredDistance( ctx, plane.Origin, plane.Normal * sign, samples,
+					Termination.Index, UpToPoint.Value, UpToBodyId );
 
-			RequireThickness( reach, new[] { profile } );
+			RequireThickness( Termination.Index == 0 ? reach : reach - StartOffset.Value, new[] { profile } );
 
-			var (near, far) = Ends( reach * sign );
+			var (near, far) = Ends( reach * sign, sign, SecondReach( ctx, plane.Origin, plane.Normal * sign, samples ) );
 
 			Emit( ctx, BuildPrism( plane, profile, near, far, Taper.Clamped, Material.Clamped ), body );
 		}
@@ -1207,18 +1316,33 @@ public sealed class ExtrudeFeature : SketchConsumingFeature
 	/// distance runs back the other way from the plane, and otherwise it starts at the plane. Flip
 	/// mirrors all of it, which is why `second` is applied against the sign of `distance` rather
 	/// than against the plane's normal directly.
+	///
+	/// The start offset then moves the start along the travel direction (<paramref name="sign"/>):
+	/// a blind extrude moves whole, a measured one keeps its far end on the surface it reached.
 	/// </summary>
-	(float Near, float Far) Ends( float distance )
+	(float Near, float Far) Ends( float distance, float sign, float second )
 	{
-		var second = MathF.Abs( SecondDistance.Value );
+		var (near, far) = Symmetric.Value ? (-distance * 0.5f, distance * 0.5f)
+			: second > 1e-6f ? (distance >= 0f ? -second : second, distance)
+			: (0f, distance);
 
-		if ( Symmetric.Value )
-			return (-distance * 0.5f, distance * 0.5f);
+		var offset = StartOffset.Value * sign;
 
-		if ( second > 1e-6f )
-			return (distance >= 0f ? -second : second, distance);
+		return Termination.Index == 0 ? (near + offset, far + offset) : (near + offset, far);
+	}
 
-		return (0f, distance);
+	/// <summary>
+	/// How far the second end reaches back from the sketch: Second distance for Blind, otherwise
+	/// measured like the first end but against the travel direction. Zero is one-sided. Symmetric
+	/// ignores the second end, so nothing is measured for it then (a stale Up to body must not fail a
+	/// symmetric extrude that never reads it).
+	/// </summary>
+	float SecondReach( FeatureContext ctx, Vec3 origin, Vec3 direction, List<Vec3> samples )
+	{
+		if ( Symmetric.Value || SecondTermination == 0 )
+			return MathF.Abs( SecondDistance.Value );
+
+		return MeasuredDistance( ctx, origin, -direction, samples, SecondTermination, SecondUpToPoint.Value, SecondUpToBodyId );
 	}
 
 	/// <summary>
@@ -1235,16 +1359,42 @@ public sealed class ExtrudeFeature : SketchConsumingFeature
 	/// rather than silent, and warned about besides: if the sample rays disagree about the distance,
 	/// the target is not parallel and the feature says so.
 	/// </summary>
-	float MeasuredDistance( FeatureContext ctx, Vec3 origin, Vec3 direction, IEnumerable<Vec3> samples )
+	float MeasuredDistance( FeatureContext ctx, Vec3 origin, Vec3 direction, IEnumerable<Vec3> samples,
+		int termination, Vec3 point, string bodyId )
 	{
+		// Up to vertex needs no bodies: the cap passes through the point, so the reach is how far the
+		// point lies along the direction. Every profile point is on the sketch plane, so one number.
+		if ( termination == 4 )
+		{
+			var along = Vec3.Dot( point - origin, direction );
+			if ( along <= 1e-4f )
+				Fail( "The point to stop at is behind the profile (or on it), so the extrude can't reach it.",
+					$"It lies {along:0.###} along the way the extrude travels.",
+					"Flip the direction", "Pick a corner ahead of the profile" );
+			return along;
+		}
+
 		// Everything already built. A sketch drawn on a face of one of these starts ON it, which is
-		// what the epsilon below is for.
+		// what the epsilon below is for. Up to body measures against the one body only.
 		var targets = ctx.Bodies.Where( b => b.Mesh is { FaceCount: > 0 } ).ToList();
+
+		if ( termination == 5 )
+		{
+			if ( string.IsNullOrEmpty( bodyId ) )
+				Fail( "Up to body needs a body to stop at, and none is picked.",
+					"No body has been picked for this end of the extrude.",
+					"Pick the body in the Extrude box", "Switch termination to a blind distance" );
+			targets = targets.Where( b => b.Id == bodyId ).ToList();
+			if ( targets.Count == 0 )
+				Fail( "The body this extrude stops at is gone.",
+					"An earlier change removed it, or it has no faces left.",
+					"Pick the body again", "Switch termination to a blind distance" );
+		}
 
 		if ( targets.Count == 0 )
 		{
 			Fail(
-				Termination.Index == 1
+				termination == 1
 					? "Up to next needs something to stop at, and there is nothing else in the studio yet."
 					: "Through all needs something to pass through, and there is nothing else in the studio yet.",
 				"This termination measures against bodies already in the studio, and there are none.",
@@ -1252,8 +1402,11 @@ public sealed class ExtrudeFeature : SketchConsumingFeature
 				"Switch termination to a blind distance" );
 		}
 
-		if ( Termination.Index == 2 )
+		if ( termination == 2 )
 			return ThroughAll( targets, origin, direction );
+
+		if ( termination == 3 )
+			return UpToFace( ctx, direction, samples );
 
 		var nearest = float.MaxValue;
 		var furthest = 0f;
@@ -1278,8 +1431,10 @@ public sealed class ExtrudeFeature : SketchConsumingFeature
 		if ( hits == 0 )
 		{
 			Fail(
-				"Up to next found nothing in the way — no face lies ahead of this profile. Use a blind "
-				+ "distance, or flip the direction.",
+				termination == 5
+					? "The picked body is not in the way — no face of it lies ahead of this profile."
+					: "Up to next found nothing in the way — no face lies ahead of this profile. Use a blind "
+						+ "distance, or flip the direction.",
 				"Every ray from the profile missed every body in the studio.",
 				"Flip the direction",
 				"Switch termination to a blind distance" );
@@ -1291,6 +1446,51 @@ public sealed class ExtrudeFeature : SketchConsumingFeature
 				+ $"{furthest:0.###} away. The extrude stops flat at the nearest point, so it will not "
 				+ "meet the far side.";
 		}
+
+		return nearest;
+	}
+
+	/// <summary>
+	/// Up to face: each sample ray against the picked face's plane, nearest crossing wins. Same flat-cap
+	/// limit and warning as Up to next.
+	/// </summary>
+	float UpToFace( FeatureContext ctx, Vec3 direction, IEnumerable<Vec3> samples )
+	{
+		if ( UpTo is null )
+			Fail( "Up to face needs a face to stop at, and none is picked.",
+				"No face has been picked for this extrude.",
+				"Pick a face in the Extrude box", "Switch termination to a blind distance" );
+
+		if ( !FacePlane.TryResolve( ctx.Bodies, UpTo!.Value, out var plane ) || plane == null )
+			Fail( "The face this extrude stops at is gone.",
+				"An earlier change removed or moved the picked face, so it can't be found any more.",
+				"Pick the face again", "Switch termination to a blind distance" );
+
+		var n = plane!.Normal;
+		var along = Vec3.Dot( direction, n );
+		if ( MathF.Abs( along ) < 1e-5f )
+			Fail( "The picked face runs alongside the extrude, so it never reaches it.",
+				"The face is parallel to the extrude direction.",
+				"Pick a face that faces the profile", "Switch termination to a blind distance" );
+
+		var nearest = float.MaxValue;
+		var furthest = 0f;
+		foreach ( var sample in samples )
+		{
+			var t = Vec3.Dot( plane.Origin - sample, n ) / along;
+			if ( t <= 1e-4f ) continue;
+			nearest = MathF.Min( nearest, t );
+			furthest = MathF.Max( furthest, t );
+		}
+
+		if ( nearest == float.MaxValue )
+			Fail( "The picked face is behind the profile, so the extrude can't reach it.",
+				"Every point of the profile is already past the face.",
+				"Flip the direction", "Pick a face ahead of the profile" );
+
+		if ( furthest - nearest > 1e-3f )
+			Warning = $"The picked face is not parallel to this profile: it is between {nearest:0.###} and "
+				+ $"{furthest:0.###} away. The extrude stops flat at the nearest point.";
 
 		return nearest;
 	}

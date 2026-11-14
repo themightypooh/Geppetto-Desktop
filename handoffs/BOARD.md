@@ -721,6 +721,12 @@ verification scripts.
 Released: V1, P1, E1–E5, M1–M4, G1–G4, I1–I4, P2–P4, D1–D3, V2–V4, A1–A7, AI1 (backend),
 L1.
 
+Active: **make-ai-capability-responses-match-real-operations (muse-t8, 2026-11-13)** holds `AiSuiteTools.cs`, `tests/PhaseThreeTests.cs`, `tests/PhaseFourTests.cs`. Other agents: do not edit these until released.
+
+DONE (verified by muse 2026-11-13, 3/3 pass; full-suite confirmation pending the next gate re-run): **LV1-smoke / installed-artifact (grok-bot, 2026-11-13 12:50)** — for muse: `packaging/smoke-test.sh` CPU `--script` step now passes `--test-sandbox --run "$out/work/cpu-run"` (GateCheck exit 3 was the cause of `installed-artifact/smoke script exists…`; the other two installed-artifact failures were the same run cascading into "ln: File exists"). `--filter installed-artifact` 3/3 pass (build in /tmp/lv1/smoke/art, log /tmp/lv1/smoke/run.log). Backup `packaging/smoke-test.sh.bak-20261113-lv1smoke`. Nothing held.
+
+PAUSED (2026-11-13 12:00, po said "the new build isn't done" — files released, nothing held; uncommitted LV1 edits left in place, backups *.bak-20261113-lv1; resume on top of the new build): **LV1 — live-build pace deck, gate-in-binary, handoff fixes, drawer auto-open (grok-bot)** held `cabinet/cabinet.qml`, new `cabinet/PaneDeck.qml`, `cabinet/RunPaceSlider.qml`, `cabinet/host.py`, `cabinet/gate.py`, `cabinet/live_runs.py`, `cabinet/claude_gate.py`, `ScriptLive.cs`, `AiCli.cs` (Run entry only), new `GateCheck.cs`, `Program.cs` (`--mcp`/`ops`/`--script` dispatch lines only), new `tests/GateCheckTests.cs`, `tests/TestRegistry.cs` (one additive registration line), new/edited `tests/test_gate_*.py`, `tests/test_pane_deck.py`, `tests/test_run_pace_slider.py`, `tests/test_live_runs.py`, `~/.local/bin/geppetto-live`, `~/.claude/skills/geppetto/SKILL.md` + `references/working-rules.md`, `handoffs/40-live-build-pace-gate.md`, `specs/puppeteer-stage.md`. Does NOT touch `AiSuiteTools.cs`, `Mcp/*`, `McpModelingTools.cs`, `McpSafety.cs`, `OpsCli.cs` (crew-owned; gated from Program.cs dispatch instead). Released: other agents may edit these; LV1 will rebase onto whatever is there.
+
 ## 5. Wave 2026-10-20 (coordinator: Claude session; each worker in its own copy under ~/Desktop/geppetto-agents/<id>)
 
 Workers edit ONLY their owned files in their own copy. The coordinator merges owned files
@@ -968,3 +974,21 @@ fixture results must be labelled fixture-only, and click-to-first-frame must not
 from token-write or Popen timing.
 Status at lease time: lanes spawned, reading first; editing authorised only on coordinator
 go-ahead sent after this entry. Lane F audit may proceed read-only immediately.
+
+## AS01 — Desktop assembly documents parity (2026-11-13, playtester-21)
+Hub task support-mobile-assembly-documents-without-losing-occurrences, geppetto-desktop,
+status in-progress, owner playtester-21. SOLE WRITER (one writer per file):
+- kernel/Effigy/Assembly/AssemblyDocument.cs (new — port of Mobile vendor model/serializer)
+- kernel/Effigy/Features/PartStudio.cs (Assembly field + assembly handling only)
+- kernel/Effigy/Features/StudioDocument.cs (format-3 assemblyjson line + legacy v1/v2 only)
+No second writer to StudioDocument; all later serializer changes coordinate through AS01.
+Other workers: read-only for these three files until AS01 marks done. PO override 2026-11-13:
+implement + meaningful tests/fixtures, no full project build or app launch; cheap targeted
+checks only; full suites deferred to the final integrator.
+
+AS01 collateral (2026-11-13, playtester-21): introducing the Effigy.Assembly namespace
+shadows System.Reflection.Assembly in two kernel files, so the kernel does not compile
+without a one-line fully-qualified fix in each (same fix already in the Mobile vendor
+copy): kernel/Effigy/FeatureRegistry.cs:23 (Scan parameter) and
+kernel/Effigy/Plugins/PluginManager.cs:25 (Assembly.LoadFrom). Sole writer for those two
+lines only; no other edits to either file.

@@ -205,6 +205,28 @@ public static class VmdlMaterials
 		public Vec3 Colour = Vec3.One;
 	}
 
+	/// <summary>Persist used slot looks even when no .vmat path was entered. Bind these only
+	/// in the exported model, not in the document, so exporting cannot change the preview.</summary>
+	public static List<Sidecar> LookSidecarsFor( PolyMesh mesh, PartStudio studio, string folder, string modelName )
+	{
+		var sidecars = new List<Sidecar>();
+		if ( studio is null ) return sidecars;
+		var bindings = studio.MaterialBindings;
+		foreach ( var slot in SlotsOn( mesh ) )
+		{
+			if ( !studio.MaterialLooks.TryGetValue( slot, out var look ) || look is null
+				|| TryBoundVmat( slot, bindings, out _ ) ) continue;
+			sidecars.Add( new Sidecar
+			{
+				Slot = slot,
+				AssetPath = $"{folder}/materials/{modelName}_look_slot{slot}.vmat",
+				VmatText = look.Vmat(),
+				Colour = look.Color,
+			} );
+		}
+		return sidecars;
+	}
+
 	/// <summary>Sidecar .vmats for a mesh's unbound detail slots (Wear rust/algae, garment
 	/// worn/dirt, hard finishes). A slot is only a number until a material definition exists
 	/// for it: without this, GroupList remaps every such slot to materials/default.vmat and
@@ -359,30 +381,25 @@ public static class VmdlMaterials
 	/// <summary>
 	/// Lane C: the .vmat parameter lines a <see cref="SlotLook"/> adds to its complex.vfx material.
 	/// Called by <see cref="SlotLook.Vmat"/> so the mapping lives here, beside the other .vmdl/.vmat
-	/// knowledge, instead of being duplicated in the look. The shader stays complex.vfx: these are
-	/// the shared complex/skin parameters the roadmap names, so no custom .shader is needed.
+	/// knowledge, instead of being duplicated in the look. complex.vfx supports diffuse wrap,
+	/// not the invented F_SUBSURFACE_SCATTERING / F_CLEARCOAT switches. Wrap is an approximation
+	/// of scattering; true subsurface and clearcoat remain features of Effigy's own renderer.
 	/// Empty when the look uses none of them.
 	/// </summary>
 	public static string LookParameters( SlotLook look )
 	{
 		if ( look is null ) return "";
 		var sb = new StringBuilder();
-		if ( look.Clearcoat > 0f )
-		{
-			sb.Append( "\tF_CLEARCOAT 1\n" );
-			sb.Append( $"\tg_flClearcoat \"{F( look.Clearcoat )}\"\n" );
-			sb.Append( $"\tg_flClearcoatRoughness \"{F( look.ClearcoatRoughness )}\"\n" );
-		}
 		if ( look.Subsurface > 0f )
 		{
-			sb.Append( "\tF_SUBSURFACE_SCATTERING 1\n" );
-			sb.Append( $"\tg_flSubsurfaceScale \"{F( look.Subsurface )}\"\n" );
-			sb.Append( $"\tg_vSubsurfaceColor \"[{F6( look.SubsurfaceColor.x )} {F6( look.SubsurfaceColor.y )} {F6( look.SubsurfaceColor.z )} 0.000000]\"\n" );
+			sb.Append( "\tF_DIFFUSE_WRAP 1\n" );
+			sb.Append( $"\tg_flDiffuseWrap \"{F( Math.Clamp( look.Subsurface, 0f, 1f ) )}\"\n" );
+			sb.Append( $"\tg_vDiffuseWrapColor \"[{F6( look.SubsurfaceColor.x )} {F6( look.SubsurfaceColor.y )} {F6( look.SubsurfaceColor.z )} 0.000000]\"\n" );
 		}
 		if ( look.Opacity < 1f )
 		{
 			sb.Append( "\tF_TRANSLUCENT 1\n" );
-			sb.Append( $"\tg_flOpacityScale \"{F( look.Opacity )}\"\n" );
+			sb.Append( $"\tg_flOpacityScale \"{F( Math.Clamp( look.Opacity, 0f, 1f ) )}\"\n" );
 		}
 		return sb.ToString();
 	}

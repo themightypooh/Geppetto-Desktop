@@ -211,7 +211,7 @@ public sealed class ControlRegistry
 	{
 		public const double ParamKey = 10, ParamLabel = 9, FeatureName = 10, FeatureViaParam = 2,
 			ParamViaFeature = 3, Option = 2, Category = 1.5;
-		public const double Synonym = 0.6, Prefix = 0.5, AllTermsBonus = 1.25;
+		public const double Synonym = 0.6, Prefix = 0.5, AllTermsBonus = 1.25, FeatureOwnParam = 4;
 	}
 
 	void AddWords( int entry, string text, double weight )
@@ -252,6 +252,10 @@ public sealed class ControlRegistry
 		var score = new Dictionary<int, double>();
 		var termsHit = new Dictionary<int, int>();
 		var matched = new Dictionary<int, HashSet<string>>();
+		// Best per-term weight per entry: a param matching only through its
+		// feature's name never exceeds Weights.ParamViaFeature (3), so a best
+		// above that means it matched on its own key/label/option too.
+		var bestOwn = new Dictionary<int, double>();
 
 		foreach ( var term in terms )
 		{
@@ -275,6 +279,7 @@ public sealed class ControlRegistry
 			foreach ( var (entry, hit) in perEntry )
 			{
 				score[entry] = score.GetValueOrDefault( entry ) + hit.w;
+				if ( !bestOwn.TryGetValue( entry, out var bw ) || hit.w > bw ) bestOwn[entry] = hit.w;
 				termsHit[entry] = termsHit.GetValueOrDefault( entry ) + 1;
 				if ( !matched.TryGetValue( entry, out var set ) ) matched[entry] = set = new();
 				set.Add( hit.tok );
@@ -294,6 +299,13 @@ public sealed class ControlRegistry
 			else if ( e is ControlParam p )
 			{
 				if ( !includeMaterial && p.Source == ControlSource.MaterialDescriptor ) continue;
+				// A param of the feature the query names, that also matches through
+			// its own key/label, ranks with the feature itself: searching "eye"
+			// should surface Eye's own controls ahead of other features' eye
+			// params (which is why the eye check counts Eye entries near the top).
+			if ( bestOwn.TryGetValue( entry, out var own ) && own > Weights.ParamViaFeature
+					&& terms.Any( t => Stem( Norm( p.Owner ) ) == t ) )
+					final += Weights.FeatureOwnParam;
 				hits.Add( new ControlSearchHit { Kind = ControlHitKind.Param, Id = p.Id, Feature = Feature( p.Owner ), Param = p, Score = final, Matched = matched[entry].ToList() } );
 			}
 		}

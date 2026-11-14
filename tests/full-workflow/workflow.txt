@@ -1,0 +1,94 @@
+# workflow.txt — scripted end-to-end asset workflow (BuildScript).
+# Run via --bench (stdin: `apply <line>` per line; `undo` where marked) or
+# --script. Run from tests/full-workflow/ so relative paths resolve here.
+# Every line uses a verb/parameter verified in source (BuildScript.cs,
+# BuildScriptRig.cs, BuildScript.Bake.cs, EFFIGY-API.md). Lines marked GAP
+# are NOT runnable commands — they name the missing route (see WORKFLOW.md).
+# Units: inches, Z-up. Output: out/workflow.effigy, out/*.obj, out/*.glb
+# (GLB leg is GAP W1 — see below), out/*.png (bake/paint maps).
+
+# --- 1. Furnished room prop: table + 2 chairs + shelf ---
+add Primitive shape=Box width=36 depth=24 height=2 position=0,0,29 materialslot=0 name=TableTop
+add Primitive shape=Box width=2 depth=2 height=28 position=16,10,14 materialslot=0 name=TableLegFL
+add Primitive shape=Box width=2 depth=2 height=28 position=16,-10,14 materialslot=0 name=TableLegFR
+add Primitive shape=Box width=2 depth=2 height=28 position=-16,10,14 materialslot=0 name=TableLegBL
+add Primitive shape=Box width=2 depth=2 height=28 position=-16,-10,14 materialslot=0 name=TableLegBR
+add Primitive shape=Box width=18 depth=18 height=2 position=40,0,17 materialslot=0 name=ChairSeat
+add Primitive shape=Box width=18 depth=2 height=20 position=40,-8,10 materialslot=0 name=ChairBack
+add Primitive shape=Box width=2 depth=2 height=16 position=33,7,8 materialslot=0 name=ChairLegFL
+add Primitive shape=Box width=2 depth=2 height=16 position=47,7,8 materialslot=0 name=ChairLegFR
+add Primitive shape=Box width=2 depth=2 height=16 position=33,-7,8 materialslot=0 name=ChairLegBL
+add Primitive shape=Box width=2 depth=2 height=16 position=47,-7,8 materialslot=0 name=ChairLegBR
+add Primitive shape=Box width=48 depth=12 height=2 position=0,20,40 materialslot=0 name=Shelf
+material 0 color=#7a5c38 rough=0.8 metal=0
+
+# --- 2. Viewmodel with moving parts: a hand tool (grip + head + lever) ---
+add Primitive shape=Cylinder width=3 depth=3 height=10 position=-40,0,5 materialslot=1 name=ToolGrip
+add Primitive shape=Box width=8 depth=3 height=4 position=-40,0,12 materialslot=1 name=ToolHead
+add Primitive shape=Box width=1 depth=2 height=8 position=-40,3,8 materialslot=1 name=ToolLever
+material 1 color=#2c2c30 rough=0.5 metal=0.8
+bone ToolRoot head=-40,0,0 tail=-40,0,10
+bone ToolLeverBone parent=ToolRoot head=-40,3,4 tail=-40,3,12
+# (The lever moves when workflow-anim.txt keys ToolLeverBone; see W2.)
+
+# --- 3. Organic fixture: sculpted head on a neck (Hero character body) ---
+add Character name=Hero preset=citizen_male height=72 muscularity=0.65 age=35
+add Sculpt body=Hero multireslevels=0
+sculpt Hero dab at=0,4,66 dir=0,-1,0 brush=draw radius=2 strength=0.3
+sculpt Hero dab at=0,4,66 dir=0,-1,0 brush=smooth radius=3 strength=0.2
+sculpt Hero dab at=2,4,68 dir=0,-1,0 brush=inflate radius=1 strength=0.2 mirror=x topomirror=on
+sculpt Hero topomap mirror=x
+
+# --- 4. Retopo the sculpted body (built-in; OpenVDB path is a later lane) ---
+retopo Hero targets=4000,1500,500
+
+# --- 5. Bake: high (sculpted) -> low (retopo) maps ---
+# NOTE: `bake` pairs bodies by name with `bake * folder`. The retopo verb
+# replaces Hero in place, so a same-name high/low pair does not exist after
+# step 4. If bake reports no pair, that is a real workflow gap to file:
+# retopo-then-bake needs the pre-retopo mesh kept as a second body.
+bake * out/baked size=1024
+
+# --- 6. Paint maps from the bake + generated maps ---
+paintmaps Hero out/tex name=hero
+genmaps out/tex name=hero preset=skin size=1024 seed=7
+
+# --- 7. Paint the hero (color channel only; other channels are the
+# paint-clipping ticket, in flight) ---
+add Paint bodies=Hero resolution=1024 usecolor=on color=0.8,0.6,0.5
+texpaint Hero path=100,100;200,100;300,100 channel=color color=0.9,0.5,0.4 radius=16 strength=1
+
+# --- 8. UV: auto-unwrap (manual island edits have no command route: W3) ---
+add UVProject bodies=Hero mode=Unwrap
+uvcheck
+
+# --- 9. Rig + bind + weights (Hero already carries the citizen rig) ---
+bind Hero method=smooth
+weight Hero smooth
+rigcheck
+
+# --- 10. Animate: GAP W2. Clips are authored by workflow-anim.txt through
+# BuildScriptAnim.Run (no CLI/bot driver exists). After that driver lands:
+#   play fixtures/walk.riganim   (validate + report; ServeMode plays it)
+#   lint fixtures/walk.riganim   (parse + bone binding)
+# Until then this step is a scripted placeholder, not a run step.
+
+# --- 12. Save, reopen, validate ---
+save out/workflow.effigy strict=1
+validate all target=game shells=1
+measure Hero
+symmetry
+
+# --- 14. Geometry + material gates ---
+# (validate above already hard-fails the script on hard fails.)
+material 0 color=#7a5c38 rough=0.8 metal=0
+material 1 color=#2c2c30 rough=0.5 metal=0.8
+
+# --- 19. Export: s&box legs run here; GLB leg is GAP W1 ---
+export out/export assets=out name=workflow skin=1 fbx=1
+exportvalidate out/export assets=out name=workflow skin=1 fbx=1
+# GAP W1: no bot route writes a .glb. When the glb writer lands, add:
+#   exportglb out/workflow.glb
+# and validate it with ../export-verify/verify-glb.py + a manifest.
+# Re-import leg: GlbImport is static-only (refuses skins); FBX re-imports
+# via FbxImport; OBJ has no importer. Record which leg ran in the log.

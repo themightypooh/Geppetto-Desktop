@@ -1,0 +1,80 @@
+# decorated-room.txt — sealed room + func_detail decoration (hammer-optimisation-func-detail)
+#
+# Format: one `brush <name> [detail|blocker|illusionary]` line, then one
+# `plane nx ny nz d` line per face (outward unit normal, plane Dot(n, p) == d,
+# solid side Dot(n, p) <= d — the MapBrushFace / BspPlane convention).
+# The six shell brushes are the sealed-room.txt room (interior void
+# -128..128 x -128..128 x 0..128); the four flagged brushes are decoration
+# inside the void (three stair treads + a trim beam). Built with these flags
+# the room must have the same leaf count as the bare room; built structural
+# the decoration must add visleaves.
+brush floor
+plane -1 0 0 144
+plane 1 0 0 144
+plane 0 -1 0 144
+plane 0 1 0 144
+plane 0 0 -1 16
+plane 0 0 1 0
+brush ceiling
+plane -1 0 0 144
+plane 1 0 0 144
+plane 0 -1 0 144
+plane 0 1 0 144
+plane 0 0 -1 -128
+plane 0 0 1 144
+brush wall-x-neg
+plane -1 0 0 144
+plane 1 0 0 -128
+plane 0 -1 0 144
+plane 0 1 0 144
+plane 0 0 -1 0
+plane 0 0 1 128
+brush wall-x-pos
+plane -1 0 0 -128
+plane 1 0 0 144
+plane 0 -1 0 144
+plane 0 1 0 144
+plane 0 0 -1 0
+plane 0 0 1 128
+brush wall-y-neg
+plane -1 0 0 128
+plane 1 0 0 128
+plane 0 -1 0 144
+plane 0 1 0 -128
+plane 0 0 -1 0
+plane 0 0 1 128
+brush wall-y-pos
+plane -1 0 0 128
+plane 1 0 0 128
+plane 0 -1 0 -128
+plane 0 1 0 144
+plane 0 0 -1 0
+plane 0 0 1 128
+brush step-1 detail
+plane -1 0 0 128
+plane 1 0 0 -96
+plane 0 -1 0 64
+plane 0 1 0 0
+plane 0 0 -1 0
+plane 0 0 1 16
+brush step-2 detail
+plane -1 0 0 128
+plane 1 0 0 -96
+plane 0 -1 0 64
+plane 0 1 0 0
+plane 0 0 -1 -16
+plane 0 0 1 32
+brush step-3 detail
+plane -1 0 0 128
+plane 1 0 0 -96
+plane 0 -1 0 64
+plane 0 1 0 0
+plane 0 0 -1 -32
+plane 0 0 1 48
+brush trim-beam detail
+plane -1 0 0 128
+plane 1 0 0 128
+plane 0 -1 0 128
+plane 0 1 0 128
+plane 0 0 -1 -112
+plane 0 0 1 120

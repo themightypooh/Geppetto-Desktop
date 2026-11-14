@@ -37,7 +37,14 @@ public sealed class SculptLayer
 		var deltas = new Vec3[rest.VertexCount];
 
 		for ( var i = 0; i < rest.VertexCount; i++ )
-			deltas[i] = frames.At[i].FromWorld( displaced.Positions[i] - rest.Positions[i] );
+		{
+			var d = frames.At[i].FromWorld( displaced.Positions[i] - rest.Positions[i] );
+			// Normalize negative zero: -0.0 == +0.0 numerically, but the sign bit survives into
+				// the blob, so a stroke that leaves a vertex alone would still change the file's
+				// bytes wherever the frame math produced -0.0. Adding +0.0 is bit-exact for every
+				// other value and turns -0.0 into +0.0, keeping undo cycles byte-stable.
+			deltas[i] = new Vec3( d.x + 0f, d.y + 0f, d.z + 0f );
+		}
 
 		return new SculptLayer( deltas );
 	}
